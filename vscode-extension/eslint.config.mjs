@@ -50,10 +50,12 @@ export default [
 
   // --- the webviews ------------------------------------------------------
   {
-    files: ["media/**/*.js"],
+    files: ["media/**/*.js", "media/**/*.mjs"],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: "script",
+      // .js here are classic scripts loaded by tag; .mjs are modules, which
+      // three requires since it stopped shipping a UMD build
+      sourceType: "module",
       globals: {
         document: "readonly",
         window: "readonly",
@@ -63,6 +65,8 @@ export default [
         requestAnimationFrame: "readonly",
         Option: "readonly",
         MutationObserver: "readonly",
+        ResizeObserver: "readonly",
+        getComputedStyle: "readonly",
         Plotly: "readonly",
         acquireVsCodeApi: "readonly",
       },

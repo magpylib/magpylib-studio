@@ -4,6 +4,7 @@ const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
 const animateEl = document.getElementById("animate");
+const sceneGraphEl = document.getElementById("sceneGraph");
 let nextReqId = 1;
 const pending = new Map();
 
@@ -25,6 +26,20 @@ function plotTemplate() {
 }
 
 async function refreshFigure() {
+  // Preview: the same scene as buffers, drawn once and kept, rather than a
+  // figure replaced on every edit. Plotly stays the default until this draws
+  // everything the figure does.
+  if (sceneGraphEl.checked) {
+    if (!window.scene3d) {
+      statusEl.textContent = "Scene graph unavailable (module failed to load)";
+      return;
+    }
+    const payload = await rpc("get_scene", {});
+    canvasEl.innerHTML = "";
+    window.scene3d.render(canvasEl, payload);
+    statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
+    return;
+  }
   const figure = await rpc("get_figure", {
     animation: animateEl.checked,
     template: plotTemplate(),
@@ -53,6 +68,14 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
+sceneGraphEl.addEventListener("change", () => {
+  canvasEl.innerHTML = ""; // the two renderers do not share a canvas
+  statusEl.textContent = "Loading…";
+  refreshFigure().catch((err) => {
+    statusEl.textContent = String(err);
+  });
+});
+
 animateEl.addEventListener("change", () => {
   statusEl.textContent = "Loading…";
   refreshFigure().catch((err) => {
@@ -77,7 +100,8 @@ window.addEventListener("message", (event) => {
 });
 
 window.addEventListener("resize", () => {
-  if (canvasEl.data) Plotly.Plots.resize(canvasEl);
+  // scene3d watches the canvas itself; Plotly needs telling
+  if (!sceneGraphEl.checked && canvasEl.data) Plotly.Plots.resize(canvasEl);
 });
 
 refreshFigure().catch((err) => {

@@ -3721,6 +3721,34 @@ export function createWebviewHtml(
       'plotly.min.js',
     ),
   );
+  const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
+  // three ships ESM only, and its addons import the bare name 'three', so the
+  // module specifiers are mapped rather than rewritten. Both entries point
+  // inside node_modules, which the webview may read as extension resources.
+  const threeUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      'node_modules',
+      'three',
+      'build',
+      'three.module.min.js',
+    ),
+  );
+  const threeAddonsUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      'node_modules',
+      'three',
+      'examples',
+      'jsm',
+    ),
+  );
+  const importMap = JSON.stringify({
+    imports: {
+      three: `${threeUri}`,
+      'three/addons/': `${threeAddonsUri}/`,
+    },
+  });
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3730,11 +3758,14 @@ export function createWebviewHtml(
   <title>Magpylib Studio</title>
   <link rel="stylesheet" href="${studioStyleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
+  <script type="importmap" nonce="${nonce}">${importMap}</script>
+  <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
 <body>
   <div id="canvas"></div>
   <div id="statusbar">
     <label><input type="checkbox" id="animate" /> Animate paths</label>
+    <label><input type="checkbox" id="sceneGraph" /> Scene graph (preview)</label>
     <span id="status">Starting…</span>
   </div>
   <script nonce="${nonce}" src="${studioScriptUri}"></script>

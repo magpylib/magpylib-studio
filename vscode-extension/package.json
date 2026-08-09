@@ -1619,7 +1619,8 @@
   },
   "dependencies": {
     "@vscode/python-extension": "^1.0.6",
-    "plotly.js-dist-min": "^3.0.0"
+    "plotly.js-dist-min": "^3.0.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
