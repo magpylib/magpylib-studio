@@ -22,6 +22,7 @@ _PUBLIC = {
     "get_schema",
     "get_values",
     "get_figure",
+    "get_scene",
     "get_field",
     "get_field_figure",
     "get_field_map",

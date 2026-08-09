@@ -135,6 +135,55 @@ def test_get_figure_is_json_serializable(session):
     json.dumps(fig)  # to_json handled numpy/bdata
 
 
+def test_get_scene_is_json_and_keyed_by_studio_ids(session):
+    scene = session.get_scene()
+    json.dumps(scene)  # must cross the wire
+    assert {m["object_id"] for m in scene["meshes"]} == {"cube", "cyl"}
+    # every mesh carries buffers a scene graph can build from
+    for mesh in scene["meshes"]:
+        assert mesh["position"] and mesh["index"]
+        assert len(mesh["position"]) % 3 == 0
+    # and an origin, which the payload itself does not contain
+    assert set(scene["anchors"]) == {"cube", "cyl"}
+
+
+def test_get_scene_ids_survive_a_rebuild(session):
+    """The point of using studio's ids rather than magpylib's.
+
+    `_build` reconstructs every object, so `id(obj)` changes on any edit and
+    could not key a view that is kept between them.
+    """
+    before = session.get_scene()
+    magpy_ids = {id(o) for o in session._objs.values()}
+    session.move("cube", [2, 0, 0])
+    after = session.get_scene()
+
+    assert {id(o) for o in session._objs.values()} != magpy_ids  # rebuilt
+    assert [m["object_id"] for m in before["meshes"]] == [
+        m["object_id"] for m in after["meshes"]
+    ]
+    assert after["anchors"]["cube"] == [2.0, 0.0, 0.0]
+
+
+def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
+    """What lets a view keep the scene instead of rebuilding it.
+
+    With magpylib's defaults an unrelated object can rescale everyone's
+    vertices -- autosized objects follow the scene extent, and the SI prefix
+    the whole scene is drawn in follows it too. `pin_scene_units` stops both.
+    """
+    before = session.get_scene()
+    cube_before = next(m for m in before["meshes"] if m["object_id"] == "cube")
+
+    session.add_object("far", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("far", [5000, 0, 0])
+    cube_after = next(
+        m for m in session.get_scene()["meshes"] if m["object_id"] == "cube"
+    )
+
+    assert cube_after["position"] == cube_before["position"]
+
+
 def test_apply_edit_updates_object_and_document(session):
     assert session.apply_edit("cube", "opacity", 0.4) == {"ok": True}
     assert session._objs["cube"].style.opacity == 0.4

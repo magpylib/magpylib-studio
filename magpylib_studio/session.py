@@ -75,7 +75,7 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, style_compat
+from magpylib_studio import expressions, style_compat, threejs
 
 
 def example_scene():
@@ -2272,6 +2272,22 @@ class MagpylibStudioSession:
         if template:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
+
+    def get_scene(self):
+        """The scene as buffers for a scene-graph view, keyed by studio ids.
+
+        `get_figure` returns a Plotly figure, which the webview replaces
+        wholesale on every edit because nothing in a chart is addressable. This
+        returns one entry per object instead, so a view can build the scene
+        once and afterwards mutate only what changed.
+
+        The ids are studio's own, not magpylib's: magpylib stamps `id(obj)`,
+        which does not survive `_build`, whereas these are what the editing
+        methods already take. Selecting a mesh therefore names an object the
+        protocol understands.
+        """
+        threejs.pin_scene_units()
+        return threejs.scene_payload(self.scene, live=self._objs)
 
     # --- field evaluation --------------------------------------------------
     def _leaf_sources(self):
