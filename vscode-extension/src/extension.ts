@@ -3766,6 +3766,7 @@ export function createWebviewHtml(
   <div id="statusbar">
     <label><input type="checkbox" id="animate" /> Animate paths</label>
     <label><input type="checkbox" id="sceneGraph" /> Scene graph (preview)</label>
+    <button id="fit" type="button" hidden>Fit view</button>
     <span id="status">Starting…</span>
   </div>
   <script nonce="${nonce}" src="${studioScriptUri}"></script>

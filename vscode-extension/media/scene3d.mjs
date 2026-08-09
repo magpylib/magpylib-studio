@@ -16,6 +16,7 @@ let camera = null;
 let controls = null;
 let renderer = null;
 const byObjectId = new Map();
+let framed = false;
 
 /** Panel background, so the view sits in whatever theme VS Code is wearing. */
 function themeColor() {
@@ -170,24 +171,34 @@ function buildScatter(item) {
   return group;
 }
 
-/** Frame the camera on the panel's ranges, once. */
-function frameCamera(ranges) {
-  if (!ranges) return;
-  const [rx, ry, rz] = ranges;
-  const centre = new THREE.Vector3(
-    (rx[0] + rx[1]) / 2,
-    (ry[0] + ry[1]) / 2,
-    (rz[0] + rz[1]) / 2,
-  );
-  const span =
-    Math.max(rx[1] - rx[0], ry[1] - ry[0], rz[1] - rz[0]) || 1;
-  camera.near = span / 1000;
-  camera.far = span * 100;
-  camera.position
-    .copy(centre)
-    .add(new THREE.Vector3(span * 1.4, -span * 1.6, span * 1.1));
+/** Put the whole scene in view, accounting for both field-of-view angles.
+ *
+ * The first attempt offset the camera by a fixed multiple of the largest span
+ * and never checked the result: it ignored the aspect ratio, and a wide flat
+ * assembly -- a halbach ring is exactly that -- came out clipped. This solves
+ * for the distance instead, taking whichever of the two angles is tighter.
+ * The panel is usually wider than tall, which makes the *vertical* angle the
+ * limiting one, so guessing from the horizontal was wrong twice over.
+ */
+function fitView() {
+  const box = new THREE.Box3();
+  for (const object of byObjectId.values()) box.expandByObject(object);
+  if (box.isEmpty()) return;
+
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const vertical = THREE.MathUtils.degToRad(camera.fov);
+  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
+  const distance =
+    (sphere.radius /
+      Math.sin(Math.min(vertical, horizontal) / 2)) *
+    1.1; // a margin, so nothing sits exactly on the edge
+
+  const direction = new THREE.Vector3(0.55, -0.68, 0.48).normalize();
+  camera.near = Math.max(distance / 5000, 1e-6);
+  camera.far = distance * 20;
+  camera.position.copy(sphere.center).addScaledVector(direction, distance);
   camera.updateProjectionMatrix();
-  controls.target.copy(centre);
+  controls.target.copy(sphere.center);
   controls.update();
 }
 
@@ -210,8 +221,16 @@ function render(canvasEl, payload, { keepCamera = true } = {}) {
     // arrow), so the first one registered wins the key
     if (!byObjectId.has(item.object_id)) byObjectId.set(item.object_id, group);
   }
-  if (!keepCamera || !controls.target.lengthSq()) frameCamera(payload.ranges);
+  // Size first: the fit depends on the aspect ratio, and on the very first
+  // render the canvas may not have been laid out yet.
   resize(canvasEl);
+  // Refit when there was nothing to look at before. A scene that arrives
+  // empty and is filled by a later refresh -- which is what a parametric
+  // example does -- would otherwise keep the camera fitted to the empty one.
+  if (!keepCamera || !framed) {
+    fitView();
+    framed = byObjectId.size > 0;
+  }
 }
 
-window.scene3d = { render, byObjectId };
+window.scene3d = { render, fitView, byObjectId };

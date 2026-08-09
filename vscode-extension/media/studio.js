@@ -5,6 +5,7 @@ const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
 const animateEl = document.getElementById("animate");
 const sceneGraphEl = document.getElementById("sceneGraph");
+const fitEl = document.getElementById("fit");
 let nextReqId = 1;
 const pending = new Map();
 
@@ -37,6 +38,7 @@ async function refreshFigure() {
     const payload = await rpc("get_scene", {});
     canvasEl.innerHTML = "";
     window.scene3d.render(canvasEl, payload);
+    fitEl.hidden = false;
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     return;
   }
@@ -68,7 +70,12 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
+fitEl.addEventListener("click", () => {
+  window.scene3d?.fitView();
+});
+
 sceneGraphEl.addEventListener("change", () => {
+  fitEl.hidden = !sceneGraphEl.checked; // plotly has its own reset
   canvasEl.innerHTML = ""; // the two renderers do not share a canvas
   statusEl.textContent = "Loading…";
   refreshFigure().catch((err) => {
