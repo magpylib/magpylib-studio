@@ -23,7 +23,19 @@ let outline = null;
 let selectedId;
 let gizmo = null;
 let gizmoMode = "translate";
-let poseSpace = "world"; // world or object axes, for the move and turn handles
+/** Which axes each kind of drag runs along, in three's vocabulary.
+ *
+ * Per mode rather than one setting for all of them, because the right answer
+ * differs and the control shows which is in force: positioning is world work,
+ * while a polarization is *stored* in the object's frame and a dimension only
+ * means anything along the object's own axes -- three forces that one anyway.
+ */
+const SPACES = {
+  translate: "world",
+  rotate: "world",
+  polarization: "local",
+  scale: "local",
+};
 let orientations = {}; // studio id -> the rotation baked into its vertices
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
@@ -131,7 +143,7 @@ function resized(scale, shape) {
 function makeGizmo(canvasEl) {
   let from = null;
   gizmo = new TransformControls(camera, renderer.domElement);
-  gizmo.setSpace(poseSpace); // the axes the user reads off the model
+  gizmo.setSpace(spaceOf()); // the axes the user reads off the model
   gizmo.size = 0.45; // full size swamps a small object
   scene.add(gizmo.getHelper());
   scene.add(proxy);
@@ -223,10 +235,7 @@ function setGizmoMode(mode) {
     gizmo.detach();
     return gizmoMode;
   }
-  // Aiming defaults to the object's own axes because that is the frame
-  // magpylib stores a polarization in; moving and turning default to the
-  // world's, which is where positioning work is done.
-  gizmo.setSpace(gizmoMode === "polarization" ? "local" : poseSpace);
+  gizmo.setSpace(spaceOf());
   if (gizmoMode === "polarization") {
     // The handles sit on the object and turn the stand-in. Two things have to
     // line up for them to follow a turned magnet: the stand-in must carry the
@@ -253,11 +262,23 @@ function constrainAxis(axis) {
   gizmo.showZ = !axis || axis === "z";
 }
 
-/** Drag along the object's own axes, or the world's. Returns the new one. */
+/** The axes the current mode drags along. */
+function spaceOf() {
+  return SPACES[gizmoMode] || "world";
+}
+
+/** Drag along the object's own axes, or the world's. Returns the one in
+ *  force, which is not always the one asked for: a resize has no choice. */
+function setSpace(space) {
+  if (gizmoMode !== "scale") {
+    SPACES[gizmoMode] = space;
+    setGizmoMode(gizmoMode); // re-attach: the stand-in is placed per mode
+  }
+  return spaceOf();
+}
+
 function toggleSpace() {
-  poseSpace = poseSpace === "world" ? "local" : "world";
-  setGizmoMode(gizmoMode); // re-attach: the stand-in is placed per mode
-  return poseSpace;
+  return setSpace(spaceOf() === "world" ? "local" : "world");
 }
 
 /** Look down an axis, from where the camera already is. */
@@ -590,6 +611,8 @@ window.scene3d = {
   highlight,
   setGizmoMode,
   constrainAxis,
+  setSpace,
+  spaceOf,
   toggleSpace,
   axisView,
   canResize: (objectId) => Boolean(shapes[objectId]),

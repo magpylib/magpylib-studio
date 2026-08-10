@@ -9,6 +9,8 @@ const fitEl = document.getElementById("fit");
 const gizmoEl = document.getElementById("gizmo");
 const gizmoLabelEl = document.getElementById("gizmoLabel");
 const controlsEl = document.getElementById("controls");
+const axesEl = document.getElementById("axes");
+const axesLabelEl = document.getElementById("axesLabel");
 let nextReqId = 1;
 const pending = new Map();
 let selectedId;
@@ -39,6 +41,7 @@ function rpc(method, params) {
 function showSceneGraphControls(shown) {
   fitEl.hidden = !shown;
   gizmoLabelEl.hidden = !shown;
+  axesLabelEl.hidden = !shown;
   controlsEl.hidden = !shown;
 }
 
@@ -67,6 +70,7 @@ async function refreshFigure() {
     parametric = payload.parametric || {};
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     applyGizmo(); // the selection may have become (or stopped being) patterned
+    showAxes();
     return;
   }
   const figure = await rpc("get_figure", {
@@ -260,7 +264,29 @@ function applyGizmo() {
   }
 }
 
-gizmoEl.addEventListener("change", applyGizmo);
+/** Show the axes the mode in force actually drags along.
+ *
+ * Each mode keeps its own choice rather than sharing one, because the right
+ * answer differs -- positioning is world work, a polarization is stored in
+ * the object's frame -- and a shared setting would silently be wrong for one
+ * of them. Nothing is hidden by that, because the control always reads out
+ * the mode it is showing. A resize has no choice at all: a dimension only
+ * means anything along the object's own axes.
+ */
+function showAxes() {
+  axesEl.value = window.scene3d?.spaceOf() || "world";
+  axesEl.disabled = gizmoEl.value === "scale" || gizmoEl.disabled;
+}
+
+gizmoEl.addEventListener("change", () => {
+  applyGizmo();
+  showAxes();
+});
+
+axesEl.addEventListener("change", () => {
+  window.scene3d?.setSpace(axesEl.value);
+  showAxes();
+});
 
 // The shortcuts the rest of the 3D world uses. They stay out of the way of
 // typing: the panel has no text input, but a <select> with focus does.
@@ -288,7 +314,11 @@ window.addEventListener("keydown", (event) => {
     scene3d?.constrainAxis(null);
     statusEl.textContent = "Dragging along all axes";
   } else if (key === "l") {
-    statusEl.textContent = `Handles follow the ${scene3d?.toggleSpace()} axes`;
+    const space = scene3d?.toggleSpace();
+    showAxes();
+    statusEl.textContent = `Handles follow the ${
+      space === "local" ? "object's own" : "world"
+    } axes`;
   } else if (key === "h") {
     // the host owns visibility and knows the current state; hidden objects
     // are not drawn, so showing one again is the Scene tree's job

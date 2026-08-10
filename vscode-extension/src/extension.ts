@@ -3982,6 +3982,13 @@ export function createWebviewHtml(
         <option value="none">nothing (Q)</option>
       </select>
     </label>
+    <label id="axesLabel" hidden
+      >along
+      <select id="axes">
+        <option value="world">world axes (L)</option>
+        <option value="local">object axes (L)</option>
+      </select>
+    </label>
     <details id="controls" hidden>
       <summary>Keys</summary>
       <div>
@@ -3992,7 +3999,7 @@ export function createWebviewHtml(
         <kbd>Q</kbd><span>no handles</span>
         <kbd>H</kbd><span>hide / show</span>
         <kbd>X</kbd><span>one axis (<kbd>A</kbd> all)</span>
-        <kbd>L</kbd><span>object / world axes</span>
+        <kbd>L</kbd><span>world / object axes</span>
         <kbd>F</kbd><span>frame selected</span>
         <kbd>Home</kbd><span>frame everything</span>
         <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
