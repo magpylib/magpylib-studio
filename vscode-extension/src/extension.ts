@@ -1307,6 +1307,14 @@ function adoptStudioPanel(
   panel.webview.options = PANEL_OPTIONS(context);
   panel.webview.html = createWebviewHtml(context, panel.webview);
   wireRpcRouter(context, panel.webview);
+  panel.webview.onDidReceiveMessage((message) => {
+    if (message.type === 'selectObject') {
+      // a pick in the 3D view is the same act as clicking the Scene tree
+      selectObjectInStudio(context, message.objectId);
+    } else if (message.type === 'ready') {
+      panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
+    }
+  });
   panel.onDidDispose(() => {
     currentPanel = undefined;
   });
@@ -1394,9 +1402,10 @@ function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string
   selectedObjectId = objectId;
   inspector?.select(objectId);
   if (currentPanel) {
+    currentPanel.webview.postMessage({ type: 'select', objectId });
     currentPanel.reveal(undefined, true); // keep focus in the sidebar
   } else {
-    openStudioPanel(context);
+    openStudioPanel(context); // its 'ready' asks for the selection itself
   }
 }
 

@@ -36,8 +36,7 @@ async function refreshFigure() {
       return;
     }
     const payload = await rpc("get_scene", {});
-    canvasEl.innerHTML = "";
-    window.scene3d.render(canvasEl, payload);
+    window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
     fitEl.hidden = false;
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     return;
@@ -74,6 +73,15 @@ fitEl.addEventListener("click", () => {
   window.scene3d?.fitView();
 });
 
+// Clicking an object here selects it everywhere else: the host owns the
+// selection, and answers with a 'select' message the highlight follows.
+canvasEl.addEventListener("objectpick", (event) => {
+  vscodeApi.postMessage({
+    type: "selectObject",
+    objectId: event.detail.objectId,
+  });
+});
+
 sceneGraphEl.addEventListener("change", () => {
   fitEl.hidden = !sceneGraphEl.checked; // plotly has its own reset
   canvasEl.innerHTML = ""; // the two renderers do not share a canvas
@@ -98,6 +106,8 @@ window.addEventListener("message", (event) => {
     pending.delete(message.reqId);
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
+  } else if (message.type === "select") {
+    window.scene3d?.highlight(message.objectId);
   } else if (message.type === "refresh") {
     // Pushed by the host after any edit (inspector, chat tool, tree).
     refreshFigure().catch((err) => {
@@ -110,6 +120,10 @@ window.addEventListener("resize", () => {
   // scene3d watches the canvas itself; Plotly needs telling
   if (!sceneGraphEl.checked && canvasEl.data) Plotly.Plots.resize(canvasEl);
 });
+
+// Ask for the selection that was already made: a panel opened (or restored)
+// mid-session has missed every 'select' the host sent before it existed.
+vscodeApi.postMessage({ type: "ready" });
 
 refreshFigure().catch((err) => {
   statusEl.textContent = "Engine failed: " + err;

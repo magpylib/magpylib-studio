@@ -15,19 +15,27 @@ const scene = new THREE.Scene();
 let camera = null;
 let controls = null;
 let renderer = null;
+const raycaster = new THREE.Raycaster();
 const byObjectId = new Map();
 let framed = false;
+let outline = null;
+let selectedId;
 
-/** Panel background, so the view sits in whatever theme VS Code is wearing. */
-function themeColor() {
-  const css = getComputedStyle(document.body)
-    .getPropertyValue("--vscode-editor-background")
-    .trim();
-  return css || "#1e1e1e";
+/** A VS Code theme colour, so the view wears whatever the editor is wearing. */
+function cssColor(name, fallback) {
+  const css = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return css || fallback;
 }
 
 function ensureRenderer(canvasEl) {
-  if (renderer) return;
+  if (renderer) {
+    // switching back from plotly empties the host element, and a WebGL context
+    // is far too expensive to rebuild for that: re-hang the canvas instead
+    if (renderer.domElement.parentElement !== canvasEl) {
+      canvasEl.appendChild(renderer.domElement);
+    }
+    return;
+  }
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   canvasEl.appendChild(renderer.domElement);
@@ -43,6 +51,50 @@ function ensureRenderer(canvasEl) {
 
   renderer.setAnimationLoop(() => renderer.render(scene, camera));
   new ResizeObserver(() => resize(canvasEl)).observe(canvasEl);
+  watchPicks(canvasEl);
+}
+
+/** Report clicks on an object as an `objectpick` event on the host element.
+ *
+ * A DOM event rather than a callback: the panel owns what selection *means*
+ * -- it belongs to the studio's sidebar, not to this view -- and this module
+ * stays a component that can be dropped in without wiring.
+ */
+function watchPicks(canvasEl) {
+  const down = new THREE.Vector2();
+  const element = renderer.domElement;
+  element.addEventListener("pointerdown", (event) =>
+    down.set(event.clientX, event.clientY),
+  );
+  element.addEventListener("pointerup", (event) => {
+    // orbiting also ends in a pointerup: only a press that stayed put is a click
+    if (down.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 4) {
+      return;
+    }
+    const objectId = pick(event);
+    if (objectId) {
+      canvasEl.dispatchEvent(new CustomEvent("objectpick", { detail: { objectId } }));
+    }
+  });
+}
+
+/** The studio id under the pointer, or undefined for empty space. */
+function pick(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  raycaster.setFromCamera(
+    new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    ),
+    camera,
+  );
+  const hits = raycaster.intersectObjects([...byObjectId.values()], true);
+  for (const hit of hits) {
+    for (let node = hit.object; node; node = node.parent) {
+      if (node.userData.objectId) return node.userData.objectId;
+    }
+  }
+  return undefined;
 }
 
 function resize(canvasEl) {
@@ -69,7 +121,27 @@ function lutTexture(lut) {
   return texture;
 }
 
-function buildMesh(item, anchor) {
+/** The node that carries one studio object.
+ *
+ * magpylib bakes each object's transform into the vertices it sends, and can
+ * send several traces for one object -- a current draws its loop and its
+ * arrows separately. Hanging them all under one node keyed by the studio id
+ * is what lets a pick, a highlight, and later a gizmo act on the object
+ * rather than on whichever trace happened to be hit. The node sits on the
+ * object's own origin, so it is also the pivot a rotation would use.
+ */
+function nodeFor(objectId, anchor) {
+  let node = byObjectId.get(objectId);
+  if (node) return node;
+  node = new THREE.Group();
+  if (anchor) node.position.fromArray(anchor);
+  node.userData.objectId = objectId;
+  scene.add(node);
+  byObjectId.set(objectId, node);
+  return node;
+}
+
+function buildMesh(item) {
   const geometry = new THREE.BufferGeometry();
   const options = {
     transparent: item.opacity < 1,
@@ -114,22 +186,8 @@ function buildMesh(item, anchor) {
   }
   geometry.computeVertexNormals();
 
-  // magpylib bakes the transform into the vertices, so re-centre on the
-  // object's own origin and carry it on the mesh: that is what makes the mesh
-  // movable, and what a gizmo would later be attached to
-  const origin = new THREE.Vector3();
-  if (anchor) {
-    origin.fromArray(anchor);
-  } else {
-    geometry.computeBoundingBox();
-    geometry.boundingBox.getCenter(origin);
-  }
-  geometry.translate(-origin.x, -origin.y, -origin.z);
-
   const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial(options));
-  mesh.position.copy(origin);
   mesh.name = item.name;
-  mesh.userData.objectId = item.object_id;
   return mesh;
 }
 
@@ -167,8 +225,35 @@ function buildScatter(item) {
     );
   }
   group.name = item.name;
-  group.userData.objectId = item.object_id;
   return group;
+}
+
+/** Everything drawn, as one sphere -- null when there is nothing to look at. */
+function sceneSphere() {
+  const box = new THREE.Box3();
+  for (const node of byObjectId.values()) box.expandByObject(node);
+  return box.isEmpty() ? null : box.getBoundingSphere(new THREE.Sphere());
+}
+
+/** Outline the selected object.
+ *
+ * A box rather than a tint or an emissive glow: colour *is* the data here --
+ * it carries magnetization direction and field magnitude -- so a highlight
+ * that repainted the object would overwrite what the user is looking at.
+ */
+function highlight(objectId) {
+  selectedId = objectId;
+  if (outline) {
+    scene.remove(outline);
+    outline.dispose();
+    outline = null;
+  }
+  const node = byObjectId.get(objectId);
+  if (!node) return;
+  const accent = cssColor("--vscode-focusBorder", "#0078d4");
+  outline = new THREE.BoxHelper(node, new THREE.Color(accent));
+  outline.raycast = () => {}; // an indicator, not a target
+  scene.add(outline);
 }
 
 /** Put the whole scene in view, accounting for both field-of-view angles.
@@ -181,11 +266,9 @@ function buildScatter(item) {
  * limiting one, so guessing from the horizontal was wrong twice over.
  */
 function fitView() {
-  const box = new THREE.Box3();
-  for (const object of byObjectId.values()) box.expandByObject(object);
-  if (box.isEmpty()) return;
+  const sphere = sceneSphere();
+  if (!sphere) return;
 
-  const sphere = box.getBoundingSphere(new THREE.Sphere());
   const vertical = THREE.MathUtils.degToRad(camera.fov);
   const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
   const distance =
@@ -205,22 +288,29 @@ function fitView() {
 /** Replace the drawn objects with `payload`, keeping the camera where it is. */
 function render(canvasEl, payload, { keepCamera = true } = {}) {
   ensureRenderer(canvasEl);
-  scene.background = new THREE.Color(themeColor());
+  const background = cssColor("--vscode-editor-background", "#1e1e1e");
+  scene.background = new THREE.Color(background);
 
-  for (const object of byObjectId.values()) scene.remove(object);
+  // Dropping a node does not free what it holds on the GPU, and this runs on
+  // every edit: a colorscale texture per mesh, left to accumulate, is a leak.
+  for (const node of byObjectId.values()) {
+    scene.remove(node);
+    node.traverse((child) => {
+      child.geometry?.dispose();
+      child.material?.map?.dispose();
+      child.material?.dispose();
+    });
+  }
   byObjectId.clear();
+  // `attach` keeps each trace where magpylib put it while re-parenting it, so
+  // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes) {
-    const mesh = buildMesh(item, payload.anchors[item.object_id]);
-    scene.add(mesh);
-    byObjectId.set(item.object_id, mesh);
+    nodeFor(item.object_id, payload.anchors[item.object_id]).attach(buildMesh(item));
   }
   for (const item of payload.scatters) {
-    const group = buildScatter(item);
-    scene.add(group);
-    // several traces can share an object (a current draws a loop and an
-    // arrow), so the first one registered wins the key
-    if (!byObjectId.has(item.object_id)) byObjectId.set(item.object_id, group);
+    nodeFor(item.object_id, payload.anchors[item.object_id]).attach(buildScatter(item));
   }
+
   // Size first: the fit depends on the aspect ratio, and on the very first
   // render the canvas may not have been laid out yet.
   resize(canvasEl);
@@ -231,6 +321,13 @@ function render(canvasEl, payload, { keepCamera = true } = {}) {
     fitView();
     framed = byObjectId.size > 0;
   }
+  // Lines and points are hit within a radius of the ray, measured in world
+  // units: a fixed one would miss a scene in metres and swallow one in
+  // millimetres, so scale it to what is on screen.
+  const sphere = sceneSphere();
+  raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
+  raycaster.params.Line.threshold = raycaster.params.Points.threshold;
+  highlight(selectedId); // the objects are new; the selection is not
 }
 
-window.scene3d = { render, fitView, byObjectId };
+window.scene3d = { render, fitView, highlight, byObjectId };
