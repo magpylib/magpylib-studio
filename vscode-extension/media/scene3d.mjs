@@ -71,7 +71,7 @@ function makeGizmo(canvasEl) {
   let turnedFrom = null;
   gizmo = new TransformControls(camera, renderer.domElement);
   gizmo.setSpace("world"); // the axes the user reads off the model
-  gizmo.size = 0.6; // full size swamps a small object
+  gizmo.size = 0.45; // full size swamps a small object
   scene.add(gizmo.getHelper());
 
   gizmo.addEventListener("dragging-changed", (event) => {
