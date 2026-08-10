@@ -167,12 +167,13 @@ def _capture(objects):
     return captured["scene"]
 
 
-def scene_payload(objects, live=None):
+def scene_payload(objects, live=None, derived=None):
     """Everything a three.js view needs to build the scene once.
 
-    `live` is the session's ``{studio id: magpylib object}`` map. Two things
-    depend on it, and both are the reason it is a parameter rather than
-    something this module could work out for itself:
+    `live` is the session's ``{studio id: magpylib object}`` map, and
+    `derived` its ``{source id: copy ids}`` one. Three things depend on them,
+    and all three are why they are parameters rather than something this
+    module could work out for itself:
 
     * **The ids.** Magpylib stamps each trace with ``id(obj)``, which is a
       CPython address: it is stable only until the next rebuild, and studio
@@ -186,22 +187,49 @@ def scene_payload(objects, live=None):
       The only alternative is the bounding-box centre, which is wrong for
       anything whose origin is not its centroid -- 0.678 off for a Sensor,
       measured. The object knows; the picture does not.
+    * **The copies.** A pattern's copies are drawn, and they live in `live`
+      under ids like ``r2#1``, but no spec was ever recorded for them: asking
+      the engine to rotate one raises ``unknown object id``. They are re-keyed
+      to the source that generated them, which keeps every id in this payload
+      one the protocol accepts, and draws a patterned ring as the single
+      object it is meant to read as.
+
+    `patterned` names the sources that have copies. An edit to one of those
+    lands at the end of the event log, after the duplication that made the
+    copies, so the source moves and the copies stay where they were. A view
+    that offers drag handles has to know not to offer them there.
     """
     scene = _capture(objects)
     panel = scene.panel(1, 1)
     traces = [t for frame in scene.frames for t in frame.traces]
 
     live = live or {}
+    derived = derived or {}
     studio_id = {id(obj): key for key, obj in live.items()}
+    source_of = {copy: src for src, copies in derived.items() for copy in copies}
+    # Patterning a Collection copies its children too, and those copies are
+    # real magnets that nothing registered an id for. The Collection holding
+    # one is the nearest thing that has an id, so the trace is drawn there --
+    # innermost first, hence the sort by size.
+    holding = {
+        id(child): key
+        for key, obj in sorted(
+            live.items(), key=lambda kv: -len(getattr(kv[1], "children_all", ()))
+        )
+        for child in getattr(obj, "children_all", ())
+    }
     anchors = {
         key: np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist()
         for key, obj in live.items()
+        if key not in source_of  # a copy is drawn on its source's node
     }
 
     payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
     payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
     for item in payload:
-        item["object_id"] = studio_id.get(item["object_id"])
+        raw = item["object_id"]
+        key = studio_id.get(raw) or holding.get(raw)
+        item["object_id"] = source_of.get(key, key)
 
     return {
         "meshes": [p for p in payload if p["kind"] == "mesh"],
@@ -209,4 +237,5 @@ def scene_payload(objects, live=None):
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         "anchors": anchors,
+        "patterned": sorted(derived),
     }

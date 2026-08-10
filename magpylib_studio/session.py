@@ -2287,7 +2287,9 @@ class MagpylibStudioSession:
         protocol understands.
         """
         threejs.pin_scene_units()
-        return threejs.scene_payload(self.scene, live=self._objs)
+        return threejs.scene_payload(
+            self.scene, live=self._objs, derived=self._derived
+        )
 
     # --- field evaluation --------------------------------------------------
     def _leaf_sources(self):

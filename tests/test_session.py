@@ -185,6 +185,55 @@ def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
     assert cube_after["position"] == cube_before["position"]
 
 
+def test_get_scene_draws_pattern_copies_on_their_source(session):
+    """Every id in the payload must be one the engine accepts.
+
+    Copies are drawn and they are in `_objs` under ids like 'r2#1', but no
+    spec was recorded for them, so editing one raised `unknown object id` --
+    which is what a click on a halbach ring's magnet used to reach. Keyed to
+    the source instead, the ring is one object, as it already is everywhere
+    else in the studio.
+    """
+    session.add_object("ring", "Collection")
+    session.add_object("r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring")
+    session.move("r2", [3, 0, 0])
+    session.duplicate_around("r2", count=4, spin=90)
+    assert "r2#1" in session._objs  # the copies really are live objects
+
+    scene = session.get_scene()
+
+    drawn = {m["object_id"] for m in scene["meshes"]}
+    assert "r2" in drawn and not {i for i in drawn if "#" in str(i)}
+    assert "r2#1" not in scene["anchors"]
+    # and every id it does name can be addressed
+    for object_id in drawn:
+        session._spec(object_id)
+    # the view is told not to offer drag handles here: an edit lands after the
+    # duplication that made the copies, so the source would move alone
+    assert scene["patterned"] == ["r2"]
+
+
+@pytest.mark.parametrize(
+    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
+)
+def test_every_id_the_scene_names_can_be_edited(name):
+    """The invariant the whole 3D view rests on, over every shipped example.
+
+    A view that draws something the user can click must not name anything the
+    engine will refuse: clicking a magnet in the halbach ring used to reach
+    `rotate('r2#1')` and raise. Patterning a Collection is the harder case --
+    the copies of its children are real magnets with no id anywhere.
+    """
+    session = MagpylibStudioSession()
+    session.load_example(name)
+    scene = session.get_scene()
+
+    drawn = [t["object_id"] for t in scene["meshes"] + scene["scatters"]]
+    assert drawn and None not in drawn  # nothing drawn is unaddressable
+    for object_id in set(drawn):
+        session._spec(object_id)  # raises KeyError if the engine would refuse
+
+
 def test_a_dragged_position_is_world_absolute(session):
     """What the 3D view's move gizmo relies on.
 

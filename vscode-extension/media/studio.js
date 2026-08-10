@@ -10,6 +10,8 @@ const gizmoEl = document.getElementById("gizmo");
 const gizmoLabelEl = document.getElementById("gizmoLabel");
 let nextReqId = 1;
 const pending = new Map();
+let selectedId;
+let patterned = new Set(); // sources whose copies would not follow an edit
 
 function rpc(method, params) {
   return new Promise((resolve, reject) => {
@@ -47,7 +49,9 @@ async function refreshFigure() {
     const payload = await rpc("get_scene", {});
     window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
     showSceneGraphControls(true);
+    patterned = new Set(payload.patterned);
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
+    applyGizmo(); // the selection may have become (or stopped being) patterned
     return;
   }
   const figure = await rpc("get_figure", {
@@ -98,19 +102,32 @@ canvasEl.addEventListener("objecttransform", (event) => {
   vscodeApi.postMessage({ type: "transformObject", ...event.detail });
 });
 
-const setGizmo = (mode) => {
-  gizmoEl.value = mode;
-  window.scene3d?.setGizmoMode(mode);
-};
+/** Show the handles, unless the selected object is one a drag cannot honour.
+ *
+ * A pattern's copies are drawn on their source's node, so the ring is one
+ * object to click -- but an edit to the source is recorded after the
+ * duplication that made the copies, so dragging it would move one magnet out
+ * of the ring and leave the rest. Better to say so than to do it.
+ */
+function applyGizmo() {
+  const blocked = patterned.has(selectedId);
+  gizmoEl.disabled = blocked;
+  window.scene3d?.setGizmoMode(blocked ? "none" : gizmoEl.value);
+  if (blocked) {
+    statusEl.textContent = `${selectedId} is patterned — dragging it would leave its copies behind`;
+  }
+}
 
-gizmoEl.addEventListener("change", () => setGizmo(gizmoEl.value));
+gizmoEl.addEventListener("change", applyGizmo);
 
 // The shortcuts the rest of the 3D world uses. They stay out of the way of
 // typing: the panel has no text input, but a <select> with focus does.
 window.addEventListener("keydown", (event) => {
   if (!sceneGraphEl.checked || event.target !== document.body) return;
   const mode = { w: "translate", e: "rotate", q: "none" }[event.key.toLowerCase()];
-  if (mode) setGizmo(mode);
+  if (!mode || gizmoEl.disabled) return;
+  gizmoEl.value = mode;
+  applyGizmo();
 });
 
 sceneGraphEl.addEventListener("change", () => {
@@ -138,7 +155,9 @@ window.addEventListener("message", (event) => {
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
   } else if (message.type === "select") {
-    window.scene3d?.highlight(message.objectId);
+    selectedId = message.objectId;
+    window.scene3d?.highlight(selectedId);
+    applyGizmo();
   } else if (message.type === "refresh") {
     // Pushed by the host after any edit (inspector, chat tool, tree).
     refreshFigure().catch((err) => {
