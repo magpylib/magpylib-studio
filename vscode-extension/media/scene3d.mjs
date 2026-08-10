@@ -37,6 +37,8 @@ const SPACES = {
   scale: "local",
 };
 let orientations = {}; // studio id -> the rotation baked into its vertices
+let anchors = {}; // studio id -> where the object is
+let centroids = {}; // studio id -> where it looks like it is
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
 // What the polarization handles turn. The object must not turn with them, so
@@ -118,9 +120,20 @@ function constrainScale(node, constraint) {
 }
 
 /** The parameter value a scale comes to, from the one the drag started at. */
-function resized(scale, shape) {
+function resized(scale, shape, centre) {
   if (shape.constraint === "uniform") return shape.value * scale.x;
   if (shape.constraint === "xy") return [shape.value[0] * scale.x, shape.value[1] * scale.z];
+  if (shape.constraint === "vertices") {
+    // A mesh has no dimension; the array is the parameter. It scales about
+    // the centroid, because that is the point the handles are on -- for a
+    // shape whose position is already its centre that is the origin, and
+    // this is the plain multiplication it looks like.
+    return shape.value.map(([x, y, z]) => [
+      centre.x + (x - centre.x) * scale.x,
+      centre.y + (y - centre.y) * scale.y,
+      centre.z + (z - centre.z) * scale.z,
+    ]);
+  }
   return [shape.value[0] * scale.x, shape.value[1] * scale.y, shape.value[2] * scale.z];
 }
 
@@ -169,14 +182,26 @@ function makeGizmo(canvasEl) {
       return;
     }
 
-    if (!node.position.equals(from.position)) {
-      detail.position = node.getWorldPosition(new THREE.Vector3()).toArray();
+    // The handles sit on the centroid, so the object's own position is that
+    // point plus the offset between them -- and that offset turns with the
+    // object, which is why turning something off-centre moves it. For
+    // anything centred on its own position the offset is zero, a turn leaves
+    // the position alone, and none of this arithmetic does anything.
+    const placed = node
+      .getWorldPosition(new THREE.Vector3())
+      .add(from.offset.clone().applyQuaternion(turned));
+    if (!placed.equals(from.placed)) {
+      detail.position = placed.toArray();
     }
     if (Math.abs(turned.w) < 1 - 1e-9) {
       detail.orientation = rotvecOf(turned.multiply(from.orientation));
     }
     if (from.shape && !node.scale.equals(UNSCALED)) {
-      detail.shape = { attr: from.shape.attr, value: resized(node.scale, from.shape) };
+      detail.shape = {
+        attr: from.shape.attr,
+        value: resized(node.scale, from.shape, from.centre),
+        scale: node.scale.toArray(), // for the readout: a mesh has no size to print
+      };
     }
     if (detail.position || detail.orientation || detail.shape) {
       outline?.update(); // the box tracks the object, not the other way round
@@ -191,10 +216,19 @@ function makeGizmo(canvasEl) {
     if (event.value) {
       const objectId = node.userData.objectId;
       const orientation = quaternionOf(orientations[objectId]);
+      const placed = new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]);
+      const offset = placed
+        .clone()
+        .sub(new THREE.Vector3().fromArray(centroids[objectId] || [0, 0, 0]));
       from = {
         position: node.position.clone(),
         quaternion: node.quaternion.clone(),
         orientation,
+        placed, // where the object is, as against where its handles are
+        offset,
+        // the same offset in the object's own frame, which is the centre a
+        // vertex array has to be scaled about to match what is on screen
+        centre: offset.clone().negate().applyQuaternion(orientation.clone().invert()),
         shape: gizmo.mode === "scale" ? shapes[objectId] : null,
         polarization:
           gizmoMode === "polarization"
@@ -378,11 +412,11 @@ function lutTexture(lut) {
  * rather than on whichever trace happened to be hit. The node sits on the
  * object's own origin, so it is also the pivot a rotation would use.
  */
-function nodeFor(objectId, anchor) {
+function nodeFor(objectId, centroid) {
   let node = byObjectId.get(objectId);
   if (node) return node;
   node = new THREE.Group();
-  if (anchor) node.position.fromArray(anchor);
+  if (centroid) node.position.fromArray(centroid);
   // The node stands in the object's own frame, not just at its origin. The
   // vertices arrive with the rotation already baked in, so a node left
   // unrotated has local axes that are really the world's -- and a resize
@@ -561,6 +595,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
   orientations = payload.orientations || {};
+  anchors = payload.anchors || {};
+  centroids = payload.centroids || {};
   shapes = payload.shapes || {};
   polarizations = payload.polarizations || {};
 
@@ -580,7 +616,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
     if (item.object_id === keep) continue;
-    const node = nodeFor(item.object_id, payload.anchors[item.object_id]);
+    const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
     node.attach(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
 

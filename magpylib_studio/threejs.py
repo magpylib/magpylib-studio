@@ -48,12 +48,17 @@ _BACKEND = "_studio_scene"
 #: how many numbers the parameter has: a Cylinder's `dimension` is
 #: (diameter, height), so x and y are locked together and z is free.
 #:
+#: A mesh has no dimension, but its vertices scale exactly -- checked the same
+#: way -- so the parameter dragged there is the whole array, multiplied
+#: row by row. Only while it is small enough to be worth sending: the array
+#: rides in every payload, and a mesh of thousands of points is a lot of
+#: numbers to ship on the chance that someone resizes it. Those keep the
+#: Inspector, which edits the value in place.
+#:
 #: Excluded, and why:
 #:  * `CylinderSegment` -- its angles do not scale with its radii.
 #:  * `Sensor` -- a composite. Its pixels sit at real coordinates while the
 #:    cross is styled, so `style.size` scales only part of the mesh.
-#:  * meshes (`Tetrahedron`, `TriangularMesh`) -- vertices are the parameter,
-#:    so there is no single scale to drag.
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -63,7 +68,12 @@ SCALE_COVARIANT = {
     "Sphere": ("diameter", "uniform"),
     "Cylinder": ("dimension", "xy"),
     "Dipole": ("style.size", "uniform"),
+    "Tetrahedron": ("vertices", "vertices"),
+    "TriangularMesh": ("vertices", "vertices"),
 }
+
+#: Above this many points a mesh keeps its vertices to itself; see above.
+MAX_DRAGGABLE_VERTICES = 256
 
 
 def _resolve(obj, path):
@@ -93,6 +103,8 @@ def shape_of(obj):
         return None
     attr, constraint = entry
     value = _resolve(obj, attr)
+    if constraint == "vertices" and len(value) > MAX_DRAGGABLE_VERTICES:
+        return None
     return {
         "attr": attr,
         "value": value.tolist() if hasattr(value, "tolist") else float(value),
@@ -282,11 +294,21 @@ def scene_payload(objects, live=None, derived=None):
         )
         for child in getattr(obj, "children_all", ())
     }
-    anchors, orientations, shapes, polarizations = {}, {}, {}, {}
+    anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
     for key, obj in live.items():
         if key in source_of:
             continue  # a copy is drawn on its source's node
         anchors[key] = np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist()
+        # Where the object *looks* like it is, which is not always where it
+        # is: a Tetrahedron's position is the origin its vertices are written
+        # against, and handles drawn there float off the corner of the shape.
+        # The two agree for everything that is centred on its own position.
+        centroid = getattr(obj, "centroid", None)
+        centroids[key] = (
+            anchors[key]
+            if centroid is None
+            else np.atleast_2d(np.asarray(centroid, dtype=float))[-1].tolist()
+        )
         orientations[key] = np.atleast_2d(
             obj.orientation.as_rotvec(degrees=True)
         )[-1].tolist()
@@ -314,6 +336,7 @@ def scene_payload(objects, live=None, derived=None):
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         "anchors": anchors,
+        "centroids": centroids,
         "orientations": orientations,
         "shapes": shapes,
         "polarizations": polarizations,

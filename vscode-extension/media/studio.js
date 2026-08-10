@@ -238,7 +238,14 @@ function showPose(pose) {
     parts.push(`polarization ${numbers(pose.polarization, 4, 9)} T`);
   }
   if (pose.shape) {
-    parts.push(`${pose.shape.attr} ${numbers([].concat(pose.shape.value), 4, 9)} m`);
+    // a mesh's parameter is its whole vertex array: the factor is the
+    // readable thing, not four hundred coordinates
+    const value = pose.shape.value;
+    parts.push(
+      Array.isArray(value[0])
+        ? `${pose.shape.attr} ×${numbers(pose.shape.scale, 3, 6)}`
+        : `${pose.shape.attr} ${numbers([].concat(value), 4, 9)} m`,
+    );
   }
   statusEl.textContent = `${pose.objectId} — ${parts.join("   ")}`;
 }

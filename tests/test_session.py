@@ -381,12 +381,74 @@ def test_only_shapes_that_scale_are_offered(session):
     sit at real coordinates while its cross is styled -- scaling the drawing
     would move the pixels somewhere the object never put them."""
     session.add_object("probe", "Sensor")
-    session.add_object("mesh", "magnet.Tetrahedron", params={"vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]})
 
     shapes = session.get_scene()["shapes"]
 
     assert shapes["cube"] == {"attr": "dimension", "value": [1, 1, 1], "constraint": "free"}
-    assert "probe" not in shapes and "mesh" not in shapes
+    assert "probe" not in shapes
+
+
+def test_the_handles_sit_where_the_object_looks(session):
+    """A Tetrahedron's position is the origin its vertices are written
+    against, not the middle of the shape, so handles drawn there float off a
+    corner. The centroid is where it looks like it is, and magpylib knows it.
+
+    They agree for anything centred on its own position, which is why nothing
+    else in the view had to care until a mesh turned up.
+    """
+    session.add_object(
+        "tet",
+        "magnet.Tetrahedron",
+        params={"vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    )
+    scene = session.get_scene()
+
+    assert scene["anchors"]["tet"] == pytest.approx([0, 0, 0])
+    assert scene["centroids"]["tet"] == pytest.approx([0.25, 0.25, 0.25])
+    # a Cuboid is its own centre, so the two are the same point
+    assert scene["centroids"]["cube"] == pytest.approx(scene["anchors"]["cube"])
+
+
+def test_a_mesh_is_resized_by_its_vertices(session):
+    """A mesh has no dimension, so the array itself is what a resize drags.
+
+    It scales exactly, which is the same thing asked of every other resizable
+    class -- the reason meshes were left out was that they have no dimension
+    parameter, not that their geometry misbehaves.
+    """
+    corners = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    session.add_object("tet", "magnet.Tetrahedron", params={"vertices": corners})
+    session.move("tet", [3, -1, 2])  # off the origin: the scale is about the object
+    before = _drawn(session, "tet")
+    anchor = np.asarray(session.get_scene()["anchors"]["tet"])
+
+    shape = session.get_scene()["shapes"]["tet"]
+    assert shape["attr"] == "vertices" and shape["constraint"] == "vertices"
+    session.set_param("tet", "vertices", (np.asarray(shape["value"]) * 2).tolist())
+
+    assert _drawn(session, "tet") - anchor == pytest.approx((before - anchor) * 2)
+
+
+def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
+    """The array rides in every payload, so past a point it is a lot of
+    numbers to ship on the chance that someone resizes it. Those meshes keep
+    the Inspector, which edits the value in place.
+
+    Only a TriangularMesh can reach the cap: a Tetrahedron is four vertices by
+    definition, which magpylib enforces.
+    """
+    from magpylib_studio import threejs
+
+    corners = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    session.add_object(
+        "mesh", "magnet.TriangularMesh", params={"vertices": corners, "faces": faces}
+    )
+    assert session.get_scene()["shapes"]["mesh"]["attr"] == "vertices"
+
+    monkeypatch.setattr(threejs, "MAX_DRAGGABLE_VERTICES", 3)
+    assert "mesh" not in session.get_scene()["shapes"]
+    assert "cube" in session.get_scene()["shapes"]  # a dimension is unaffected
 
 
 def test_the_quiver_grid_is_a_number_to_drag():
