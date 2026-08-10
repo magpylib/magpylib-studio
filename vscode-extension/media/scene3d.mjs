@@ -165,7 +165,11 @@ function resize(canvasEl) {
   if (!renderer) return;
   const { clientWidth: w, clientHeight: h } = canvasEl;
   if (!w || !h) return;
-  renderer.setSize(w, h, false);
+  // Let three set the canvas's CSS size as well as its buffer. Nothing else
+  // sizes the element, so without this it lays out at its buffer size --
+  // devicePixelRatio times too big, which on a retina display shows the top
+  // left quarter of the scene and calls it the whole view.
+  renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
