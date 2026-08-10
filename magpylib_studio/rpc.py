@@ -33,6 +33,8 @@ _PUBLIC = {
     "move_object",
     "copy_object",
     "set_visible",
+    "begin_interaction",
+    "end_interaction",
     "set_param",
     "get_params",
     "get_transform",

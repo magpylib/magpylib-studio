@@ -39,6 +39,66 @@ LUT_SIZE = 256
 
 _BACKEND = "_studio_scene"
 
+#: Classes whose mesh is *exactly* the base mesh scaled, so a resize can be
+#: dragged with `node.scale` and the engine told only the value it came to.
+#: Ported from the prototype, where every entry was checked by rendering twice
+#: and comparing vertices.
+#:
+#: `constraint` records which scale axes are independent, which follows from
+#: how many numbers the parameter has: a Cylinder's `dimension` is
+#: (diameter, height), so x and y are locked together and z is free.
+#:
+#: Excluded, and why:
+#:  * `CylinderSegment` -- its angles do not scale with its radii.
+#:  * `Sensor` -- a composite. Its pixels sit at real coordinates while the
+#:    cross is styled, so `style.size` scales only part of the mesh.
+#:  * meshes (`Tetrahedron`, `TriangularMesh`) -- vertices are the parameter,
+#:    so there is no single scale to drag.
+#:
+#: A Dipole has no physical size at all: its arrow is styled geometry and
+#: `style.size` is one scalar, so the resize is uniform by construction. That
+#: holds only under `sizemode="absolute"`, which `pin_scene_units` sets.
+SCALE_COVARIANT = {
+    "Cuboid": ("dimension", "free"),
+    "Sphere": ("diameter", "uniform"),
+    "Cylinder": ("dimension", "xy"),
+    "Dipole": ("style.size", "uniform"),
+}
+
+
+def _resolve(obj, path):
+    """Read a dotted attribute path, falling back to the library default.
+
+    An unset style property reads as `None` on the object and only takes its
+    value from `magpy.defaults.display.style.<family>` when the figure is
+    drawn. `merged()` does not help: it resolves set-vs-inherited *within* the
+    object's own tree, so `Dipole().style.merged().size` is still `None` while
+    the effective size is 1.
+    """
+    value = obj
+    for part in path.split("."):
+        value = getattr(value, part)
+    if value is None and path.startswith("style."):
+        node = magpy.defaults.display.style
+        for part in (type(obj).__name__.lower(), *path.split(".")[1:]):
+            node = getattr(node, part)
+        value = node
+    return value
+
+
+def shape_of(obj):
+    """The scale-covariant shape parameter of `obj`, or None if it has none."""
+    entry = SCALE_COVARIANT.get(type(obj).__name__)
+    if entry is None:
+        return None
+    attr, constraint = entry
+    value = _resolve(obj, attr)
+    return {
+        "attr": attr,
+        "value": value.tolist() if hasattr(value, "tolist") else float(value),
+        "constraint": constraint,
+    }
+
 
 def pin_scene_units():
     """Make the emitted geometry depend on the objects, not on the scene.
@@ -222,7 +282,7 @@ def scene_payload(objects, live=None, derived=None):
         )
         for child in getattr(obj, "children_all", ())
     }
-    anchors, orientations = {}, {}
+    anchors, orientations, shapes, polarizations = {}, {}, {}, {}
     for key, obj in live.items():
         if key in source_of:
             continue  # a copy is drawn on its source's node
@@ -230,6 +290,16 @@ def scene_payload(objects, live=None, derived=None):
         orientations[key] = np.atleast_2d(
             obj.orientation.as_rotvec(degrees=True)
         )[-1].tolist()
+        shape = shape_of(obj)
+        if shape is not None:
+            shapes[key] = shape
+        # In the object's own frame, which is how magpylib stores it. The
+        # rendered colour is the vertex projected on the *world* vector, so
+        # reading this as world-space is wrong by the object's orientation --
+        # 0.44 out at 50 degrees, measured in the prototype.
+        polarization = getattr(obj, "polarization", None)
+        if polarization is not None:
+            polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
     payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
     payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
@@ -245,5 +315,7 @@ def scene_payload(objects, live=None, derived=None):
         "labels": panel.labels,
         "anchors": anchors,
         "orientations": orientations,
+        "shapes": shapes,
+        "polarizations": polarizations,
         "patterned": sorted(derived),
     }
