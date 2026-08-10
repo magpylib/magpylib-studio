@@ -12,6 +12,9 @@ let nextReqId = 1;
 const pending = new Map();
 let selectedId;
 let patterned = new Set(); // sources whose copies would not follow an edit
+let poseInFlight = false;
+let pendingPose = null;
+let draggingId = null; // the object the pointer owns until it lets go
 
 function rpc(method, params) {
   return new Promise((resolve, reject) => {
@@ -95,12 +98,65 @@ canvasEl.addEventListener("objectpick", (event) => {
   });
 });
 
-// A finished drag is an edit like any other, so it goes to the host rather
-// than straight down the RPC: only the host marks the scene dirty, refreshes
-// the trees, and reports what the engine said.
+// A drag is an edit like any other, so it goes to the host rather than
+// straight down the RPC: only the host marks the scene dirty, refreshes the
+// trees, and reports what the engine said.
+//
+// Mid-drag poses are paced by the round trip rather than by a timer: one is
+// in flight at a time and the newest waiting pose wins, so the rate settles
+// wherever the scene's cost puts it -- measured from 1.4 ms for two magnets
+// to 180 ms for a thousand. Any fixed interval would be wrong at one end of
+// that or the other, and a queue would only make the view lag further behind
+// the pointer the longer the drag went on.
 canvasEl.addEventListener("objecttransform", (event) => {
+  if (event.detail.preview) {
+    // Read out at pointer rate rather than at engine rate: the numbers are
+    // already known here, and waiting for the round trip to show them would
+    // make a fast drag on a heavy scene look like it had stopped responding.
+    showPose(event.detail);
+    draggingId = event.detail.objectId;
+    pendingPose = event.detail;
+    sendPose();
+    return;
+  }
+  draggingId = null;
+  pendingPose = null; // the final pose supersedes anything still waiting
   vscodeApi.postMessage({ type: "transformObject", ...event.detail });
 });
+
+/** Redraw what the drag changed, except the object under the pointer.
+ *
+ * Moving a magnet moves more than the magnet: a field's arrows are computed
+ * from it and have to be asked for again. This is the expensive half of the
+ * round trip, so it runs *inside* the pacing loop rather than beside it --
+ * the next pose is not sent until the scene it caused has been drawn, which
+ * is what keeps a heavy scene sending fewer poses instead of falling behind.
+ */
+async function redrawAroundDrag() {
+  if (!sceneGraphEl.checked || !draggingId) return;
+  const payload = await rpc("get_scene", {});
+  patterned = new Set(payload.patterned);
+  window.scene3d?.render(canvasEl, payload, { keep: draggingId });
+}
+
+/** The pose being dragged, in the status bar. It sits last in the bar, so a
+ *  number growing a digit moves nothing but itself. */
+function showPose(pose) {
+  const numbers = (values) =>
+    values.map((n) => (Math.abs(n) < 1e-12 ? "0" : Number(n.toPrecision(4)))).join(", ");
+  const parts = [];
+  if (pose.position) parts.push(`position ${numbers(pose.position)} m`);
+  if (pose.orientation) parts.push(`rotation ${numbers(pose.orientation)}°`);
+  statusEl.textContent = `${pose.objectId} — ${parts.join("   ")}`;
+}
+
+function sendPose() {
+  if (poseInFlight || !pendingPose) return;
+  poseInFlight = true;
+  const pose = pendingPose;
+  pendingPose = null;
+  vscodeApi.postMessage({ type: "previewTransform", ...pose });
+}
 
 /** Show the handles, unless the selected object is one a drag cannot honour.
  *
@@ -154,6 +210,13 @@ window.addEventListener("message", (event) => {
     pending.delete(message.reqId);
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
+  } else if (message.type === "previewDone") {
+    redrawAroundDrag()
+      .catch(() => {}) // a failed redraw must not end the drag
+      .finally(() => {
+        poseInFlight = false;
+        sendPose(); // whatever the pointer reached while that one was away
+      });
   } else if (message.type === "select") {
     selectedId = message.objectId;
     window.scene3d?.highlight(selectedId);

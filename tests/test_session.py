@@ -6,7 +6,6 @@ import os
 import tempfile
 
 import pytest
-from scipy.spatial.transform import Rotation as R
 
 from magpylib_studio import importer
 from magpylib_studio.rpc import serve
@@ -253,27 +252,44 @@ def test_a_dragged_position_is_world_absolute(session):
     )
 
 
-def test_a_dragged_rotation_turns_in_place_about_world_axes(session):
-    """What the 3D view's rotate gizmo relies on, and why it sends a turn.
+def test_a_whole_drag_is_one_construction_step(session):
+    """Why the 3D view reports the pose reached, not the change it made.
 
-    magpylib bakes each object's orientation into the vertices it draws, so
-    the dragged node starts every render unrotated: what a drag knows is the
-    turn it just made, in world axes, about the object's own origin. That is
-    `rotate` with no anchor -- it must compose onto whatever rotation the
-    object already had, and must not move it.
+    A drag sends a pose per frame while the pointer moves. Absolute ones are
+    replaced in place, so the history keeps one step however long the drag
+    ran; a relative `rotate` cannot be replaced and would leave one event per
+    frame, and one undo per frame to get back out.
     """
-    session.set_transform("cube", position=[2.0, 0.0, 0.0])
-    session.rotate("cube", angle=90, axis=[0, 0, 1])
+    before = len(session.doc["events"])
 
-    session.rotate("cube", angle=90, axis=[1, 0, 0])  # a second, world-axis turn
+    for i in range(60):  # a second of dragging
+        session.set_transform(
+            "cube", position=[i * 0.01, 0, 0], orientation=[0, 0, i * 1.5]
+        )
 
+    added = session.doc["events"][before:]
+    assert [event["op"] for event in added] == ["position", "orientation"]
     cube = session._objs["cube"]
-    assert cube.position == pytest.approx([2.0, 0.0, 0.0])  # turned in place
-    # world-axis turns compose on the left: R_x(90) then applied after R_z(90)
-    expected = R.from_rotvec([90, 0, 0], degrees=True) * R.from_rotvec(
-        [0, 0, 90], degrees=True
-    )
-    assert cube.orientation.as_matrix() == pytest.approx(expected.as_matrix())
+    assert cube.position == pytest.approx([0.59, 0, 0])  # the pose last sent
+    assert cube.orientation.as_rotvec(degrees=True) == pytest.approx([0, 0, 88.5])
+
+    # for contrast, the shape the same drag would have had as relative turns
+    before = len(session.doc["events"])
+    for _ in range(60):
+        session.rotate("cube", angle=1.5, axis=[0, 0, 1])
+    assert len(session.doc["events"]) - before == 60
+
+
+def test_get_scene_reports_the_orientation_a_drag_needs(session):
+    """The rotation a drag has to add its turn to, which the picture cannot
+    show: magpylib bakes it into the vertices, so the node arrives unrotated
+    and nothing on screen says how far round the object already is."""
+    session.set_transform("cube", orientation=[0, 0, 30])
+
+    scene = session.get_scene()
+
+    assert scene["orientations"]["cube"] == pytest.approx([0, 0, 30])
+    assert set(scene["orientations"]) == set(scene["anchors"])
 
 
 def test_apply_edit_updates_object_and_document(session):

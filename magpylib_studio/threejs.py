@@ -182,11 +182,15 @@ def scene_payload(objects, live=None, derived=None):
       what `move`, `rotate`, `apply_edit` and `set_visible` already take. A
       picked mesh then names an object the existing protocol understands, with
       no new methods and no second identity scheme.
-    * **The anchors.** The payload carries no transform, so a mesh arrives with
+    * **The poses.** The payload carries no transform, so a mesh arrives with
       an identity matrix and a gizmo attached to it lands at the world origin.
       The only alternative is the bounding-box centre, which is wrong for
       anything whose origin is not its centroid -- 0.678 off for a Sensor,
-      measured. The object knows; the picture does not.
+      measured. The object knows; the picture does not. `anchors` gives each
+      object its own origin to turn about, and `orientations` the rotation
+      already baked into its vertices -- which is what lets a drag report the
+      pose it reached rather than the turn it made, and so be recorded as one
+      construction step however many frames it took.
     * **The copies.** A pattern's copies are drawn, and they live in `live`
       under ids like ``r2#1``, but no spec was ever recorded for them: asking
       the engine to rotate one raises ``unknown object id``. They are re-keyed
@@ -218,11 +222,14 @@ def scene_payload(objects, live=None, derived=None):
         )
         for child in getattr(obj, "children_all", ())
     }
-    anchors = {
-        key: np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist()
-        for key, obj in live.items()
-        if key not in source_of  # a copy is drawn on its source's node
-    }
+    anchors, orientations = {}, {}
+    for key, obj in live.items():
+        if key in source_of:
+            continue  # a copy is drawn on its source's node
+        anchors[key] = np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist()
+        orientations[key] = np.atleast_2d(
+            obj.orientation.as_rotvec(degrees=True)
+        )[-1].tolist()
 
     payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
     payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
@@ -237,5 +244,6 @@ def scene_payload(objects, live=None, derived=None):
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         "anchors": anchors,
+        "orientations": orientations,
         "patterned": sorted(derived),
     }

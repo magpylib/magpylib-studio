@@ -180,13 +180,38 @@ window.addEventListener("message", (event) => {
     modeEl.value = "sweep";
     refreshField();
   } else if (message.type === "refresh") {
-    loadSources()
-      .then(refreshField)
-      .catch((err) => {
-        statusEl.textContent = String(err);
-      });
+    reloadPaced();
   }
 });
+
+/** Recompute for the newest state, never for a queue of stale ones.
+ *
+ * Dragging an object in the 3D view posts a refresh per pose, which can
+ * outrun the field: a map over a grid is not a cheap thing to redo. Refreshes
+ * arriving during a computation collapse into one that runs after it, so the
+ * plot always catches up to where the object actually is and never works
+ * through where it has been.
+ */
+let computing = false;
+let againWhenDone = false;
+async function reloadPaced() {
+  if (computing) {
+    againWhenDone = true;
+    return;
+  }
+  computing = true;
+  try {
+    do {
+      againWhenDone = false;
+      await loadSources();
+      await refreshField();
+    } while (againWhenDone);
+  } catch (err) {
+    statusEl.textContent = String(err);
+  } finally {
+    computing = false;
+  }
+}
 
 window.addEventListener("resize", () => {
   if (canvasEl.data) Plotly.Plots.resize(canvasEl);

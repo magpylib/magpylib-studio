@@ -23,6 +23,7 @@ let outline = null;
 let selectedId;
 let gizmo = null;
 let gizmoMode = "translate";
+let orientations = {}; // studio id -> the rotation baked into its vertices
 
 /** A VS Code theme colour, so the view wears whatever the editor is wearing. */
 function cssColor(name, fallback) {
@@ -58,47 +59,81 @@ function ensureRenderer(canvasEl) {
   makeGizmo(canvasEl);
 }
 
-/** The drag handles, and the edit a finished drag asks for.
+/** A rotation as magpylib writes one: an axis scaled by its angle in degrees. */
+function rotvecOf(quaternion) {
+  const sine = Math.sqrt(Math.max(1 - quaternion.w * quaternion.w, 0));
+  if (sine < 1e-9) return [0, 0, 0];
+  const angle = 2 * Math.acos(THREE.MathUtils.clamp(quaternion.w, -1, 1));
+  const scale = THREE.MathUtils.radToDeg(angle) / sine;
+  return [quaternion.x * scale, quaternion.y * scale, quaternion.z * scale];
+}
+
+function quaternionOf(rotvec) {
+  const axis = new THREE.Vector3().fromArray(rotvec || [0, 0, 0]);
+  const degrees = axis.length();
+  if (degrees < 1e-12) return new THREE.Quaternion();
+  return new THREE.Quaternion().setFromAxisAngle(
+    axis.normalize(),
+    THREE.MathUtils.degToRad(degrees),
+  );
+}
+
+/** The drag handles, and the pose a drag reports as it goes.
  *
- * What a drag can report is limited by what the payload is: magpylib bakes
- * each object's transform into the vertices, so the node starts every render
- * at identity and its rotation is only ever the turn *this* drag made. A
- * position can be sent as it stands -- the node sits on the object's own
- * origin -- but a rotation has to go out as the relative turn it is, which is
- * what magpylib's rotate() takes anyway.
+ * Reported as the pose *reached*, never as the turn made, and that is the
+ * whole design. The engine coalesces repeated absolute poses on one object
+ * into a single construction step, so a drag of any length coalesces into
+ * one -- while a relative rotate cannot be replaced in place and would leave
+ * one event per frame in the history, and one undo per frame to get back.
+ *
+ * Reporting an absolute rotation takes knowing the one already there, which
+ * the picture cannot show: magpylib bakes it into the vertices, so the node
+ * starts every render unrotated. That is what the payload's `orientations`
+ * is for.
+ *
+ * Only the part that moved is sent. A drag that moves an object should not
+ * overwrite an orientation the user wrote as an expression, and vice versa.
  */
 function makeGizmo(canvasEl) {
-  let turnedFrom = null;
+  let from = null;
   gizmo = new TransformControls(camera, renderer.domElement);
   gizmo.setSpace("world"); // the axes the user reads off the model
   gizmo.size = 0.45; // full size swamps a small object
   scene.add(gizmo.getHelper());
+
+  const report = (preview) => {
+    const node = gizmo.object;
+    if (!node || !from) return;
+    const detail = { objectId: node.userData.objectId, preview };
+    if (!node.position.equals(from.position)) {
+      detail.position = node.getWorldPosition(new THREE.Vector3()).toArray();
+    }
+    const turn = node.quaternion.clone().multiply(from.quaternion.clone().invert());
+    if (Math.abs(turn.w) < 1 - 1e-9) {
+      detail.orientation = rotvecOf(turn.multiply(from.orientation));
+    }
+    if (detail.position || detail.orientation) {
+      outline?.update(); // the box tracks the object, not the other way round
+      canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
+    }
+  };
 
   gizmo.addEventListener("dragging-changed", (event) => {
     controls.enabled = !event.value; // do not orbit while dragging a handle
     const node = gizmo.object;
     if (!node) return;
     if (event.value) {
-      turnedFrom = node.quaternion.clone();
-      return;
-    }
-    const detail = { objectId: node.userData.objectId };
-    if (gizmo.mode === "rotate") {
-      // the turn this drag made, about the object's own origin -- which is
-      // where magpylib rotates when it is given no anchor
-      const turn = node.quaternion.clone().multiply(turnedFrom.invert());
-      const angle = 2 * Math.acos(THREE.MathUtils.clamp(turn.w, -1, 1));
-      const sine = Math.sqrt(Math.max(1 - turn.w * turn.w, 0));
-      if (sine < 1e-9) return; // no turn worth recording
-      detail.mode = "rotate";
-      detail.angle = THREE.MathUtils.radToDeg(angle);
-      detail.axis = [turn.x / sine, turn.y / sine, turn.z / sine];
+      from = {
+        position: node.position.clone(),
+        quaternion: node.quaternion.clone(),
+        orientation: quaternionOf(orientations[node.userData.objectId]),
+      };
     } else {
-      detail.mode = "translate";
-      detail.position = node.getWorldPosition(new THREE.Vector3()).toArray();
+      report(false); // the one that gets recorded and redrawn
+      from = null;
     }
-    canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
   });
+  gizmo.addEventListener("objectChange", () => report(true));
 }
 
 /** Which handles to show, or "none" to put them away. Also how the handles
@@ -354,30 +389,39 @@ function fitView() {
   controls.update();
 }
 
-/** Replace the drawn objects with `payload`, keeping the camera where it is. */
-function render(canvasEl, payload, { keepCamera = true } = {}) {
+/** Replace the drawn objects with `payload`, keeping the camera where it is.
+ *
+ * `keep` names one object to leave alone: the one being dragged. Everything
+ * else in the scene is redrawn, because plenty of it is *derived* from the
+ * dragged object -- a field's arrows turn as the magnet that makes them
+ * moves, and no amount of moving a mesh locally will show that. The dragged
+ * object itself is the one thing the picture already has right, and swapping
+ * it out from under the gizmo mid-drag would end the drag.
+ */
+function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   ensureRenderer(canvasEl);
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
+  orientations = payload.orientations || {};
 
   // Dropping a node does not free what it holds on the GPU, and this runs on
   // every edit: a colorscale texture per mesh, left to accumulate, is a leak.
-  for (const node of byObjectId.values()) {
+  for (const [objectId, node] of byObjectId) {
+    if (objectId === keep) continue;
     scene.remove(node);
     node.traverse((child) => {
       child.geometry?.dispose();
       child.material?.map?.dispose();
       child.material?.dispose();
     });
+    byObjectId.delete(objectId);
   }
-  byObjectId.clear();
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
-  for (const item of payload.meshes) {
-    nodeFor(item.object_id, payload.anchors[item.object_id]).attach(buildMesh(item));
-  }
-  for (const item of payload.scatters) {
-    nodeFor(item.object_id, payload.anchors[item.object_id]).attach(buildScatter(item));
+  for (const item of payload.meshes.concat(payload.scatters)) {
+    if (item.object_id === keep) continue;
+    const node = nodeFor(item.object_id, payload.anchors[item.object_id]);
+    node.attach(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
 
   // Size first: the fit depends on the aspect ratio, and on the very first
@@ -396,7 +440,9 @@ function render(canvasEl, payload, { keepCamera = true } = {}) {
   const sphere = sceneSphere();
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
-  highlight(selectedId); // the objects are new; the selection is not
+  // Mid-drag the selected object is the one that was *not* rebuilt, and
+  // re-attaching the gizmo to it would interrupt the drag in progress.
+  if (keep === null) highlight(selectedId);
 }
 
 window.scene3d = { render, fitView, highlight, setGizmoMode, byObjectId };

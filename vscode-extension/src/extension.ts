@@ -1313,6 +1313,8 @@ function adoptStudioPanel(
       selectObjectInStudio(context, message.objectId);
     } else if (message.type === 'transformObject') {
       void transformFromPanel(context, message);
+    } else if (message.type === 'previewTransform') {
+      void transformFromPanel(context, message, panel);
     } else if (message.type === 'ready') {
       panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
     }
@@ -1400,39 +1402,71 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
   );
 }
 
-/** Record a gizmo drag from the 3D view as a construction step.
+/** Apply a gizmo drag from the 3D view, as it happens and when it ends.
  *
  * A drag is an edit, so it goes through the engine and the event log like
  * every other one -- undo, the history, and the exported script all get it
- * for free. The two modes take different methods on purpose: the view can
- * report a *position* absolutely, because the node it drags sits on the
- * object's own origin, but it cannot report an orientation that way, since
- * magpylib bakes the object's own rotation into the vertices it sends. What
- * a drag knows is the turn it made, which is what rotate() wants.
+ * for free. It arrives as the pose reached rather than the change made,
+ * which is what lets the engine replace the trailing op in place: a drag of
+ * any length is two events, not two per frame.
+ *
+ * While the drag is running, the surfaces that show something the picture
+ * cannot are brought up to date: the Inspector's numbers and the field. The
+ * 3D view is not, because it is already showing the new pose -- it moved the
+ * mesh itself -- and asking for the scene back would re-serialise every
+ * object in it to move one, which is three quarters of the round trip and
+ * the only part that grows with the size of the scene. That redraw and the
+ * trees wait for the drag to end.
  */
 async function transformFromPanel(
   context: vscode.ExtensionContext,
-  message: { objectId: string; mode: string; position?: number[]; angle?: number; axis?: number[] },
+  message: { objectId: string; position?: number[]; orientation?: number[] },
+  previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
-  const [method, params] =
-    message.mode === 'rotate'
-      ? ['rotate', { object_id: message.objectId, angle: message.angle, axis: message.axis }]
-      : ['set_transform', { object_id: message.objectId, position: message.position }];
+  const params: Record<string, unknown> = { object_id: message.objectId };
+  if (message.position) {
+    params.position = message.position;
+  }
+  if (message.orientation) {
+    params.orientation = message.orientation;
+  }
   try {
-    const result = (await (await getEngine(context)).request(method, params)) as {
-      ok: boolean;
-      error?: string;
-    };
-    if (!result.ok) {
+    const result = (await (await getEngine(context)).request(
+      'set_transform',
+      params,
+    )) as { ok: boolean; error?: string };
+    // Only the final pose reports: the same refusal sixty times over during
+    // one drag is sixty notifications about one mistake.
+    if (!result.ok && !previewFor) {
       vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
     }
   } catch (err) {
-    vscode.window.showErrorMessage(
-      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
-    );
+    if (!previewFor) {
+      vscode.window.showErrorMessage(
+        `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
-  // Always: a refused drag still leaves the view showing where the object was
-  // dragged to, and only a redraw from the model puts it back.
+  if (previewFor) {
+    try {
+      inspector?.refresh();
+      // The field is the whole point of dragging a magnet somewhere, and the
+      // one thing on screen that cannot be worked out from the picture. It
+      // paces itself: a recompute that outlasts the next pose is left to
+      // finish and the newest pose is taken up after it.
+      fieldPanel?.webview.postMessage({ type: 'refresh' });
+    } finally {
+      // Answering is what paces the drag: the panel holds the next pose until
+      // this one is back, so a slow scene sends fewer of them rather than
+      // falling further behind. Unconditional, because a preview that fails
+      // to answer does not slow the drag down -- it ends it, silently, and
+      // every remaining pose waits for a reply that is never coming.
+      previewFor.webview.postMessage({ type: 'previewDone' });
+    }
+    return;
+  }
+  // A refused drag still leaves the view showing where the object was dragged
+  // to, and only a redraw from the model puts it back.
   broadcastMutation();
 }
 
