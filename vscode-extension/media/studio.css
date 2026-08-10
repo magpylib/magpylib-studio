@@ -28,6 +28,14 @@ body {
   align-items: center;
   cursor: pointer;
 }
+/* The pose readout changes every pointer move, so its digits must all be the
+   same width — in a proportional font a 1 is narrower than a 0, and the text
+   shuffles on the spot as the numbers run. */
+#status {
+  font-variant-numeric: tabular-nums;
+  white-space: pre; /* keep the padding that holds the columns still */
+}
+
 /* The key list opens *above* the bar rather than inside it: a status bar that
    changed height would move the 3D view it sits under. */
 #controls {

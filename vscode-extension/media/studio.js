@@ -220,15 +220,25 @@ async function redrawAroundDrag() {
 /** The pose being dragged, in the status bar. It sits last in the bar, so a
  *  number growing a digit moves nothing but itself. */
 function showPose(pose) {
-  const numbers = (values) =>
-    values.map((n) => (Math.abs(n) < 1e-12 ? "0" : Number(n.toPrecision(4)))).join(", ");
+  // A fixed number of decimals, not significant figures. Significant figures
+  // change the *length* of the string as a value crosses a scale -- 0.1 to
+  // 0.09999 is four characters wider -- and at pointer rate that reads as a
+  // twitch. The digits themselves are held to one width by the stylesheet.
+  // Padded to a fixed width as well, so a sign appearing or a value crossing
+  // ten does not shuffle everything after it either. The stylesheet keeps the
+  // padding (`white-space: pre`), which also restores the wider gaps below.
+  const numbers = (values, decimals, width) =>
+    values
+      .map((n) => (Math.abs(n) < 1e-12 ? 0 : n).toFixed(decimals).padStart(width))
+      .join(", ");
   const parts = [];
-  if (pose.position) parts.push(`position ${numbers(pose.position)} m`);
-  if (pose.orientation) parts.push(`rotation ${numbers(pose.orientation)}°`);
-  if (pose.polarization) parts.push(`polarization ${numbers(pose.polarization)} T`);
+  if (pose.position) parts.push(`position ${numbers(pose.position, 4, 9)} m`);
+  if (pose.orientation) parts.push(`rotation ${numbers(pose.orientation, 1, 6)}°`);
+  if (pose.polarization) {
+    parts.push(`polarization ${numbers(pose.polarization, 4, 9)} T`);
+  }
   if (pose.shape) {
-    const value = pose.shape.value;
-    parts.push(`${pose.shape.attr} ${numbers([].concat(value))} m`);
+    parts.push(`${pose.shape.attr} ${numbers([].concat(pose.shape.value), 4, 9)} m`);
   }
   statusEl.textContent = `${pose.objectId} — ${parts.join("   ")}`;
 }
