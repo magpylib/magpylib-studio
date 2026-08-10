@@ -10,6 +10,7 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 
 const scene = new THREE.Scene();
 let camera = null;
@@ -20,6 +21,8 @@ const byObjectId = new Map();
 let framed = false;
 let outline = null;
 let selectedId;
+let gizmo = null;
+let gizmoMode = "translate";
 
 /** A VS Code theme colour, so the view wears whatever the editor is wearing. */
 function cssColor(name, fallback) {
@@ -52,6 +55,64 @@ function ensureRenderer(canvasEl) {
   renderer.setAnimationLoop(() => renderer.render(scene, camera));
   new ResizeObserver(() => resize(canvasEl)).observe(canvasEl);
   watchPicks(canvasEl);
+  makeGizmo(canvasEl);
+}
+
+/** The drag handles, and the edit a finished drag asks for.
+ *
+ * What a drag can report is limited by what the payload is: magpylib bakes
+ * each object's transform into the vertices, so the node starts every render
+ * at identity and its rotation is only ever the turn *this* drag made. A
+ * position can be sent as it stands -- the node sits on the object's own
+ * origin -- but a rotation has to go out as the relative turn it is, which is
+ * what magpylib's rotate() takes anyway.
+ */
+function makeGizmo(canvasEl) {
+  let turnedFrom = null;
+  gizmo = new TransformControls(camera, renderer.domElement);
+  gizmo.setSpace("world"); // the axes the user reads off the model
+  gizmo.size = 0.6; // full size swamps a small object
+  scene.add(gizmo.getHelper());
+
+  gizmo.addEventListener("dragging-changed", (event) => {
+    controls.enabled = !event.value; // do not orbit while dragging a handle
+    const node = gizmo.object;
+    if (!node) return;
+    if (event.value) {
+      turnedFrom = node.quaternion.clone();
+      return;
+    }
+    const detail = { objectId: node.userData.objectId };
+    if (gizmo.mode === "rotate") {
+      // the turn this drag made, about the object's own origin -- which is
+      // where magpylib rotates when it is given no anchor
+      const turn = node.quaternion.clone().multiply(turnedFrom.invert());
+      const angle = 2 * Math.acos(THREE.MathUtils.clamp(turn.w, -1, 1));
+      const sine = Math.sqrt(Math.max(1 - turn.w * turn.w, 0));
+      if (sine < 1e-9) return; // no turn worth recording
+      detail.mode = "rotate";
+      detail.angle = THREE.MathUtils.radToDeg(angle);
+      detail.axis = [turn.x / sine, turn.y / sine, turn.z / sine];
+    } else {
+      detail.mode = "translate";
+      detail.position = node.getWorldPosition(new THREE.Vector3()).toArray();
+    }
+    canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
+  });
+}
+
+/** Which handles to show, or "none" to put them away. Also how the handles
+ *  find their way back onto an object that a re-render has just replaced. */
+function setGizmoMode(mode) {
+  gizmoMode = mode;
+  if (!gizmo) return;
+  const node = mode === "none" ? null : byObjectId.get(selectedId);
+  if (!node) {
+    gizmo.detach();
+    return;
+  }
+  gizmo.mode = mode;
+  gizmo.attach(node);
 }
 
 /** Report clicks on an object as an `objectpick` event on the host element.
@@ -71,6 +132,9 @@ function watchPicks(canvasEl) {
     if (down.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 4) {
       return;
     }
+    // a handle under the pointer was the target of the press, not the object
+    // behind it -- otherwise letting go of a gizmo selects whatever it covers
+    if (gizmo?.axis) return;
     const objectId = pick(event);
     if (objectId) {
       canvasEl.dispatchEvent(new CustomEvent("objectpick", { detail: { objectId } }));
@@ -248,6 +312,7 @@ function highlight(objectId) {
     outline.dispose();
     outline = null;
   }
+  setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   const node = byObjectId.get(objectId);
   if (!node) return;
   const accent = cssColor("--vscode-focusBorder", "#0078d4");
@@ -330,4 +395,4 @@ function render(canvasEl, payload, { keepCamera = true } = {}) {
   highlight(selectedId); // the objects are new; the selection is not
 }
 
-window.scene3d = { render, fitView, highlight, byObjectId };
+window.scene3d = { render, fitView, highlight, setGizmoMode, byObjectId };

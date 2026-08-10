@@ -28,6 +28,15 @@ body {
   align-items: center;
   cursor: pointer;
 }
+#statusbar select {
+  background: var(--vscode-dropdown-background, transparent);
+  color: var(--vscode-dropdown-foreground, inherit);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  border-radius: 3px;
+  font: inherit;
+  padding: 0 2px;
+  cursor: pointer;
+}
 #statusbar button {
   display: inline-flex;
   align-items: center;

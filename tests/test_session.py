@@ -6,6 +6,7 @@ import os
 import tempfile
 
 import pytest
+from scipy.spatial.transform import Rotation as R
 
 from magpylib_studio import importer
 from magpylib_studio.rpc import serve
@@ -182,6 +183,48 @@ def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
     )
 
     assert cube_after["position"] == cube_before["position"]
+
+
+def test_a_dragged_position_is_world_absolute(session):
+    """What the 3D view's move gizmo relies on.
+
+    The node it drags sits on the object's own origin, so the position it
+    reports when the drag ends is the world position the object should end at
+    -- not a displacement. `set_transform` is the method that takes it that
+    way, and it must leave the orientation alone.
+    """
+    session.rotate("cube", angle=30, axis=[0, 1, 0])
+    turned = session._objs["cube"].orientation.as_rotvec(degrees=True)
+
+    session.set_transform("cube", position=[1.0, -2.0, 0.5])
+
+    assert session.get_scene()["anchors"]["cube"] == [1.0, -2.0, 0.5]
+    assert session._objs["cube"].orientation.as_rotvec(degrees=True) == pytest.approx(
+        turned
+    )
+
+
+def test_a_dragged_rotation_turns_in_place_about_world_axes(session):
+    """What the 3D view's rotate gizmo relies on, and why it sends a turn.
+
+    magpylib bakes each object's orientation into the vertices it draws, so
+    the dragged node starts every render unrotated: what a drag knows is the
+    turn it just made, in world axes, about the object's own origin. That is
+    `rotate` with no anchor -- it must compose onto whatever rotation the
+    object already had, and must not move it.
+    """
+    session.set_transform("cube", position=[2.0, 0.0, 0.0])
+    session.rotate("cube", angle=90, axis=[0, 0, 1])
+
+    session.rotate("cube", angle=90, axis=[1, 0, 0])  # a second, world-axis turn
+
+    cube = session._objs["cube"]
+    assert cube.position == pytest.approx([2.0, 0.0, 0.0])  # turned in place
+    # world-axis turns compose on the left: R_x(90) then applied after R_z(90)
+    expected = R.from_rotvec([90, 0, 0], degrees=True) * R.from_rotvec(
+        [0, 0, 90], degrees=True
+    )
+    assert cube.orientation.as_matrix() == pytest.approx(expected.as_matrix())
 
 
 def test_apply_edit_updates_object_and_document(session):

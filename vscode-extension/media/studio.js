@@ -6,6 +6,8 @@ const canvasEl = document.getElementById("canvas");
 const animateEl = document.getElementById("animate");
 const sceneGraphEl = document.getElementById("sceneGraph");
 const fitEl = document.getElementById("fit");
+const gizmoEl = document.getElementById("gizmo");
+const gizmoLabelEl = document.getElementById("gizmoLabel");
 let nextReqId = 1;
 const pending = new Map();
 
@@ -15,6 +17,13 @@ function rpc(method, params) {
     pending.set(reqId, { resolve, reject });
     vscodeApi.postMessage({ type: "rpcRequest", reqId, method, params });
   });
+}
+
+/** Fitting and dragging belong to the scene graph; plotly has its own reset
+ *  and nothing to drag. */
+function showSceneGraphControls(shown) {
+  fitEl.hidden = !shown;
+  gizmoLabelEl.hidden = !shown;
 }
 
 function plotTemplate() {
@@ -37,7 +46,7 @@ async function refreshFigure() {
     }
     const payload = await rpc("get_scene", {});
     window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
-    fitEl.hidden = false;
+    showSceneGraphControls(true);
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     return;
   }
@@ -82,8 +91,30 @@ canvasEl.addEventListener("objectpick", (event) => {
   });
 });
 
+// A finished drag is an edit like any other, so it goes to the host rather
+// than straight down the RPC: only the host marks the scene dirty, refreshes
+// the trees, and reports what the engine said.
+canvasEl.addEventListener("objecttransform", (event) => {
+  vscodeApi.postMessage({ type: "transformObject", ...event.detail });
+});
+
+const setGizmo = (mode) => {
+  gizmoEl.value = mode;
+  window.scene3d?.setGizmoMode(mode);
+};
+
+gizmoEl.addEventListener("change", () => setGizmo(gizmoEl.value));
+
+// The shortcuts the rest of the 3D world uses. They stay out of the way of
+// typing: the panel has no text input, but a <select> with focus does.
+window.addEventListener("keydown", (event) => {
+  if (!sceneGraphEl.checked || event.target !== document.body) return;
+  const mode = { w: "translate", e: "rotate", q: "none" }[event.key.toLowerCase()];
+  if (mode) setGizmo(mode);
+});
+
 sceneGraphEl.addEventListener("change", () => {
-  fitEl.hidden = !sceneGraphEl.checked; // plotly has its own reset
+  showSceneGraphControls(sceneGraphEl.checked);
   canvasEl.innerHTML = ""; // the two renderers do not share a canvas
   statusEl.textContent = "Loading…";
   refreshFigure().catch((err) => {

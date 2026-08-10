@@ -1311,6 +1311,8 @@ function adoptStudioPanel(
     if (message.type === 'selectObject') {
       // a pick in the 3D view is the same act as clicking the Scene tree
       selectObjectInStudio(context, message.objectId);
+    } else if (message.type === 'transformObject') {
+      void transformFromPanel(context, message);
     } else if (message.type === 'ready') {
       panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
     }
@@ -1396,6 +1398,42 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
       PANEL_OPTIONS(context),
     ),
   );
+}
+
+/** Record a gizmo drag from the 3D view as a construction step.
+ *
+ * A drag is an edit, so it goes through the engine and the event log like
+ * every other one -- undo, the history, and the exported script all get it
+ * for free. The two modes take different methods on purpose: the view can
+ * report a *position* absolutely, because the node it drags sits on the
+ * object's own origin, but it cannot report an orientation that way, since
+ * magpylib bakes the object's own rotation into the vertices it sends. What
+ * a drag knows is the turn it made, which is what rotate() wants.
+ */
+async function transformFromPanel(
+  context: vscode.ExtensionContext,
+  message: { objectId: string; mode: string; position?: number[]; angle?: number; axis?: number[] },
+): Promise<void> {
+  const [method, params] =
+    message.mode === 'rotate'
+      ? ['rotate', { object_id: message.objectId, angle: message.angle, axis: message.axis }]
+      : ['set_transform', { object_id: message.objectId, position: message.position }];
+  try {
+    const result = (await (await getEngine(context)).request(method, params)) as {
+      ok: boolean;
+      error?: string;
+    };
+    if (!result.ok) {
+      vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  // Always: a refused drag still leaves the view showing where the object was
+  // dragged to, and only a redraw from the model puts it back.
+  broadcastMutation();
 }
 
 function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string): void {
@@ -3776,6 +3814,14 @@ export function createWebviewHtml(
     <label><input type="checkbox" id="animate" /> Animate paths</label>
     <label><input type="checkbox" id="sceneGraph" /> Scene graph (preview)</label>
     <button id="fit" type="button" hidden>Fit view</button>
+    <label id="gizmoLabel" hidden
+      >Drag
+      <select id="gizmo">
+        <option value="translate">to move (W)</option>
+        <option value="rotate">to rotate (E)</option>
+        <option value="none">nothing (Q)</option>
+      </select>
+    </label>
     <span id="status">Starting…</span>
   </div>
   <script nonce="${nonce}" src="${studioScriptUri}"></script>
