@@ -8,13 +8,23 @@ const sceneGraphEl = document.getElementById("sceneGraph");
 const fitEl = document.getElementById("fit");
 const gizmoEl = document.getElementById("gizmo");
 const gizmoLabelEl = document.getElementById("gizmoLabel");
+const controlsEl = document.getElementById("controls");
 let nextReqId = 1;
 const pending = new Map();
 let selectedId;
 let patterned = new Set(); // sources whose copies would not follow an edit
 let poseInFlight = false;
 let pendingPose = null;
-let draggingId = null; // the object the pointer owns until it lets go
+let dragging = null; // { objectId, keep } while a handle is held
+let parametric = {}; // objectId -> which drag-written fields a variable decides
+
+//: What each drag writes, which is what an expression deciding it loses to.
+const DRAG_WRITES = {
+  translate: "position",
+  rotate: "orientation",
+  scale: "shape",
+  polarization: "polarization",
+};
 
 function rpc(method, params) {
   return new Promise((resolve, reject) => {
@@ -29,6 +39,7 @@ function rpc(method, params) {
 function showSceneGraphControls(shown) {
   fitEl.hidden = !shown;
   gizmoLabelEl.hidden = !shown;
+  controlsEl.hidden = !shown;
 }
 
 function plotTemplate() {
@@ -53,6 +64,7 @@ async function refreshFigure() {
     window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
     showSceneGraphControls(true);
     patterned = new Set(payload.patterned);
+    parametric = payload.parametric || {};
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     applyGizmo(); // the selection may have become (or stopped being) patterned
     return;
@@ -78,11 +90,39 @@ async function refreshFigure() {
   statusEl.textContent = "Ready";
 }
 
+/** Redraw for the newest state, never for a queue of stale ones.
+ *
+ * Refreshes arrive from everywhere -- an edit, a chat tool, a variable slider
+ * being dragged -- and a big scene takes longer to rebuild than the debounce
+ * that spaces them out. Without this they overlap, and two `get_scene` calls
+ * in flight at once can be drawn in the order they come back rather than the
+ * order they were asked for. Collapsed into one that runs after the current
+ * redraw, the view always catches up to the newest state and never draws an
+ * older one over it.
+ */
+let redrawing = false;
+let redrawDue = false;
+async function refreshPaced() {
+  if (redrawing) {
+    redrawDue = true;
+    return;
+  }
+  redrawing = true;
+  try {
+    do {
+      redrawDue = false;
+      await refreshFigure();
+    } while (redrawDue);
+  } catch (err) {
+    statusEl.textContent = String(err);
+  } finally {
+    redrawing = false;
+  }
+}
+
 // Re-render when the user switches the VS Code color theme.
 new MutationObserver(() => {
-  refreshFigure().catch((err) => {
-    statusEl.textContent = String(err);
-  });
+  refreshPaced();
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 fitEl.addEventListener("click", () => {
@@ -114,15 +154,36 @@ canvasEl.addEventListener("objecttransform", (event) => {
     // already known here, and waiting for the round trip to show them would
     // make a fast drag on a heavy scene look like it had stopped responding.
     showPose(event.detail);
-    draggingId = event.detail.objectId;
     pendingPose = event.detail;
     sendPose();
     return;
   }
-  draggingId = null;
+  dragging = null;
   pendingPose = null; // the final pose supersedes anything still waiting
   vscodeApi.postMessage({ type: "transformObject", ...event.detail });
 });
+
+// Told at the start, so the edits the drag is about to make are grouped into
+// one thing to undo, and so anything it will supersede can be said once --
+// before the drag rather than after, which is when it stops being useful.
+canvasEl.addEventListener("dragstart", (event) => {
+  const { objectId, mode } = event.detail;
+  // aiming polarization redraws the magnet's colours, so it keeps nothing
+  dragging = { objectId, keep: mode === "polarization" ? null : objectId };
+  vscodeApi.postMessage({
+    type: "dragStart",
+    objectId,
+    field: DRAG_WRITES[mode],
+    names: (parametric[objectId] || {})[DRAG_WRITES[mode]],
+  });
+});
+
+/** How long building the scene may take before a drag stops waiting for it.
+ *
+ * Well under a frame at 60 Hz. Everything else a drag updates lives in
+ * another webview and cannot slow the pointer down; this one runs here, so
+ * it is the only thing that can make the gesture itself feel heavy. */
+const REDRAW_BUDGET_MS = 8;
 
 /** Redraw what the drag changed, except the object under the pointer.
  *
@@ -130,13 +191,26 @@ canvasEl.addEventListener("objecttransform", (event) => {
  * from it and have to be asked for again. This is the expensive half of the
  * round trip, so it runs *inside* the pacing loop rather than beside it --
  * the next pose is not sent until the scene it caused has been drawn, which
- * is what keeps a heavy scene sending fewer poses instead of falling behind.
+ * keeps a heavy scene sending fewer poses instead of falling behind.
+ *
+ * Pacing stops the work queueing up; it does not stop one slow redraw from
+ * stuttering the drag it is meant to illustrate. So the first redraw of each
+ * gesture is timed, and if building the scene costs more than a frame, the
+ * rest of that drag goes without: the object under the pointer keeps up, the
+ * field and the Inspector keep updating in their own webviews, and the scene
+ * catches up when the drag ends. A big scene on a slow machine then loses
+ * the thing that was never going to look right anyway, rather than the
+ * smoothness of the gesture.
  */
 async function redrawAroundDrag() {
-  if (!sceneGraphEl.checked || !draggingId) return;
+  if (!sceneGraphEl.checked || !dragging || dragging.tooSlow) return;
   const payload = await rpc("get_scene", {});
   patterned = new Set(payload.patterned);
-  window.scene3d?.render(canvasEl, payload, { keep: draggingId });
+  // Timed around the render alone. The request before it is the engine's
+  // time, not ours: it delays the next pose without blocking this one.
+  const started = performance.now();
+  window.scene3d?.render(canvasEl, payload, { keep: dragging.keep });
+  dragging.tooSlow = performance.now() - started > REDRAW_BUDGET_MS;
 }
 
 /** The pose being dragged, in the status bar. It sits last in the bar, so a
@@ -147,6 +221,11 @@ function showPose(pose) {
   const parts = [];
   if (pose.position) parts.push(`position ${numbers(pose.position)} m`);
   if (pose.orientation) parts.push(`rotation ${numbers(pose.orientation)}°`);
+  if (pose.polarization) parts.push(`polarization ${numbers(pose.polarization)} T`);
+  if (pose.shape) {
+    const value = pose.shape.value;
+    parts.push(`${pose.shape.attr} ${numbers([].concat(value))} m`);
+  }
   statusEl.textContent = `${pose.objectId} — ${parts.join("   ")}`;
 }
 
@@ -168,9 +247,16 @@ function sendPose() {
 function applyGizmo() {
   const blocked = patterned.has(selectedId);
   gizmoEl.disabled = blocked;
-  window.scene3d?.setGizmoMode(blocked ? "none" : gizmoEl.value);
+  const wanted = blocked ? "none" : gizmoEl.value;
+  const inEffect = window.scene3d?.setGizmoMode(wanted);
   if (blocked) {
     statusEl.textContent = `${selectedId} is patterned — dragging it would leave its copies behind`;
+  } else if (inEffect !== wanted) {
+    // asked to resize something with no size to drag
+    gizmoEl.value = inEffect;
+    statusEl.textContent = selectedId
+      ? `${selectedId} has no single dimension to drag — resize it in the Inspector`
+      : "Select an object to resize";
   }
 }
 
@@ -178,28 +264,54 @@ gizmoEl.addEventListener("change", applyGizmo);
 
 // The shortcuts the rest of the 3D world uses. They stay out of the way of
 // typing: the panel has no text input, but a <select> with focus does.
+const GIZMO_KEYS = {
+  w: "translate",
+  e: "rotate",
+  r: "scale",
+  p: "polarization",
+  q: "none",
+};
+const AXIS_VIEWS = { 1: [0, -1, 0], 3: [1, 0, 0], 7: [0, 0, 1] }; // front, right, top
+
 window.addEventListener("keydown", (event) => {
   if (!sceneGraphEl.checked || event.target !== document.body) return;
-  const mode = { w: "translate", e: "rotate", q: "none" }[event.key.toLowerCase()];
-  if (!mode || gizmoEl.disabled) return;
-  gizmoEl.value = mode;
-  applyGizmo();
+  const key = event.key.toLowerCase();
+  const scene3d = window.scene3d;
+  if (GIZMO_KEYS[key]) {
+    if (gizmoEl.disabled) return;
+    gizmoEl.value = GIZMO_KEYS[key];
+    applyGizmo();
+  } else if ("xyz".includes(key)) {
+    scene3d?.constrainAxis(key);
+    statusEl.textContent = `Dragging along ${key.toUpperCase()} only — A for all axes`;
+  } else if (key === "a") {
+    scene3d?.constrainAxis(null);
+    statusEl.textContent = "Dragging along all axes";
+  } else if (key === "l") {
+    statusEl.textContent = `Handles follow the ${scene3d?.toggleSpace()} axes`;
+  } else if (key === "h") {
+    // the host owns visibility and knows the current state; hidden objects
+    // are not drawn, so showing one again is the Scene tree's job
+    if (selectedId) vscodeApi.postMessage({ type: "toggleVisible", objectId: selectedId });
+  } else if (key === "f") {
+    scene3d?.fitView(selectedId); // undefined when nothing is selected: fits all
+  } else if (event.key === "Home") {
+    scene3d?.fitView();
+  } else if (AXIS_VIEWS[event.key]) {
+    scene3d?.axisView(...AXIS_VIEWS[event.key]);
+  }
 });
 
 sceneGraphEl.addEventListener("change", () => {
   showSceneGraphControls(sceneGraphEl.checked);
   canvasEl.innerHTML = ""; // the two renderers do not share a canvas
   statusEl.textContent = "Loading…";
-  refreshFigure().catch((err) => {
-    statusEl.textContent = String(err);
-  });
+  refreshPaced();
 });
 
 animateEl.addEventListener("change", () => {
   statusEl.textContent = "Loading…";
-  refreshFigure().catch((err) => {
-    statusEl.textContent = String(err);
-  });
+  refreshPaced();
 });
 
 window.addEventListener("message", (event) => {
@@ -222,10 +334,9 @@ window.addEventListener("message", (event) => {
     window.scene3d?.highlight(selectedId);
     applyGizmo();
   } else if (message.type === "refresh") {
-    // Pushed by the host after any edit (inspector, chat tool, tree).
-    refreshFigure().catch((err) => {
-      statusEl.textContent = String(err);
-    });
+    // Pushed by the host after any edit (inspector, chat tool, tree, a
+    // variable slider being dragged) — the one that can arrive fastest.
+    refreshPaced();
   }
 });
 
@@ -238,6 +349,4 @@ window.addEventListener("resize", () => {
 // mid-session has missed every 'select' the host sent before it existed.
 vscodeApi.postMessage({ type: "ready" });
 
-refreshFigure().catch((err) => {
-  statusEl.textContent = "Engine failed: " + err;
-});
+refreshPaced();

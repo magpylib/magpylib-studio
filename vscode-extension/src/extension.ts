@@ -1315,6 +1315,10 @@ function adoptStudioPanel(
       void transformFromPanel(context, message);
     } else if (message.type === 'previewTransform') {
       void transformFromPanel(context, message, panel);
+    } else if (message.type === 'toggleVisible') {
+      void toggleVisibleFromPanel(context, message.objectId);
+    } else if (message.type === 'dragStart') {
+      void beginDragFromPanel(context, message);
     } else if (message.type === 'ready') {
       panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
     }
@@ -1420,7 +1424,13 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
  */
 async function transformFromPanel(
   context: vscode.ExtensionContext,
-  message: { objectId: string; position?: number[]; orientation?: number[] },
+  message: {
+    objectId: string;
+    position?: number[];
+    orientation?: number[];
+    shape?: { attr: string; value: number | number[] };
+    polarization?: number[];
+  },
   previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
   const params: Record<string, unknown> = { object_id: message.objectId };
@@ -1431,10 +1441,48 @@ async function transformFromPanel(
     params.orientation = message.orientation;
   }
   try {
-    const result = (await (await getEngine(context)).request(
-      'set_transform',
-      params,
-    )) as { ok: boolean; error?: string };
+    const engine = await getEngine(context);
+    // A resize drags a parameter rather than a pose, and where that parameter
+    // lives decides the method: a dimension belongs to what the object *is*,
+    // which is its create event, while a Dipole's size is styling. Both edit
+    // in place, so a whole resize drag leaves the history exactly as it found
+    // it -- there is no new step to coalesce.
+    if (message.shape) {
+      const { attr, value } = message.shape;
+      await (attr.startsWith('style.')
+        ? engine.request('apply_edit', {
+            object_id: message.objectId,
+            path: attr.slice('style.'.length),
+            value,
+          })
+        : engine.request('set_param', {
+            object_id: message.objectId,
+            name: attr,
+            value,
+          }));
+    }
+    // Aiming it turns the vector, not the magnet, so it is a parameter edit
+    // and not part of the pose. It arrives in the object's own frame, which
+    // is the frame magpylib stores and the script writes.
+    if (message.polarization) {
+      await engine.request('set_param', {
+        object_id: message.objectId,
+        name: 'polarization',
+        value: message.polarization,
+      });
+    }
+    if (!message.position && !message.orientation) {
+      if (previewFor) {
+        finishPreview(previewFor);
+      } else {
+        await finishDrag(context);
+      }
+      return;
+    }
+    const result = (await engine.request('set_transform', params)) as {
+      ok: boolean;
+      error?: string;
+    };
     // Only the final pose reports: the same refusal sixty times over during
     // one drag is sixty notifications about one mistake.
     if (!result.ok && !previewFor) {
@@ -1448,26 +1496,102 @@ async function transformFromPanel(
     }
   }
   if (previewFor) {
-    try {
-      inspector?.refresh();
-      // The field is the whole point of dragging a magnet somewhere, and the
-      // one thing on screen that cannot be worked out from the picture. It
-      // paces itself: a recompute that outlasts the next pose is left to
-      // finish and the newest pose is taken up after it.
-      fieldPanel?.webview.postMessage({ type: 'refresh' });
-    } finally {
-      // Answering is what paces the drag: the panel holds the next pose until
-      // this one is back, so a slow scene sends fewer of them rather than
-      // falling further behind. Unconditional, because a preview that fails
-      // to answer does not slow the drag down -- it ends it, silently, and
-      // every remaining pose waits for a reply that is never coming.
-      previewFor.webview.postMessage({ type: 'previewDone' });
-    }
+    finishPreview(previewFor);
     return;
   }
   // A refused drag still leaves the view showing where the object was dragged
   // to, and only a redraw from the model puts it back.
+  await finishDrag(context);
+}
+
+/** Open a drag: group what it is about to do, and say what it will supersede.
+ *
+ * The grouping is the important half. A drag sets a pose every frame so the
+ * field and the scene keep up with the pointer, and each of those is a real
+ * edit -- without this the undo stack takes one entry per frame and a gesture
+ * made once becomes a hundred things to undo.
+ */
+async function beginDragFromPanel(
+  context: vscode.ExtensionContext,
+  message: { objectId: string; field: string; names?: string[] },
+): Promise<void> {
+  try {
+    await (await getEngine(context)).request('begin_interaction');
+  } catch {
+    // the drag still works; it just undoes a frame at a time
+  }
+  if (message.names?.length) {
+    // A status message rather than a notification: worth knowing, not worth a
+    // dialog, and said before the first frame rather than after the fact.
+    vscode.window.setStatusBarMessage(
+      `Magpylib Studio: this drag sets ${message.objectId}'s ${message.field} outright — ` +
+        `${message.names.join(', ')} stops deciding it`,
+      6000,
+    );
+  }
+}
+
+/** Close the drag, then bring every surface back in sync. */
+async function finishDrag(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await (await getEngine(context)).request('end_interaction');
+  } catch {
+    // a group left open is closed by the next gesture that begins
+  }
   broadcastMutation();
+}
+
+/** Hide the object, or show it again.
+ *
+ * The engine holds the current state, so the toggle is resolved here rather
+ * than in the view: a hidden object is not drawn, and a view that tracked
+ * visibility itself would be guessing about things it cannot see.
+ */
+async function toggleVisibleFromPanel(
+  context: vscode.ExtensionContext,
+  objectId: string,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    const objects = (await engine.request('list_objects')) as {
+      id: string;
+      visible: boolean;
+    }[];
+    const shown = objects.find((entry) => entry.id === objectId)?.visible ?? true;
+    await engine.request('set_visible', { object_id: objectId, visible: !shown });
+    if (shown) {
+      // It has just left the picture, and clicking what is not there cannot
+      // bring it back. The Scene tree can, so say where to look.
+      vscode.window.setStatusBarMessage(
+        `Magpylib Studio: ${objectId} hidden — show it again from the Scene tree`,
+        5000,
+      );
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  broadcastMutation();
+}
+
+/** Bring the cheap surfaces up to date mid-drag, and let the next pose go. */
+function finishPreview(panel: vscode.WebviewPanel): void {
+  try {
+    inspector?.refresh();
+    // The field is the whole point of dragging a magnet somewhere, and the
+    // one thing on screen that cannot be worked out from the picture. It
+    // paces itself: a recompute that outlasts the next pose is left to finish
+    // and the newest pose is taken up after it.
+    fieldPanel?.webview.postMessage({ type: 'refresh' });
+  } finally {
+    // Answering is what paces the drag: the panel holds the next pose until
+    // this one is back, so a slow scene sends fewer of them rather than
+    // falling further behind. Unconditional, because a preview that fails to
+    // answer does not slow the drag down -- it ends it, silently, and every
+    // remaining pose waits for a reply that is never coming.
+    panel.webview.postMessage({ type: 'previewDone' });
+  }
 }
 
 function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string): void {
@@ -3853,9 +3977,27 @@ export function createWebviewHtml(
       <select id="gizmo">
         <option value="translate">to move (W)</option>
         <option value="rotate">to rotate (E)</option>
+        <option value="scale">to resize (R)</option>
+        <option value="polarization">to aim polarization (P)</option>
         <option value="none">nothing (Q)</option>
       </select>
     </label>
+    <details id="controls" hidden>
+      <summary>Keys</summary>
+      <div>
+        <kbd>W</kbd><span>move</span>
+        <kbd>E</kbd><span>rotate</span>
+        <kbd>R</kbd><span>resize</span>
+        <kbd>P</kbd><span>aim polarization</span>
+        <kbd>Q</kbd><span>no handles</span>
+        <kbd>H</kbd><span>hide / show</span>
+        <kbd>X</kbd><span>one axis (<kbd>A</kbd> all)</span>
+        <kbd>L</kbd><span>object / world axes</span>
+        <kbd>F</kbd><span>frame selected</span>
+        <kbd>Home</kbd><span>frame everything</span>
+        <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
+      </div>
+    </details>
     <span id="status">Starting…</span>
   </div>
   <script nonce="${nonce}" src="${studioScriptUri}"></script>

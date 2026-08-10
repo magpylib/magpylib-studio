@@ -67,6 +67,7 @@ export default [
         MutationObserver: "readonly",
         ResizeObserver: "readonly",
         CustomEvent: "readonly",
+        performance: "readonly",
         getComputedStyle: "readonly",
         Plotly: "readonly",
         acquireVsCodeApi: "readonly",

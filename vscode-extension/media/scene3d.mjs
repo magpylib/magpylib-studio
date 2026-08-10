@@ -23,7 +23,13 @@ let outline = null;
 let selectedId;
 let gizmo = null;
 let gizmoMode = "translate";
+let poseSpace = "world"; // world or object axes, for the move and turn handles
 let orientations = {}; // studio id -> the rotation baked into its vertices
+let shapes = {}; // studio id -> the one parameter a resize may drag
+let polarizations = {}; // studio id -> its polarization, in its own frame
+// What the polarization handles turn. The object must not turn with them, so
+// they cannot be attached to it: this stands in, and only its rotation is read.
+const proxy = new THREE.Object3D();
 
 /** A VS Code theme colour, so the view wears whatever the editor is wearing. */
 function cssColor(name, fallback) {
@@ -78,6 +84,34 @@ function quaternionOf(rotvec) {
   );
 }
 
+const UNSCALED = new THREE.Vector3(1, 1, 1);
+
+/** Hold the scale to the shape of the parameter behind it.
+ *
+ * A resize drags one magpylib value, not three: a Sphere has a diameter and a
+ * Cylinder a (diameter, height), so the axes that value does not separate
+ * must not separate on screen either. Applied to the node as the drag runs,
+ * so the handles cannot be pulled into a shape the object could never take.
+ */
+function constrainScale(node, constraint) {
+  const { x, y, z } = node.scale;
+  if (constraint === "uniform") {
+    // whichever axis was pulled furthest from 1 is the one being dragged
+    const pulled = [x, y, z].reduce((a, b) => (Math.abs(b - 1) > Math.abs(a - 1) ? b : a));
+    node.scale.setScalar(pulled);
+  } else if (constraint === "xy") {
+    const radial = Math.abs(x - 1) > Math.abs(y - 1) ? x : y;
+    node.scale.set(radial, radial, z);
+  }
+}
+
+/** The parameter value a scale comes to, from the one the drag started at. */
+function resized(scale, shape) {
+  if (shape.constraint === "uniform") return shape.value * scale.x;
+  if (shape.constraint === "xy") return [shape.value[0] * scale.x, shape.value[1] * scale.z];
+  return [shape.value[0] * scale.x, shape.value[1] * scale.y, shape.value[2] * scale.z];
+}
+
 /** The drag handles, and the pose a drag reports as it goes.
  *
  * Reported as the pose *reached*, never as the turn made, and that is the
@@ -97,22 +131,42 @@ function quaternionOf(rotvec) {
 function makeGizmo(canvasEl) {
   let from = null;
   gizmo = new TransformControls(camera, renderer.domElement);
-  gizmo.setSpace("world"); // the axes the user reads off the model
+  gizmo.setSpace(poseSpace); // the axes the user reads off the model
   gizmo.size = 0.45; // full size swamps a small object
   scene.add(gizmo.getHelper());
+  scene.add(proxy);
 
   const report = (preview) => {
     const node = gizmo.object;
     if (!node || !from) return;
     const detail = { objectId: node.userData.objectId, preview };
+    const turned = node.quaternion.clone().multiply(from.quaternion.clone().invert());
+
+    if (from.polarization) {
+      // The drag turns the vector, not the magnet. magpylib keeps it in the
+      // object's own frame, so the turn is applied in world and taken back:
+      // reading the stored vector as world-space is out by the object's own
+      // rotation, which is a silent error the picture cannot show.
+      if (Math.abs(turned.w) >= 1 - 1e-9) return;
+      detail.polarization = from.polarization
+        .clone()
+        .applyQuaternion(turned)
+        .applyQuaternion(from.orientation.clone().invert())
+        .toArray();
+      canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
+      return;
+    }
+
     if (!node.position.equals(from.position)) {
       detail.position = node.getWorldPosition(new THREE.Vector3()).toArray();
     }
-    const turn = node.quaternion.clone().multiply(from.quaternion.clone().invert());
-    if (Math.abs(turn.w) < 1 - 1e-9) {
-      detail.orientation = rotvecOf(turn.multiply(from.orientation));
+    if (Math.abs(turned.w) < 1 - 1e-9) {
+      detail.orientation = rotvecOf(turned.multiply(from.orientation));
     }
-    if (detail.position || detail.orientation) {
+    if (from.shape && !node.scale.equals(UNSCALED)) {
+      detail.shape = { attr: from.shape.attr, value: resized(node.scale, from.shape) };
+    }
+    if (detail.position || detail.orientation || detail.shape) {
       outline?.update(); // the box tracks the object, not the other way round
       canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
     }
@@ -123,31 +177,101 @@ function makeGizmo(canvasEl) {
     const node = gizmo.object;
     if (!node) return;
     if (event.value) {
+      const objectId = node.userData.objectId;
+      const orientation = quaternionOf(orientations[objectId]);
       from = {
         position: node.position.clone(),
         quaternion: node.quaternion.clone(),
-        orientation: quaternionOf(orientations[node.userData.objectId]),
+        orientation,
+        shape: gizmo.mode === "scale" ? shapes[objectId] : null,
+        polarization:
+          gizmoMode === "polarization"
+            ? new THREE.Vector3()
+                .fromArray(polarizations[objectId])
+                .applyQuaternion(orientation) // stored local, turned in world
+            : null,
       };
+      canvasEl.dispatchEvent(
+        new CustomEvent("dragstart", { detail: { objectId, mode: gizmoMode } }),
+      );
     } else {
       report(false); // the one that gets recorded and redrawn
       from = null;
     }
   });
-  gizmo.addEventListener("objectChange", () => report(true));
+  gizmo.addEventListener("objectChange", () => {
+    if (from?.shape) constrainScale(gizmo.object, from.shape.constraint);
+    report(true);
+  });
 }
 
 /** Which handles to show, or "none" to put them away. Also how the handles
- *  find their way back onto an object that a re-render has just replaced. */
+ *  find their way back onto an object that a re-render has just replaced.
+ *
+ *  Returns the mode actually in effect, which is not always the one asked
+ *  for: a resize needs a parameter to drag and most objects have none, so
+ *  the caller is told rather than left showing handles that do nothing.
+ */
 function setGizmoMode(mode) {
-  gizmoMode = mode;
-  if (!gizmo) return;
-  const node = mode === "none" ? null : byObjectId.get(selectedId);
+  const missing =
+    (mode === "scale" && !shapes[selectedId]) ||
+    (mode === "polarization" && !polarizations[selectedId]);
+  gizmoMode = missing ? "translate" : mode;
+  if (!gizmo) return gizmoMode;
+  const node = gizmoMode === "none" ? null : byObjectId.get(selectedId);
   if (!node) {
     gizmo.detach();
-    return;
+    return gizmoMode;
   }
-  gizmo.mode = mode;
+  // Aiming defaults to the object's own axes because that is the frame
+  // magpylib stores a polarization in; moving and turning default to the
+  // world's, which is where positioning work is done.
+  gizmo.setSpace(gizmoMode === "polarization" ? "local" : poseSpace);
+  if (gizmoMode === "polarization") {
+    // The handles sit on the object and turn the stand-in. Two things have to
+    // line up for them to follow a turned magnet: the stand-in must carry the
+    // object's rotation, *and* the handles must be drawn against it -- three
+    // only orients them to the object in local space, and scale is the one
+    // mode it forces there, which is why resize followed and this did not.
+    proxy.position.copy(node.getWorldPosition(new THREE.Vector3()));
+    proxy.quaternion.copy(quaternionOf(orientations[selectedId]));
+    proxy.userData.objectId = selectedId;
+    gizmo.mode = "rotate";
+    gizmo.attach(proxy);
+    return gizmoMode;
+  }
+  gizmo.mode = gizmoMode;
   gizmo.attach(node);
+  return gizmoMode;
+}
+
+/** Restrict the handles to one axis, or to all of them again. */
+function constrainAxis(axis) {
+  if (!gizmo) return;
+  gizmo.showX = !axis || axis === "x";
+  gizmo.showY = !axis || axis === "y";
+  gizmo.showZ = !axis || axis === "z";
+}
+
+/** Drag along the object's own axes, or the world's. Returns the new one. */
+function toggleSpace() {
+  poseSpace = poseSpace === "world" ? "local" : "world";
+  setGizmoMode(gizmoMode); // re-attach: the stand-in is placed per mode
+  return poseSpace;
+}
+
+/** Look down an axis, from where the camera already is. */
+function axisView(x, y, z) {
+  if (!camera) return;
+  const distance = camera.position.distanceTo(controls.target) || 1;
+  // z is up in a magpylib scene, so looking straight down it needs another
+  // reference or the view has no defined roll
+  camera.up.set(0, 0, 1);
+  if (Math.abs(z) > 0.99) camera.up.set(0, 1, 0);
+  camera.position
+    .copy(controls.target)
+    .addScaledVector(new THREE.Vector3(x, y, z).normalize(), distance);
+  controls.update();
 }
 
 /** Report clicks on an object as an `objectpick` event on the host element.
@@ -238,6 +362,15 @@ function nodeFor(objectId, anchor) {
   if (node) return node;
   node = new THREE.Group();
   if (anchor) node.position.fromArray(anchor);
+  // The node stands in the object's own frame, not just at its origin. The
+  // vertices arrive with the rotation already baked in, so a node left
+  // unrotated has local axes that are really the world's -- and a resize
+  // then pulls a turned cuboid along the world's X, shearing it on screen
+  // until the rebuild puts the dimension back along the object's own axis.
+  // Carrying the rotation here is what makes "local" mean local, for the
+  // resize handles and for the L key alike. `attach` below takes the
+  // rotation back out of each trace, so nothing moves on screen.
+  node.quaternion.copy(quaternionOf(orientations[objectId]));
   node.userData.objectId = objectId;
   scene.add(node);
   byObjectId.set(objectId, node);
@@ -331,10 +464,14 @@ function buildScatter(item) {
   return group;
 }
 
-/** Everything drawn, as one sphere -- null when there is nothing to look at. */
-function sceneSphere() {
+/** One object, or everything drawn, as a sphere -- null if there is nothing
+ *  to look at. */
+function sceneSphere(objectId) {
   const box = new THREE.Box3();
-  for (const node of byObjectId.values()) box.expandByObject(node);
+  const nodes = byObjectId.has(objectId)
+    ? [byObjectId.get(objectId)]
+    : byObjectId.values();
+  for (const node of nodes) box.expandByObject(node);
   return box.isEmpty() ? null : box.getBoundingSphere(new THREE.Sphere());
 }
 
@@ -369,8 +506,8 @@ function highlight(objectId) {
  * The panel is usually wider than tall, which makes the *vertical* angle the
  * limiting one, so guessing from the horizontal was wrong twice over.
  */
-function fitView() {
-  const sphere = sceneSphere();
+function fitView(objectId) {
+  const sphere = sceneSphere(objectId);
   if (!sphere) return;
 
   const vertical = THREE.MathUtils.degToRad(camera.fov);
@@ -403,6 +540,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
   orientations = payload.orientations || {};
+  shapes = payload.shapes || {};
+  polarizations = payload.polarizations || {};
 
   // Dropping a node does not free what it holds on the GPU, and this runs on
   // every edit: a colorscale texture per mesh, left to accumulate, is a leak.
@@ -445,4 +584,15 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   if (keep === null) highlight(selectedId);
 }
 
-window.scene3d = { render, fitView, highlight, setGizmoMode, byObjectId };
+window.scene3d = {
+  render,
+  fitView,
+  highlight,
+  setGizmoMode,
+  constrainAxis,
+  toggleSpace,
+  axisView,
+  canResize: (objectId) => Boolean(shapes[objectId]),
+  canAim: (objectId) => Boolean(polarizations[objectId]),
+  byObjectId,
+};
