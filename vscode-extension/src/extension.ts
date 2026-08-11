@@ -4046,9 +4046,19 @@ export function createWebviewHtml(
 <body>
   <div id="canvas"></div>
   <div id="statusbar">
-    <label><input type="checkbox" id="animate" /> Animate paths</label>
-    <label><input type="checkbox" id="sceneGraph" /> Scene graph (preview)</label>
+    <label
+      >Draw with
+      <select id="renderer">
+        <option value="scene">the scene graph</option>
+        <option value="plotly">Plotly</option>
+      </select>
+    </label>
     <button id="fit" type="button" hidden>Fit view</button>
+    <button id="play" type="button" hidden title="Run the paths (space)">
+      &#9654; Play
+    </button>
+    <input id="frame" type="range" min="0" max="0" value="0" hidden
+      title="Scrub through the path" />
     <label id="gizmoLabel" hidden
       >Drag
       <select id="gizmo">
@@ -4082,6 +4092,7 @@ export function createWebviewHtml(
         <kbd>Home</kbd><span>frame everything</span>
         <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
         <kbd>5</kbd><span>parallel / perspective</span>
+        <kbd>space</kbd><span>play / pause paths</span>
         <kbd>&#8677;</kbd><span>select the next object</span>
         <kbd>&#8984;</kbd><span>click: add to the selection</span>
       </div>

@@ -74,6 +74,11 @@ body {
 #controls span kbd {
   margin: 0 2px;
 }
+#statusbar input[type="range"] {
+  width: 110px;
+  margin: 0;
+  accent-color: var(--vscode-focusBorder);
+}
 #statusbar select {
   background: var(--vscode-dropdown-background, transparent);
   color: var(--vscode-dropdown-foreground, inherit);

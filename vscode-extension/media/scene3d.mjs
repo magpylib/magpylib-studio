@@ -20,6 +20,7 @@ const raycaster = new THREE.Raycaster();
 const byObjectId = new Map();
 let framed = false;
 let outlines = [];
+let axes = null; // the box, ticks and names that give the scene a scale
 let selectedIds = []; // the primary is first: what the sidebar is showing
 // What a drag of several objects turns. It stands at the middle of the
 // selection and is never drawn -- only the motion it makes is read off it.
@@ -27,6 +28,9 @@ const rig = new THREE.Object3D();
 let gizmo = null;
 let gizmoMode = "translate";
 let snapping = false;
+let playing = false;
+let pivots = {}; // studio id -> its handle point, in its own frame
+
 let frustumHeight = 1; // what an orthographic camera shows, top to bottom
 /** Which axes each kind of drag runs along, in three's vocabulary.
  *
@@ -597,10 +601,14 @@ function buildScatter(item) {
  *  to look at. */
 function sceneSphere(objectId) {
   const box = new THREE.Box3();
-  const nodes = byObjectId.has(objectId)
-    ? [byObjectId.get(objectId)]
-    : byObjectId.values();
-  for (const node of nodes) box.expandByObject(node);
+  if (byObjectId.has(objectId)) {
+    box.expandByObject(byObjectId.get(objectId));
+  } else {
+    for (const node of byObjectId.values()) box.expandByObject(node);
+    // the graduated box sits a little outside the objects, and framing the
+    // scene without its scale showing would cut the numbers off
+    if (axes) box.expandByObject(axes);
+  }
   return box.isEmpty() ? null : box.getBoundingSphere(new THREE.Sphere());
 }
 
@@ -761,6 +769,144 @@ function setSnapping(on) {
   return on ? step : null;
 }
 
+/** A short string as a flat label that always faces the camera. */
+function textSprite(text, color, height) {
+  const canvas = document.createElement("canvas");
+  const size = 64;
+  let context = canvas.getContext("2d");
+  context.font = `${size}px sans-serif`;
+  canvas.width = Math.ceil(context.measureText(text).width) + 8;
+  canvas.height = Math.ceil(size * 1.3);
+  context = canvas.getContext("2d"); // resizing the canvas clears its state
+  context.font = `${size}px sans-serif`;
+  context.fillStyle = color;
+  context.textBaseline = "middle";
+  context.fillText(text, 4, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+  );
+  sprite.scale.set((height * canvas.width) / canvas.height, height, 1);
+  sprite.raycast = () => {}; // scenery, not a target
+  return sprite;
+}
+
+/** A step that lands on round numbers, near the size asked for. */
+function niceStep(rough) {
+  const decade = Math.pow(10, Math.floor(Math.log10(rough)));
+  return [1, 2, 5, 10].find((n) => rough <= n * decade * 1.5) * decade;
+}
+
+/** The box, ticks and names that say how big any of this is.
+ *
+ * Magpylib scenes are measurements, and a view of one that does not say what
+ * scale it is at leaves you judging a magnet by eye. Plotly draws a graduated
+ * cube; this is the same idea with the labels magpylib itself supplies, so
+ * the units follow whatever the scene is drawn in.
+ */
+function drawAxes(ranges, labels) {
+  if (axes) {
+    scene.remove(axes);
+    axes.traverse((child) => {
+      child.geometry?.dispose();
+      child.material?.map?.dispose();
+      child.material?.dispose();
+    });
+    axes = null;
+  }
+  if (!ranges) return;
+
+  const low = new THREE.Vector3(ranges[0][0], ranges[1][0], ranges[2][0]);
+  const high = new THREE.Vector3(ranges[0][1], ranges[1][1], ranges[2][1]);
+  const span = high.clone().sub(low);
+  const ink = cssColor("--vscode-editorLineNumber-foreground", "#888");
+  const text = Math.max(span.x, span.y, span.z) / 28;
+
+  axes = new THREE.Group();
+  const box = new THREE.Box3Helper(new THREE.Box3(low, high), new THREE.Color(ink));
+  box.material.transparent = true;
+  box.material.opacity = 0.35;
+  box.raycast = () => {};
+  axes.add(box);
+
+  // Ticks on the three edges that meet at one corner: on all twelve they
+  // would be unreadable, and one of each is enough to read a length off.
+  const along = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  const names = [labels?.x ?? "x", labels?.y ?? "y", labels?.z ?? "z"];
+  for (let axis = 0; axis < 3; axis++) {
+    const from = low.getComponent(axis);
+    const to = high.getComponent(axis);
+    const step = niceStep((to - from) / 5);
+    const outward = along[(axis + 1) % 3].clone().add(along[(axis + 2) % 3]).multiplyScalar(-text);
+    for (let value = Math.ceil(from / step) * step; value <= to + step / 2; value += step) {
+      const at = low.clone();
+      at.setComponent(axis, value);
+      const label = textSprite(Number(value.toPrecision(4)).toString(), ink, text);
+      label.position.copy(at).add(outward);
+      axes.add(label);
+    }
+    const name = textSprite(names[axis], ink, text * 1.2);
+    name.position
+      .copy(low)
+      .setComponent(axis, (from + to) / 2)
+      .add(outward.clone().multiplyScalar(2.4));
+    axes.add(name);
+  }
+  scene.add(axes);
+}
+
+/** Drop every node but the ones held, freeing what they hold on the GPU.
+ *  This runs on every edit: a colorscale texture per mesh, left to
+ *  accumulate, is a leak. */
+function discard(held) {
+  for (const [objectId, node] of byObjectId) {
+    if (held.has(objectId)) continue;
+    scene.remove(node);
+    node.traverse((child) => {
+      child.geometry?.dispose();
+      child.material?.map?.dispose();
+      child.material?.dispose();
+    });
+    byObjectId.delete(objectId);
+  }
+}
+
+/** How many poses the longest path in the scene runs through. */
+function frameCount() {
+  return Object.values(paths).reduce(
+    (most, path) => Math.max(most, path.position.length),
+    1,
+  );
+}
+
+/** Draw one captured frame of the scene's paths.
+ *
+ * The traces arrive already at that step's pose -- and, for anything the
+ * field decides, already recomputed for it -- so the nodes carry no transform
+ * of their own here. A sensor's arrows turn as the magnet that makes them
+ * turns, and that is not something moving a mesh about can show.
+ */
+function renderFrame(payload) {
+  discard(new Set());
+  for (const item of payload.meshes.concat(payload.scatters)) {
+    const node = nodeFor(item.object_id, null);
+    node.quaternion.identity(); // the geometry already holds the pose
+    node.add(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
+  }
+  for (const box of outlines) box.update();
+}
+
+/** Handles have no place on something moving of its own accord: a drag would
+ *  fight the playback for the same object. */
+function setPlaying(on) {
+  playing = on;
+  if (on) gizmo?.detach();
+  else setGizmoMode(gizmoMode);
+  return playing;
+}
+
 /** The object the sidebar is showing, which is the one single-object
  *  gestures act on. First in, so a shift-click keeps its meaning. */
 function primaryId() {
@@ -791,21 +937,21 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   orientations = payload.orientations || {};
   anchors = payload.anchors || {};
   paths = payload.paths || {};
+  // Where the handles stand in each object's own frame. The payload's poses
+  // are the last frame of a path -- which is the pose the geometry is drawn
+  // at -- so this is what lets playback put a node back at any other one.
+  pivots = {};
+  for (const [objectId, anchor] of Object.entries(anchors)) {
+    const turn = quaternionOf(orientations[objectId]);
+    pivots[objectId] = new THREE.Vector3()
+      .fromArray((payload.centroids || {})[objectId] || anchor)
+      .sub(new THREE.Vector3().fromArray(anchor))
+      .applyQuaternion(turn.clone().invert());
+  }
   shapes = payload.shapes || {};
   polarizations = payload.polarizations || {};
 
-  // Dropping a node does not free what it holds on the GPU, and this runs on
-  // every edit: a colorscale texture per mesh, left to accumulate, is a leak.
-  for (const [objectId, node] of byObjectId) {
-    if (held.has(objectId)) continue;
-    scene.remove(node);
-    node.traverse((child) => {
-      child.geometry?.dispose();
-      child.material?.map?.dispose();
-      child.material?.dispose();
-    });
-    byObjectId.delete(objectId);
-  }
+  discard(held);
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
@@ -827,6 +973,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // Lines and points are hit within a radius of the ray, measured in world
   // units: a fixed one would miss a scene in metres and swallow one in
   // millimetres, so scale it to what is on screen.
+  drawAxes(payload.ranges, payload.labels);
   const sphere = sceneSphere();
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
@@ -843,6 +990,9 @@ window.scene3d = {
   constrainAxis,
   setSnapping,
   toggleProjection,
+  setPlaying,
+  renderFrame,
+  frameCount,
   nextObject,
   setSpace,
   spaceOf,

@@ -3,9 +3,17 @@
 const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
-const animateEl = document.getElementById("animate");
-const sceneGraphEl = document.getElementById("sceneGraph");
+const rendererEl = document.getElementById("renderer");
+
+/** Which renderer is drawing. The scene graph is what the studio uses; Plotly
+ *  stays on the menu because it is the only way to compare when something
+ *  looks wrong, and looking wrong is how most of this got found. */
+function drawingScene() {
+  return rendererEl.value === "scene";
+}
 const fitEl = document.getElementById("fit");
+const playEl = document.getElementById("play");
+const frameEl = document.getElementById("frame");
 const gizmoEl = document.getElementById("gizmo");
 const gizmoLabelEl = document.getElementById("gizmoLabel");
 const controlsEl = document.getElementById("controls");
@@ -41,6 +49,10 @@ function rpc(method, params) {
  *  and nothing to drag. */
 function showSceneGraphControls(shown) {
   fitEl.hidden = !shown;
+  if (!shown) {
+    playEl.hidden = true; // put back by the next scene that has one
+    frameEl.hidden = true;
+  }
   gizmoLabelEl.hidden = !shown;
   axesLabelEl.hidden = !shown;
   controlsEl.hidden = !shown;
@@ -59,7 +71,7 @@ async function refreshFigure() {
   // Preview: the same scene as buffers, drawn once and kept, rather than a
   // figure replaced on every edit. Plotly stays the default until this draws
   // everything the figure does.
-  if (sceneGraphEl.checked) {
+  if (drawingScene()) {
     if (!window.scene3d) {
       statusEl.textContent = "Scene graph unavailable (module failed to load)";
       return;
@@ -72,12 +84,15 @@ async function refreshFigure() {
     statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
     applyGizmo(); // the selection may have become (or stopped being) patterned
     showAxes();
+    const frames = window.scene3d.frameCount();
+    playEl.hidden = frames < 2; // nothing to run
+    frameEl.hidden = frames < 2;
+    frameEl.max = String(frames - 1);
     return;
   }
-  const figure = await rpc("get_figure", {
-    animation: animateEl.checked,
-    template: plotTemplate(),
-  });
+  // Plotly draws no handles and cannot be picked, so it has no animation
+  // worth asking for either: the scene graph runs the paths now.
+  const figure = await rpc("get_figure", { template: plotTemplate() });
   const layout = figure.layout || {};
   layout.uirevision = "magpylib-studio"; // hold camera across edits
   layout.autosize = true;
@@ -134,6 +149,67 @@ fitEl.addEventListener("click", () => {
   window.scene3d?.fitView();
 });
 
+playEl.addEventListener("click", playPause);
+frameEl.addEventListener("input", () => {
+  playing = false; // scrubbing takes over from running
+  playEl.textContent = "\u25b6 Play";
+  showFrame(Number(frameEl.value));
+});
+
+/** Run the paths, or stop.
+ *
+ * The panel drives this rather than the renderer, because a frame is a
+ * request: what a pose cannot express -- a sensor's arrows, read off the
+ * field -- only python can say, and only per frame. The run is captured once
+ * on the first frame asked for and served from there after, so the first
+ * press is slow and the rest are not.
+ */
+let playing = false;
+let frameInFlight = false;
+
+function playPause() {
+  const frames = window.scene3d?.frameCount() ?? 1;
+  if (frames < 2) {
+    statusEl.textContent = "Nothing here has a path to play";
+    return;
+  }
+  playing = window.scene3d.setPlaying(!playing);
+  playEl.textContent = playing ? "\u23f8 Pause" : "\u25b6 Play";
+  if (playing) {
+    statusEl.textContent = "Capturing the run\u2026"; // the first one is the slow one
+    showFrame(Number(frameEl.value));
+  }
+}
+
+/** Draw one frame, and queue the next while it is still running.
+ *
+ * Paced the same way as everything else here: one request in flight, and the
+ * clock is whatever the engine manages rather than a rate set in advance. A
+ * scene whose frames are expensive plays slower instead of falling behind.
+ */
+async function showFrame(index) {
+  if (frameInFlight) return;
+  frameInFlight = true;
+  try {
+    const payload = await rpc("get_scene", { frame: index });
+    window.scene3d.renderFrame(payload);
+    frameEl.max = String(payload.frames - 1);
+    frameEl.value = String(payload.frame);
+    statusEl.textContent = `${playing ? "Playing" : "Frame"} ${String(
+      payload.frame + 1,
+    ).padStart(String(payload.frames).length)} of ${payload.frames}`;
+  } catch (err) {
+    playing = false;
+    statusEl.textContent = String(err);
+  } finally {
+    frameInFlight = false;
+  }
+  if (playing) {
+    const frames = Number(frameEl.max) + 1;
+    showFrame((Number(frameEl.value) + 1) % frames);
+  }
+}
+
 // Clicking an object here selects it everywhere else: the host owns the
 // selection, and answers with a 'select' message the highlight follows.
 canvasEl.addEventListener("objectpick", (event) => {
@@ -187,7 +263,10 @@ canvasEl.addEventListener("objecttransform", (event) => {
 // Told at the start, so the edits the drag is about to make are grouped into
 // one thing to undo, and so anything it will supersede can be said once --
 // before the drag rather than after, which is when it stops being useful.
+// A drag and a running path are two things moving the same object. The
+// playback yields, since the pointer is the one being asked.
 canvasEl.addEventListener("dragstart", (event) => {
+  if (playing) playPause();
   const { objectId, mode } = event.detail;
   // aiming polarization redraws the magnet's colours, so it keeps nothing
   dragging = { objectId, keep: mode === "polarization" ? null : objectId };
@@ -224,7 +303,7 @@ const REDRAW_BUDGET_MS = 8;
  * smoothness of the gesture.
  */
 async function redrawAroundDrag() {
-  if (!sceneGraphEl.checked || !dragging || dragging.tooSlow) return;
+  if (!drawingScene() || !dragging || dragging.tooSlow) return;
   const payload = await rpc("get_scene", {});
   patterned = new Set(payload.patterned);
   // Timed around the render alone. The request before it is the engine's
@@ -340,7 +419,7 @@ const GIZMO_KEYS = {
 const AXIS_VIEWS = { 1: [0, -1, 0], 3: [1, 0, 0], 7: [0, 0, 1] }; // front, right, top
 
 window.addEventListener("keydown", (event) => {
-  if (!sceneGraphEl.checked || event.target !== document.body) return;
+  if (!drawingScene() || event.target !== document.body) return;
   const key = event.key.toLowerCase();
   const scene3d = window.scene3d;
   if (GIZMO_KEYS[key]) {
@@ -368,6 +447,9 @@ window.addEventListener("keydown", (event) => {
         objectId: selectedIds[0],
       });
     }
+  } else if (event.key === " ") {
+    event.preventDefault(); // space would otherwise scroll or press a button
+    playPause();
   } else if (key === "s") {
     const step = scene3d?.setSnapping(!snapping);
     snapping = step !== null && step !== undefined;
@@ -391,14 +473,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-sceneGraphEl.addEventListener("change", () => {
-  showSceneGraphControls(sceneGraphEl.checked);
+rendererEl.addEventListener("change", () => {
+  showSceneGraphControls(drawingScene());
   canvasEl.innerHTML = ""; // the two renderers do not share a canvas
-  statusEl.textContent = "Loading…";
-  refreshPaced();
-});
-
-animateEl.addEventListener("change", () => {
   statusEl.textContent = "Loading…";
   refreshPaced();
 });
@@ -432,7 +509,7 @@ window.addEventListener("message", (event) => {
 
 window.addEventListener("resize", () => {
   // scene3d watches the canvas itself; Plotly needs telling
-  if (!sceneGraphEl.checked && canvasEl.data) Plotly.Plots.resize(canvasEl);
+  if (!drawingScene() && canvasEl.data) Plotly.Plots.resize(canvasEl);
 });
 
 // Ask for the selection that was already made: a panel opened (or restored)

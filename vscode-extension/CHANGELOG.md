@@ -4,6 +4,15 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+### Changed
+
+- **The 3D view is a scene graph, not a chart.** It draws with three.js by
+  default now. Objects can be clicked, dragged, turned, resized and aimed;
+  paths play, and what the field decides — a sensor's arrows — is recomputed
+  per frame rather than posed. The Plotly view is still a checkbox away.
+- **Animate paths is gone.** It asked Plotly for an animated figure; the
+  scene graph runs the paths itself, with a scrubber.
+
 ### Added
 
 - **Close Scene**, on the Scene view's title bar beside undo, redo and save.
