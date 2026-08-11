@@ -3121,6 +3121,24 @@ export function activate(context: vscode.ExtensionContext): void {
         await setSceneFile(undefined);
       }
     }),
+    /** Put the scene away: no file, nothing in it, and its views shut.
+     *
+     * The same clearing as New Scene, which is all the engine can offer --
+     * there is always a document, so an empty one is what "no scene" means.
+     * What closing adds is the views: leaving the 3D and field panels open
+     * on an empty scene is how a studio ends up showing nothing and looking
+     * broken rather than looking closed.
+     */
+    vscode.commands.registerCommand('magpylib-studio.closeScene', async (options?: Discard) => {
+      if (!(await confirmDiscard('closing the scene', options))) {
+        return;
+      }
+      if (await mutateFromTree('clear_scene', {})) {
+        await setSceneFile(undefined);
+        currentPanel?.dispose();
+        fieldPanel?.dispose();
+      }
+    }),
     vscode.commands.registerCommand('magpylib-studio.revertScene', async () => {
       if (!sceneFile) {
         return;

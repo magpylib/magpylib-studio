@@ -4,6 +4,13 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+### Added
+
+- **Close Scene**, on the Scene view's title bar beside undo, redo and save.
+  New Scene already cleared the document, but it lived in the overflow menu
+  with no icon, and it left the 3D and field views open on an empty scene —
+  which looks broken rather than closed. Closing shuts them.
+
 ## [0.3.1]
 
 ### Fixed

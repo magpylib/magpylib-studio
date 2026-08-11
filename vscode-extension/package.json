@@ -93,6 +93,11 @@
         "title": "Magpylib Studio: New Scene"
       },
       {
+        "command": "magpylib-studio.closeScene",
+        "title": "Magpylib Studio: Close Scene",
+        "icon": "$(close)"
+      },
+      {
         "command": "magpylib-studio.revertScene",
         "title": "Magpylib Studio: Revert Scene to Saved"
       },
@@ -516,6 +521,11 @@
           "command": "magpylib-studio.newScene",
           "when": "view == magpylib-studio.sceneView",
           "group": "1_file@1"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.sceneView",
+          "group": "navigation@8"
         },
         {
           "command": "magpylib-studio.loadScene",
