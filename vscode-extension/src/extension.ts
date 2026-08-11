@@ -1311,12 +1311,14 @@ function adoptStudioPanel(
     if (message.type === 'selectObject') {
       // a pick in the 3D view is the same act as clicking the Scene tree
       selectObjectInStudio(context, message.objectId);
-    } else if (message.type === 'transformObject') {
+    } else if (message.type === 'transformObjects') {
       void transformFromPanel(context, message);
     } else if (message.type === 'previewTransform') {
       void transformFromPanel(context, message, panel);
     } else if (message.type === 'toggleVisible') {
       void toggleVisibleFromPanel(context, message.objectId);
+    } else if (message.type === 'isolateObject') {
+      void isolateFromPanel(context, message.objectId);
     } else if (message.type === 'dragStart') {
       void beginDragFromPanel(context, message);
     } else if (message.type === 'ready') {
@@ -1422,70 +1424,84 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
  * the only part that grows with the size of the scene. That redraw and the
  * trees wait for the drag to end.
  */
+interface Edit {
+  objectId: string;
+  position?: number[] | number[][];
+  orientation?: number[] | number[][];
+  shape?: { attr: string; value: number | number[] | number[][] };
+  polarization?: number[];
+}
+
+/** The engine calls one edit turns into. A pose is one call; a resize or an
+ *  aim is a parameter, and where that parameter lives decides the method. */
+function callsFor(edit: Edit): { method: string; params: Record<string, unknown> }[] {
+  const calls = [];
+  if (edit.shape) {
+    const { attr, value } = edit.shape;
+    calls.push(
+      attr.startsWith('style.')
+        ? {
+            method: 'apply_edit',
+            params: {
+              object_id: edit.objectId,
+              path: attr.slice('style.'.length),
+              value,
+            },
+          }
+        : { method: 'set_param', params: { object_id: edit.objectId, name: attr, value } },
+    );
+  }
+  if (edit.polarization) {
+    calls.push({
+      method: 'set_param',
+      params: {
+        object_id: edit.objectId,
+        name: 'polarization',
+        value: edit.polarization,
+      },
+    });
+  }
+  if (edit.position || edit.orientation) {
+    const params: Record<string, unknown> = { object_id: edit.objectId };
+    if (edit.position) {
+      params.position = edit.position;
+    }
+    if (edit.orientation) {
+      params.orientation = edit.orientation;
+    }
+    calls.push({ method: 'set_transform', params });
+  }
+  return calls;
+}
+
 async function transformFromPanel(
   context: vscode.ExtensionContext,
-  message: {
-    objectId: string;
-    position?: number[];
-    orientation?: number[];
-    shape?: { attr: string; value: number | number[] };
-    polarization?: number[];
-  },
+  message: { edits: Edit[] },
   previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
-  const params: Record<string, unknown> = { object_id: message.objectId };
-  if (message.position) {
-    params.position = message.position;
-  }
-  if (message.orientation) {
-    params.orientation = message.orientation;
+  const calls = message.edits.flatMap(callsFor);
+  if (!calls.length) {
+    if (previewFor) {
+      finishPreview(previewFor);
+    } else {
+      await finishDrag(context);
+    }
+    return;
   }
   try {
     const engine = await getEngine(context);
-    // A resize drags a parameter rather than a pose, and where that parameter
-    // lives decides the method: a dimension belongs to what the object *is*,
-    // which is its create event, while a Dipole's size is styling. Both edit
-    // in place, so a whole resize drag leaves the history exactly as it found
-    // it -- there is no new step to coalesce.
-    if (message.shape) {
-      const { attr, value } = message.shape;
-      await (attr.startsWith('style.')
-        ? engine.request('apply_edit', {
-            object_id: message.objectId,
-            path: attr.slice('style.'.length),
-            value,
-          })
-        : engine.request('set_param', {
-            object_id: message.objectId,
-            name: attr,
-            value,
-          }));
-    }
-    // Aiming it turns the vector, not the magnet, so it is a parameter edit
-    // and not part of the pose. It arrives in the object's own frame, which
-    // is the frame magpylib stores and the script writes.
-    if (message.polarization) {
-      await engine.request('set_param', {
-        object_id: message.objectId,
-        name: 'polarization',
-        value: message.polarization,
-      });
-    }
-    if (!message.position && !message.orientation) {
-      if (previewFor) {
-        finishPreview(previewFor);
-      } else {
-        await finishDrag(context);
-      }
-      return;
-    }
-    const result = (await engine.request('set_transform', params)) as {
+    // Several objects dragged together go as a batch, which the engine
+    // records as one step: sent one at a time they would be one history
+    // entry each, and the gesture was one thing the user did.
+    const result = (await (calls.length === 1
+      ? engine.request(calls[0].method, calls[0].params)
+      : engine.request('batch', { operations: calls }))) as {
       ok: boolean;
       error?: string;
     };
     // Only the final pose reports: the same refusal sixty times over during
     // one drag is sixty notifications about one mistake.
-    if (!result.ok && !previewFor) {
+    if (result.ok === false && !previewFor) {
       vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
     }
   } catch (err) {
@@ -1567,6 +1583,49 @@ async function toggleVisibleFromPanel(
         5000,
       );
     }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  broadcastMutation();
+}
+
+/** Show one object and hide the rest, or put everything back.
+ *
+ * Sent as a batch, which the engine records as a single step: hiding
+ * everything else one call at a time would be a screenful of history for one
+ * keystroke, and as many undos to reverse. Pressing it again when the scene
+ * is already down to one object shows them all, so the same key gets out of
+ * what it got into.
+ */
+async function isolateFromPanel(
+  context: vscode.ExtensionContext,
+  objectId: string,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    const objects = (await engine.request('list_objects')) as {
+      id: string;
+      visible: boolean;
+    }[];
+    const others = objects.filter((entry) => entry.id !== objectId);
+    const alone = others.every((entry) => !entry.visible);
+    await engine.request('batch', {
+      operations: [
+        { method: 'set_visible', params: { object_id: objectId, visible: true } },
+        ...others.map((entry) => ({
+          method: 'set_visible',
+          params: { object_id: entry.id, visible: alone },
+        })),
+      ],
+    });
+    vscode.window.setStatusBarMessage(
+      alone
+        ? 'Magpylib Studio: showing everything again'
+        : `Magpylib Studio: showing ${objectId} alone — shift+H again to undo it`,
+      5000,
+    );
   } catch (err) {
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
@@ -4015,12 +4074,16 @@ export function createWebviewHtml(
         <kbd>R</kbd><span>resize</span>
         <kbd>P</kbd><span>aim polarization</span>
         <kbd>Q</kbd><span>no handles</span>
-        <kbd>H</kbd><span>hide / show</span>
+        <kbd>H</kbd><span>hide / show (<kbd>&#8679;</kbd> show alone)</span>
+        <kbd>S</kbd><span>snap to a round step</span>
         <kbd>X</kbd><span>one axis (<kbd>A</kbd> all)</span>
         <kbd>L</kbd><span>world / object axes</span>
         <kbd>F</kbd><span>frame selected</span>
         <kbd>Home</kbd><span>frame everything</span>
         <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
+        <kbd>5</kbd><span>parallel / perspective</span>
+        <kbd>&#8677;</kbd><span>select the next object</span>
+        <kbd>&#8984;</kbd><span>click: add to the selection</span>
       </div>
     </details>
     <span id="status">Starting…</span>

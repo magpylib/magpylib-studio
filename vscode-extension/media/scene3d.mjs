@@ -19,10 +19,15 @@ let renderer = null;
 const raycaster = new THREE.Raycaster();
 const byObjectId = new Map();
 let framed = false;
-let outline = null;
-let selectedId;
+let outlines = [];
+let selectedIds = []; // the primary is first: what the sidebar is showing
+// What a drag of several objects turns. It stands at the middle of the
+// selection and is never drawn -- only the motion it makes is read off it.
+const rig = new THREE.Object3D();
 let gizmo = null;
 let gizmoMode = "translate";
+let snapping = false;
+let frustumHeight = 1; // what an orthographic camera shows, top to bottom
 /** Which axes each kind of drag runs along, in three's vocabulary.
  *
  * Per mode rather than one setting for all of them, because the right answer
@@ -160,11 +165,11 @@ function makeGizmo(canvasEl) {
   gizmo.size = 0.45; // full size swamps a small object
   scene.add(gizmo.getHelper());
   scene.add(proxy);
+  scene.add(rig);
 
   const report = (preview) => {
     const node = gizmo.object;
     if (!node || !from) return;
-    const detail = { objectId: node.userData.objectId, preview };
     const turned = node.quaternion.clone().multiply(from.quaternion.clone().invert());
 
     if (from.polarization) {
@@ -173,49 +178,61 @@ function makeGizmo(canvasEl) {
       // reading the stored vector as world-space is out by the object's own
       // rotation, which is a silent error the picture cannot show.
       if (Math.abs(turned.w) >= 1 - 1e-9) return;
-      detail.polarization = from.polarization
+      const primary = from.objectIds[0];
+      const aimed = from.polarization
         .clone()
         .applyQuaternion(turned)
-        .applyQuaternion(from.orientation.clone().invert())
+        .applyQuaternion(from.orientations[primary].clone().invert())
         .toArray();
-      canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
+      canvasEl.dispatchEvent(
+        new CustomEvent("objecttransform", {
+          detail: { preview, edits: [{ objectId: primary, polarization: aimed }] },
+        }),
+      );
       return;
     }
 
-    // One rigid motion, applied to every frame the object passes through: a
+    // One rigid motion, applied to every frame of every object selected: a
     // point p goes to (where the handles are now) + turn x (p - where they
-    // were). An object with no path is the single-frame case of that, and
-    // the offset between its position and its centroid is what the turn acts
-    // on -- which is why turning something off-centre moves it, and why
-    // anything centred on its own position stays put.
+    // were). One object with no path is the single-frame, single-object case
+    // of that, and the offset between its position and its centroid is what
+    // the turn acts on -- which is why turning something off-centre moves it,
+    // and why anything centred on its own position stays put.
     const here = node.getWorldPosition(new THREE.Vector3());
     const rigid = (point) =>
       here.clone().add(point.clone().sub(from.here).applyQuaternion(turned));
+    const turning = Math.abs(turned.w) < 1 - 1e-9;
 
-    const placed = rigid(from.placed);
-    if (!placed.equals(from.placed)) {
-      detail.position = from.path
-        ? from.path.position.map((p) => rigid(new THREE.Vector3().fromArray(p)).toArray())
-        : placed.toArray();
+    const edits = [];
+    for (const objectId of from.objectIds) {
+      const edit = { objectId };
+      const path = from.paths[objectId];
+      const placed = rigid(from.placed[objectId]);
+      if (!placed.equals(from.placed[objectId])) {
+        edit.position = path
+          ? path.position.map((p) => rigid(new THREE.Vector3().fromArray(p)).toArray())
+          : placed.toArray();
+      }
+      if (turning) {
+        // every frame turns by the same amount, so a path keeps its shape
+        edit.orientation = path
+          ? path.orientation.map((r) => rotvecOf(turned.clone().multiply(quaternionOf(r))))
+          : rotvecOf(turned.clone().multiply(from.orientations[objectId]));
+      }
+      if (from.shape && !node.scale.equals(UNSCALED)) {
+        edit.shape = {
+          attr: from.shape.attr,
+          value: resized(node.scale, from.shape, from.centre),
+          scale: node.scale.toArray(), // a mesh has no size worth printing
+        };
+      }
+      if (edit.position || edit.orientation || edit.shape) edits.push(edit);
     }
-    if (Math.abs(turned.w) < 1 - 1e-9) {
-      // every frame turns by the same amount, so the path keeps its shape
-      detail.orientation = from.path
-        ? from.path.orientation.map((r) =>
-            rotvecOf(turned.clone().multiply(quaternionOf(r))),
-          )
-        : rotvecOf(turned.clone().multiply(from.orientation));
-    }
-    if (from.shape && !node.scale.equals(UNSCALED)) {
-      detail.shape = {
-        attr: from.shape.attr,
-        value: resized(node.scale, from.shape, from.centre),
-        scale: node.scale.toArray(), // for the readout: a mesh has no size to print
-      };
-    }
-    if (detail.position || detail.orientation || detail.shape) {
-      outline?.update(); // the box tracks the object, not the other way round
-      canvasEl.dispatchEvent(new CustomEvent("objecttransform", { detail }));
+    if (edits.length) {
+      for (const box of outlines) box.update(); // boxes track objects, not the reverse
+      canvasEl.dispatchEvent(
+        new CustomEvent("objecttransform", { detail: { preview, edits } }),
+      );
     }
   };
 
@@ -224,36 +241,60 @@ function makeGizmo(canvasEl) {
     const node = gizmo.object;
     if (!node) return;
     if (event.value) {
-      const objectId = node.userData.objectId;
-      const orientation = quaternionOf(orientations[objectId]);
-      const placed = new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]);
+      // Dragging the rig carries everything selected; dragging an object's
+      // own node carries that one. Either way it is one rigid motion, and the
+      // only difference is how many objects come along with it.
+      const objectIds = node === rig ? [...selectedIds] : [node.userData.objectId];
+      const primary = objectIds[0];
+      const orientation = quaternionOf(orientations[primary]);
       const here = node.getWorldPosition(new THREE.Vector3());
+      const placed = {};
+      const turns = {};
+      for (const objectId of objectIds) {
+        placed[objectId] = new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]);
+        turns[objectId] = quaternionOf(orientations[objectId]);
+      }
+      if (node === rig) {
+        // `attach` keeps each object where it is while hanging it on the rig,
+        // so the whole selection moves with the handles at pointer rate --
+        // waiting for the model to come back would show nothing moving.
+        for (const objectId of objectIds) {
+          const carried = byObjectId.get(objectId);
+          if (carried) rig.attach(carried);
+        }
+      }
       from = {
-        position: node.position.clone(),
+        objectIds,
         quaternion: node.quaternion.clone(),
-        orientation,
-        placed, // where the object is, as against where its handles are
+        orientations: turns,
+        placed, // where each object is, as against where the handles are
         here, // where the handles were when the drag began: the pivot
-        path: paths[objectId] || null, // so a drag moves the whole track
+        paths, // so a drag moves whole tracks and not their ends
         // where the handles are in the object's own frame, which is the
         // centre a vertex array has to be scaled about to match the screen
         centre: here
           .clone()
-          .sub(placed)
+          .sub(placed[primary])
           .applyQuaternion(orientation.clone().invert()),
-        shape: gizmo.mode === "scale" ? shapes[objectId] : null,
+        shape: gizmo.mode === "scale" ? shapes[primary] : null,
         polarization:
           gizmoMode === "polarization"
             ? new THREE.Vector3()
-                .fromArray(polarizations[objectId])
+                .fromArray(polarizations[primary])
                 .applyQuaternion(orientation) // stored local, turned in world
             : null,
       };
       canvasEl.dispatchEvent(
-        new CustomEvent("dragstart", { detail: { objectId, mode: gizmoMode } }),
+        new CustomEvent("dragstart", {
+          detail: { objectIds: from.objectIds, mode: gizmoMode },
+        }),
       );
     } else {
       report(false); // the one that gets recorded and redrawn
+      for (const objectId of from.objectIds) {
+        const carried = byObjectId.get(objectId);
+        if (carried && carried.parent === rig) scene.attach(carried);
+      }
       from = null;
     }
   });
@@ -271,12 +312,28 @@ function makeGizmo(canvasEl) {
  *  the caller is told rather than left showing handles that do nothing.
  */
 function setGizmoMode(mode) {
+  // Several objects move and turn together; resizing or aiming them as a
+  // group would mean deciding what a shared dimension or a shared direction
+  // is, and there is no such thing. Those stay on the one object selected.
+  const together = selectedIds.length > 1;
   const missing =
-    (mode === "scale" && !shapes[selectedId]) ||
-    (mode === "polarization" && !polarizations[selectedId]);
+    (mode === "scale" && (together || !shapes[primaryId()])) ||
+    (mode === "polarization" && (together || !polarizations[primaryId()]));
   gizmoMode = missing ? "translate" : mode;
   if (!gizmo) return gizmoMode;
-  const node = gizmoMode === "none" ? null : byObjectId.get(selectedId);
+  if (together && gizmoMode !== "none") {
+    const centre = selectionCentre();
+    if (centre) {
+      rig.position.copy(centre);
+      rig.quaternion.identity();
+      rig.updateMatrixWorld(true);
+      gizmo.setSpace("world"); // the objects disagree about their own axes
+      gizmo.mode = gizmoMode;
+      gizmo.attach(rig);
+      return gizmoMode;
+    }
+  }
+  const node = gizmoMode === "none" ? null : byObjectId.get(primaryId());
   if (!node) {
     gizmo.detach();
     return gizmoMode;
@@ -289,8 +346,8 @@ function setGizmoMode(mode) {
     // only orients them to the object in local space, and scale is the one
     // mode it forces there, which is why resize followed and this did not.
     proxy.position.copy(node.getWorldPosition(new THREE.Vector3()));
-    proxy.quaternion.copy(quaternionOf(orientations[selectedId]));
-    proxy.userData.objectId = selectedId;
+    proxy.quaternion.copy(quaternionOf(orientations[primaryId()]));
+    proxy.userData.objectId = primaryId();
     gizmo.mode = "rotate";
     gizmo.attach(proxy);
     return gizmoMode;
@@ -363,7 +420,13 @@ function watchPicks(canvasEl) {
     if (gizmo?.axis) return;
     const objectId = pick(event);
     if (objectId) {
-      canvasEl.dispatchEvent(new CustomEvent("objectpick", { detail: { objectId } }));
+      canvasEl.dispatchEvent(
+        new CustomEvent("objectpick", {
+          // cmd on a mac, ctrl elsewhere: the modifier every editor uses to
+          // add to a selection rather than replace it
+          detail: { objectId, adding: event.metaKey || event.ctrlKey },
+        }),
+      );
     }
   });
 }
@@ -396,8 +459,7 @@ function resize(canvasEl) {
   // devicePixelRatio times too big, which on a retina display shows the top
   // left quarter of the scene and calls it the whole view.
   renderer.setSize(w, h);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  applyProjection();
 }
 
 /** A magpylib colorscale table as a texture the shader indexes by intensity. */
@@ -548,20 +610,38 @@ function sceneSphere(objectId) {
  * it carries magnetization direction and field magnitude -- so a highlight
  * that repainted the object would overwrite what the user is looking at.
  */
-function highlight(objectId) {
-  selectedId = objectId;
-  if (outline) {
-    scene.remove(outline);
-    outline.dispose();
-    outline = null;
+function highlight(objectIds) {
+  selectedIds = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(Boolean);
+  for (const box of outlines) {
+    scene.remove(box);
+    box.dispose();
   }
+  outlines = [];
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
-  const node = byObjectId.get(objectId);
-  if (!node) return;
-  const accent = cssColor("--vscode-focusBorder", "#0078d4");
-  outline = new THREE.BoxHelper(node, new THREE.Color(accent));
-  outline.raycast = () => {}; // an indicator, not a target
-  scene.add(outline);
+  const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
+  for (const objectId of selectedIds) {
+    const node = byObjectId.get(objectId);
+    if (!node) continue;
+    const box = new THREE.BoxHelper(node, accent);
+    box.raycast = () => {}; // an indicator, not a target
+    scene.add(box);
+    outlines.push(box);
+  }
+}
+
+/** Where a drag of several objects turns about: the middle of what is
+ *  selected, which is the only point that belongs to all of them. */
+function selectionCentre() {
+  const middle = new THREE.Vector3();
+  let counted = 0;
+  for (const objectId of selectedIds) {
+    const node = byObjectId.get(objectId);
+    if (node) {
+      middle.add(node.getWorldPosition(new THREE.Vector3()));
+      counted++;
+    }
+  }
+  return counted ? middle.divideScalar(counted) : null;
 }
 
 /** Put the whole scene in view, accounting for both field-of-view angles.
@@ -577,20 +657,121 @@ function fitView(objectId) {
   const sphere = sceneSphere(objectId);
   if (!sphere) return;
 
-  const vertical = THREE.MathUtils.degToRad(camera.fov);
-  const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
-  const distance =
-    (sphere.radius /
-      Math.sin(Math.min(vertical, horizontal) / 2)) *
-    1.1; // a margin, so nothing sits exactly on the edge
+  // Framing should not also spin the view: keep the angle the camera is
+  // already at. On the very first fit there is none, and an off-axis start
+  // shows three faces of a box, which reads as depth where face-on does not.
+  const looking = camera.position.clone().sub(controls.target);
+  const direction =
+    looking.lengthSq() > 0
+      ? looking.normalize()
+      : new THREE.Vector3(0.55, -0.68, 0.48).normalize();
 
-  const direction = new THREE.Vector3(0.55, -0.68, 0.48).normalize();
-  camera.near = Math.max(distance / 5000, 1e-6);
+  let distance;
+  if (camera.isOrthographicCamera) {
+    // No perspective, so distance decides nothing but clipping: the frustum
+    // is what frames the scene.
+    frustumHeight = sphere.radius * 2 * 1.1;
+    distance = sphere.radius * 4;
+  } else {
+    const vertical = THREE.MathUtils.degToRad(camera.fov);
+    const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
+    distance =
+      (sphere.radius / Math.sin(Math.min(vertical, horizontal) / 2)) * 1.1;
+  }
+  camera.near = camera.isOrthographicCamera
+    ? -sphere.radius * 8 // ortho may see behind itself; a box, not a cone
+    : Math.max(distance / 5000, 1e-6);
   camera.far = distance * 20;
   camera.position.copy(sphere.center).addScaledVector(direction, distance);
-  camera.updateProjectionMatrix();
+  applyProjection();
   controls.target.copy(sphere.center);
   controls.update();
+  if (snapping) setSnapping(true); // the step follows the scene's size
+}
+
+/** Fit whichever camera is in use to the canvas it draws on. */
+function applyProjection() {
+  const size = renderer.getSize(new THREE.Vector2());
+  const aspect = size.x / size.y || 1;
+  if (camera.isOrthographicCamera) {
+    const half = frustumHeight / 2;
+    camera.left = -half * aspect;
+    camera.right = half * aspect;
+    camera.top = half;
+    camera.bottom = -half;
+  } else {
+    camera.aspect = aspect;
+  }
+  camera.updateProjectionMatrix();
+}
+
+/** Swap between a perspective view and a parallel one, from where the camera
+ *  already is. Returns the projection now in use.
+ *
+ * A parallel projection is how you tell whether two things line up: equal
+ * lengths draw equal wherever they sit, so a ring of magnets can be checked
+ * against its axis rather than judged through the foreshortening.
+ */
+function toggleProjection() {
+  if (!camera) return "perspective";
+  const target = controls.target.clone();
+  const offset = camera.position.clone().sub(target);
+  const wasOrthographic = camera.isOrthographicCamera;
+
+  if (wasOrthographic) {
+    camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+  } else {
+    // Keep what is on screen the same size across the swap: at the target,
+    // a perspective camera shows this much.
+    frustumHeight =
+      2 * offset.length() * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
+  }
+  camera.up.set(0, 0, 1);
+  camera.position.copy(target).add(offset);
+  // Rebuilt rather than repointed: the orbit controls read the camera in a
+  // dozen places and were handed it once, and a stale reference in any of
+  // them is a view that half moves.
+  controls.dispose();
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.copy(target);
+  gizmo.camera = camera; // this one has a setter that passes it on
+  applyProjection();
+  camera.lookAt(target);
+  controls.update();
+  return wasOrthographic ? "perspective" : "parallel";
+}
+
+/** Drag in round numbers, or freely. Returns the step now in force.
+ *
+ * The step follows the scene rather than being a constant: a stride that
+ * suits a scene measured in metres would pin a millimetre one to its origin,
+ * and magpylib scenes are written at whatever scale the object is.
+ */
+function setSnapping(on) {
+  snapping = on;
+  if (!gizmo) return null;
+  const sphere = sceneSphere();
+  const rough = (sphere ? sphere.radius : 1) / 10;
+  const decade = Math.pow(10, Math.floor(Math.log10(rough)));
+  const step = [1, 2, 5, 10].find((n) => rough <= n * decade * 1.5) * decade;
+  gizmo.translationSnap = on ? step : null;
+  gizmo.rotationSnap = on ? THREE.MathUtils.degToRad(15) : null;
+  gizmo.scaleSnap = on ? 0.1 : null;
+  return on ? step : null;
+}
+
+/** The object the sidebar is showing, which is the one single-object
+ *  gestures act on. First in, so a shift-click keeps its meaning. */
+function primaryId() {
+  return selectedIds[0];
+}
+
+/** The object after this one, so a keystroke can walk the scene. */
+function nextObject(objectId) {
+  const drawn = [...byObjectId.keys()].filter(Boolean);
+  if (!drawn.length) return undefined;
+  return drawn[(drawn.indexOf(objectId) + 1) % drawn.length];
 }
 
 /** Replace the drawn objects with `payload`, keeping the camera where it is.
@@ -602,7 +783,8 @@ function fitView(objectId) {
  * object itself is the one thing the picture already has right, and swapping
  * it out from under the gizmo mid-drag would end the drag.
  */
-function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
+function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
+  const held = new Set([].concat(keep ?? []));
   ensureRenderer(canvasEl);
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
@@ -615,7 +797,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   // Dropping a node does not free what it holds on the GPU, and this runs on
   // every edit: a colorscale texture per mesh, left to accumulate, is a leak.
   for (const [objectId, node] of byObjectId) {
-    if (objectId === keep) continue;
+    if (held.has(objectId)) continue;
     scene.remove(node);
     node.traverse((child) => {
       child.geometry?.dispose();
@@ -627,7 +809,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
-    if (item.object_id === keep) continue;
+    if (held.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
     node.attach(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
@@ -650,7 +832,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
   // Mid-drag the selected object is the one that was *not* rebuilt, and
   // re-attaching the gizmo to it would interrupt the drag in progress.
-  if (keep === null) highlight(selectedId);
+  if (!held.size) highlight(selectedIds);
 }
 
 window.scene3d = {
@@ -659,6 +841,9 @@ window.scene3d = {
   highlight,
   setGizmoMode,
   constrainAxis,
+  setSnapping,
+  toggleProjection,
+  nextObject,
   setSpace,
   spaceOf,
   toggleSpace,

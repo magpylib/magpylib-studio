@@ -13,12 +13,13 @@ const axesEl = document.getElementById("axes");
 const axesLabelEl = document.getElementById("axesLabel");
 let nextReqId = 1;
 const pending = new Map();
-let selectedId;
+let selectedIds = []; // the sidebar shows the first; a drag carries all
 let patterned = new Set(); // sources whose copies would not follow an edit
 let poseInFlight = false;
 let pendingPose = null;
 let dragging = null; // { objectId, keep } while a handle is held
 let parametric = {}; // objectId -> which drag-written fields a variable decides
+let snapping = false;
 
 //: What each drag writes, which is what an expression deciding it loses to.
 const DRAG_WRITES = {
@@ -136,11 +137,27 @@ fitEl.addEventListener("click", () => {
 // Clicking an object here selects it everywhere else: the host owns the
 // selection, and answers with a 'select' message the highlight follows.
 canvasEl.addEventListener("objectpick", (event) => {
-  vscodeApi.postMessage({
-    type: "selectObject",
-    objectId: event.detail.objectId,
-  });
+  const { objectId, adding } = event.detail;
+  if (adding) {
+    // The sidebar shows one object, so the first of the set stays the one it
+    // shows: adding to a selection here must not change what the Inspector
+    // is looking at, or every extra click would move it.
+    selectedIds = selectedIds.includes(objectId)
+      ? selectedIds.filter((id) => id !== objectId)
+      : [...selectedIds, objectId];
+    window.scene3d?.highlight(selectedIds);
+    showSelection();
+    return;
+  }
+  vscodeApi.postMessage({ type: "selectObject", objectId });
 });
+
+/** Say how many are selected, since the sidebar can only show the one. */
+function showSelection() {
+  if (selectedIds.length > 1) {
+    statusEl.textContent = `${selectedIds.length} objects selected — drag moves them together`;
+  }
+}
 
 // A drag is an edit like any other, so it goes to the host rather than
 // straight down the RPC: only the host marks the scene dirty, refreshes the
@@ -220,6 +237,8 @@ async function redrawAroundDrag() {
 /** The pose being dragged, in the status bar. It sits last in the bar, so a
  *  number growing a digit moves nothing but itself. */
 function showPose(pose) {
+  const edit = pose.edits[0];
+  const extra = pose.edits.length > 1 ? `  (+${pose.edits.length - 1} more)` : "";
   // A fixed number of decimals, not significant figures. Significant figures
   // change the *length* of the string as a value crosses a scale -- 0.1 to
   // 0.09999 is four characters wider -- and at pointer rate that reads as a
@@ -232,22 +251,26 @@ function showPose(pose) {
       .map((n) => (Math.abs(n) < 1e-12 ? 0 : n).toFixed(decimals).padStart(width))
       .join(", ");
   const parts = [];
-  if (pose.position) parts.push(`position ${numbers(pose.position, 4, 9)} m`);
-  if (pose.orientation) parts.push(`rotation ${numbers(pose.orientation, 1, 6)}°`);
-  if (pose.polarization) {
-    parts.push(`polarization ${numbers(pose.polarization, 4, 9)} T`);
+  // a path reports every frame; the one it ends on is the one worth reading
+  const last = (value) => (Array.isArray(value[0]) ? value[value.length - 1] : value);
+  if (edit.position) parts.push(`position ${numbers(last(edit.position), 4, 9)} m`);
+  if (edit.orientation) {
+    parts.push(`rotation ${numbers(last(edit.orientation), 1, 6)}°`);
   }
-  if (pose.shape) {
+  if (edit.polarization) {
+    parts.push(`polarization ${numbers(edit.polarization, 4, 9)} T`);
+  }
+  if (edit.shape) {
     // a mesh's parameter is its whole vertex array: the factor is the
     // readable thing, not four hundred coordinates
-    const value = pose.shape.value;
+    const value = edit.shape.value;
     parts.push(
       Array.isArray(value[0])
-        ? `${pose.shape.attr} ×${numbers(pose.shape.scale, 3, 6)}`
-        : `${pose.shape.attr} ${numbers([].concat(value), 4, 9)} m`,
+        ? `${edit.shape.attr} ×${numbers(edit.shape.scale, 3, 6)}`
+        : `${edit.shape.attr} ${numbers([].concat(value), 4, 9)} m`,
     );
   }
-  statusEl.textContent = `${pose.objectId} — ${parts.join("   ")}`;
+  statusEl.textContent = `${edit.objectId} — ${parts.join("   ")}${extra}`;
 }
 
 function sendPose() {
@@ -266,17 +289,17 @@ function sendPose() {
  * of the ring and leave the rest. Better to say so than to do it.
  */
 function applyGizmo() {
-  const blocked = patterned.has(selectedId);
+  const blocked = patterned.has(selectedIds[0]);
   gizmoEl.disabled = blocked;
   const wanted = blocked ? "none" : gizmoEl.value;
   const inEffect = window.scene3d?.setGizmoMode(wanted);
   if (blocked) {
-    statusEl.textContent = `${selectedId} is patterned — dragging it would leave its copies behind`;
+    statusEl.textContent = `${selectedIds[0]} is patterned — dragging it would leave its copies behind`;
   } else if (inEffect !== wanted) {
     // asked to resize something with no size to drag
     gizmoEl.value = inEffect;
-    statusEl.textContent = selectedId
-      ? `${selectedId} has no single dimension to drag — resize it in the Inspector`
+    statusEl.textContent = selectedIds[0]
+      ? `${selectedIds[0]} has no single dimension to drag — resize it in the Inspector`
       : "Select an object to resize";
   }
 }
@@ -339,9 +362,28 @@ window.addEventListener("keydown", (event) => {
   } else if (key === "h") {
     // the host owns visibility and knows the current state; hidden objects
     // are not drawn, so showing one again is the Scene tree's job
-    if (selectedId) vscodeApi.postMessage({ type: "toggleVisible", objectId: selectedId });
+    if (selectedIds[0]) {
+      vscodeApi.postMessage({
+        type: event.shiftKey ? "isolateObject" : "toggleVisible",
+        objectId: selectedIds[0],
+      });
+    }
+  } else if (key === "s") {
+    const step = scene3d?.setSnapping(!snapping);
+    snapping = step !== null && step !== undefined;
+    statusEl.textContent = snapping
+      ? `Snapping to ${Number(step.toPrecision(3))} m and 15\u00b0`
+      : "Snapping off";
+  } else if (event.key === "5") {
+    statusEl.textContent = `Viewing in ${scene3d?.toggleProjection()} projection`;
+  } else if (event.key === "Tab") {
+    // the panel has nothing else worth tabbing through, and walking the
+    // scene is worth more here than moving focus between two dropdowns
+    event.preventDefault();
+    const next = scene3d?.nextObject(selectedIds[0]);
+    if (next) vscodeApi.postMessage({ type: "selectObject", objectId: next });
   } else if (key === "f") {
-    scene3d?.fitView(selectedId); // undefined when nothing is selected: fits all
+    scene3d?.fitView(selectedIds[0]); // undefined when nothing is selected: fits all
   } else if (event.key === "Home") {
     scene3d?.fitView();
   } else if (AXIS_VIEWS[event.key]) {
@@ -377,8 +419,9 @@ window.addEventListener("message", (event) => {
         sendPose(); // whatever the pointer reached while that one was away
       });
   } else if (message.type === "select") {
-    selectedId = message.objectId;
-    window.scene3d?.highlight(selectedId);
+    // a plain pick, or the Scene tree: one object, and the set restarts
+    selectedIds = message.objectId ? [message.objectId] : [];
+    window.scene3d?.highlight(selectedIds);
     applyGizmo();
   } else if (message.type === "refresh") {
     // Pushed by the host after any edit (inspector, chat tool, tree, a
