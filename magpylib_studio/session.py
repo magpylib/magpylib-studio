@@ -785,6 +785,7 @@ _BATCHABLE = {
     "set_transform",
     "clear_path",
     "reset_style",
+    "set_visible",
     "clear_scene",
     # a parametric scene is built in one go: variables, then the objects
     # written in terms of them, then the arrangements

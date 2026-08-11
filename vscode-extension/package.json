@@ -1173,7 +1173,7 @@
         "displayName": "Batch magpylib operations",
         "toolReferenceName": "magpyBatch",
         "canBeReferencedInPrompt": true,
-        "modelDescription": "Apply several Magpylib Studio scene operations in ONE call - always prefer this over chaining single tool calls when creating, editing, or removing multiple objects (e.g. building an array of magnets). Operations run in order; failures don't stop the rest. The result lists per-operation outcomes ({ok, error?}) - fix failed ones and retry only those. Batchable methods: add_object, remove_object, move_object (reparent into/out of Collections: {object_id, parent?}), apply_edit, set_param, move, rotate, set_transform, clear_path, reset_style, clear_scene, set_variable, remove_variable, duplicate_around, duplicate_along, mirror (their params match the corresponding single tools). That covers a whole parametric scene - variables, the objects written in terms of them, then the arrangements - in one undoable call. remove_variable ({\"name\": \"gap\"}) is the only way to delete a variable, and fails while anything still refers to it.",
+        "modelDescription": "Apply several Magpylib Studio scene operations in ONE call - always prefer this over chaining single tool calls when creating, editing, or removing multiple objects (e.g. building an array of magnets). Operations run in order; failures don't stop the rest. The result lists per-operation outcomes ({ok, error?}) - fix failed ones and retry only those. Batchable methods: add_object, remove_object, move_object (reparent into/out of Collections: {object_id, parent?}), apply_edit, set_param, move, rotate, set_transform, clear_path, reset_style, set_visible, clear_scene, set_variable, remove_variable, duplicate_around, duplicate_along, mirror (their params match the corresponding single tools). That covers a whole parametric scene - variables, the objects written in terms of them, then the arrangements - in one undoable call. remove_variable ({\"name\": \"gap\"}) is the only way to delete a variable, and fails while anything still refers to it.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -1196,6 +1196,7 @@
                       "set_transform",
                       "clear_path",
                       "reset_style",
+                      "set_visible",
                       "clear_scene",
                       "set_variable",
                       "remove_variable",
