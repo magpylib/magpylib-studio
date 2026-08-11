@@ -1513,6 +1513,10 @@ class MagpylibStudioSession:
         #: the state to undo back to. See `begin_interaction`.
         self._interaction: bool | None = None
         self._captured_scenes: list[dict] = []  # from the last load_script
+        #: The animated capture playback reads frames from, or None when it
+        #: has to be taken again. Every rebuild drops it: a scene that has
+        #: changed no longer moves the way the captured run says it does.
+        self._animated = None
         self._build()
 
     def _record_state(self, label, doc_before):
@@ -1541,6 +1545,7 @@ class MagpylibStudioSession:
         do, and those are events like any other, so they keep their place in
         the log relative to the children they carry.
         """
+        self._animated = None  # the captured run is of a scene that no longer is
         self._vars = expressions.resolve_variables(self.doc.get("variables") or {})
         # Hard bounds are checked here rather than where a value is typed, so
         # they hold however the variable arrived at its value — including
@@ -2322,8 +2327,14 @@ class MagpylibStudioSession:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
 
-    def get_scene(self):
+    def get_scene(self, frame=None):
         """The scene as buffers for a scene-graph view, keyed by studio ids.
+
+        With `frame`, one step of the scene's paths instead: the same shape,
+        holding only what is drawn, and computed rather than posed. Captured
+        once and served a step at a time -- a run of the quiver example is
+        14 MB and half a second, and one frame of it is what anyone is
+        looking at.
 
         `get_figure` returns a Plotly figure, which the webview replaces
         wholesale on every edit because nothing in a chart is addressable. This
@@ -2336,6 +2347,16 @@ class MagpylibStudioSession:
         protocol understands.
         """
         threejs.pin_scene_units()
+        if frame is not None:
+            # One step of the paths, whole: what a pose cannot express is a
+            # sensor's arrows, which are read off the field and so turn as
+            # the magnet that makes them turns. Only magpylib can say what
+            # they are, and only per frame.
+            if self._animated is None:
+                self._animated = threejs.capture_frames(self.scene)
+            return threejs.frame_payload(
+                self._animated, frame, live=self._objs, derived=self._derived
+            )
         scene = threejs.scene_payload(
             self.scene, live=self._objs, derived=self._derived
         )

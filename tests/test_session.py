@@ -388,6 +388,43 @@ def test_only_shapes_that_scale_are_offered(session):
     assert "probe" not in shapes
 
 
+def test_a_played_frame_recomputes_what_the_field_decides():
+    """Why playback asks for frames rather than moving meshes about.
+
+    A pose can be applied in the browser; a sensor's arrows cannot, because
+    they are read off the field and turn as the magnet that makes them turns.
+    Moving the drawn meshes locally left them pointing where they had been at
+    the end of the path, whatever the magnet was doing.
+    """
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+
+    first = session.get_scene(frame=0)
+    later = session.get_scene(frame=9)
+
+    assert first["frames"] == 51 and later["frame"] == 9
+    arrows = [next(m for m in f["meshes"] if m["object_id"] == "field") for f in (first, later)]
+    assert arrows[0]["position"] != arrows[1]["position"]  # the field moved on
+    magnet = [next(m for m in f["meshes"] if m["object_id"] == "magnet") for f in (first, later)]
+    assert magnet[0]["position"] != magnet[1]["position"]  # and so did the magnet
+
+    # asking past the end holds the last frame rather than failing
+    assert session.get_scene(frame=999)["frame"] == 50
+
+
+def test_the_captured_run_is_dropped_when_the_scene_changes():
+    """It is a recording of a scene that no longer exists. Keeping it would
+    play the old one."""
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    session.get_scene(frame=0)
+    assert session._animated is not None
+
+    session.set_variable("lift", 2.0)
+
+    assert session._animated is None
+
+
 def test_dragging_an_object_with_a_path_moves_the_whole_path():
     """Reporting one pose for an object that has a path deletes the path.
 

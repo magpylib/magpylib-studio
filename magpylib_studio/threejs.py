@@ -224,8 +224,15 @@ def _scatter_payload(trace):
     }
 
 
-def _capture(objects):
-    """The `Scene` magpylib would hand a display backend, for `objects`."""
+def _capture(objects, animation=False):
+    """The `Scene` magpylib would hand a display backend, for `objects`.
+
+    With `animation`, that scene carries one frame per step of the longest
+    path, each holding the whole scene *as computed at that step* -- which is
+    the only way to get what a pose cannot express. A sensor's arrows are
+    read from the field, so they turn as the magnet that makes them turns,
+    and no amount of moving meshes about will show it.
+    """
     captured = {}
     if _BACKEND not in DisplayBackend.backends:
         magpy.register_backend(
@@ -235,13 +242,58 @@ def _capture(objects):
             merge_traces=False,  # one mesh per object, so each is addressable
             handles_traces=frozenset({"mesh3d", "scatter3d"}),
             accepts_options=frozenset(),
+            supports_animation=True,
         )
     else:  # re-registering would replace the closure each call
         DisplayBackend.backends[_BACKEND].show = lambda scene: captured.setdefault(
             "scene", scene
         )
-    magpy.show(objects, backend=_BACKEND, return_fig=True)
+    magpy.show(objects, backend=_BACKEND, return_fig=True, animation=animation)
     return captured["scene"]
+
+
+def capture_frames(objects):
+    """Every step of the scene's paths, computed. Kept by the session and
+    served a frame at a time: the whole run is megabytes, and one frame is
+    the only part anyone is looking at."""
+    return _capture(objects, animation=True)
+
+
+def frame_payload(scene, index, live=None, derived=None):
+    """One frame of a captured run, in the shape `scene_payload` returns.
+
+    Only what is drawn: the poses, shapes and paths a view needs are the same
+    from frame to frame, and it already has them.
+    """
+    frames = scene.frames
+    frame = frames[max(0, min(int(index), len(frames) - 1))]
+    payload = _keyed(list(frame.traces), live or {}, derived or {})
+    return {
+        "frame": max(0, min(int(index), len(frames) - 1)),
+        "frames": len(frames),
+        "meshes": [p for p in payload if p["kind"] == "mesh"],
+        "scatters": [p for p in payload if p["kind"] == "scatter"],
+    }
+
+
+def _keyed(traces, live, derived):
+    """Traces converted and re-keyed from magpylib's ids to studio's."""
+    studio_id = {id(obj): key for key, obj in live.items()}
+    source_of = {copy: src for src, copies in derived.items() for copy in copies}
+    holding = {
+        id(child): key
+        for key, obj in sorted(
+            live.items(), key=lambda kv: -len(getattr(kv[1], "children_all", ()))
+        )
+        for child in getattr(obj, "children_all", ())
+    }
+    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
+    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
+    for item in payload:
+        raw = item["object_id"]
+        key = studio_id.get(raw) or holding.get(raw)
+        item["object_id"] = source_of.get(key, key)
+    return payload
 
 
 def scene_payload(objects, live=None, derived=None):
@@ -286,19 +338,7 @@ def scene_payload(objects, live=None, derived=None):
 
     live = live or {}
     derived = derived or {}
-    studio_id = {id(obj): key for key, obj in live.items()}
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
-    # Patterning a Collection copies its children too, and those copies are
-    # real magnets that nothing registered an id for. The Collection holding
-    # one is the nearest thing that has an id, so the trace is drawn there --
-    # innermost first, hence the sort by size.
-    holding = {
-        id(child): key
-        for key, obj in sorted(
-            live.items(), key=lambda kv: -len(getattr(kv[1], "children_all", ()))
-        )
-        for child in getattr(obj, "children_all", ())
-    }
     anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
     paths = {}
     for key, obj in live.items():
@@ -341,12 +381,7 @@ def scene_payload(objects, live=None, derived=None):
         if polarization is not None:
             polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
-    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
-    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
-    for item in payload:
-        raw = item["object_id"]
-        key = studio_id.get(raw) or holding.get(raw)
-        item["object_id"] = source_of.get(key, key)
+    payload = _keyed(traces, live, derived)
 
     return {
         "meshes": [p for p in payload if p["kind"] == "mesh"],
