@@ -75,6 +75,11 @@ SCALE_COVARIANT = {
 #: Above this many points a mesh keeps its vertices to itself; see above.
 MAX_DRAGGABLE_VERTICES = 256
 
+#: And above this many frames a path is not carried either. A drag has to
+#: move the whole path or it replaces it -- a single position where a path
+#: was is magpylib deleting the path -- so the frames have to come along.
+MAX_DRAGGABLE_PATH = 1024
+
 
 def _resolve(obj, path):
     """Read a dotted attribute path, falling back to the library default.
@@ -295,6 +300,7 @@ def scene_payload(objects, live=None, derived=None):
         for child in getattr(obj, "children_all", ())
     }
     anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
+    paths = {}
     for key, obj in live.items():
         if key in source_of:
             continue  # a copy is drawn on its source's node
@@ -312,6 +318,18 @@ def scene_payload(objects, live=None, derived=None):
         orientations[key] = np.atleast_2d(
             obj.orientation.as_rotvec(degrees=True)
         )[-1].tolist()
+        # The whole path, when there is one. A drag reports the pose it
+        # reached, and reporting one pose for an object that has a path is
+        # magpylib being told the path is now a single point -- which is how
+        # dragging a sensor used to make its track disappear.
+        frames = np.atleast_2d(np.asarray(obj.position, dtype=float))
+        turns = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))
+        if 1 < len(frames) <= MAX_DRAGGABLE_PATH:
+            paths[key] = {
+                "position": frames.tolist(),
+                "orientation": turns.tolist(),
+            }
+
         shape = shape_of(obj)
         if shape is not None:
             shapes[key] = shape
@@ -338,6 +356,7 @@ def scene_payload(objects, live=None, derived=None):
         "anchors": anchors,
         "centroids": centroids,
         "orientations": orientations,
+        "paths": paths,
         "shapes": shapes,
         "polarizations": polarizations,
         "patterned": sorted(derived),

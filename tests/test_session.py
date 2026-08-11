@@ -388,6 +388,50 @@ def test_only_shapes_that_scale_are_offered(session):
     assert "probe" not in shapes
 
 
+def test_dragging_an_object_with_a_path_moves_the_whole_path():
+    """Reporting one pose for an object that has a path deletes the path.
+
+    The solenoid's sensor sweeps through 25 frames, and a drag that sent a
+    single position replaced all of them with it -- so the track it draws
+    simply vanished. The frames come along in the payload, and the drag
+    applies its motion to every one of them.
+    """
+    session = MagpylibStudioSession()
+    session.load_example("coil")
+    scene = session.get_scene()
+    path = np.asarray(scene["paths"]["sensor"]["position"])
+    assert path.shape == (25, 3)
+
+    def track():
+        drawn = [t for t in session.get_scene()["scatters"] if t["object_id"] == "sensor"]
+        return len(drawn[0]["position"]) // 3 if drawn else 0
+
+    assert track() == 25
+    displaced = path + np.array([0.01, 0, 0.02])
+    session.set_transform("sensor", position=displaced.tolist())
+
+    assert track() == 25  # still a track, not a point
+    assert np.asarray(session._objs["sensor"].position) == pytest.approx(displaced)
+
+
+def test_a_path_is_only_carried_while_it_is_worth_carrying(session):
+    """It rides in every payload, like a mesh's vertices, so it is capped —
+    and an object standing still has no path to carry in the first place."""
+    from magpylib_studio import threejs
+
+    assert session.get_scene()["paths"] == {}  # nothing in this scene moves
+
+    session.move("cube", [[0, 0, 0], [1, 0, 0], [2, 0, 0]], start=0)
+    assert len(session.get_scene()["paths"]["cube"]["position"]) == 3
+
+    monkey = threejs.MAX_DRAGGABLE_PATH
+    try:
+        threejs.MAX_DRAGGABLE_PATH = 2
+        assert "cube" not in session.get_scene()["paths"]
+    finally:
+        threejs.MAX_DRAGGABLE_PATH = monkey
+
+
 def test_the_handles_sit_where_the_object_looks(session):
     """A Tetrahedron's position is the origin its vertices are written
     against, not the middle of the shape, so handles drawn there float off a

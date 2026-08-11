@@ -38,7 +38,7 @@ const SPACES = {
 };
 let orientations = {}; // studio id -> the rotation baked into its vertices
 let anchors = {}; // studio id -> where the object is
-let centroids = {}; // studio id -> where it looks like it is
+let paths = {}; // studio id -> every frame it passes through, when it has one
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
 // What the polarization handles turn. The object must not turn with them, so
@@ -182,19 +182,29 @@ function makeGizmo(canvasEl) {
       return;
     }
 
-    // The handles sit on the centroid, so the object's own position is that
-    // point plus the offset between them -- and that offset turns with the
-    // object, which is why turning something off-centre moves it. For
-    // anything centred on its own position the offset is zero, a turn leaves
-    // the position alone, and none of this arithmetic does anything.
-    const placed = node
-      .getWorldPosition(new THREE.Vector3())
-      .add(from.offset.clone().applyQuaternion(turned));
+    // One rigid motion, applied to every frame the object passes through: a
+    // point p goes to (where the handles are now) + turn x (p - where they
+    // were). An object with no path is the single-frame case of that, and
+    // the offset between its position and its centroid is what the turn acts
+    // on -- which is why turning something off-centre moves it, and why
+    // anything centred on its own position stays put.
+    const here = node.getWorldPosition(new THREE.Vector3());
+    const rigid = (point) =>
+      here.clone().add(point.clone().sub(from.here).applyQuaternion(turned));
+
+    const placed = rigid(from.placed);
     if (!placed.equals(from.placed)) {
-      detail.position = placed.toArray();
+      detail.position = from.path
+        ? from.path.position.map((p) => rigid(new THREE.Vector3().fromArray(p)).toArray())
+        : placed.toArray();
     }
     if (Math.abs(turned.w) < 1 - 1e-9) {
-      detail.orientation = rotvecOf(turned.multiply(from.orientation));
+      // every frame turns by the same amount, so the path keeps its shape
+      detail.orientation = from.path
+        ? from.path.orientation.map((r) =>
+            rotvecOf(turned.clone().multiply(quaternionOf(r))),
+          )
+        : rotvecOf(turned.clone().multiply(from.orientation));
     }
     if (from.shape && !node.scale.equals(UNSCALED)) {
       detail.shape = {
@@ -217,18 +227,20 @@ function makeGizmo(canvasEl) {
       const objectId = node.userData.objectId;
       const orientation = quaternionOf(orientations[objectId]);
       const placed = new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]);
-      const offset = placed
-        .clone()
-        .sub(new THREE.Vector3().fromArray(centroids[objectId] || [0, 0, 0]));
+      const here = node.getWorldPosition(new THREE.Vector3());
       from = {
         position: node.position.clone(),
         quaternion: node.quaternion.clone(),
         orientation,
         placed, // where the object is, as against where its handles are
-        offset,
-        // the same offset in the object's own frame, which is the centre a
-        // vertex array has to be scaled about to match what is on screen
-        centre: offset.clone().negate().applyQuaternion(orientation.clone().invert()),
+        here, // where the handles were when the drag began: the pivot
+        path: paths[objectId] || null, // so a drag moves the whole track
+        // where the handles are in the object's own frame, which is the
+        // centre a vertex array has to be scaled about to match the screen
+        centre: here
+          .clone()
+          .sub(placed)
+          .applyQuaternion(orientation.clone().invert()),
         shape: gizmo.mode === "scale" ? shapes[objectId] : null,
         polarization:
           gizmoMode === "polarization"
@@ -596,7 +608,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = null } = {}) {
   scene.background = new THREE.Color(background);
   orientations = payload.orientations || {};
   anchors = payload.anchors || {};
-  centroids = payload.centroids || {};
+  paths = payload.paths || {};
   shapes = payload.shapes || {};
   polarizations = payload.polarizations || {};
 
