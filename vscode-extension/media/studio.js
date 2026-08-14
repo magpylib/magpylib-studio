@@ -112,9 +112,18 @@ async function refreshFigure() {
     // Whether there is anything to play is a question the paths answer; how
     // many frames there are is not. Magpylib composes the run, and past a
     // point it subsamples, so the count comes back with the first frame.
-    const movable = window.scene3d.frameCount() > 1;
-    playEl.hidden = !movable;
-    frameEl.hidden = !movable;
+    const steps = window.scene3d.frameCount();
+    playEl.hidden = steps < 2;
+    frameEl.hidden = steps < 2;
+    // A range to drag before anything has been fetched. The paths say how
+    // many steps there are, which is what the scrubber is for; how many
+    // frames magpylib actually composed only comes back with the first one,
+    // and corrects this then.
+    frameEl.max = String(Math.max(1, steps - 1));
+    // At the end, because that is where the scene is: a path is drawn at its
+    // last position, so a scrubber sitting at zero would be pointing at a
+    // frame nothing on screen is showing.
+    frameEl.value = frameEl.max;
     return;
   }
   // Plotly draws no handles and cannot be picked, so it has no animation
@@ -178,8 +187,10 @@ fitEl.addEventListener("click", () => {
 
 playEl.addEventListener("click", playPause);
 frameEl.addEventListener("input", () => {
-  playing = false; // scrubbing takes over from running
-  playEl.textContent = "\u25b6 Play";
+  if (playing) {
+    playing = window.scene3d.setPlaying(false); // scrubbing takes over
+    playEl.textContent = "\u25b6 Play";
+  }
   showFrame(Number(frameEl.value));
 });
 
@@ -193,6 +204,7 @@ frameEl.addEventListener("input", () => {
  */
 let playing = false;
 let frameInFlight = false;
+let wantedFrame = 0;
 let playStartedAt = 0;
 
 function playPause() {
@@ -202,6 +214,11 @@ function playPause() {
   }
   playing = window.scene3d.setPlaying(!playing);
   playEl.textContent = playing ? "\u23f8 Pause" : "\u25b6 Play";
+  // pressing play at the end of the run starts it over rather than finishing
+  // immediately, which is what the scrubber leaves it at
+  if (playing && Number(frameEl.value) >= Number(frameEl.max)) {
+    frameEl.value = "0";
+  }
   if (playing) {
     say("Capturing the run\u2026"); // the first one is slow
     show("");
@@ -220,8 +237,13 @@ function playPause() {
  * five second sweep into however long the engine took.
  */
 async function showFrame(index) {
+  // Latest wins, as everywhere else here: a scrub moves the slider far
+  // faster than frames come back, and the one worth drawing is where the
+  // pointer is now, not each place it passed through.
+  wantedFrame = index;
   if (frameInFlight) return;
   frameInFlight = true;
+  index = wantedFrame;
   let payload = null;
   try {
     payload = await rpc("get_scene", { frame: index });
@@ -238,6 +260,10 @@ async function showFrame(index) {
     say(String(err));
   } finally {
     frameInFlight = false;
+  }
+  if (wantedFrame !== index) {
+    showFrame(wantedFrame); // the pointer moved on while that one was away
+    return;
   }
   if (!playing || !payload) return;
 
