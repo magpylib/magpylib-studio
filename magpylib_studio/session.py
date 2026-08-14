@@ -2353,7 +2353,11 @@ class MagpylibStudioSession:
             # the magnet that makes them turns. Only magpylib can say what
             # they are, and only per frame.
             if self._animated is None:
-                self._animated = threejs.capture_frames(self.scene)
+                steps = max(
+                    (len(np.atleast_2d(np.asarray(obj.position))) for obj in self._objs.values()),
+                    default=1,
+                )
+                self._animated = threejs.capture_frames(self.scene, steps)
             return threejs.frame_payload(
                 self._animated, frame, live=self._objs, derived=self._derived
             )

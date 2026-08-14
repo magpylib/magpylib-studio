@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 
+import magpylib as magpy
 import numpy as np
 import pytest
 
@@ -410,6 +411,48 @@ def test_a_played_frame_recomputes_what_the_field_decides():
 
     # asking past the end holds the last frame rather than failing
     assert session.get_scene(frame=999)["frame"] == 50
+
+
+@pytest.mark.parametrize("steps", [25, 250, 600])
+def test_every_step_of_a_path_is_a_frame_to_stop_on(steps):
+    """`animation=True` alone does not give every step.
+
+    Magpylib composes a film: the frame count is time x fps capped by
+    maxframes, so with the defaults a 250-step path arrives as 99 frames,
+    silently. Right for a film, wrong here -- these steps *are* the path, each
+    a pose someone asked for, and a scrubber that cannot stop on one is not
+    showing the model.
+    """
+    session = MagpylibStudioSession()
+    session.add_object("m", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("m", [[i * 0.01, 0, 0] for i in range(steps)], start=0)
+
+    assert session.get_scene(frame=0)["frames"] == steps
+
+
+@pytest.fixture
+def animation_time():
+    """magpylib's defaults are global, so a test that sets one puts it back."""
+    before = magpy.defaults.display.animation.time
+    yield
+    magpy.defaults.display.animation.time = before
+
+
+@pytest.mark.parametrize("seconds", [5, 2])
+def test_a_run_lasts_what_the_animation_settings_say(seconds, animation_time):
+    """`animation.time` is a duration, not a frame count: five seconds by
+    default, whatever the path's length. The view paces to it and drops what
+    it cannot keep up with, so a 600-step path takes as long as a 25-step
+    one rather than forty times as long."""
+    magpy.defaults.display.animation.time = seconds
+    session = MagpylibStudioSession()
+    session.add_object("m", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("m", [[i * 0.01, 0, 0] for i in range(60)], start=0)
+
+    scene = session.get_scene(frame=0)
+
+    assert scene["duration"] == seconds
+    assert scene["frames"] == 60  # the length of the path, not time x fps
 
 
 def test_the_captured_run_is_dropped_when_the_scene_changes():

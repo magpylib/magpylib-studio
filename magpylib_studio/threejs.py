@@ -25,6 +25,8 @@ and 10):
 
 from __future__ import annotations
 
+import math
+
 import magpylib as magpy
 import numpy as np
 from magpylib.graphics.backend import DisplayBackend
@@ -224,7 +226,7 @@ def _scatter_payload(trace):
     }
 
 
-def _capture(objects, animation=False):
+def _capture(objects, animation=False, **kwargs):
     """The `Scene` magpylib would hand a display backend, for `objects`.
 
     With `animation`, that scene carries one frame per step of the longest
@@ -248,15 +250,41 @@ def _capture(objects, animation=False):
         DisplayBackend.backends[_BACKEND].show = lambda scene: captured.setdefault(
             "scene", scene
         )
-    magpy.show(objects, backend=_BACKEND, return_fig=True, animation=animation)
+    magpy.show(
+        objects, backend=_BACKEND, return_fig=True, animation=animation, **kwargs
+    )
     return captured["scene"]
 
 
-def capture_frames(objects):
+def capture_frames(objects, steps):
     """Every step of the scene's paths, computed. Kept by the session and
     served a frame at a time: the whole run is megabytes, and one frame is
-    the only part anyone is looking at."""
-    return _capture(objects, animation=True)
+    the only part anyone is looking at.
+
+    `animation=True` alone does not give every step. Magpylib is composing a
+    film: `time` x `fps` is the frame budget, so with the defaults a 250-step
+    path arrives as 99 frames. That is the right answer for a film and the
+    wrong one for a scrubber, which has to be able to stop on any step -- the
+    steps *are* the path, each one a pose someone asked for. So the budget is
+    raised to the length of the path, and the whole run is kept.
+
+    `animation.time` is untouched by that, and it is not a frame count: it is
+    how long the animation lasts, five seconds by default. The view paces its
+    playback to it and drops frames it cannot keep up with, which is what
+    keeps a 600-step path taking the same five seconds as a 25-step one.
+
+    Beyond `MAX_DRAGGABLE_PATH` magpylib subsamples as it sees fit, and the
+    view is told how many frames it actually got.
+    """
+    steps = max(2, min(int(steps), MAX_DRAGGABLE_PATH))
+    return _capture(
+        objects,
+        animation=True,
+        # the budget is min(time x fps, maxframes); both have to clear the path
+        animation_fps=math.ceil(steps / magpy.defaults.display.animation.time),
+        animation_maxfps=math.ceil(steps / magpy.defaults.display.animation.time),
+        animation_maxframes=steps,
+    )
 
 
 def frame_payload(scene, index, live=None, derived=None):
@@ -271,6 +299,8 @@ def frame_payload(scene, index, live=None, derived=None):
     return {
         "frame": max(0, min(int(index), len(frames) - 1)),
         "frames": len(frames),
+        # how long the whole run should take, which is what the view paces to
+        "duration": magpy.defaults.display.animation.time,
         "meshes": [p for p in payload if p["kind"] == "mesh"],
         "scatters": [p for p in payload if p["kind"] == "scatter"],
     }
