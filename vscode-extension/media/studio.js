@@ -3,20 +3,44 @@
 const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
-const rendererEl = document.getElementById("renderer");
+const modeEditEl = document.getElementById("modeEdit");
+const modeChartEl = document.getElementById("modeChart");
 
-/** Which renderer is drawing. The scene graph is what the studio uses; Plotly
- *  stays on the menu because it is the only way to compare when something
- *  looks wrong, and looking wrong is how most of this got found. */
+/** Whether the editable view is drawing.
+ *
+ * The two are named for what they let you do, not for the library behind
+ * them: the chart's defining property, from here, is that it cannot be
+ * picked or dragged. It stays on offer because it is the only way to answer
+ * "is this drawing right?", which has had a real answer several times.
+ */
 function drawingScene() {
-  return rendererEl.value === "scene";
+  return modeEditEl.classList.contains("on");
 }
+
+function setMode(editing) {
+  if (editing === drawingScene()) return;
+  show("");
+  modeEditEl.classList.toggle("on", editing);
+  modeChartEl.classList.toggle("on", !editing);
+  showSceneGraphControls(editing);
+  canvasEl.innerHTML = ""; // the two renderers do not share a canvas
+  say("Loading…");
+  refreshPaced();
+}
+
+modeEditEl.addEventListener("click", () => setMode(true));
+modeChartEl.addEventListener("click", () => setMode(false));
 const fitEl = document.getElementById("fit");
 const playEl = document.getElementById("play");
 const frameEl = document.getElementById("frame");
 const gizmoEl = document.getElementById("gizmo");
 const gizmoLabelEl = document.getElementById("gizmoLabel");
 const controlsEl = document.getElementById("controls");
+const axisEl = document.getElementById("axis");
+const snapEl = document.getElementById("snap");
+const projectionEl = document.getElementById("projection");
+const selectionEl = document.getElementById("selection");
+const readoutEl = document.getElementById("readout");
 const axesEl = document.getElementById("axes");
 const axesLabelEl = document.getElementById("axesLabel");
 let nextReqId = 1;
@@ -48,7 +72,8 @@ function rpc(method, params) {
 /** Fitting and dragging belong to the scene graph; plotly has its own reset
  *  and nothing to drag. */
 function showSceneGraphControls(shown) {
-  fitEl.hidden = !shown;
+  for (const el of [fitEl, axisEl, snapEl, projectionEl]) el.hidden = !shown;
+  selectionEl.hidden = !shown || selectedIds.length < 2;
   if (!shown) {
     playEl.hidden = true; // put back by the next scene that has one
     frameEl.hidden = true;
@@ -73,7 +98,7 @@ async function refreshFigure() {
   // everything the figure does.
   if (drawingScene()) {
     if (!window.scene3d) {
-      statusEl.textContent = "Scene graph unavailable (module failed to load)";
+      say("Scene graph unavailable (module failed to load)");
       return;
     }
     const payload = await rpc("get_scene", {});
@@ -81,13 +106,15 @@ async function refreshFigure() {
     showSceneGraphControls(true);
     patterned = new Set(payload.patterned);
     parametric = payload.parametric || {};
-    statusEl.textContent = `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`;
+    say(`Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`);
     applyGizmo(); // the selection may have become (or stopped being) patterned
     showAxes();
-    const frames = window.scene3d.frameCount();
-    playEl.hidden = frames < 2; // nothing to run
-    frameEl.hidden = frames < 2;
-    frameEl.max = String(frames - 1);
+    // Whether there is anything to play is a question the paths answer; how
+    // many frames there are is not. Magpylib composes the run, and past a
+    // point it subsamples, so the count comes back with the first frame.
+    const movable = window.scene3d.frameCount() > 1;
+    playEl.hidden = !movable;
+    frameEl.hidden = !movable;
     return;
   }
   // Plotly draws no handles and cannot be picked, so it has no animation
@@ -107,7 +134,7 @@ async function refreshFigure() {
     frames: figure.frames || [],
     config: { responsive: true },
   });
-  statusEl.textContent = "Ready";
+  say("Read only — switch to Edit to pick and drag");
 }
 
 /** Redraw for the newest state, never for a queue of stale ones.
@@ -134,7 +161,7 @@ async function refreshPaced() {
       await refreshFigure();
     } while (redrawDue);
   } catch (err) {
-    statusEl.textContent = String(err);
+    say(String(err));
   } finally {
     redrawing = false;
   }
@@ -166,48 +193,65 @@ frameEl.addEventListener("input", () => {
  */
 let playing = false;
 let frameInFlight = false;
+let playStartedAt = 0;
 
 function playPause() {
-  const frames = window.scene3d?.frameCount() ?? 1;
-  if (frames < 2) {
-    statusEl.textContent = "Nothing here has a path to play";
+  if ((window.scene3d?.frameCount() ?? 1) < 2) {
+    say("Nothing here has a path to play");
     return;
   }
   playing = window.scene3d.setPlaying(!playing);
   playEl.textContent = playing ? "\u23f8 Pause" : "\u25b6 Play";
   if (playing) {
-    statusEl.textContent = "Capturing the run\u2026"; // the first one is the slow one
+    say("Capturing the run\u2026"); // the first one is slow
+    show("");
+    playStartedAt = 0; // set from the first frame, once its timing is known
     showFrame(Number(frameEl.value));
   }
 }
 
-/** Draw one frame, and queue the next while it is still running.
+/** Draw one frame, and take the next from the clock.
  *
- * Paced the same way as everything else here: one request in flight, and the
- * clock is whatever the engine manages rather than a rate set in advance. A
- * scene whose frames are expensive plays slower instead of falling behind.
+ * A run lasts what magpylib says it lasts -- `animation.time`, five seconds
+ * by default -- however many steps it has, so the frame to show is whichever
+ * one that many seconds is *up to* rather than simply the next one. A scene
+ * whose frames are slow drops some and still finishes on time, which is what
+ * an animation does; asking for every one in turn would instead stretch a
+ * five second sweep into however long the engine took.
  */
 async function showFrame(index) {
   if (frameInFlight) return;
   frameInFlight = true;
+  let payload = null;
   try {
-    const payload = await rpc("get_scene", { frame: index });
+    payload = await rpc("get_scene", { frame: index });
     window.scene3d.renderFrame(payload);
     frameEl.max = String(payload.frames - 1);
     frameEl.value = String(payload.frame);
-    statusEl.textContent = `${playing ? "Playing" : "Frame"} ${String(
-      payload.frame + 1,
-    ).padStart(String(payload.frames).length)} of ${payload.frames}`;
+    show(
+      `${playing ? "Playing" : "Frame"} ${String(payload.frame + 1).padStart(
+        String(payload.frames).length,
+      )} of ${payload.frames}`,
+    );
   } catch (err) {
     playing = false;
-    statusEl.textContent = String(err);
+    say(String(err));
   } finally {
     frameInFlight = false;
   }
-  if (playing) {
-    const frames = Number(frameEl.max) + 1;
-    showFrame((Number(frameEl.value) + 1) % frames);
-  }
+  if (!playing || !payload) return;
+
+  const perFrame = (payload.duration * 1000) / payload.frames;
+  if (!playStartedAt) playStartedAt = performance.now() - payload.frame * perFrame;
+  const due = playStartedAt + (payload.frame + 1) * perFrame;
+  setTimeout(
+    () => {
+      if (!playing) return;
+      const elapsed = performance.now() - playStartedAt;
+      showFrame(Math.floor(elapsed / perFrame) % payload.frames);
+    },
+    Math.max(0, due - performance.now()),
+  );
 }
 
 // Clicking an object here selects it everywhere else: the host owns the
@@ -228,11 +272,11 @@ canvasEl.addEventListener("objectpick", (event) => {
   vscodeApi.postMessage({ type: "selectObject", objectId });
 });
 
-/** Say how many are selected, since the sidebar can only show the one. */
+/** How many are selected, since the sidebar can only show the one. */
 function showSelection() {
-  if (selectedIds.length > 1) {
-    statusEl.textContent = `${selectedIds.length} objects selected — drag moves them together`;
-  }
+  selectionEl.hidden = selectedIds.length < 2;
+  selectionEl.textContent = `${selectedIds.length} selected`;
+  selectionEl.title = "Dragging moves them together (\u2318 click to add)";
 }
 
 // A drag is an edit like any other, so it goes to the host rather than
@@ -313,8 +357,12 @@ async function redrawAroundDrag() {
   dragging.tooSlow = performance.now() - started > REDRAW_BUDGET_MS;
 }
 
-/** The pose being dragged, in the status bar. It sits last in the bar, so a
- *  number growing a digit moves nothing but itself. */
+/** The pose being dragged, over the view rather than in the bar.
+ *
+ * These change every pointer move, and the bar is also carrying progress and
+ * errors and whether the scene loaded -- one line cannot do both. Here they
+ * sit beside the thing they describe.
+ */
 function showPose(pose) {
   const edit = pose.edits[0];
   const extra = pose.edits.length > 1 ? `  (+${pose.edits.length - 1} more)` : "";
@@ -349,7 +397,21 @@ function showPose(pose) {
         : `${edit.shape.attr} ${numbers([].concat(value), 4, 9)} m`,
     );
   }
-  statusEl.textContent = `${edit.objectId} — ${parts.join("   ")}${extra}`;
+  show(`${edit.objectId} — ${parts.join("   ")}${extra}`);
+}
+
+/** Say something in the bar. The full text goes in the tooltip too: the
+ *  message is what gives up width when the panel is narrow, so what is on
+ *  screen may be cut to an ellipsis. */
+function say(text) {
+  statusEl.textContent = text;
+  statusEl.title = text;
+}
+
+/** Put something in the corner of the view, or take it away. */
+function show(text) {
+  readoutEl.hidden = !text;
+  readoutEl.textContent = text || "";
 }
 
 function sendPose() {
@@ -368,19 +430,30 @@ function sendPose() {
  * of the ring and leave the rest. Better to say so than to do it.
  */
 function applyGizmo() {
-  const blocked = patterned.has(selectedIds[0]);
+  const blocked = selectedIds.some((id) => patterned.has(id));
   gizmoEl.disabled = blocked;
   const wanted = blocked ? "none" : gizmoEl.value;
   const inEffect = window.scene3d?.setGizmoMode(wanted);
+  // The reason a control will not do something belongs on that control, not
+  // in the one line the live numbers need: a sentence there is gone by the
+  // next redraw anyway, and the tooltip is still there when it is wanted.
   if (blocked) {
-    statusEl.textContent = `${selectedIds[0]} is patterned — dragging it would leave its copies behind`;
+    gizmoEl.title = `${selectedIds[0]} is patterned — dragging it would leave its copies behind`;
   } else if (inEffect !== wanted) {
-    // asked to resize something with no size to drag
-    gizmoEl.value = inEffect;
-    statusEl.textContent = selectedIds[0]
+    gizmoEl.value = inEffect; // asked to resize something with no size to drag
+    gizmoEl.title = selectedIds[0]
       ? `${selectedIds[0]} has no single dimension to drag — resize it in the Inspector`
-      : "Select an object to resize";
+      : "Select an object first";
+    notice(gizmoEl.title); // said once, where it fades, since a key was pressed
+  } else {
+    gizmoEl.title = "What a drag does (W, E, R, P, Q)";
   }
+}
+
+/** A passing remark, in VS Code's own status bar, which expires by itself
+ *  rather than sitting on top of the numbers. */
+function notice(text) {
+  vscodeApi.postMessage({ type: "notice", text });
 }
 
 /** Show the axes the mode in force actually drags along.
@@ -401,6 +474,33 @@ gizmoEl.addEventListener("change", () => {
   applyGizmo();
   showAxes();
 });
+
+/** Restrict the handles to one axis, or free them, and show which on the
+ *  button rather than announcing it. */
+function constrain(axis) {
+  window.scene3d?.constrainAxis(axis);
+  axisEl.textContent = axis ? axis.toUpperCase() : "XYZ";
+  axisEl.classList.toggle("on", Boolean(axis));
+}
+
+function toggleSnap() {
+  const step = window.scene3d?.setSnapping(!snapping);
+  snapping = step !== null && step !== undefined;
+  snapEl.classList.toggle("on", snapping);
+  snapEl.title = snapping
+    ? `Snapping to ${Number(step.toPrecision(3))} m and 15\u00b0 (S)`
+    : "Snap to round steps (S)";
+}
+
+function toggleProjection() {
+  const kind = window.scene3d?.toggleProjection();
+  projectionEl.textContent = kind === "parallel" ? "Parallel" : "Persp";
+  projectionEl.classList.toggle("on", kind === "parallel");
+}
+
+axisEl.addEventListener("click", () => constrain(null));
+snapEl.addEventListener("click", toggleSnap);
+projectionEl.addEventListener("click", toggleProjection);
 
 axesEl.addEventListener("change", () => {
   window.scene3d?.setSpace(axesEl.value);
@@ -427,17 +527,12 @@ window.addEventListener("keydown", (event) => {
     gizmoEl.value = GIZMO_KEYS[key];
     applyGizmo();
   } else if ("xyz".includes(key)) {
-    scene3d?.constrainAxis(key);
-    statusEl.textContent = `Dragging along ${key.toUpperCase()} only — A for all axes`;
+    constrain(key);
   } else if (key === "a") {
-    scene3d?.constrainAxis(null);
-    statusEl.textContent = "Dragging along all axes";
+    constrain(null);
   } else if (key === "l") {
-    const space = scene3d?.toggleSpace();
+    scene3d?.toggleSpace();
     showAxes();
-    statusEl.textContent = `Handles follow the ${
-      space === "local" ? "object's own" : "world"
-    } axes`;
   } else if (key === "h") {
     // the host owns visibility and knows the current state; hidden objects
     // are not drawn, so showing one again is the Scene tree's job
@@ -451,13 +546,9 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault(); // space would otherwise scroll or press a button
     playPause();
   } else if (key === "s") {
-    const step = scene3d?.setSnapping(!snapping);
-    snapping = step !== null && step !== undefined;
-    statusEl.textContent = snapping
-      ? `Snapping to ${Number(step.toPrecision(3))} m and 15\u00b0`
-      : "Snapping off";
+    toggleSnap();
   } else if (event.key === "5") {
-    statusEl.textContent = `Viewing in ${scene3d?.toggleProjection()} projection`;
+    toggleProjection();
   } else if (event.key === "Tab") {
     // the panel has nothing else worth tabbing through, and walking the
     // scene is worth more here than moving focus between two dropdowns
@@ -471,13 +562,6 @@ window.addEventListener("keydown", (event) => {
   } else if (AXIS_VIEWS[event.key]) {
     scene3d?.axisView(...AXIS_VIEWS[event.key]);
   }
-});
-
-rendererEl.addEventListener("change", () => {
-  showSceneGraphControls(drawingScene());
-  canvasEl.innerHTML = ""; // the two renderers do not share a canvas
-  statusEl.textContent = "Loading…";
-  refreshPaced();
 });
 
 window.addEventListener("message", (event) => {
@@ -500,6 +584,8 @@ window.addEventListener("message", (event) => {
     selectedIds = message.objectId ? [message.objectId] : [];
     window.scene3d?.highlight(selectedIds);
     applyGizmo();
+    showSelection();
+    show(""); // the last drag's numbers were about something else
   } else if (message.type === "refresh") {
     // Pushed by the host after any edit (inspector, chat tool, tree, a
     // variable slider being dragged) — the one that can arrive fastest.

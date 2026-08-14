@@ -8,19 +8,38 @@ body {
 body {
   display: flex;
   flex-direction: column;
+  position: relative; /* the readout hangs in the view's top corner */
 }
 #canvas {
   flex: 1;
   min-height: 0;
 }
+/* Narrow panels are the normal case in a side-by-side layout, and a row that
+   cannot wrap loses whatever does not fit -- which was the controls, since
+   the message beside them can be any length. So: the controls never shrink
+   and never disappear, the message gives up its width first and truncates,
+   and only when even the controls will not fit does the bar take a second
+   line. Growing a line moves the view, which is worth it to keep a control
+   that would otherwise be gone. */
 #statusbar {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   align-items: center;
   padding: 2px 10px;
   font-size: 11px;
   opacity: 0.8;
   border-top: 1px solid var(--vscode-panel-border, #444);
+}
+#statusbar > * {
+  flex: 0 0 auto;
+}
+#status {
+  flex: 1 1 6em;
+  min-width: 0; /* a flex item will not shrink below its content without it */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #statusbar label {
   display: flex;
@@ -28,12 +47,27 @@ body {
   align-items: center;
   cursor: pointer;
 }
-/* The pose readout changes every pointer move, so its digits must all be the
-   same width — in a proportional font a 1 is narrower than a 0, and the text
-   shuffles on the spot as the numbers run. */
-#status {
+/* The live numbers sit over the view, by what they describe, rather than in
+   the bar with the progress and the errors: they change every pointer move,
+   and a line that is also saying other things cannot hold them.
+
+   Digits all one width — in a proportional font a 1 is narrower than a 0, so
+   the text shuffles on the spot as the numbers run — and `pre` to keep the
+   padding that holds the columns still. */
+#readout {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  white-space: pre; /* keep the padding that holds the columns still */
+  white-space: pre;
+  opacity: 0.9;
+  pointer-events: none; /* scenery: the view underneath is what is being used */
 }
 
 /* The key list opens *above* the bar rather than inside it: a status bar that
@@ -73,6 +107,42 @@ body {
 }
 #controls span kbd {
   margin: 0 2px;
+}
+/* Two halves of one control, so which is active reads at a glance. The
+   names say what each does rather than which library draws it: what matters
+   about the chart is that it cannot be touched. */
+#mode {
+  display: inline-flex;
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 3px;
+  overflow: hidden;
+}
+#statusbar #mode button {
+  padding: 0 8px;
+  border-radius: 0;
+  opacity: 0.7;
+}
+#statusbar #mode button.on {
+  background: var(--vscode-button-background, rgba(128, 128, 128, 0.35));
+  color: var(--vscode-button-foreground, inherit);
+  opacity: 1;
+}
+/* A state that is on looks pressed, so the bar can hold it without spending
+   a sentence saying so. */
+#statusbar button.on {
+  background: var(--vscode-button-background, rgba(128, 128, 128, 0.35));
+  color: var(--vscode-button-foreground, inherit);
+  opacity: 1;
+}
+#statusbar #axis,
+#statusbar #snap,
+#statusbar #projection {
+  border: 1px solid var(--vscode-panel-border, #444);
+  padding: 0 6px;
+  min-width: 2.4em;
+}
+#selection {
+  opacity: 0.8;
 }
 #statusbar input[type="range"] {
   width: 110px;

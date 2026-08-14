@@ -1319,6 +1319,11 @@ function adoptStudioPanel(
       void toggleVisibleFromPanel(context, message.objectId);
     } else if (message.type === 'isolateObject') {
       void isolateFromPanel(context, message.objectId);
+    } else if (message.type === 'notice') {
+      // Passing remarks go where VS Code puts them, and expire on their own.
+      // The panel's own line is for the numbers a drag is changing, which are
+      // still changing after any of these has stopped being news.
+      vscode.window.setStatusBarMessage(`Magpylib Studio: ${message.text}`, 5000);
     } else if (message.type === 'dragStart') {
       void beginDragFromPanel(context, message);
     } else if (message.type === 'ready') {
@@ -4045,14 +4050,14 @@ export function createWebviewHtml(
 </head>
 <body>
   <div id="canvas"></div>
+  <div id="readout" hidden></div>
   <div id="statusbar">
-    <label
-      >Draw with
-      <select id="renderer">
-        <option value="scene">the scene graph</option>
-        <option value="plotly">Plotly</option>
-      </select>
-    </label>
+    <span id="mode">
+      <button id="modeEdit" type="button" class="on"
+        title="Draw a scene you can pick and drag">Edit</button
+      ><button id="modeChart" type="button"
+        title="Draw a Plotly chart: read only">Chart</button>
+    </span>
     <button id="fit" type="button" hidden>Fit view</button>
     <button id="play" type="button" hidden title="Run the paths (space)">
       &#9654; Play
@@ -4076,6 +4081,13 @@ export function createWebviewHtml(
         <option value="local">object axes (L)</option>
       </select>
     </label>
+    <button id="axis" type="button" hidden
+      title="Which axes a drag runs along (X, Y, Z; A for all)">XYZ</button>
+    <button id="snap" type="button" hidden
+      title="Snap to round steps (S)">Snap</button>
+    <button id="projection" type="button" hidden
+      title="Perspective or parallel projection (5)">Persp</button>
+    <span id="selection" hidden></span>
     <details id="controls" hidden>
       <summary>Keys</summary>
       <div>
