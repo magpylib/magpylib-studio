@@ -24,9 +24,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 # Works with released magpylib; `magpylib_studio/style_compat.py` fills in the
-# style APIs (schema/set/set_values) that only the property-tree branch has.
+# style APIs (schema/set/set_values) that only magpylib's main has so far.
 # That branch additionally enables path-valued properties (current=[...]):
-#   pip install "magpylib @ git+https://github.com/magpylib/magpylib@feat/improve-style"
+#   pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
 # The 3D scene graph additionally needs magpylib's display-backend API, which
 # is newer than 5.2.3. Without it the studio runs as before and the view draws
 # the plotly figure; nothing else here depends on it.

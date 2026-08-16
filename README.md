@@ -45,22 +45,23 @@ extension rather than use it, see [Development](#development).
 pip install magpylib-studio
 ```
 
-That is enough: the engine works with **released magpylib** (≥ 5.2). The
-optional [property-tree branch][branch] adds a first-class style API and
-path-valued physics properties (`current=[100, 200, 300]`):
+That is enough: the engine works with **released magpylib** (≥ 5.2).
+[magpylib's main][branch], not yet released, adds a first-class style API,
+path-valued physics properties (`current=[100, 200, 300]`) and the
+display-backend API the editable 3D view is built on:
 
 ```sh
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@feat/improve-style"
+pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
 ```
 
 `magpylib_studio/style_compat.py` detects which one you have. On released
 magpylib it reproduces the four style operations the engine needs from
 `style.update()` / `style.as_dict()`, and falls back to a generated copy of the
-branch's JSON Schema (`style_schemas.json`) — the two style trees are the same
+main's JSON Schema (`style_schemas.json`) — the two style trees are the same
 shape, so the inspector keeps real widgets (enum dropdowns, ranges, colour
 pickers) either way. The test suite runs against both.
 
-[branch]: https://github.com/magpylib/magpylib/tree/feat/improve-style
+[branch]: https://github.com/magpylib/magpylib/tree/main
 
 ### Development
 

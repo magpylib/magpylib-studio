@@ -20,20 +20,23 @@ jobs:
       fail-fast: false
       matrix:
         # `released` is what `pip install magpylib-studio` gets anyone;
-        # `property-tree` is the branch that adds the first-class style API.
-        # style_compat.py exists to make both work, so both are tested.
-        magpylib: [released, property-tree]
+        # `main` is magpylib unreleased, which is where the first-class style
+        # API lives and, since it was merged, the display-backend API the 3D
+        # scene graph is built on. The studio has to work either way --
+        # style_compat.py fills in the first, and the scene graph steps aside
+        # without the second -- so both are tested.
+        magpylib: [released, main]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -e ".[dev]"
-      - name: Switch to the property-tree branch
-        if: matrix.magpylib == 'property-tree'
+      - name: Switch to magpylib main
+        if: matrix.magpylib == 'main'
         run:
           pip install "magpylib @
-          git+https://github.com/magpylib/magpylib@feat/improve-style"
+          git+https://github.com/magpylib/magpylib@main"
       - run: python -m pytest -q
 
   extension:
