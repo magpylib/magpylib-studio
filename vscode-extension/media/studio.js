@@ -117,7 +117,18 @@ async function refreshFigure() {
       say("Scene graph unavailable (module failed to load)");
       return;
     }
-    const payload = await rpc("get_scene", {});
+    let payload;
+    try {
+      payload = await rpc("get_scene", {});
+    } catch (err) {
+      // The engine cannot draw a scene graph -- an older magpylib, most
+      // likely, whose display-backend API this needs. The chart is what the
+      // panel drew before any of this existed, so fall back to it and say
+      // why rather than sitting in front of an empty view.
+      setMode(false);
+      say(String(err.message || err));
+      return;
+    }
     if (drawingScene() !== editing) return; // switched while we were away
     window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
     showSceneGraphControls(true);

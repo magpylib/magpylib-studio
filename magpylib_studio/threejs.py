@@ -29,7 +29,16 @@ import math
 
 import magpylib as magpy
 import numpy as np
-from magpylib.graphics.backend import DisplayBackend
+
+try:
+    from magpylib.graphics.backend import DisplayBackend
+except ImportError:  # pragma: no cover - depends on the magpylib installed
+    #: The public display-backend API landed in magpylib after 5.2.3, and this
+    #: module is the only thing here that needs it. Everything else the studio
+    #: does works with the released version, so this is not a hard dependency:
+    #: without it the scene graph is unavailable and the view draws the Plotly
+    #: figure, which is what it drew before any of this existed.
+    DisplayBackend = None
 
 #: Magpylib's `line_width` and `marker_size` are nominal: every backend scales
 #: them into its own units, and nothing in the contract says what a width of 2
@@ -226,6 +235,20 @@ def _scatter_payload(trace):
     }
 
 
+#: What to say when the installed magpylib cannot do this, once, in the words
+#: of the thing to do about it.
+UNAVAILABLE = (
+    "The scene graph needs magpylib's display-backend API, which is newer "
+    "than the installed magpylib. Draw with the chart instead, or install "
+    "magpylib from git."
+)
+
+
+def available():
+    """Whether the installed magpylib can hand out a scene to convert."""
+    return DisplayBackend is not None
+
+
 def _capture(objects, animation=False, **kwargs):
     """The `Scene` magpylib would hand a display backend, for `objects`.
 
@@ -235,6 +258,8 @@ def _capture(objects, animation=False, **kwargs):
     read from the field, so they turn as the magnet that makes them turns,
     and no amount of moving meshes about will show it.
     """
+    if not available():
+        raise RuntimeError(UNAVAILABLE)
     captured = {}
     if _BACKEND not in DisplayBackend.backends:
         magpy.register_backend(
