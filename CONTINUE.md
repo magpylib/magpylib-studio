@@ -576,6 +576,16 @@ Run the suite against both: `.venv/bin/python -m pytest -q` (branch) and a
 second venv with released magpylib (49 passed, 1 skipped — the property-path
 test skips via `supports_property_paths()`).
 
+One more difference, found the hard way and silent in the direction that
+matters: **`show(backend="plotly", plotly_renderer=...)` does not reach the
+figure on 5.2.3.** The `<backend>_<option>` passthrough arrived with the
+display-backend registry, which that version does not have, so the argument is
+dropped — no warning, no error, and plotly opens a browser tab as if nothing
+had been asked for. Measured both ways, 0 files against 2. That is why
+`viewer.draw_here()` sets plotly's own default renderer rather than passing one
+through magpylib: it is the only route that works on every version this package
+supports.
+
 ## Key design decisions (keep these)
 
 1. **The scene document is the source of truth.** Every edit updates the live

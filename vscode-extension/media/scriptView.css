@@ -1,0 +1,29 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: var(--vscode-font-family, sans-serif);
+  color: var(--vscode-foreground);
+}
+body {
+  display: flex;
+  flex-direction: column;
+}
+#canvas {
+  flex: 1;
+  min-height: 0;
+}
+/* The script the figure came from. It is the only thing this panel can say
+   about itself that the tab title does not already say, and it is what tells
+   two panels of the same scene apart -- so it stays visible rather than
+   fading after a moment the way the studio's own status line does. */
+#status {
+  padding: 2px 10px;
+  font-size: 11px;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* a long path truncates at the front, keeping the name */
+  text-align: left;
+}

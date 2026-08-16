@@ -8,6 +8,7 @@ import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 import { Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
+import { activateScriptViewer } from './scriptViewer';
 import {
   iconFor,
   isOperation,
@@ -1896,6 +1897,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.environmentVariableCollection.description =
     'Magpylib Studio: tells a script run here which window to draw in';
   context.environmentVariableCollection.replace('MAGPYLIB_STUDIO_DROP', drop);
+  activateScriptViewer(context);
 
   const tree = new SceneTreeProvider(
     context.extensionUri,

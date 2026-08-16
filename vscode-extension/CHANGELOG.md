@@ -17,6 +17,20 @@ All notable changes to the Magpylib Studio extension.
 
 ### Added
 
+- **A script's own `show()` can draw in this window.** Call
+  `magpylib_studio.viewer.draw_here()` once at the top of a magpylib script and
+  run it from a terminal here — the Run button, F5 and the integrated terminal
+  all work — and its plotly figures open in a panel beside your editor instead
+  of a browser tab. One panel per `show()` call in the script, and a rerun
+  updates the panels already open, keeping the camera you left them at, rather
+  than opening a second set.
+
+  These panels are read only: no engine stands behind them, and by the time one
+  draws there is usually no script either. Nothing draws here unless the script
+  asks for it by name — the window tells a script _where_ it is, never _what_ to
+  draw with, because a `pytest` run in the same terminal is indistinguishable
+  from a person running a script.
+
 - **The 3D view can be worked in.** Click an object to select it anywhere else
   in the studio, ⌘-click to add to the selection, and drag the handles to
   **move** (`W`), **turn** (`E`), **resize** (`R`) or **aim a polarization**
