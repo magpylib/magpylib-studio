@@ -23,9 +23,11 @@ repos:
       - id: check-yaml
       - id: check-json
         # VS Code's own config files are JSONC — comments and all — which it
-        # reads happily and a strict JSON parser does not. The schema files
-        # and package.json, which have to be real JSON, are still checked.
-        exclude: ^\.vscode/|/jsconfig\.json$
+        # reads happily and a strict JSON parser does not. Any .vscode/, not
+        # just the root one: sandbox/ has its own, naming the interpreter the
+        # Extension Development Host should use. The schema files and
+        # package.json, which have to be real JSON, are still checked.
+        exclude: (^|/)\.vscode/|/jsconfig\.json$
       - id: debug-statements
       - id: end-of-file-fixer
       - id: mixed-line-ending
@@ -39,7 +41,7 @@ repos:
         args: [--prose-wrap=always]
         # VS Code's own config files are JSONC, which prettier parses as
         # strict JSON and chokes on.
-        exclude: ^\.vscode/|/jsconfig\.json$
+        exclude: (^|/)\.vscode/|/jsconfig\.json$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.15.15"

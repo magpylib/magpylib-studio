@@ -1,0 +1,12 @@
+{
+  // The Extension Development Host opens this folder, and this folder has no
+  // environment of its own — so the Python extension picks whatever python is
+  // on PATH, which on macOS is the command-line-tools one with no magpylib in
+  // it. Point it at the repo's venv, where both magpylib and the engine are
+  // installed, and the Run button, F5 and a new terminal all work in the host
+  // without anyone selecting an interpreter first.
+  //
+  // Only consulted while no interpreter has been chosen for this folder: if
+  // the host is already remembering one, change it from the picker instead.
+  "python.defaultInterpreterPath": "${workspaceFolder}/../.venv/bin/python"
+}
