@@ -51,7 +51,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: hynek/build-and-inspect-python-package@v2
+      # Pinned to a commit, and by full version: v3 is not force-tagged,
+      # on purpose. v3 is what carries twine 7, which is the first that
+      # accepts the metadata 2.5 hatchling 1.30 emits -- v2's twine 6.2
+      # rejected our own wheel as invalid.
+      - uses: hynek/build-and-inspect-python-package@2abe76da66d0a6a4a227101f9348ee855797cfa5 # v3.0.1
 
   publish:
     needs: [test, dist]
