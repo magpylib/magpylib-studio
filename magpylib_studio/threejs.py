@@ -136,6 +136,8 @@ def pin_scene_units():
     shift the SI prefix that scales *everything*. Measured in the prototype: a
     magnet's own vertices changed by 1000x because an unrelated object moved.
     """
+    if not available():
+        raise RuntimeError(UNAVAILABLE)
     magpy.defaults.display.units.length = "m"
     magpy.defaults.display.style.sensor.sizemode = "absolute"
     magpy.defaults.display.style.dipole.sizemode = "absolute"
@@ -245,8 +247,16 @@ UNAVAILABLE = (
 
 
 def available():
-    """Whether the installed magpylib can hand out a scene to convert."""
-    return DisplayBackend is not None
+    """Whether the installed magpylib can do what the scene graph needs.
+
+    Two things, both newer than 5.2.3 and both from the same magpylib
+    release: a backend can be registered and handed a `Scene`, and the length
+    unit the scene is drawn in can be pinned. Without the second the geometry
+    follows the scene extent rather than the objects, which is the thing a
+    kept scene graph cannot survive -- so it is as much a requirement as the
+    first, and checked here rather than failing later inside a redraw.
+    """
+    return DisplayBackend is not None and hasattr(magpy.defaults.display, "units")
 
 
 def _capture(objects, animation=False, **kwargs):
