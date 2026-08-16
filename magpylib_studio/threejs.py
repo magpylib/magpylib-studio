@@ -385,9 +385,9 @@ def scene_payload(objects, live=None, derived=None):
             if centroid is None
             else np.atleast_2d(np.asarray(centroid, dtype=float))[-1].tolist()
         )
-        orientations[key] = np.atleast_2d(
-            obj.orientation.as_rotvec(degrees=True)
-        )[-1].tolist()
+        orientations[key] = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))[
+            -1
+        ].tolist()
         # The whole path, when there is one. A drag reports the pose it
         # reached, and reporting one pose for an object that has a path is
         # magpylib being told the path is now a single point -- which is how

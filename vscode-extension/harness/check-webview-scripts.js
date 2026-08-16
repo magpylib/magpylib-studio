@@ -37,7 +37,9 @@ for (const file of fs
     console.log(`ok    media/${file} (${source.split("\n").length} lines)`);
   } catch (err) {
     failures += 1;
-    const detail = err.stderr ? String(err.stderr).trim().split("\n")[0] : err.message;
+    const detail = err.stderr
+      ? String(err.stderr).trim().split("\n")[0]
+      : err.message;
     console.log(`FAIL  media/${file}: ${detail}`);
   }
 }

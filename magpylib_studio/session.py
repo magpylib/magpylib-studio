@@ -2354,7 +2354,10 @@ class MagpylibStudioSession:
             # they are, and only per frame.
             if self._animated is None:
                 steps = max(
-                    (len(np.atleast_2d(np.asarray(obj.position))) for obj in self._objs.values()),
+                    (
+                        len(np.atleast_2d(np.asarray(obj.position)))
+                        for obj in self._objs.values()
+                    ),
                     default=1,
                 )
                 self._animated = threejs.capture_frames(self.scene, steps)

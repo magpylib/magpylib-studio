@@ -55,8 +55,8 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   over the other variables (`360 / n`), with the allowed operators, functions
   and constants listed in the panel and checked as you type. `⋯` lists what a
   variable is — its name, its limits, its kind — each entry showing what it
-  holds; renaming from there rewrites everything written in terms of it.
-  **Sweep a Variable…** plots the field against one in the Field view.
+  holds; renaming from there rewrites everything written in terms of it. **Sweep
+  a Variable…** plots the field against one in the Field view.
 - **Undo view** — the session's checkpoints, newest first: click any to jump the
   scene there, backwards or forwards. This is _not_ the construction history
   above; it is document snapshots, and it is gone on reload.

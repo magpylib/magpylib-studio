@@ -120,7 +120,9 @@ function constrainScale(node, constraint) {
   const { x, y, z } = node.scale;
   if (constraint === "uniform") {
     // whichever axis was pulled furthest from 1 is the one being dragged
-    const pulled = [x, y, z].reduce((a, b) => (Math.abs(b - 1) > Math.abs(a - 1) ? b : a));
+    const pulled = [x, y, z].reduce((a, b) =>
+      Math.abs(b - 1) > Math.abs(a - 1) ? b : a,
+    );
     node.scale.setScalar(pulled);
   } else if (constraint === "xy") {
     const radial = Math.abs(x - 1) > Math.abs(y - 1) ? x : y;
@@ -131,7 +133,8 @@ function constrainScale(node, constraint) {
 /** The parameter value a scale comes to, from the one the drag started at. */
 function resized(scale, shape, centre) {
   if (shape.constraint === "uniform") return shape.value * scale.x;
-  if (shape.constraint === "xy") return [shape.value[0] * scale.x, shape.value[1] * scale.z];
+  if (shape.constraint === "xy")
+    return [shape.value[0] * scale.x, shape.value[1] * scale.z];
   if (shape.constraint === "vertices") {
     // A mesh has no dimension; the array is the parameter. It scales about
     // the centroid, because that is the point the handles are on -- for a
@@ -143,7 +146,11 @@ function resized(scale, shape, centre) {
       centre.z + (z - centre.z) * scale.z,
     ]);
   }
-  return [shape.value[0] * scale.x, shape.value[1] * scale.y, shape.value[2] * scale.z];
+  return [
+    shape.value[0] * scale.x,
+    shape.value[1] * scale.y,
+    shape.value[2] * scale.z,
+  ];
 }
 
 /** The drag handles, and the pose a drag reports as it goes.
@@ -174,7 +181,9 @@ function makeGizmo(canvasEl) {
   const report = (preview) => {
     const node = gizmo.object;
     if (!node || !from) return;
-    const turned = node.quaternion.clone().multiply(from.quaternion.clone().invert());
+    const turned = node.quaternion
+      .clone()
+      .multiply(from.quaternion.clone().invert());
 
     if (from.polarization) {
       // The drag turns the vector, not the magnet. magpylib keeps it in the
@@ -190,7 +199,10 @@ function makeGizmo(canvasEl) {
         .toArray();
       canvasEl.dispatchEvent(
         new CustomEvent("objecttransform", {
-          detail: { preview, edits: [{ objectId: primary, polarization: aimed }] },
+          detail: {
+            preview,
+            edits: [{ objectId: primary, polarization: aimed }],
+          },
         }),
       );
       return;
@@ -214,13 +226,17 @@ function makeGizmo(canvasEl) {
       const placed = rigid(from.placed[objectId]);
       if (!placed.equals(from.placed[objectId])) {
         edit.position = path
-          ? path.position.map((p) => rigid(new THREE.Vector3().fromArray(p)).toArray())
+          ? path.position.map((p) =>
+              rigid(new THREE.Vector3().fromArray(p)).toArray(),
+            )
           : placed.toArray();
       }
       if (turning) {
         // every frame turns by the same amount, so a path keeps its shape
         edit.orientation = path
-          ? path.orientation.map((r) => rotvecOf(turned.clone().multiply(quaternionOf(r))))
+          ? path.orientation.map((r) =>
+              rotvecOf(turned.clone().multiply(quaternionOf(r))),
+            )
           : rotvecOf(turned.clone().multiply(from.orientations[objectId]));
       }
       if (from.shape && !node.scale.equals(UNSCALED)) {
@@ -248,14 +264,17 @@ function makeGizmo(canvasEl) {
       // Dragging the rig carries everything selected; dragging an object's
       // own node carries that one. Either way it is one rigid motion, and the
       // only difference is how many objects come along with it.
-      const objectIds = node === rig ? [...selectedIds] : [node.userData.objectId];
+      const objectIds =
+        node === rig ? [...selectedIds] : [node.userData.objectId];
       const primary = objectIds[0];
       const orientation = quaternionOf(orientations[primary]);
       const here = node.getWorldPosition(new THREE.Vector3());
       const placed = {};
       const turns = {};
       for (const objectId of objectIds) {
-        placed[objectId] = new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]);
+        placed[objectId] = new THREE.Vector3().fromArray(
+          anchors[objectId] || [0, 0, 0],
+        );
         turns[objectId] = quaternionOf(orientations[objectId]);
       }
       if (node === rig) {
@@ -619,7 +638,9 @@ function sceneSphere(objectId) {
  * that repainted the object would overwrite what the user is looking at.
  */
 function highlight(objectIds) {
-  selectedIds = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(Boolean);
+  selectedIds = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(
+    Boolean,
+  );
   for (const box of outlines) {
     scene.remove(box);
     box.dispose();
@@ -786,7 +807,11 @@ function textSprite(text, color, height) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }),
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+    }),
   );
   sprite.scale.set((height * canvas.width) / canvas.height, height, 1);
   sprite.raycast = () => {}; // scenery, not a target
@@ -825,7 +850,10 @@ function drawAxes(ranges, labels) {
   const text = Math.max(span.x, span.y, span.z) / 28;
 
   axes = new THREE.Group();
-  const box = new THREE.Box3Helper(new THREE.Box3(low, high), new THREE.Color(ink));
+  const box = new THREE.Box3Helper(
+    new THREE.Box3(low, high),
+    new THREE.Color(ink),
+  );
   box.material.transparent = true;
   box.material.opacity = 0.35;
   box.raycast = () => {};
@@ -833,17 +861,32 @@ function drawAxes(ranges, labels) {
 
   // Ticks on the three edges that meet at one corner: on all twelve they
   // would be unreadable, and one of each is enough to read a length off.
-  const along = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  const along = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(0, 0, 1),
+  ];
   const names = [labels?.x ?? "x", labels?.y ?? "y", labels?.z ?? "z"];
   for (let axis = 0; axis < 3; axis++) {
     const from = low.getComponent(axis);
     const to = high.getComponent(axis);
     const step = niceStep((to - from) / 5);
-    const outward = along[(axis + 1) % 3].clone().add(along[(axis + 2) % 3]).multiplyScalar(-text);
-    for (let value = Math.ceil(from / step) * step; value <= to + step / 2; value += step) {
+    const outward = along[(axis + 1) % 3]
+      .clone()
+      .add(along[(axis + 2) % 3])
+      .multiplyScalar(-text);
+    for (
+      let value = Math.ceil(from / step) * step;
+      value <= to + step / 2;
+      value += step
+    ) {
       const at = low.clone();
       at.setComponent(axis, value);
-      const label = textSprite(Number(value.toPrecision(4)).toString(), ink, text);
+      const label = textSprite(
+        Number(value.toPrecision(4)).toString(),
+        ink,
+        text,
+      );
       label.position.copy(at).add(outward);
       axes.add(label);
     }

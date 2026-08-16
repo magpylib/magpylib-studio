@@ -196,7 +196,9 @@ def test_get_scene_draws_pattern_copies_on_their_source(session):
     else in the studio.
     """
     session.add_object("ring", "Collection")
-    session.add_object("r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
     session.move("r2", [3, 0, 0])
     session.duplicate_around("r2", count=4, spin=90)
     assert "r2#1" in session._objs  # the copies really are live objects
@@ -366,6 +368,7 @@ def test_a_cylinder_resizes_across_then_along():
     is z. Getting this backwards would resize the wrong way round."""
     session = MagpylibStudioSession()
     session.add_object("o", "magnet.Cylinder", params={"dimension": [1, 2]})
+
     def extent():
         return np.ptp(_drawn(session, "o"), axis=0)
 
@@ -385,7 +388,11 @@ def test_only_shapes_that_scale_are_offered(session):
 
     shapes = session.get_scene()["shapes"]
 
-    assert shapes["cube"] == {"attr": "dimension", "value": [1, 1, 1], "constraint": "free"}
+    assert shapes["cube"] == {
+        "attr": "dimension",
+        "value": [1, 1, 1],
+        "constraint": "free",
+    }
     assert "probe" not in shapes
 
 
@@ -404,9 +411,15 @@ def test_a_played_frame_recomputes_what_the_field_decides():
     later = session.get_scene(frame=9)
 
     assert first["frames"] == 51 and later["frame"] == 9
-    arrows = [next(m for m in f["meshes"] if m["object_id"] == "field") for f in (first, later)]
+    arrows = [
+        next(m for m in f["meshes"] if m["object_id"] == "field")
+        for f in (first, later)
+    ]
     assert arrows[0]["position"] != arrows[1]["position"]  # the field moved on
-    magnet = [next(m for m in f["meshes"] if m["object_id"] == "magnet") for f in (first, later)]
+    magnet = [
+        next(m for m in f["meshes"] if m["object_id"] == "magnet")
+        for f in (first, later)
+    ]
     assert magnet[0]["position"] != magnet[1]["position"]  # and so did the magnet
 
     # asking past the end holds the last frame rather than failing
@@ -483,7 +496,9 @@ def test_dragging_an_object_with_a_path_moves_the_whole_path():
     assert path.shape == (25, 3)
 
     def track():
-        drawn = [t for t in session.get_scene()["scatters"] if t["object_id"] == "sensor"]
+        drawn = [
+            t for t in session.get_scene()["scatters"] if t["object_id"] == "sensor"
+        ]
         return len(drawn[0]["position"]) // 3 if drawn else 0
 
     assert track() == 25

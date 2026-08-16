@@ -123,7 +123,9 @@ async function refreshFigure() {
     showSceneGraphControls(true);
     patterned = new Set(payload.patterned);
     parametric = payload.parametric || {};
-    say(`Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`);
+    say(
+      `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`,
+    );
     applyGizmo(); // the selection may have become (or stopped being) patterned
     showAxes();
     // Whether there is anything to play is a question the paths answer; how
@@ -296,7 +298,8 @@ async function showFrame(index) {
   if (!playing || !payload) return;
 
   const perFrame = (payload.duration * 1000) / payload.frames;
-  if (!playStartedAt) playStartedAt = performance.now() - payload.frame * perFrame;
+  if (!playStartedAt)
+    playStartedAt = performance.now() - payload.frame * perFrame;
   const due = playStartedAt + (payload.frame + 1) * perFrame;
   setTimeout(
     () => {
@@ -419,7 +422,8 @@ async function redrawAroundDrag() {
  */
 function showPose(pose) {
   const edit = pose.edits[0];
-  const extra = pose.edits.length > 1 ? `  (+${pose.edits.length - 1} more)` : "";
+  const extra =
+    pose.edits.length > 1 ? `  (+${pose.edits.length - 1} more)` : "";
   // A fixed number of decimals, not significant figures. Significant figures
   // change the *length* of the string as a value crosses a scale -- 0.1 to
   // 0.09999 is four characters wider -- and at pointer rate that reads as a
@@ -429,12 +433,16 @@ function showPose(pose) {
   // padding (`white-space: pre`), which also restores the wider gaps below.
   const numbers = (values, decimals, width) =>
     values
-      .map((n) => (Math.abs(n) < 1e-12 ? 0 : n).toFixed(decimals).padStart(width))
+      .map((n) =>
+        (Math.abs(n) < 1e-12 ? 0 : n).toFixed(decimals).padStart(width),
+      )
       .join(", ");
   const parts = [];
   // a path reports every frame; the one it ends on is the one worth reading
-  const last = (value) => (Array.isArray(value[0]) ? value[value.length - 1] : value);
-  if (edit.position) parts.push(`position ${numbers(last(edit.position), 4, 9)} m`);
+  const last = (value) =>
+    Array.isArray(value[0]) ? value[value.length - 1] : value;
+  if (edit.position)
+    parts.push(`position ${numbers(last(edit.position), 4, 9)} m`);
   if (edit.orientation) {
     parts.push(`rotation ${numbers(last(edit.orientation), 1, 6)}°`);
   }
