@@ -134,6 +134,12 @@ body {
   color: var(--vscode-button-foreground, inherit);
   opacity: 1;
 }
+/* Icon only, and a fixed width: a button whose label grows from Play to
+   Pause shifts everything after it every time it is pressed. */
+#statusbar #play {
+  min-width: 1.9em;
+  text-align: center;
+}
 #statusbar #axis,
 #statusbar #snap,
 #statusbar #projection {
@@ -157,6 +163,13 @@ body {
   font: inherit;
   padding: 0 2px;
   cursor: pointer;
+}
+/* `hidden` is only `[hidden] { display: none }` in the browser's own sheet,
+   which any rule here outranks -- and the button rule below sets `display`,
+   so hiding a button by the attribute did nothing at all. Stated here, with
+   the specificity to win, so `hidden` means hidden. */
+#statusbar [hidden] {
+  display: none;
 }
 #statusbar button {
   display: inline-flex;

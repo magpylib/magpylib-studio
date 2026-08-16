@@ -4059,9 +4059,8 @@ export function createWebviewHtml(
         title="Draw a Plotly chart: read only">Chart</button>
     </span>
     <button id="fit" type="button" hidden>Fit view</button>
-    <button id="play" type="button" hidden title="Run the paths (space)">
-      &#9654; Play
-    </button>
+    <button id="play" type="button" hidden title="Play the paths (space)"
+      >&#9654;</button>
     <input id="frame" type="range" min="0" max="0" value="0" hidden
       title="Scrub through the path" />
     <label id="gizmoLabel" hidden
@@ -4081,6 +4080,8 @@ export function createWebviewHtml(
         <option value="local">object axes (L)</option>
       </select>
     </label>
+    <button id="animate" type="button" hidden
+      title="Bake the paths into the chart, with Plotly's own transport">Animate</button>
     <button id="axis" type="button" hidden
       title="Which axes a drag runs along (X, Y, Z; A for all)">XYZ</button>
     <button id="snap" type="button" hidden

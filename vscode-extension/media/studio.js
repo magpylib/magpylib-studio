@@ -20,6 +20,12 @@ function drawingScene() {
 function setMode(editing) {
   if (editing === drawingScene()) return;
   show("");
+  // Plotly keeps its state on the element, not in the DOM it drew. Emptying
+  // the element without telling it leaves that state describing a plot that
+  // is no longer there, and the next `react` diffs against the phantom and
+  // draws nothing -- which only shows on the *second* switch to the chart,
+  // the first having had no stale state to trip over.
+  if (!drawingScene()) Plotly.purge(canvasEl);
   modeEditEl.classList.toggle("on", editing);
   modeChartEl.classList.toggle("on", !editing);
   showSceneGraphControls(editing);
@@ -41,6 +47,7 @@ const snapEl = document.getElementById("snap");
 const projectionEl = document.getElementById("projection");
 const selectionEl = document.getElementById("selection");
 const readoutEl = document.getElementById("readout");
+const animateEl = document.getElementById("animate");
 const axesEl = document.getElementById("axes");
 const axesLabelEl = document.getElementById("axesLabel");
 let nextReqId = 1;
@@ -73,6 +80,10 @@ function rpc(method, params) {
  *  and nothing to drag. */
 function showSceneGraphControls(shown) {
   for (const el of [fitEl, axisEl, snapEl, projectionEl]) el.hidden = !shown;
+  // Animation is the chart's own: Plotly bakes every frame into the figure
+  // and draws its own slider and buttons for them. The scene graph asks for
+  // one frame at a time instead, so the option only means anything here.
+  animateEl.hidden = shown;
   selectionEl.hidden = !shown || selectedIds.length < 2;
   if (!shown) {
     playEl.hidden = true; // put back by the next scene that has one
@@ -96,12 +107,18 @@ async function refreshFigure() {
   // Preview: the same scene as buffers, drawn once and kept, rather than a
   // figure replaced on every edit. Plotly stays the default until this draws
   // everything the figure does.
-  if (drawingScene()) {
+  // Which renderer this pass is for, read once. Both branches wait on the
+  // engine, and the mode can be switched while they wait -- a reply landing
+  // after the switch would otherwise draw into the other renderer's canvas
+  // and put back the controls that had just been taken away.
+  const editing = drawingScene();
+  if (editing) {
     if (!window.scene3d) {
       say("Scene graph unavailable (module failed to load)");
       return;
     }
     const payload = await rpc("get_scene", {});
+    if (drawingScene() !== editing) return; // switched while we were away
     window.scene3d.render(canvasEl, payload); // owns its canvas; keeps the camera
     showSceneGraphControls(true);
     patterned = new Set(payload.patterned);
@@ -128,7 +145,12 @@ async function refreshFigure() {
   }
   // Plotly draws no handles and cannot be picked, so it has no animation
   // worth asking for either: the scene graph runs the paths now.
-  const figure = await rpc("get_figure", { template: plotTemplate() });
+  const figure = await rpc("get_figure", {
+    animation: animateEl.classList.contains("on"),
+    template: plotTemplate(),
+  });
+  if (drawingScene() !== editing) return; // switched while we were away
+  showSceneGraphControls(false); // each branch states its own, so order cannot
   const layout = figure.layout || {};
   layout.uirevision = "magpylib-studio"; // hold camera across edits
   layout.autosize = true;
@@ -143,7 +165,11 @@ async function refreshFigure() {
     frames: figure.frames || [],
     config: { responsive: true },
   });
-  say("Read only — switch to Edit to pick and drag");
+  say(
+    animateEl.classList.contains("on")
+      ? "Read only — Plotly's own transport runs the paths"
+      : "Read only — switch to Edit to pick and drag",
+  );
 }
 
 /** Redraw for the newest state, never for a queue of stale ones.
@@ -189,7 +215,8 @@ playEl.addEventListener("click", playPause);
 frameEl.addEventListener("input", () => {
   if (playing) {
     playing = window.scene3d.setPlaying(false); // scrubbing takes over
-    playEl.textContent = "\u25b6 Play";
+    playEl.textContent = "\u25b6";
+    playEl.title = "Play the paths (space)";
   }
   showFrame(Number(frameEl.value));
 });
@@ -213,7 +240,8 @@ function playPause() {
     return;
   }
   playing = window.scene3d.setPlaying(!playing);
-  playEl.textContent = playing ? "\u23f8 Pause" : "\u25b6 Play";
+  playEl.textContent = playing ? "\u23f8" : "\u25b6";
+  playEl.title = playing ? "Pause (space)" : "Play the paths (space)";
   // pressing play at the end of the run starts it over rather than finishing
   // immediately, which is what the scrubber leaves it at
   if (playing && Number(frameEl.value) >= Number(frameEl.max)) {
@@ -523,6 +551,14 @@ function toggleProjection() {
   projectionEl.textContent = kind === "parallel" ? "Parallel" : "Persp";
   projectionEl.classList.toggle("on", kind === "parallel");
 }
+
+// Off by default: the frames are baked into the figure, which for the quiver
+// example is 14 MB and a second of work, paid again on every redraw.
+animateEl.addEventListener("click", () => {
+  animateEl.classList.toggle("on");
+  say("Loading…");
+  refreshPaced();
+});
 
 axisEl.addEventListener("click", () => constrain(null));
 snapEl.addEventListener("click", toggleSnap);
