@@ -635,6 +635,39 @@ test skips via `supports_property_paths()`).
    both linear and both profiled — do not go looking for more without measuring
    first.
 
+8. **The window stamp says _where_, never _whether_.** The extension puts
+   `MAGPYLIB_STUDIO_DROP` on its terminals (`environmentVariableCollection`), so
+   a script the user runs knows which window to draw in. Measured, one launch
+   method at a time:
+
+   | launched by                 | stamped | right?                                                                             |
+   | --------------------------- | ------- | ---------------------------------------------------------------------------------- |
+   | integrated terminal         | yes     | yes                                                                                |
+   | Run button                  | yes     | yes                                                                                |
+   | F5 / debug                  | yes     | yes — debugpy's default console _is_ that terminal                                 |
+   | Interactive Window          | **no**  | yes — the kernel is spawned from the extension host, and magpylib's `is_notebook()` already claims that context for plotly |
+   | `pytest` in the same terminal | yes   | **no**                                                                             |
+
+   The last row is the finding. A test run and a human run differ in nothing the
+   stamp can see: `stdout.isatty()` is True for both, because `pytest -s` keeps
+   the tty attached. The only discriminator is `PYTEST_CURRENT_TEST`, and the set
+   it belongs to — nox, tox, sphinx-build, nbconvert, a script rendering 200
+   figures — cannot be enumerated.
+
+   So: stamp the address always, never a backend name. Had the extension set
+   something like `MAGPYLIB_BACKEND=studio` on every terminal, every `pytest` run
+   in that window would have silently changed magpylib's default backend.
+   Selecting the studio automatically stays an opt-in setting, default off —
+   then when it does bite a suite, the fix is a checkbox the user knows about
+   rather than an inference nobody can see.
+
+   Corollary: nothing here may sniff `VSCODE_*`. Those variables are inherited by
+   anything the extension host spawns — the Interactive Window's kernel has
+   `VSCODE_PID` and `VSCODE_IPC_HOOK` — so keying on them would fire in exactly
+   the context the notebook rule already owns. And the stamp crosses interpreters
+   freely while the package does not: the runs above used three different
+   pythons. Reaching the window is necessary, not sufficient.
+
 ## Reference material (in ../magpylib, branch feat/improve-style)
 
 - `__temp_solara_app.py` — a WORKING Solara POC of the same GUI+LLM idea:

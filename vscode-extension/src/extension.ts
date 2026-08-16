@@ -1886,6 +1886,17 @@ function registerLmTools(context: vscode.ExtensionContext): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Tell a script run from this window's terminals where to leave a payload,
+  // so `show()` can draw into *this* window rather than guessing at one. The
+  // address only, never a backend name: `pytest` in the same terminal is
+  // stamped identically to a human run, and nothing the stamp can see tells
+  // them apart (CONTINUE.md, design decision 8). A stamp that selected the
+  // backend would change what every test suite in this window drew with.
+  const drop = (context.storageUri ?? context.globalStorageUri).fsPath;
+  context.environmentVariableCollection.description =
+    'Magpylib Studio: tells a script run here which window to draw in';
+  context.environmentVariableCollection.replace('MAGPYLIB_STUDIO_DROP', drop);
+
   const tree = new SceneTreeProvider(
     context.extensionUri,
     async () => {
