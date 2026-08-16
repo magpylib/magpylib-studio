@@ -45,10 +45,10 @@ extension rather than use it, see [Development](#development).
 pip install magpylib-studio
 ```
 
-That is enough: the engine works with **released magpylib** (≥ 5.2).
-[magpylib's main][branch], not yet released, adds a first-class style API,
-path-valued physics properties (`current=[100, 200, 300]`) and the
-display-backend API the editable 3D view is built on:
+That is enough: the engine works with **released magpylib** (≥ 5.2). [magpylib's
+main][branch], not yet released, adds a first-class style API, path-valued
+physics properties (`current=[100, 200, 300]`) and the display-backend API the
+editable 3D view is built on:
 
 ```sh
 pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"

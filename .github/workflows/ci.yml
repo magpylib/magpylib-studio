@@ -35,8 +35,7 @@ jobs:
       - name: Switch to magpylib main
         if: matrix.magpylib == 'main'
         run:
-          pip install "magpylib @
-          git+https://github.com/magpylib/magpylib@main"
+          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
       - run: python -m pytest -q
 
   extension:
