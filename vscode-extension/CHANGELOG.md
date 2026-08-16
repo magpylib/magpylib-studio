@@ -9,13 +9,46 @@ All notable changes to the Magpylib Studio extension.
 - **The 3D view is a scene graph, not a chart.** It draws with three.js by
   default now. Objects can be clicked, dragged, turned, resized and aimed;
   paths play, and what the field decides — a sensor's arrows — is recomputed
-  per frame rather than posed. The Plotly view is still a checkbox away.
+  per frame rather than posed. The Plotly view is one button away, read only.
 - **Animate paths belongs to the chart now.** It only ever meant "ask Plotly
   for an animated figure", so it appears with the chart and nowhere else. The
   scene graph runs the paths itself, with a play button and a scrubber, and
   asks for one frame at a time rather than baking every frame into a figure.
 
 ### Added
+
+- **The 3D view can be worked in.** Click an object to select it anywhere else
+  in the studio, ⌘-click to add to the selection, and drag the handles to
+  **move** (`W`), **turn** (`E`), **resize** (`R`) or **aim a polarization**
+  (`P`). `X`/`Y`/`Z` hold a drag to one axis and `A` frees it, `L` swaps world
+  for the object's own axes, `S` snaps to round steps chosen from the scene's
+  own scale. Several objects dragged together move as one.
+
+  A drag is one thing to undo, however many frames it took, and everything
+  that follows from it keeps up as you go: the Inspector's numbers, the field,
+  and the rest of the scene. What it writes is recorded like any other edit, so
+  the history and the exported script get it.
+
+  Resizing drags the one parameter that scales the shape — a Cuboid's
+  dimension, a Sphere's diameter, a Cylinder's diameter and height, a mesh's
+  vertices — and holds it to the shape that parameter can take. Classes whose
+  geometry does not simply scale do not offer it.
+
+- **Paths play**, with a play button, a scrubber and `space`. Each frame is
+  the scene as computed at that step, so a sensor's arrows turn as the magnet
+  that makes them turns. A run lasts what `magpylib.defaults.display.animation.time`
+  says it should — five seconds by default — whatever the path's length.
+
+- **The scene says what scale it is at**: a graduated box at its extent with
+  magpylib's own axis names and units.
+
+- **Navigation**: `F` frames the selection and `Home` everything, `1`, `3` and
+  `7` look down the axes, `5` swaps perspective for a parallel projection —
+  which is how you tell whether two things line up — `Tab` walks the objects
+  and `H` hides one (`⇧H` shows it alone). The panel carries a key list.
+
+- **Variable sliders move the scene while you drag them**, rather than only on
+  release, and the whole drag is still one step in the history.
 
 - **Close Scene**, on the Scene view's title bar beside undo, redo and save.
   New Scene already cleared the document, but it lived in the overflow menu
