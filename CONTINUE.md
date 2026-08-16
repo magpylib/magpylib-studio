@@ -149,8 +149,9 @@ and drives it.
   cycles, is unknown, or that some object rejects rolls back. A rename rewrites
   every expression that names it through the AST and not the text — `n` occurs
   inside `turns` and inside the axis name `"n"`, and neither is the variable —
-  so the name is as editable as the value and the scene comes out unchanged. `to_script` emits them as real Python
-  assignments, so the exported script is parametric too.
+  so the name is as editable as the value and the scene comes out unchanged.
+  `to_script` emits them as real Python assignments, so the exported script is
+  parametric too.
 - **The rule is visible, and says so as you type.** `expression_help()` returns
   the operators, functions and constants **read off the allow-list that enforces
   them**, so the help cannot drift from what evaluates — there is a test
@@ -423,10 +424,14 @@ and drives it.
     `get_params` reads the live object, so they looked editable and silently
     weren't).
   - Layout: tree click → host `selectedObjectId` → inspector loads it; the
-    Studio panel is **plot-only** now (with an "Animate paths" toggle; plot
-    template follows the VS Code theme). `broadcastMutation()` (debounced 150
-    ms) refreshes plot + tree + inspector + virtual docs after every edit from
-    any surface (inspector widgets, LM tools, tree commands).
+    Studio panel draws the scene with **three.js** (`media/scene3d.mjs`, one
+    node per studio id) and can be worked in: pick, multi-select, drag, resize,
+    aim, hide, play the paths. A **Chart** button swaps in the Plotly figure,
+    read only, with its own animation toggle (template follows the VS Code
+    theme). `broadcastMutation()` (debounced 150 ms) refreshes plot + tree +
+    inspector + virtual docs after every edit from any surface (inspector
+    widgets, LM tools, tree commands); a drag previews without it, paced one
+    request in flight.
   - **Script/scene I/O**: read-only virtual doc `magpylib-studio:/scene.json`
     (to_dict) that live-updates on every edit; commands Edit Python Script
     ($(code) icon on the Scene view), Save Scene As… (.py or .json via

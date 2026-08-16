@@ -5,15 +5,24 @@ import json
 import os
 import tempfile
 
+import magpylib as magpy
+import numpy as np
 import pytest
 
-from magpylib_studio import importer
+from magpylib_studio import importer, threejs
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     _BATCHABLE,
     DOC_VERSION,
     MagpylibStudioSession,
     _linspace_lit,
+)
+
+#: The scene graph needs a magpylib newer than 5.2.3 -- see `threejs.available`.
+#: Its tests say so rather than failing where the released one is installed.
+needs_scene_graph = pytest.mark.skipif(
+    not threejs.available(),
+    reason="the scene graph needs magpylib's display-backend API and unit pinning",
 )
 
 # Small fixed scene for tests (sessions start empty by default).
@@ -133,6 +142,587 @@ def test_get_figure_is_json_serializable(session):
     fig = session.get_figure()
     assert "data" in fig and "layout" in fig
     json.dumps(fig)  # to_json handled numpy/bdata
+
+
+@needs_scene_graph
+def test_get_scene_is_json_and_keyed_by_studio_ids(session):
+    scene = session.get_scene()
+    json.dumps(scene)  # must cross the wire
+    assert {m["object_id"] for m in scene["meshes"]} == {"cube", "cyl"}
+    # every mesh carries buffers a scene graph can build from
+    for mesh in scene["meshes"]:
+        assert mesh["position"] and mesh["index"]
+        assert len(mesh["position"]) % 3 == 0
+    # and an origin, which the payload itself does not contain
+    assert set(scene["anchors"]) == {"cube", "cyl"}
+
+
+@needs_scene_graph
+def test_get_scene_ids_survive_a_rebuild(session):
+    """The point of using studio's ids rather than magpylib's.
+
+    `_build` reconstructs every object, so `id(obj)` changes on any edit and
+    could not key a view that is kept between them.
+    """
+    before = session.get_scene()
+    magpy_ids = {id(o) for o in session._objs.values()}
+    session.move("cube", [2, 0, 0])
+    after = session.get_scene()
+
+    assert {id(o) for o in session._objs.values()} != magpy_ids  # rebuilt
+    assert [m["object_id"] for m in before["meshes"]] == [
+        m["object_id"] for m in after["meshes"]
+    ]
+    assert after["anchors"]["cube"] == [2.0, 0.0, 0.0]
+
+
+@needs_scene_graph
+def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
+    """What lets a view keep the scene instead of rebuilding it.
+
+    With magpylib's defaults an unrelated object can rescale everyone's
+    vertices -- autosized objects follow the scene extent, and the SI prefix
+    the whole scene is drawn in follows it too. `pin_scene_units` stops both.
+    """
+    before = session.get_scene()
+    cube_before = next(m for m in before["meshes"] if m["object_id"] == "cube")
+
+    session.add_object("far", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("far", [5000, 0, 0])
+    cube_after = next(
+        m for m in session.get_scene()["meshes"] if m["object_id"] == "cube"
+    )
+
+    assert cube_after["position"] == cube_before["position"]
+
+
+@needs_scene_graph
+def test_get_scene_draws_pattern_copies_on_their_source(session):
+    """Every id in the payload must be one the engine accepts.
+
+    Copies are drawn and they are in `_objs` under ids like 'r2#1', but no
+    spec was recorded for them, so editing one raised `unknown object id` --
+    which is what a click on a halbach ring's magnet used to reach. Keyed to
+    the source instead, the ring is one object, as it already is everywhere
+    else in the studio.
+    """
+    session.add_object("ring", "Collection")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
+    session.move("r2", [3, 0, 0])
+    session.duplicate_around("r2", count=4, spin=90)
+    assert "r2#1" in session._objs  # the copies really are live objects
+
+    scene = session.get_scene()
+
+    drawn = {m["object_id"] for m in scene["meshes"]}
+    assert "r2" in drawn and not {i for i in drawn if "#" in str(i)}
+    assert "r2#1" not in scene["anchors"]
+    # and every id it does name can be addressed
+    for object_id in drawn:
+        session._spec(object_id)
+    # the view is told not to offer drag handles here: an edit lands after the
+    # duplication that made the copies, so the source would move alone
+    assert scene["patterned"] == ["r2"]
+
+
+@pytest.mark.parametrize(
+    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
+)
+@needs_scene_graph
+def test_every_id_the_scene_names_can_be_edited(name):
+    """The invariant the whole 3D view rests on, over every shipped example.
+
+    A view that draws something the user can click must not name anything the
+    engine will refuse: clicking a magnet in the halbach ring used to reach
+    `rotate('r2#1')` and raise. Patterning a Collection is the harder case --
+    the copies of its children are real magnets with no id anywhere.
+    """
+    session = MagpylibStudioSession()
+    session.load_example(name)
+    scene = session.get_scene()
+
+    drawn = [t["object_id"] for t in scene["meshes"] + scene["scatters"]]
+    assert drawn and None not in drawn  # nothing drawn is unaddressable
+    for object_id in set(drawn):
+        session._spec(object_id)  # raises KeyError if the engine would refuse
+
+
+@needs_scene_graph
+def test_a_dragged_position_is_world_absolute(session):
+    """What the 3D view's move gizmo relies on.
+
+    The node it drags sits on the object's own origin, so the position it
+    reports when the drag ends is the world position the object should end at
+    -- not a displacement. `set_transform` is the method that takes it that
+    way, and it must leave the orientation alone.
+    """
+    session.rotate("cube", angle=30, axis=[0, 1, 0])
+    turned = session._objs["cube"].orientation.as_rotvec(degrees=True)
+
+    session.set_transform("cube", position=[1.0, -2.0, 0.5])
+
+    assert session.get_scene()["anchors"]["cube"] == [1.0, -2.0, 0.5]
+    assert session._objs["cube"].orientation.as_rotvec(degrees=True) == pytest.approx(
+        turned
+    )
+
+
+def test_a_whole_drag_is_one_thing_to_undo(session):
+    """The history a user actually sees, which is not the event log.
+
+    The log coalesces repeated absolute poses into one step, but every call
+    still pushed its own undo entry, so a one-second drag left sixty of them
+    and took sixty undos to reverse. Grouped, the gesture is one entry and one
+    undo, back to where it stood before the drag began.
+    """
+    start = np.ravel(session._objs["cube"].position).copy()
+    entries = len(session.get_history()["entries"])
+
+    session.begin_interaction()
+    for i in range(60):
+        session.set_transform("cube", position=[i * 0.01, 0, 0])
+    session.end_interaction()
+
+    assert len(session.get_history()["entries"]) == entries + 1
+    assert session.undo()["ok"]
+    assert np.ravel(session._objs["cube"].position) == pytest.approx(start)
+
+
+def test_edits_after_a_gesture_undo_on_their_own_again(session):
+    """A group closes: the next edit is its own step, and a gesture left open
+    by a view that went away is closed by the next one that begins."""
+    session.begin_interaction()
+    session.set_transform("cube", position=[1, 0, 0])
+    session.end_interaction()
+    entries = len(session.get_history()["entries"])
+
+    session.set_transform("cube", position=[2, 0, 0])
+    session.set_transform("cube", position=[3, 0, 0])
+    assert len(session.get_history()["entries"]) == entries + 2
+
+    session.begin_interaction()  # left open on purpose
+    session.set_transform("cube", position=[4, 0, 0])
+    session.begin_interaction()  # a second gesture repairs the first
+    session.set_transform("cube", position=[5, 0, 0])
+    session.end_interaction()
+    assert len(session.get_history()["entries"]) == entries + 4
+
+
+def test_a_whole_drag_is_one_construction_step(session):
+    """Why the 3D view reports the pose reached, not the change it made.
+
+    A drag sends a pose per frame while the pointer moves. Absolute ones are
+    replaced in place, so the history keeps one step however long the drag
+    ran; a relative `rotate` cannot be replaced and would leave one event per
+    frame, and one undo per frame to get back out.
+    """
+    before = len(session.doc["events"])
+
+    for i in range(60):  # a second of dragging
+        session.set_transform(
+            "cube", position=[i * 0.01, 0, 0], orientation=[0, 0, i * 1.5]
+        )
+
+    added = session.doc["events"][before:]
+    assert [event["op"] for event in added] == ["position", "orientation"]
+    cube = session._objs["cube"]
+    assert cube.position == pytest.approx([0.59, 0, 0])  # the pose last sent
+    assert cube.orientation.as_rotvec(degrees=True) == pytest.approx([0, 0, 88.5])
+
+    # for contrast, the shape the same drag would have had as relative turns
+    before = len(session.doc["events"])
+    for _ in range(60):
+        session.rotate("cube", angle=1.5, axis=[0, 0, 1])
+    assert len(session.doc["events"]) - before == 60
+
+
+def _drawn(session, object_id):
+    """The vertices of one object, as one (n, 3) array."""
+    mesh = next(m for m in session.get_scene()["meshes"] if m["object_id"] == object_id)
+    return np.asarray(mesh["position"]).reshape(-1, 3)
+
+
+@pytest.mark.parametrize(
+    ("kind", "params", "attr", "scale"),
+    [
+        ("magnet.Cuboid", {"dimension": [1, 2, 3]}, "dimension", 2.0),
+        ("magnet.Cylinder", {"dimension": [1, 2]}, "dimension", 1.5),
+        ("magnet.Sphere", {"diameter": 2}, "diameter", 3.0),
+    ],
+)
+@needs_scene_graph
+def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
+    """What the resize gizmo relies on, per class it offers to resize.
+
+    The drag scales the drawn mesh and tells the engine only the value it came
+    to. That is only honest if the mesh magpylib draws for the new value *is*
+    the old mesh scaled -- true for these three and false for the classes the
+    table leaves out, whose angles or vertices do not follow their size.
+    """
+    session = MagpylibStudioSession()
+    session.add_object("o", kind, params=params)
+    session.move("o", [5, -2, 1])  # off the origin: the scale is about the object
+    before = _drawn(session, "o")
+    anchor = np.asarray(session.get_scene()["anchors"]["o"])
+
+    value = session.get_scene()["shapes"]["o"]["value"]
+    grown = [v * scale for v in value] if isinstance(value, list) else value * scale
+    session.set_param("o", attr, grown)
+
+    assert _drawn(session, "o") - anchor == pytest.approx(
+        (before - anchor) * scale, abs=1e-12
+    )
+
+
+@needs_scene_graph
+def test_a_cylinder_resizes_across_then_along():
+    """The axis mapping the view assumes: a Cylinder's dimension is
+    (diameter, height), so the first number is x and y together and the second
+    is z. Getting this backwards would resize the wrong way round."""
+    session = MagpylibStudioSession()
+    session.add_object("o", "magnet.Cylinder", params={"dimension": [1, 2]})
+
+    def extent():
+        return np.ptp(_drawn(session, "o"), axis=0)
+
+    base = extent()
+
+    session.set_param("o", "dimension", [2, 2])
+    assert extent() / base == pytest.approx([2, 2, 1])
+    session.set_param("o", "dimension", [1, 4])
+    assert extent() / base == pytest.approx([1, 1, 2])
+
+
+@needs_scene_graph
+def test_only_shapes_that_scale_are_offered(session):
+    """A resize is offered for a Cuboid and refused for a Sensor, whose pixels
+    sit at real coordinates while its cross is styled -- scaling the drawing
+    would move the pixels somewhere the object never put them."""
+    session.add_object("probe", "Sensor")
+
+    shapes = session.get_scene()["shapes"]
+
+    assert shapes["cube"] == {
+        "attr": "dimension",
+        "value": [1, 1, 1],
+        "constraint": "free",
+    }
+    assert "probe" not in shapes
+
+
+@needs_scene_graph
+def test_the_studio_runs_without_the_display_backend_api(session, monkeypatch):
+    """The scene graph needs an API newer than released magpylib, and nothing
+    else here does.
+
+    A hard import made the whole package unimportable against 5.2.3 -- not
+    just the 3D view, everything -- which broke what this promises to work
+    with. It is optional: the scene graph says what it needs, and the view
+    draws the plotly figure, as it did before any of this existed.
+    """
+    from magpylib_studio import threejs
+
+    monkeypatch.setattr(threejs, "DisplayBackend", None)
+    assert not threejs.available()
+
+    # the things the studio is for keep working
+    assert session.get_figure()["data"]
+    assert [o["id"] for o in session.list_objects()]
+    assert session.move("cube", [1, 0, 0])["ok"]
+
+    with pytest.raises(RuntimeError, match="display-backend API"):
+        session.get_scene()
+
+
+@needs_scene_graph
+def test_a_played_frame_recomputes_what_the_field_decides():
+    """Why playback asks for frames rather than moving meshes about.
+
+    A pose can be applied in the browser; a sensor's arrows cannot, because
+    they are read off the field and turn as the magnet that makes them turns.
+    Moving the drawn meshes locally left them pointing where they had been at
+    the end of the path, whatever the magnet was doing.
+    """
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+
+    first = session.get_scene(frame=0)
+    later = session.get_scene(frame=9)
+
+    assert first["frames"] == 51 and later["frame"] == 9
+    arrows = [
+        next(m for m in f["meshes"] if m["object_id"] == "field")
+        for f in (first, later)
+    ]
+    assert arrows[0]["position"] != arrows[1]["position"]  # the field moved on
+    magnet = [
+        next(m for m in f["meshes"] if m["object_id"] == "magnet")
+        for f in (first, later)
+    ]
+    assert magnet[0]["position"] != magnet[1]["position"]  # and so did the magnet
+
+    # asking past the end holds the last frame rather than failing
+    assert session.get_scene(frame=999)["frame"] == 50
+
+
+@pytest.mark.parametrize("steps", [25, 250, 600])
+@needs_scene_graph
+def test_every_step_of_a_path_is_a_frame_to_stop_on(steps):
+    """`animation=True` alone does not give every step.
+
+    Magpylib composes a film: the frame count is time x fps capped by
+    maxframes, so with the defaults a 250-step path arrives as 99 frames,
+    silently. Right for a film, wrong here -- these steps *are* the path, each
+    a pose someone asked for, and a scrubber that cannot stop on one is not
+    showing the model.
+    """
+    session = MagpylibStudioSession()
+    session.add_object("m", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("m", [[i * 0.01, 0, 0] for i in range(steps)], start=0)
+
+    assert session.get_scene(frame=0)["frames"] == steps
+
+
+@pytest.fixture
+def animation_time():
+    """magpylib's defaults are global, so a test that sets one puts it back."""
+    before = magpy.defaults.display.animation.time
+    yield
+    magpy.defaults.display.animation.time = before
+
+
+@pytest.mark.parametrize("seconds", [5, 2])
+@needs_scene_graph
+def test_a_run_lasts_what_the_animation_settings_say(seconds, animation_time):
+    """`animation.time` is a duration, not a frame count: five seconds by
+    default, whatever the path's length. The view paces to it and drops what
+    it cannot keep up with, so a 600-step path takes as long as a 25-step
+    one rather than forty times as long."""
+    magpy.defaults.display.animation.time = seconds
+    session = MagpylibStudioSession()
+    session.add_object("m", "magnet.Cuboid", params={"dimension": [1, 1, 1]})
+    session.move("m", [[i * 0.01, 0, 0] for i in range(60)], start=0)
+
+    scene = session.get_scene(frame=0)
+
+    assert scene["duration"] == seconds
+    assert scene["frames"] == 60  # the length of the path, not time x fps
+
+
+@needs_scene_graph
+def test_the_captured_run_is_dropped_when_the_scene_changes():
+    """It is a recording of a scene that no longer exists. Keeping it would
+    play the old one."""
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    session.get_scene(frame=0)
+    assert session._animated is not None
+
+    session.set_variable("lift", 2.0)
+
+    assert session._animated is None
+
+
+@needs_scene_graph
+def test_dragging_an_object_with_a_path_moves_the_whole_path():
+    """Reporting one pose for an object that has a path deletes the path.
+
+    The solenoid's sensor sweeps through 25 frames, and a drag that sent a
+    single position replaced all of them with it -- so the track it draws
+    simply vanished. The frames come along in the payload, and the drag
+    applies its motion to every one of them.
+    """
+    session = MagpylibStudioSession()
+    session.load_example("coil")
+    scene = session.get_scene()
+    path = np.asarray(scene["paths"]["sensor"]["position"])
+    assert path.shape == (25, 3)
+
+    def track():
+        drawn = [
+            t for t in session.get_scene()["scatters"] if t["object_id"] == "sensor"
+        ]
+        return len(drawn[0]["position"]) // 3 if drawn else 0
+
+    assert track() == 25
+    displaced = path + np.array([0.01, 0, 0.02])
+    session.set_transform("sensor", position=displaced.tolist())
+
+    assert track() == 25  # still a track, not a point
+    assert np.asarray(session._objs["sensor"].position) == pytest.approx(displaced)
+
+
+@needs_scene_graph
+def test_a_path_is_only_carried_while_it_is_worth_carrying(session):
+    """It rides in every payload, like a mesh's vertices, so it is capped —
+    and an object standing still has no path to carry in the first place."""
+    from magpylib_studio import threejs
+
+    assert session.get_scene()["paths"] == {}  # nothing in this scene moves
+
+    session.move("cube", [[0, 0, 0], [1, 0, 0], [2, 0, 0]], start=0)
+    assert len(session.get_scene()["paths"]["cube"]["position"]) == 3
+
+    monkey = threejs.MAX_DRAGGABLE_PATH
+    try:
+        threejs.MAX_DRAGGABLE_PATH = 2
+        assert "cube" not in session.get_scene()["paths"]
+    finally:
+        threejs.MAX_DRAGGABLE_PATH = monkey
+
+
+@needs_scene_graph
+def test_the_handles_sit_where_the_object_looks(session):
+    """A Tetrahedron's position is the origin its vertices are written
+    against, not the middle of the shape, so handles drawn there float off a
+    corner. The centroid is where it looks like it is, and magpylib knows it.
+
+    They agree for anything centred on its own position, which is why nothing
+    else in the view had to care until a mesh turned up.
+    """
+    session.add_object(
+        "tet",
+        "magnet.Tetrahedron",
+        params={"vertices": [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+    )
+    scene = session.get_scene()
+
+    assert scene["anchors"]["tet"] == pytest.approx([0, 0, 0])
+    assert scene["centroids"]["tet"] == pytest.approx([0.25, 0.25, 0.25])
+    # a Cuboid is its own centre, so the two are the same point
+    assert scene["centroids"]["cube"] == pytest.approx(scene["anchors"]["cube"])
+
+
+@needs_scene_graph
+def test_a_mesh_is_resized_by_its_vertices(session):
+    """A mesh has no dimension, so the array itself is what a resize drags.
+
+    It scales exactly, which is the same thing asked of every other resizable
+    class -- the reason meshes were left out was that they have no dimension
+    parameter, not that their geometry misbehaves.
+    """
+    corners = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    session.add_object("tet", "magnet.Tetrahedron", params={"vertices": corners})
+    session.move("tet", [3, -1, 2])  # off the origin: the scale is about the object
+    before = _drawn(session, "tet")
+    anchor = np.asarray(session.get_scene()["anchors"]["tet"])
+
+    shape = session.get_scene()["shapes"]["tet"]
+    assert shape["attr"] == "vertices" and shape["constraint"] == "vertices"
+    session.set_param("tet", "vertices", (np.asarray(shape["value"]) * 2).tolist())
+
+    assert _drawn(session, "tet") - anchor == pytest.approx((before - anchor) * 2)
+
+
+@needs_scene_graph
+def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
+    """The array rides in every payload, so past a point it is a lot of
+    numbers to ship on the chance that someone resizes it. Those meshes keep
+    the Inspector, which edits the value in place.
+
+    Only a TriangularMesh can reach the cap: a Tetrahedron is four vertices by
+    definition, which magpylib enforces.
+    """
+    from magpylib_studio import threejs
+
+    corners = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
+    session.add_object(
+        "mesh", "magnet.TriangularMesh", params={"vertices": corners, "faces": faces}
+    )
+    assert session.get_scene()["shapes"]["mesh"]["attr"] == "vertices"
+
+    monkeypatch.setattr(threejs, "MAX_DRAGGABLE_VERTICES", 3)
+    assert "mesh" not in session.get_scene()["shapes"]
+    assert "cube" in session.get_scene()["shapes"]  # a dimension is unaffected
+
+
+def test_the_quiver_grid_is_a_number_to_drag():
+    """The arrow grid is sampled from `density` rather than listed, so how
+    many arrows there are is a slider rather than a table to rewrite.
+
+    A sampled node draws one run of points, so the run is over a single index
+    split into a row and a column. magpylib takes any (…, 3) pixel array, so
+    a flat run of density² points is the same grid to it as a nested one.
+    """
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+
+    assert np.asarray(session._objs["field"].pixel).shape == (144, 3)
+    # and it is the grid this example always drew, before it was parametric
+    edge, n = 2.0, 12
+    axis = [-edge + 2 * edge * i / (n - 1) for i in range(n)]
+    listed = np.array([[u, v, 0] for v in axis for u in axis])
+    drawn = np.asarray(session._objs["field"].pixel).reshape(-1, 3)
+    assert np.sort(drawn, axis=0) == pytest.approx(np.sort(listed, axis=0))
+
+    for density in (2, 5, 20):
+        assert session.set_variable("density", density)["ok"]
+        assert np.asarray(session._objs["field"].pixel).shape == (density**2, 3)
+
+    # and it still writes down as runnable magpylib, with the count named
+    script = session.to_script()
+    assert "density = " in script and "t % density" in script
+
+
+@needs_scene_graph
+def test_polarization_is_reported_in_the_objects_own_frame(session):
+    """Which frame the aim gizmo has to undo before it writes back.
+
+    magpylib stores polarization in the object's own frame while the colours
+    it draws come from the world vector, so a view that read this as
+    world-space would be wrong by the object's rotation -- silently, since
+    both are plausible arrows.
+    """
+    session.set_transform("cube", orientation=[0, 0, 90])
+    session.set_param("cube", "polarization", [1, 0, 0])
+
+    reported = session.get_scene()["polarizations"]["cube"]
+
+    assert reported == pytest.approx([1, 0, 0])  # local, as stored
+    world = session._objs["cube"].orientation.apply(reported)
+    assert world == pytest.approx([0, 1, 0])  # and not what it points at
+
+
+@needs_scene_graph
+def test_parametric_names_the_variables_a_drag_would_supersede(session):
+    """What lets the view warn before the drag rather than after.
+
+    Both kinds of loss count: a dimension is replaced outright, while a
+    position expression survives in the document and is overruled by the
+    absolute op recorded after it. Either way the object stops following the
+    variable, so both are worth naming.
+    """
+    session.set_variable("gap", 0.01)
+    session.set_variable("t", 0.002)
+    session.add_object(
+        "m",
+        "magnet.Cuboid",
+        params={"dimension": [1, 1, "=t"], "position": [0, 0, "=gap"]},
+    )
+    session.add_object("n", "magnet.Sphere", params={"diameter": 1})
+    session.move("n", [0, 0, "=gap"])  # an expression in an op, not a param
+
+    parametric = session.get_scene()["parametric"]
+
+    assert parametric["m"] == {"position": ["gap"], "shape": ["t"]}
+    assert parametric["n"] == {"position": ["gap"]}
+    assert "cube" not in parametric  # nothing parametric about it
+
+
+@needs_scene_graph
+def test_get_scene_reports_the_orientation_a_drag_needs(session):
+    """The rotation a drag has to add its turn to, which the picture cannot
+    show: magpylib bakes it into the vertices, so the node arrives unrotated
+    and nothing on screen says how far round the object already is."""
+    session.set_transform("cube", orientation=[0, 0, 30])
+
+    scene = session.get_scene()
+
+    assert scene["orientations"]["cube"] == pytest.approx([0, 0, 30])
+    assert set(scene["orientations"]) == set(scene["anchors"])
 
 
 def test_apply_edit_updates_object_and_document(session):
@@ -3311,7 +3901,13 @@ def test_params_say_their_unit_and_component_names():
     assert "components" not in params["dimension"]
     assert "Cuboid" in params["dimension"]["doc"]
 
+    # the quiver's grid is sampled from `density`, so it reports as the node
+    # it is; a listed grid is still a matrix
     pixel = next(p for p in s.get_params("field") if p["name"] == "pixel")
+    assert pixel["kind"] == "sampled" and pixel["unit"] == "m"
+
+    s.add_object("listed", "Sensor", params={"pixel": [[0, 0, 0], [1, 0, 0]]})
+    pixel = next(p for p in s.get_params("listed") if p["name"] == "pixel")
     assert pixel["kind"] == "matrix" and pixel["unit"] == "m"
 
 

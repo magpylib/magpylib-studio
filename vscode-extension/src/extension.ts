@@ -1307,6 +1307,29 @@ function adoptStudioPanel(
   panel.webview.options = PANEL_OPTIONS(context);
   panel.webview.html = createWebviewHtml(context, panel.webview);
   wireRpcRouter(context, panel.webview);
+  panel.webview.onDidReceiveMessage((message) => {
+    if (message.type === 'selectObject') {
+      // a pick in the 3D view is the same act as clicking the Scene tree
+      selectObjectInStudio(context, message.objectId);
+    } else if (message.type === 'transformObjects') {
+      void transformFromPanel(context, message);
+    } else if (message.type === 'previewTransform') {
+      void transformFromPanel(context, message, panel);
+    } else if (message.type === 'toggleVisible') {
+      void toggleVisibleFromPanel(context, message.objectId);
+    } else if (message.type === 'isolateObject') {
+      void isolateFromPanel(context, message.objectId);
+    } else if (message.type === 'notice') {
+      // Passing remarks go where VS Code puts them, and expire on their own.
+      // The panel's own line is for the numbers a drag is changing, which are
+      // still changing after any of these has stopped being news.
+      vscode.window.setStatusBarMessage(`Magpylib Studio: ${message.text}`, 5000);
+    } else if (message.type === 'dragStart') {
+      void beginDragFromPanel(context, message);
+    } else if (message.type === 'ready') {
+      panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
+    }
+  });
   panel.onDidDispose(() => {
     currentPanel = undefined;
   });
@@ -1390,13 +1413,259 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
   );
 }
 
+/** Apply a gizmo drag from the 3D view, as it happens and when it ends.
+ *
+ * A drag is an edit, so it goes through the engine and the event log like
+ * every other one -- undo, the history, and the exported script all get it
+ * for free. It arrives as the pose reached rather than the change made,
+ * which is what lets the engine replace the trailing op in place: a drag of
+ * any length is two events, not two per frame.
+ *
+ * While the drag is running, the surfaces that show something the picture
+ * cannot are brought up to date: the Inspector's numbers and the field. The
+ * 3D view is not, because it is already showing the new pose -- it moved the
+ * mesh itself -- and asking for the scene back would re-serialise every
+ * object in it to move one, which is three quarters of the round trip and
+ * the only part that grows with the size of the scene. That redraw and the
+ * trees wait for the drag to end.
+ */
+interface Edit {
+  objectId: string;
+  position?: number[] | number[][];
+  orientation?: number[] | number[][];
+  shape?: { attr: string; value: number | number[] | number[][] };
+  polarization?: number[];
+}
+
+/** The engine calls one edit turns into. A pose is one call; a resize or an
+ *  aim is a parameter, and where that parameter lives decides the method. */
+function callsFor(edit: Edit): { method: string; params: Record<string, unknown> }[] {
+  const calls = [];
+  if (edit.shape) {
+    const { attr, value } = edit.shape;
+    calls.push(
+      attr.startsWith('style.')
+        ? {
+            method: 'apply_edit',
+            params: {
+              object_id: edit.objectId,
+              path: attr.slice('style.'.length),
+              value,
+            },
+          }
+        : { method: 'set_param', params: { object_id: edit.objectId, name: attr, value } },
+    );
+  }
+  if (edit.polarization) {
+    calls.push({
+      method: 'set_param',
+      params: {
+        object_id: edit.objectId,
+        name: 'polarization',
+        value: edit.polarization,
+      },
+    });
+  }
+  if (edit.position || edit.orientation) {
+    const params: Record<string, unknown> = { object_id: edit.objectId };
+    if (edit.position) {
+      params.position = edit.position;
+    }
+    if (edit.orientation) {
+      params.orientation = edit.orientation;
+    }
+    calls.push({ method: 'set_transform', params });
+  }
+  return calls;
+}
+
+async function transformFromPanel(
+  context: vscode.ExtensionContext,
+  message: { edits: Edit[] },
+  previewFor?: vscode.WebviewPanel,
+): Promise<void> {
+  const calls = message.edits.flatMap(callsFor);
+  if (!calls.length) {
+    if (previewFor) {
+      finishPreview(previewFor);
+    } else {
+      await finishDrag(context);
+    }
+    return;
+  }
+  try {
+    const engine = await getEngine(context);
+    // Several objects dragged together go as a batch, which the engine
+    // records as one step: sent one at a time they would be one history
+    // entry each, and the gesture was one thing the user did.
+    const result = (await (calls.length === 1
+      ? engine.request(calls[0].method, calls[0].params)
+      : engine.request('batch', { operations: calls }))) as {
+      ok: boolean;
+      error?: string;
+    };
+    // Only the final pose reports: the same refusal sixty times over during
+    // one drag is sixty notifications about one mistake.
+    if (result.ok === false && !previewFor) {
+      vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
+    }
+  } catch (err) {
+    if (!previewFor) {
+      vscode.window.showErrorMessage(
+        `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+  if (previewFor) {
+    finishPreview(previewFor);
+    return;
+  }
+  // A refused drag still leaves the view showing where the object was dragged
+  // to, and only a redraw from the model puts it back.
+  await finishDrag(context);
+}
+
+/** Open a drag: group what it is about to do, and say what it will supersede.
+ *
+ * The grouping is the important half. A drag sets a pose every frame so the
+ * field and the scene keep up with the pointer, and each of those is a real
+ * edit -- without this the undo stack takes one entry per frame and a gesture
+ * made once becomes a hundred things to undo.
+ */
+async function beginDragFromPanel(
+  context: vscode.ExtensionContext,
+  message: { objectId: string; field: string; names?: string[] },
+): Promise<void> {
+  try {
+    await (await getEngine(context)).request('begin_interaction');
+  } catch {
+    // the drag still works; it just undoes a frame at a time
+  }
+  if (message.names?.length) {
+    // A status message rather than a notification: worth knowing, not worth a
+    // dialog, and said before the first frame rather than after the fact.
+    vscode.window.setStatusBarMessage(
+      `Magpylib Studio: this drag sets ${message.objectId}'s ${message.field} outright — ` +
+        `${message.names.join(', ')} stops deciding it`,
+      6000,
+    );
+  }
+}
+
+/** Close the drag, then bring every surface back in sync. */
+async function finishDrag(context: vscode.ExtensionContext): Promise<void> {
+  try {
+    await (await getEngine(context)).request('end_interaction');
+  } catch {
+    // a group left open is closed by the next gesture that begins
+  }
+  broadcastMutation();
+}
+
+/** Hide the object, or show it again.
+ *
+ * The engine holds the current state, so the toggle is resolved here rather
+ * than in the view: a hidden object is not drawn, and a view that tracked
+ * visibility itself would be guessing about things it cannot see.
+ */
+async function toggleVisibleFromPanel(
+  context: vscode.ExtensionContext,
+  objectId: string,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    const objects = (await engine.request('list_objects')) as {
+      id: string;
+      visible: boolean;
+    }[];
+    const shown = objects.find((entry) => entry.id === objectId)?.visible ?? true;
+    await engine.request('set_visible', { object_id: objectId, visible: !shown });
+    if (shown) {
+      // It has just left the picture, and clicking what is not there cannot
+      // bring it back. The Scene tree can, so say where to look.
+      vscode.window.setStatusBarMessage(
+        `Magpylib Studio: ${objectId} hidden — show it again from the Scene tree`,
+        5000,
+      );
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  broadcastMutation();
+}
+
+/** Show one object and hide the rest, or put everything back.
+ *
+ * Sent as a batch, which the engine records as a single step: hiding
+ * everything else one call at a time would be a screenful of history for one
+ * keystroke, and as many undos to reverse. Pressing it again when the scene
+ * is already down to one object shows them all, so the same key gets out of
+ * what it got into.
+ */
+async function isolateFromPanel(
+  context: vscode.ExtensionContext,
+  objectId: string,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    const objects = (await engine.request('list_objects')) as {
+      id: string;
+      visible: boolean;
+    }[];
+    const others = objects.filter((entry) => entry.id !== objectId);
+    const alone = others.every((entry) => !entry.visible);
+    await engine.request('batch', {
+      operations: [
+        { method: 'set_visible', params: { object_id: objectId, visible: true } },
+        ...others.map((entry) => ({
+          method: 'set_visible',
+          params: { object_id: entry.id, visible: alone },
+        })),
+      ],
+    });
+    vscode.window.setStatusBarMessage(
+      alone
+        ? 'Magpylib Studio: showing everything again'
+        : `Magpylib Studio: showing ${objectId} alone — shift+H again to undo it`,
+      5000,
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  broadcastMutation();
+}
+
+/** Bring the cheap surfaces up to date mid-drag, and let the next pose go. */
+function finishPreview(panel: vscode.WebviewPanel): void {
+  try {
+    inspector?.refresh();
+    // The field is the whole point of dragging a magnet somewhere, and the
+    // one thing on screen that cannot be worked out from the picture. It
+    // paces itself: a recompute that outlasts the next pose is left to finish
+    // and the newest pose is taken up after it.
+    fieldPanel?.webview.postMessage({ type: 'refresh' });
+  } finally {
+    // Answering is what paces the drag: the panel holds the next pose until
+    // this one is back, so a slow scene sends fewer of them rather than
+    // falling further behind. Unconditional, because a preview that fails to
+    // answer does not slow the drag down -- it ends it, silently, and every
+    // remaining pose waits for a reply that is never coming.
+    panel.webview.postMessage({ type: 'previewDone' });
+  }
+}
+
 function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string): void {
   selectedObjectId = objectId;
   inspector?.select(objectId);
   if (currentPanel) {
+    currentPanel.webview.postMessage({ type: 'select', objectId });
     currentPanel.reveal(undefined, true); // keep focus in the sidebar
   } else {
-    openStudioPanel(context);
+    openStudioPanel(context); // its 'ready' asks for the selection itself
   }
 }
 
@@ -2916,6 +3185,24 @@ export function activate(context: vscode.ExtensionContext): void {
         await setSceneFile(undefined);
       }
     }),
+    /** Put the scene away: no file, nothing in it, and its views shut.
+     *
+     * The same clearing as New Scene, which is all the engine can offer --
+     * there is always a document, so an empty one is what "no scene" means.
+     * What closing adds is the views: leaving the 3D and field panels open
+     * on an empty scene is how a studio ends up showing nothing and looking
+     * broken rather than looking closed.
+     */
+    vscode.commands.registerCommand('magpylib-studio.closeScene', async (options?: Discard) => {
+      if (!(await confirmDiscard('closing the scene', options))) {
+        return;
+      }
+      if (await mutateFromTree('clear_scene', {})) {
+        await setSceneFile(undefined);
+        currentPanel?.dispose();
+        fieldPanel?.dispose();
+      }
+    }),
     vscode.commands.registerCommand('magpylib-studio.revertScene', async () => {
       if (!sceneFile) {
         return;
@@ -3721,6 +4008,34 @@ export function createWebviewHtml(
       'plotly.min.js',
     ),
   );
+  const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
+  // three ships ESM only, and its addons import the bare name 'three', so the
+  // module specifiers are mapped rather than rewritten. Both entries point
+  // inside node_modules, which the webview may read as extension resources.
+  const threeUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      'node_modules',
+      'three',
+      'build',
+      'three.module.min.js',
+    ),
+  );
+  const threeAddonsUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      'node_modules',
+      'three',
+      'examples',
+      'jsm',
+    ),
+  );
+  const importMap = JSON.stringify({
+    imports: {
+      three: `${threeUri}`,
+      'three/addons/': `${threeAddonsUri}/`,
+    },
+  });
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3730,11 +4045,71 @@ export function createWebviewHtml(
   <title>Magpylib Studio</title>
   <link rel="stylesheet" href="${studioStyleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
+  <script type="importmap" nonce="${nonce}">${importMap}</script>
+  <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
 <body>
   <div id="canvas"></div>
+  <div id="readout" hidden></div>
   <div id="statusbar">
-    <label><input type="checkbox" id="animate" /> Animate paths</label>
+    <span id="mode">
+      <button id="modeEdit" type="button" class="on"
+        title="Draw a scene you can pick and drag">Edit</button
+      ><button id="modeChart" type="button"
+        title="Draw a Plotly chart: read only">Chart</button>
+    </span>
+    <button id="fit" type="button" hidden>Fit view</button>
+    <button id="play" type="button" hidden title="Play the paths (space)"
+      >&#9654;</button>
+    <input id="frame" type="range" min="0" max="0" value="0" hidden
+      title="Scrub through the path" />
+    <label id="gizmoLabel" hidden
+      >Drag
+      <select id="gizmo">
+        <option value="translate">to move (W)</option>
+        <option value="rotate">to rotate (E)</option>
+        <option value="scale">to resize (R)</option>
+        <option value="polarization">to aim polarization (P)</option>
+        <option value="none">nothing (Q)</option>
+      </select>
+    </label>
+    <label id="axesLabel" hidden
+      >along
+      <select id="axes">
+        <option value="world">world axes (L)</option>
+        <option value="local">object axes (L)</option>
+      </select>
+    </label>
+    <button id="animate" type="button" hidden
+      title="Bake the paths into the chart, with Plotly's own transport">Animate</button>
+    <button id="axis" type="button" hidden
+      title="Which axes a drag runs along (X, Y, Z; A for all)">XYZ</button>
+    <button id="snap" type="button" hidden
+      title="Snap to round steps (S)">Snap</button>
+    <button id="projection" type="button" hidden
+      title="Perspective or parallel projection (5)">Persp</button>
+    <span id="selection" hidden></span>
+    <details id="controls" hidden>
+      <summary>Keys</summary>
+      <div>
+        <kbd>W</kbd><span>move</span>
+        <kbd>E</kbd><span>rotate</span>
+        <kbd>R</kbd><span>resize</span>
+        <kbd>P</kbd><span>aim polarization</span>
+        <kbd>Q</kbd><span>no handles</span>
+        <kbd>H</kbd><span>hide / show (<kbd>&#8679;</kbd> show alone)</span>
+        <kbd>S</kbd><span>snap to a round step</span>
+        <kbd>X</kbd><span>one axis (<kbd>A</kbd> all)</span>
+        <kbd>L</kbd><span>world / object axes</span>
+        <kbd>F</kbd><span>frame selected</span>
+        <kbd>Home</kbd><span>frame everything</span>
+        <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
+        <kbd>5</kbd><span>parallel / perspective</span>
+        <kbd>space</kbd><span>play / pause paths</span>
+        <kbd>&#8677;</kbd><span>select the next object</span>
+        <kbd>&#8984;</kbd><span>click: add to the selection</span>
+      </div>
+    </details>
     <span id="status">Starting…</span>
   </div>
   <script nonce="${nonce}" src="${studioScriptUri}"></script>

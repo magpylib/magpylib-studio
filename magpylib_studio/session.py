@@ -75,7 +75,7 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, style_compat
+from magpylib_studio import expressions, style_compat, threejs
 
 
 def example_scene():
@@ -470,7 +470,7 @@ def pixel_field_scene(resolution=7):
     }
 
 
-def quiver_scene(pixels=12, steps=51):
+def quiver_scene(density=12, steps=51):
     """magpylib's animated-quiver example as a scene: a magnet turning
     through a full revolution under a grid of field arrows, each coloured and
     scaled by what it measures.
@@ -479,15 +479,29 @@ def quiver_scene(pixels=12, steps=51):
     pose is a *path*, so the whole scene animates, and a sensor styled to
     draw its own reading — are both magpylib's, not the studio's. What the
     studio adds is that the grid rides on the sensor's position, so `lift`
-    moves all 144 arrows at once.
+    moves every arrow at once, and that `density` decides how many arrows
+    there are: the grid is sampled rather than listed, so the count is a
+    number to drag rather than a table to rewrite.
+
+    The sample runs over one index and splits it into a row and a column,
+    because a sampled node draws one run of points. magpylib takes any
+    (…, 3) pixel array, so a flat run of density² points is the same grid to
+    it as a nested one — and this way the whole thing is an expression.
     """
     edge = 2.0
-    coordinates = [round(-edge + 2 * edge * i / (pixels - 1), 6) for i in range(pixels)]
+    span = 2 * edge
     return {
-        "variables": {"lift": 1.0, "width": 3.0},
+        "variables": {"lift": 1.0, "width": 3.0, "density": density},
         "variable_bounds": {
             "lift": {"min": 0.1, "max": 10, "soft_min": 0.5, "soft_max": 3},
             "width": {"min": 0.1, "max": 10, "soft_min": 1, "soft_max": 5},
+            "density": {
+                "min": 2,
+                "max": 40,
+                "soft_min": 4,
+                "soft_max": 20,
+                "integer": True,
+            },
         },
         "events": [
             {
@@ -513,7 +527,17 @@ def quiver_scene(pixels=12, steps=51):
                 "type": "Sensor",
                 "params": {
                     "position": [0, 0, "=lift"],
-                    "pixel": [[[u, v, 0] for u in coordinates] for v in coordinates],
+                    "pixel": {
+                        expressions.SAMPLED: {
+                            "count": "=density ** 2",
+                            "over": [0, "=density ** 2 - 1"],
+                            "of": [
+                                f"={-edge} + {span} * (t % density) / (density - 1)",
+                                f"={-edge} + {span} * (t // density) / (density - 1)",
+                                0,
+                            ],
+                        }
+                    },
                 },
                 "style": {
                     "label": "Field arrows",
@@ -627,6 +651,18 @@ _PARAM_DOCS = {
 # Style switches that hide an object without removing it from the figure —
 # magpylib still assigns it a colour, so the others keep theirs.
 _HIDE_STYLE = {"model3d.showdefault": False, "path.show": False}
+
+#: What each kind of drag in the 3D view writes, as (create parameters,
+#: recorded ops) that decide the same thing and would therefore be superseded.
+_DRAG_WRITES = {
+    "position": (("position",), ("move", "position")),
+    "orientation": (
+        ("orientation",),
+        ("rotate_from_angax", "rotate_from_rotvec", "orientation"),
+    ),
+    "shape": (("dimension", "diameter"), ()),
+    "polarization": (("polarization",), ()),
+}
 
 
 # A mirror borrows the body's own z-flip symmetry, so only shapes that have
@@ -749,6 +785,7 @@ _BATCHABLE = {
     "set_transform",
     "clear_path",
     "reset_style",
+    "set_visible",
     "clear_scene",
     # a parametric scene is built in one go: variables, then the objects
     # written in terms of them, then the arrangements
@@ -1472,13 +1509,29 @@ class MagpylibStudioSession:
         self._undo: list[dict] = []
         self._redo: list[dict] = []
         self._history_paused = False
+        #: None outside a gesture; inside one, whether it has already recorded
+        #: the state to undo back to. See `begin_interaction`.
+        self._interaction: bool | None = None
         self._captured_scenes: list[dict] = []  # from the last load_script
+        #: The animated capture playback reads frames from, or None when it
+        #: has to be taken again. Every rebuild drops it: a scene that has
+        #: changed no longer moves the way the captured run says it does.
+        self._animated = None
         self._build()
 
     def _record_state(self, label, doc_before):
         """Push a pre-change doc state onto the undo stack (capped)."""
         if self._history_paused:
             return
+        if self._interaction is not None:
+            # One gesture is one thing to undo, however many times it fires.
+            # A drag in the 3D view sets a pose per frame; the state to come
+            # back to is the one before the first of them, and the rest are
+            # places the pointer passed through rather than places anyone
+            # wants to return to.
+            if self._interaction:
+                return
+            self._interaction = True
         self._undo.append({"label": label, "doc": doc_before})
         del self._undo[:-100]
         self._redo.clear()
@@ -1492,6 +1545,7 @@ class MagpylibStudioSession:
         do, and those are events like any other, so they keep their place in
         the log relative to the children they carry.
         """
+        self._animated = None  # the captured run is of a scene that no longer is
         self._vars = expressions.resolve_variables(self.doc.get("variables") or {})
         # Hard bounds are checked here rather than where a value is typed, so
         # they hold however the variable arrived at its value — including
@@ -2273,6 +2327,78 @@ class MagpylibStudioSession:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
 
+    def get_scene(self, frame=None):
+        """The scene as buffers for a scene-graph view, keyed by studio ids.
+
+        With `frame`, one step of the scene's paths instead: the same shape,
+        holding only what is drawn, and computed rather than posed. Captured
+        once and served a step at a time -- a run of the quiver example is
+        14 MB and half a second, and one frame of it is what anyone is
+        looking at.
+
+        `get_figure` returns a Plotly figure, which the webview replaces
+        wholesale on every edit because nothing in a chart is addressable. This
+        returns one entry per object instead, so a view can build the scene
+        once and afterwards mutate only what changed.
+
+        The ids are studio's own, not magpylib's: magpylib stamps `id(obj)`,
+        which does not survive `_build`, whereas these are what the editing
+        methods already take. Selecting a mesh therefore names an object the
+        protocol understands.
+        """
+        threejs.pin_scene_units()
+        if frame is not None:
+            # One step of the paths, whole: what a pose cannot express is a
+            # sensor's arrows, which are read off the field and so turn as
+            # the magnet that makes them turns. Only magpylib can say what
+            # they are, and only per frame.
+            if self._animated is None:
+                steps = max(
+                    (
+                        len(np.atleast_2d(np.asarray(obj.position)))
+                        for obj in self._objs.values()
+                    ),
+                    default=1,
+                )
+                self._animated = threejs.capture_frames(self.scene, steps)
+            return threejs.frame_payload(
+                self._animated, frame, live=self._objs, derived=self._derived
+            )
+        scene = threejs.scene_payload(
+            self.scene, live=self._objs, derived=self._derived
+        )
+        # Added here rather than in the converter: which fields a variable is
+        # deciding is a fact about the document, not about the drawing.
+        scene["parametric"] = self._parametric_fields()
+        return scene
+
+    def _parametric_fields(self):
+        """Which drag-editable fields a variable is deciding, per object.
+
+        A drag writes an absolute value, and that supersedes whatever
+        expression was deciding it — whether the expression is replaced (a
+        dimension, which is edited in place) or merely overruled (a position,
+        whose absolute op is recorded after it and wins on replay). Either way
+        the object stops following the variable. Naming the variables lets a
+        view say what is about to be lost before the drag rather than after.
+        """
+        out = {}
+        events = self.doc.get("events") or []
+        for spec, _ in self._iter_specs():
+            params = spec.get("params") or {}
+            mine = [e for e in events if e.get("target") == spec["id"]]
+            fields = {}
+            for field, (keys, ops) in _DRAG_WRITES.items():
+                names = expressions.referenced_names(
+                    [params.get(key) for key in keys]
+                    + [e for e in mine if e.get("op") in ops]
+                )
+                if names:
+                    fields[field] = sorted(names)
+            if fields:
+                out[spec["id"]] = fields
+        return out
+
     # --- field evaluation --------------------------------------------------
     def _leaf_sources(self):
         """All field sources (excludes Sensors; Collections are just groups —
@@ -2982,6 +3108,29 @@ class MagpylibStudioSession:
         if result["ok"]:
             result["id"] = new_id
         return result
+
+    def begin_interaction(self):
+        """Group the edits that follow into one undo step, until
+        `end_interaction`.
+
+        A drag in the 3D view sets a pose every frame so that the field and
+        the rest of the scene keep up with the pointer. Each one is a real
+        edit — the event log coalesces them into a single step, but the undo
+        stack would otherwise take one entry per frame, and a gesture the
+        user made once would be a hundred things to undo.
+
+        Beginning again closes anything left open, so a view that goes away
+        mid-drag costs the grouping of that one gesture rather than the undo
+        stack from then on.
+        """
+        self._interaction = False
+        return {"ok": True}
+
+    def end_interaction(self):
+        """Close the group opened by `begin_interaction`. Edits after this
+        record their own undo steps again."""
+        self._interaction = None
+        return {"ok": True}
 
     def set_visible(self, object_id, visible=True):
         """Show/hide an object in the 3D view. Implemented with magpylib's own

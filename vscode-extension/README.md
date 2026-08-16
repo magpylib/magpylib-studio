@@ -17,9 +17,13 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
 
 ## What it provides
 
-- **Command** `Magpylib Studio: Open Scene View` — the "Magpylib Scene" tab: the
-  live plotly 3D view (camera held across edits via `uirevision`). Just the
-  plot: selection and editing live in the sidebar.
+- **Command** `Magpylib Studio: Open Scene View` — the "Magpylib Scene" tab: a
+  live three.js scene you can work in. Click an object to select it, ⌘-click to
+  add to the selection, and drag the handles to move (W), turn (E), resize (R)
+  or aim a polarization (P) — along world or object axes, snapping to round
+  steps with S. Paths play, with a scrubber. Every drag is one step in the
+  history and one undo, and the field follows as you go. A **Chart** button
+  swaps in the Plotly figure, which is read only and has its own animation.
 - **Scene view** — the magpylib-logo icon in the activity bar opens a sidebar
   tree of the scene's objects, nested as they are grouped, one icon per type
   (magnets red, currents blue, sensors green). Clicking an object opens the plot
@@ -51,8 +55,8 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   over the other variables (`360 / n`), with the allowed operators, functions
   and constants listed in the panel and checked as you type. `⋯` lists what a
   variable is — its name, its limits, its kind — each entry showing what it
-  holds; renaming from there rewrites everything written in terms of it.
-  **Sweep a Variable…** plots the field against one in the Field view.
+  holds; renaming from there rewrites everything written in terms of it. **Sweep
+  a Variable…** plots the field against one in the Field view.
 - **Undo view** — the session's checkpoints, newest first: click any to jump the
   scene there, backwards or forwards. This is _not_ the construction history
   above; it is document snapshots, and it is gone on reload.

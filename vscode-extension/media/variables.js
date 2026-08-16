@@ -39,6 +39,7 @@ function asValue(text) {
 
 function commit(name, value) {
   statusEl.textContent = "";
+  pendingValue = null; // a committed value supersedes anything still waiting
   rpc("set_variable", { name, value })
     .then((res) => {
       if (res && res.ok === false) statusEl.textContent = res.error;
@@ -46,6 +47,55 @@ function commit(name, value) {
     })
     .catch((err) => {
       statusEl.textContent = String(err);
+    });
+}
+
+/** Close the undo group after the release has been recorded.
+ *
+ * A range input fires `pointerup` *before* the `change` that commits its
+ * value, so closing on pointerup would leave the value the user actually
+ * chose outside the group and undoing as a step of its own. Deferring past
+ * both puts it inside, and still closes for a click that changed nothing and
+ * so never fired `change` at all.
+ */
+function endInteractionSoon() {
+  setTimeout(() => rpc("end_interaction").catch(() => {}), 0);
+}
+
+/** Set the variable while the slider is still moving.
+ *
+ * Everything written in terms of it follows, which is the whole point of a
+ * variable and none of it is on this panel -- so a slider that only spoke on
+ * release was asking the user to let go to see what they had done.
+ *
+ * Paced on the round trip rather than on a timer: one set in flight and the
+ * newest waiting value wins, so a variable that reshapes a hundred magnets
+ * sends fewer of them instead of queueing up edits the user has already
+ * dragged past. The views it feeds collapse their own redraws the same way.
+ *
+ * `load` is not called here on purpose: it would rebuild this panel, and the
+ * slider under the pointer with it.
+ */
+let liveInFlight = false;
+let pendingValue = null;
+
+function preview(name, value) {
+  pendingValue = { name, value };
+  sendValue();
+}
+
+function sendValue() {
+  if (liveInFlight || !pendingValue) return;
+  liveInFlight = true;
+  const { name, value } = pendingValue;
+  pendingValue = null;
+  rpc("set_variable", { name, value })
+    .catch(() => {
+      // the release value reports; a refusal mid-drag is not worth saying
+    })
+    .then(() => {
+      liveInFlight = false;
+      sendValue();
     });
 }
 
@@ -170,19 +220,24 @@ async function load() {
       slider.step = b.integer ? 1 : (high - low) / 100;
       slider.value = v.value;
       slider.title = short(low) + " .. " + short(high);
-      // live text while dragging, one edit when released
+      // live scene while dragging, one edit in the history when released
       slider.addEventListener("pointerdown", () => {
         dragging = true;
+        rpc("begin_interaction"); // the whole drag undoes as one
       });
       slider.addEventListener("input", () => {
         text.value = short(parseFloat(slider.value));
+        // Only under the pointer: a keyboard step fires input and change
+        // together, and would otherwise set the same value twice.
+        if (dragging) preview(v.name, parseFloat(slider.value));
       });
       slider.addEventListener("change", () => {
         dragging = false;
-        commit(v.name, parseFloat(slider.value));
+        commit(v.name, parseFloat(slider.value), { closes: true });
       });
       slider.addEventListener("pointerup", () => {
         dragging = false;
+        endInteractionSoon();
         if (missedRefresh) {
           missedRefresh = false;
           load();

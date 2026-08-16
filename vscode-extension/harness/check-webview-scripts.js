@@ -3,15 +3,19 @@
  *
  *   node harness/check-webview-scripts.js
  *
- * 1. Every media/*.js parses. They are loaded by URL, so a syntax error is
+ * 1. Every media script parses. They are loaded by URL, so a syntax error is
  *    reported nowhere the extension host can see it: the panel simply renders
  *    as the static HTML it starts as, blank and silent. That cost a day once.
+ *    `.mjs` files are modules -- vm.Script would reject their imports as
+ *    syntax errors -- so those go through `node --check`, which parses a
+ *    `.mjs` path as a module.
  *
  * 2. No src/*.ts has grown a webview script back inside a template literal.
  *    That is where the escaping hazard lives — `\n` written singly is resolved
  *    by TypeScript into a real line break inside a quoted string — and where
  *    neither tsc nor eslint can see the code at all.
  */
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
@@ -21,14 +25,22 @@ let failures = 0;
 
 for (const file of fs
   .readdirSync(path.join(EXT, "media"))
-  .filter((f) => f.endsWith(".js"))) {
-  const source = fs.readFileSync(path.join(EXT, "media", file), "utf8");
+  .filter((f) => f.endsWith(".js") || f.endsWith(".mjs"))) {
+  const full = path.join(EXT, "media", file);
+  const source = fs.readFileSync(full, "utf8");
   try {
-    new vm.Script(source, { filename: file });
+    if (file.endsWith(".mjs")) {
+      execFileSync(process.execPath, ["--check", full], { stdio: "pipe" });
+    } else {
+      new vm.Script(source, { filename: file });
+    }
     console.log(`ok    media/${file} (${source.split("\n").length} lines)`);
   } catch (err) {
     failures += 1;
-    console.log(`FAIL  media/${file}: ${err.message}`);
+    const detail = err.stderr
+      ? String(err.stderr).trim().split("\n")[0]
+      : err.message;
+    console.log(`FAIL  media/${file}: ${detail}`);
   }
 }
 
