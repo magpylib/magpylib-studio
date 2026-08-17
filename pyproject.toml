@@ -38,6 +38,19 @@ dependencies = ["magpylib>=5.2", "plotly>=5"]
 # to magpylib and numpy -- see the note there.
 studio = "magpylib_studio.backend:StudioBackend"
 
+# Where uv gets magpylib for *development*. `magpylib>=5.2` above is the true
+# floor for anyone installing this package, and it resolves to the released
+# 5.2.3 -- which the engine works with, and the scene graph does not: that
+# needs the display-backend API and unit pinning, both newer than any release.
+# Without this, `uv sync` quietly swaps a working checkout for 5.2.3 and the
+# scene-graph tests start skipping. CI installs the same thing by hand.
+#
+# Sources are development-only: they are stripped from published metadata, so
+# `pip install magpylib-studio` is unaffected. Drop this once a magpylib
+# release carries the API (magpylib#978).
+[tool.uv.sources]
+magpylib = { git = "https://github.com/magpylib/magpylib", branch = "main" }
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "jsonschema>=4"]
 
