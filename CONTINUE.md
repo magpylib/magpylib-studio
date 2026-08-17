@@ -576,6 +576,16 @@ Run the suite against both: `.venv/bin/python -m pytest -q` (branch) and a
 second venv with released magpylib (49 passed, 1 skipped — the property-path
 test skips via `supports_property_paths()`).
 
+One more difference, found the hard way and silent in the direction that
+matters: **`show(backend="plotly", plotly_renderer=...)` does not reach the
+figure on 5.2.3.** The `<backend>_<option>` passthrough arrived with the
+display-backend registry, which that version does not have, so the argument is
+dropped — no warning, no error, and plotly opens a browser tab as if nothing had
+been asked for. Measured both ways, 0 files against 2. That is why
+`viewer.draw_here()` sets plotly's own default renderer rather than passing one
+through magpylib: it is the only route that works on every version this package
+supports.
+
 ## Key design decisions (keep these)
 
 1. **The scene document is the source of truth.** Every edit updates the live
@@ -634,6 +644,39 @@ test skips via `supports_property_paths()`).
    0.6 s. What is left is `copy()` (a deepcopy) and magpylib's own rotation,
    both linear and both profiled — do not go looking for more without measuring
    first.
+
+8. **The window stamp says _where_, never _whether_.** The extension puts
+   `MAGPYLIB_STUDIO_DROP` on its terminals (`environmentVariableCollection`), so
+   a script the user runs knows which window to draw in. Measured, one launch
+   method at a time:
+
+   | launched by                   | stamped | right?                                                                                                                     |
+   | ----------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+   | integrated terminal           | yes     | yes                                                                                                                        |
+   | Run button                    | yes     | yes                                                                                                                        |
+   | F5 / debug                    | yes     | yes — debugpy's default console _is_ that terminal                                                                         |
+   | Interactive Window            | **no**  | yes — the kernel is spawned from the extension host, and magpylib's `is_notebook()` already claims that context for plotly |
+   | `pytest` in the same terminal | yes     | **no**                                                                                                                     |
+
+   The last row is the finding. A test run and a human run differ in nothing the
+   stamp can see: `stdout.isatty()` is True for both, because `pytest -s` keeps
+   the tty attached. The only discriminator is `PYTEST_CURRENT_TEST`, and the
+   set it belongs to — nox, tox, sphinx-build, nbconvert, a script rendering 200
+   figures — cannot be enumerated.
+
+   So: stamp the address always, never a backend name. Had the extension set
+   something like `MAGPYLIB_BACKEND=studio` on every terminal, every `pytest`
+   run in that window would have silently changed magpylib's default backend.
+   Selecting the studio automatically stays an opt-in setting, default off —
+   then when it does bite a suite, the fix is a checkbox the user knows about
+   rather than an inference nobody can see.
+
+   Corollary: nothing here may sniff `VSCODE_*`. Those variables are inherited
+   by anything the extension host spawns — the Interactive Window's kernel has
+   `VSCODE_PID` and `VSCODE_IPC_HOOK` — so keying on them would fire in exactly
+   the context the notebook rule already owns. And the stamp crosses
+   interpreters freely while the package does not: the runs above used three
+   different pythons. Reaching the window is necessary, not sufficient.
 
 ## Reference material (in ../magpylib, branch feat/improve-style)
 

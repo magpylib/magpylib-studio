@@ -8,6 +8,7 @@ import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 import { Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
+import { activateScriptViewer } from './scriptViewer';
 import {
   iconFor,
   isOperation,
@@ -1886,6 +1887,18 @@ function registerLmTools(context: vscode.ExtensionContext): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Tell a script run from this window's terminals where to leave a payload,
+  // so `show()` can draw into *this* window rather than guessing at one. The
+  // address only, never a backend name: `pytest` in the same terminal is
+  // stamped identically to a human run, and nothing the stamp can see tells
+  // them apart (CONTINUE.md, design decision 8). A stamp that selected the
+  // backend would change what every test suite in this window drew with.
+  const drop = (context.storageUri ?? context.globalStorageUri).fsPath;
+  context.environmentVariableCollection.description =
+    'Magpylib Studio: tells a script run here which window to draw in';
+  context.environmentVariableCollection.replace('MAGPYLIB_STUDIO_DROP', drop);
+  activateScriptViewer(context);
+
   const tree = new SceneTreeProvider(
     context.extensionUri,
     async () => {
@@ -2012,7 +2025,11 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /** Run a user script through the engine importer and show the result. */
-  const importScript = async (uri: vscode.Uri) => {
+  /** `scene` names which of the script's `show()` calls to land on, for a
+   *  caller that already knows -- a script view is one particular call, and
+   *  arriving on a different scene with a prompt to go looking for yours is a
+   *  poor answer to having clicked on it. */
+  const importScript = async (uri: vscode.Uri, scene?: number) => {
     try {
       const result = (await (await getEngine(context)).request('load_script', {
         path: uri.fsPath,
@@ -2029,6 +2046,22 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       broadcastMutation();
       openStudioPanel(context);
+      // The studio is its sidebar as much as its panel: the tree, the
+      // inspector, the variables and the history are where an imported scene
+      // is actually worked on. Leaving the container closed makes an import
+      // look like it only drew a picture. This is the same act as clicking the
+      // logo in the activity bar, and VS Code registers `<viewId>.focus` for
+      // every contributed view, so no command of our own is needed.
+      void vscode.commands.executeCommand('magpylib-studio.sceneView.focus');
+      if (scene !== undefined) {
+        // Asked for by a caller that already knows which one it wants, so the
+        // prompt below is not for them -- including for scene 0, which the
+        // import has just loaded and which is a choice like any other.
+        if (scene > 0 && scene < importedScenes.length) {
+          await mutateFromTree('load_captured', { scene });
+        }
+        return;
+      }
       if (importedScenes.length > 1) {
         const choice = await vscode.window.showInformationMessage(
           `Magpylib Studio: imported "${importedScenes[0]}" — the script has ${importedScenes.length} scene candidates.`,
@@ -3254,10 +3287,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'magpylib-studio.openScriptInStudio',
-      async (uri?: vscode.Uri) => {
+      async (uri?: vscode.Uri, scene?: number) => {
         const target = uri ?? vscode.window.activeTextEditor?.document.uri;
         if (target) {
-          await importScript(target);
+          await importScript(target, scene);
         }
       },
     ),

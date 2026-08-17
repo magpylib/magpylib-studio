@@ -33,12 +33,30 @@ import numpy as np
 try:
     from magpylib.graphics.backend import DisplayBackend
 except ImportError:  # pragma: no cover - depends on the magpylib installed
-    #: The public display-backend API landed in magpylib after 5.2.3, and this
-    #: module is the only thing here that needs it. Everything else the studio
-    #: does works with the released version, so this is not a hard dependency:
-    #: without it the scene graph is unavailable and the view draws the Plotly
-    #: figure, which is what it drew before any of this existed.
-    DisplayBackend = None
+    try:
+        # For magpylib 5.2.3 and the unreleased builds before magpylib#978,
+        # where the public path was not importable from an entry point -- the
+        # one place magpylib documents for shipping a backend. Discovery ran
+        # from inside `defaults_classes` while magpylib was still importing,
+        # and `magpylib.graphics.__init__` pulls the style and display stack,
+        # which came back round to `default_settings` before it was bound:
+        #
+        #   ImportError: cannot import name 'default_settings' from partially
+        #   initialized module magpylib._src.defaults.defaults_classes
+        #
+        # Discovery now waits for the import to finish, so the public path
+        # above is the one taken. This stays while ">=5.2" is supported.
+        # `_src.display.api` is where the public path re-exports from, and
+        # `backend_registry` has already imported it by then, so it is there.
+        from magpylib._src.display.api import DisplayBackend
+    except ImportError:
+        #: The display-backend API landed in magpylib after 5.2.3, and this
+        #: module is the only thing here that needs it. Everything else the
+        #: studio does works with the released version, so this is not a hard
+        #: dependency: without it the scene graph is unavailable and the view
+        #: draws the Plotly figure, which is what it drew before any of this
+        #: existed.
+        DisplayBackend = None
 
 #: Magpylib's `line_width` and `marker_size` are nominal: every backend scales
 #: them into its own units, and nothing in the contract says what a width of 2
@@ -359,6 +377,49 @@ def _keyed(traces, live, derived):
         key = studio_id.get(raw) or holding.get(raw)
         item["object_id"] = source_of.get(key, key)
     return payload
+
+
+def view_payload(scene):
+    """Everything a three.js view needs for a scene nobody is editing.
+
+    `scene_payload` below is for the studio, where the engine owns the objects:
+    it re-keys traces onto studio ids and works out the poses a gizmo turns
+    about. A script owns its own objects and then exits, so there is nothing to
+    key to and nothing to drag. What is left is the picture, plus enough
+    identity to hang one object's several traces on one node — a current draws
+    its loop and its arrows separately, and they should highlight as one thing.
+
+    That identity is magpylib's own `id(obj)`, a CPython address. It is valid
+    for exactly as long as this payload is, which is the point: by the time the
+    panel draws it, the process that owned those objects has usually gone. It
+    is not an id to send anywhere expecting it to still mean something.
+
+    Takes the `Scene` a display backend is handed, rather than the objects,
+    because that is all a backend gets. The poses `scene_payload` reads off the
+    objects are the ones a read-only view has no use for.
+    """
+    panel = scene.panel(1, 1)
+    traces = [t for frame in scene.frames for t in frame.traces]
+    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
+    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
+    for item in payload:
+        item["object_id"] = str(item["object_id"])
+    return {
+        "meshes": [p for p in payload if p["kind"] == "mesh"],
+        "scatters": [p for p in payload if p["kind"] == "scatter"],
+        "ranges": None if panel.ranges is None else panel.ranges.tolist(),
+        "labels": panel.labels,
+        # The studio's view carries these; this one has no gizmo to place, no
+        # shape to resize, no polarization to aim and no path to scrub. The
+        # renderer reads each as empty and skips all four.
+        "centroids": {},
+        "anchors": {},
+        "orientations": {},
+        "paths": {},
+        "shapes": {},
+        "polarizations": {},
+        "patterned": [],
+    }
 
 
 def scene_payload(objects, live=None, derived=None):
