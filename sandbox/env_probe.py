@@ -18,8 +18,12 @@ def main():
     print(f"stdout.isatty {sys.stdout.isatty()}")
     print(f"stdin.isatty  {sys.stdin.isatty()}")
     print(f"ppid         {os.getppid()}")
-    print(f"debugpy      {'debugpy' in sys.modules}  gettrace={sys.gettrace() is not None}")
-    print(f"pytest       {'pytest' in sys.modules}  PYTEST_CURRENT_TEST={'PYTEST_CURRENT_TEST' in os.environ}")
+    print(
+        f"debugpy      {'debugpy' in sys.modules}  gettrace={sys.gettrace() is not None}"
+    )
+    print(
+        f"pytest       {'pytest' in sys.modules}  PYTEST_CURRENT_TEST={'PYTEST_CURRENT_TEST' in os.environ}"
+    )
     print(f"ipython      {'IPython' in sys.modules}")
     print("--- env ---")
     hits = sorted(k for k in os.environ if any(p in k for p in INTERESTING))

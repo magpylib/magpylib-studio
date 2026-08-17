@@ -18,12 +18,12 @@ All notable changes to the Magpylib Studio extension.
 ### Added
 
 - **A script's own `show()` can draw in this window.** Run a magpylib script
-  from a terminal here — the Run button, F5 and the integrated terminal all
-  work — and `magpy.show(..., backend="studio")` opens a panel beside your
-  editor instead of a browser tab, drawn by the same three.js scene graph the
-  studio's own view uses. One panel per `show()` call in the script, and a
-  rerun updates the panels already open, keeping the camera you left them at,
-  rather than opening a second set.
+  from a terminal here — the Run button, F5 and the integrated terminal all work
+  — and `magpy.show(..., backend="studio")` opens a panel beside your editor
+  instead of a browser tab, drawn by the same three.js scene graph the studio's
+  own view uses. One panel per `show()` call in the script, and a rerun updates
+  the panels already open, keeping the camera you left them at, rather than
+  opening a second set.
 
   Installing the package is all the scene graph needs; magpylib finds the
   backend by itself. For the Plotly chart instead, call
@@ -35,12 +35,11 @@ All notable changes to the Magpylib Studio extension.
   draw with, because a `pytest` run in the same terminal is indistinguishable
   from a person running a script.
 
-  **Open in Magpylib Studio** sits in the corner of the panel, for when
-  looking is no longer enough. It opens the script the figure came from, which
-  the studio runs and takes the objects of — so what you get is the scene the
-  script builds now, editable, with the history and the inspector. The picture
-  itself cannot be promoted: it is a rendering, and the objects behind it are
-  gone.
+  **Open in Magpylib Studio** sits in the corner of the panel, for when looking
+  is no longer enough. It opens the script the figure came from, which the
+  studio runs and takes the objects of — so what you get is the scene the script
+  builds now, editable, with the history and the inspector. The picture itself
+  cannot be promoted: it is a rendering, and the objects behind it are gone.
 
 - **The 3D view can be worked in.** Click an object to select it anywhere else
   in the studio, ⌘-click to add to the selection, and drag the handles to

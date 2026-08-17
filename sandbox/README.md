@@ -28,8 +28,8 @@ sufficient.
 
 ## Two scripts that are not scenes
 
-- `env_probe.py` — what a script inherits, launched each of the ways VS Code
-  can launch one. It is how design decision 8 was settled, and how to re-check
-  it when a VS Code release moves a launch path.
-- `view_from_script.py` — two figures from one script, drawn in this window.
-  Run it twice: the panels update in place.
+- `env_probe.py` — what a script inherits, launched each of the ways VS Code can
+  launch one. It is how design decision 8 was settled, and how to re-check it
+  when a VS Code release moves a launch path.
+- `view_from_script.py` — two figures from one script, drawn in this window. Run
+  it twice: the panels update in place.
