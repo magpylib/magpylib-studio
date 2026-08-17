@@ -72,6 +72,43 @@ def _next_call(script: str) -> int:
     return index
 
 
+def _in_notebook() -> bool:
+    """Whether this is a notebook kernel rather than a script.
+
+    Kernels are started by the editor, not from a terminal, so they never carry
+    the window's address -- measured, and the reason the Interactive Window came
+    up clean when the stamp was probed (CONTINUE.md, design decision 8).
+    """
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return False
+    shell = get_ipython()
+    # the same test magpylib's own `is_notebook` makes
+    return shell is not None and type(shell).__name__ == "ZMQInteractiveShell"
+
+
+def unaddressed(what: str) -> str:
+    """Why `what` cannot draw, in terms of where the caller actually is.
+
+    "Run it from a terminal" is sound advice to a script and none at all to a
+    notebook, where there is no terminal to move to and magpylib already draws
+    inline.
+    """
+    if _in_notebook():
+        return (
+            f"{what} draws in a Magpylib Studio window, and a notebook kernel "
+            "has none: it is started by the editor rather than from a "
+            "terminal, so it never carries the window's address. Use "
+            "backend='plotly', which magpylib draws inline here anyway."
+        )
+    return (
+        f"{what} draws in a Magpylib Studio window, and this script was not run "
+        "from one (MAGPYLIB_STUDIO_DROP is unset). Run it from a terminal in a "
+        "window where the extension is active, or choose another backend."
+    )
+
+
 def write_view(
     kind: str,
     body: object,

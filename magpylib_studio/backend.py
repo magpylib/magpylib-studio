@@ -17,7 +17,7 @@ one, and getting there means handing the studio the script, not the picture.
 from __future__ import annotations
 
 from magpylib_studio import threejs
-from magpylib_studio.viewer import write_view
+from magpylib_studio.viewer import unaddressed, write_view
 
 #: Selected by name. Registered by magpylib's entry-point discovery, so a
 #: script needs no import of its own for this one.
@@ -58,12 +58,5 @@ else:
         def show(self, scene):
             payload = threejs.view_payload(scene)
             if write_view("scene", payload, title=scene.title) is None:
-                msg = (
-                    f"the {BACKEND_NAME!r} backend draws in a Magpylib Studio "
-                    "window, and this script was not run from one "
-                    "(MAGPYLIB_STUDIO_DROP is unset). Run it from a terminal "
-                    "in a window where the extension is active, or choose "
-                    "another backend."
-                )
-                raise RuntimeError(msg)
+                raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
             return payload

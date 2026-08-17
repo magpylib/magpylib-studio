@@ -15,7 +15,7 @@ import plotly.io as pio
 from plotly.io._base_renderers import ExternalRenderer
 from plotly.utils import PlotlyJSONEncoder
 
-from magpylib_studio.viewer import write_view
+from magpylib_studio.viewer import unaddressed, write_view
 
 #: Registered on import, and selected either by name or by `draw_here()`.
 RENDERER_NAME = "magpylib-studio"
@@ -42,14 +42,7 @@ class StudioRenderer(ExternalRenderer):
 
     def render(self, fig: dict) -> None:
         if write_view("plotly", fig, encoder=PlotlyJSONEncoder) is None:
-            msg = (
-                f"the {RENDERER_NAME!r} renderer draws in a Magpylib Studio "
-                "window, and this script was not run from one "
-                "(MAGPYLIB_STUDIO_DROP is unset). Run it from a terminal in a "
-                "window where the extension is active, or pick another "
-                "renderer."
-            )
-            raise RuntimeError(msg)
+            raise RuntimeError(unaddressed(f"the {RENDERER_NAME!r} renderer"))
 
 
 pio.renderers[RENDERER_NAME] = StudioRenderer()

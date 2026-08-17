@@ -211,3 +211,22 @@ def test_a_scene_asked_for_outside_a_window_says_so(monkeypatch):
             magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)),
             backend=backend.BACKEND_NAME,
         )
+
+
+def test_a_notebook_is_told_something_it_can_act_on(monkeypatch):
+    """"Run it from a terminal" is no advice to a kernel started by the editor.
+
+    A notebook never carries the address, and magpylib already draws inline
+    there, so the message names the thing to do instead.
+    """
+    monkeypatch.delenv("MAGPYLIB_STUDIO_DROP", raising=False)
+    monkeypatch.setattr(viewer, "_in_notebook", lambda: True)
+    with pytest.raises(RuntimeError, match="notebook kernel has none"):
+        go.Figure().show(renderer=plotly_view.RENDERER_NAME)
+
+
+def test_a_script_is_still_told_about_the_terminal(monkeypatch):
+    monkeypatch.delenv("MAGPYLIB_STUDIO_DROP", raising=False)
+    monkeypatch.setattr(viewer, "_in_notebook", lambda: False)
+    with pytest.raises(RuntimeError, match="Run it from a terminal"):
+        go.Figure().show(renderer=plotly_view.RENDERER_NAME)
