@@ -35,6 +35,13 @@ All notable changes to the Magpylib Studio extension.
   draw with, because a `pytest` run in the same terminal is indistinguishable
   from a person running a script.
 
+  **Open in Magpylib Studio** sits in the corner of the panel, for when
+  looking is no longer enough. It opens the script the figure came from, which
+  the studio runs and takes the objects of — so what you get is the scene the
+  script builds now, editable, with the history and the inspector. The picture
+  itself cannot be promoted: it is a rendering, and the objects behind it are
+  gone.
+
 - **The 3D view can be worked in.** Click an object to select it anywhere else
   in the studio, ⌘-click to add to the selection, and drag the handles to
   **move** (`W`), **turn** (`E`), **resize** (`R`) or **aim a polarization**

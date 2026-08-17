@@ -50,11 +50,22 @@ function say(message: string): void {
   log.appendLine(message);
 }
 
-/** Where scripts run from this window leave their figures. */
+/** Where scripts run from this window leave their figures.
+ *
+ *  Per window, which workspace storage already is. A window with no folder
+ *  open has none and falls back to global storage, which every other
+ *  folder-less window shares -- so a script run in one would draw panels in
+ *  both, and whichever swept first would delete the other's payloads before
+ *  they were read. The session id separates them; it changes across a reload,
+ *  which is also when the stamp is re-applied. */
 function viewsUri(context: vscode.ExtensionContext): vscode.Uri {
+  if (context.storageUri) {
+    return vscode.Uri.joinPath(context.storageUri, VIEWS_SUBDIR);
+  }
   return vscode.Uri.joinPath(
-    context.storageUri ?? context.globalStorageUri,
+    context.globalStorageUri,
     VIEWS_SUBDIR,
+    vscode.env.sessionId,
   );
 }
 
@@ -79,6 +90,10 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
       'plotly.min.js',
     ),
   );
+  // The same logo the activity bar and the panel tabs carry. The activity bar
+  // masks it to a monochrome silhouette; as an <img> here it keeps its own
+  // colours, which is what makes the button read as "the studio" at a glance.
+  const logoUri = mediaUri(webview, context.extensionUri, 'magnet.svg');
   const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
   // Same mapping as the studio's own panel: three ships ESM only and its
   // addons import the bare name, so the specifiers are mapped rather than
@@ -111,7 +126,12 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
 <body>
-  <div id="status">Waiting for a figure…</div>
+  <div id="bar">
+    <span id="status">Waiting for a figure…</span>
+    <button id="promote" hidden title="Runs this script again in the studio, which takes its objects">
+      <img src="${logoUri}" alt="" />Open in Magpylib Studio
+    </button>
+  </div>
   <div id="canvas"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
@@ -151,11 +171,54 @@ function draw(
       if (current) {
         void current.panel.webview.postMessage({ type: 'view', payload: current.payload });
       }
+    } else if (message.type === 'openInStudio') {
+      void promote(key);
     }
   });
   panel.onDidDispose(() => {
     views.delete(key);
   });
+}
+
+/** Hand the studio the script this panel was drawn from.
+ *
+ *  The picture cannot be promoted — a payload is a rendering, and the objects
+ *  it was made from are in a process that has exited. What can be promoted is
+ *  the script, which the studio already knows how to run and introspect. So
+ *  the studio's scene is what the script produces *now*, which is why the
+ *  button says "open the script" rather than "edit this".
+ */
+async function promote(key: string): Promise<void> {
+  const view = views.get(key);
+  if (!view) {
+    return;
+  }
+  const { script } = view.payload;
+  const uri = vscode.Uri.file(script);
+  try {
+    await vscode.workspace.fs.stat(uri);
+  } catch {
+    // A script run from a temp file, or one edited away since it drew. The
+    // panel keeps its figure; there is simply nothing to re-run.
+    void vscode.window.showWarningMessage(
+      `Magpylib Studio: cannot open ${script} — it is not there any more.`,
+    );
+    return;
+  }
+  // Which of the script's show() calls this panel is. The studio re-runs the
+  // script and captures one scene per call, in the same order, so the index
+  // that addressed this panel usually picks the scene it was drawn from.
+  //
+  // Usually, because the two count different things: this counts figures this
+  // package wrote, the import counts magpylib show() calls it could read. A
+  // script that also draws a plain plotly figure under `draw_here()`, or one
+  // the importer skips, pushes them apart. Recoverable rather than prevented --
+  // "Magpylib Studio: Switch Imported Scene…" picks another.
+  await vscode.commands.executeCommand(
+    'magpylib-studio.openScriptInStudio',
+    uri,
+    view.payload.index,
+  );
 }
 
 async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
@@ -192,6 +255,18 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
 
 /** Watch this window's drop directory, and draw what arrives in it. */
 export function activateScriptViewer(context: vscode.ExtensionContext): void {
+  void watch(context).catch((err: unknown) => {
+    // Without this the failure is total and silent: no watcher, no panels, and
+    // a script that goes on writing payloads nothing will ever read.
+    say(`script views are not running: ${err instanceof Error ? err.message : err}`);
+    void vscode.window.showWarningMessage(
+      'Magpylib Studio: figures from scripts cannot be watched for — see the ' +
+        '"Magpylib Studio Views" output for why.',
+    );
+  });
+}
+
+async function watch(context: vscode.ExtensionContext): Promise<void> {
   const arrived = (uri: vscode.Uri): void => {
     void read(uri).then((payload) => {
       if (payload) {
@@ -199,7 +274,7 @@ export function activateScriptViewer(context: vscode.ExtensionContext): void {
       }
     });
   };
-  void (async () => {
+  {
     const dir = viewsUri(context);
     await vscode.workspace.fs.createDirectory(dir);
     // Payloads left by earlier sessions describe panels that no longer exist:
@@ -220,5 +295,5 @@ export function activateScriptViewer(context: vscode.ExtensionContext): void {
     watcher.onDidCreate(arrived);
     watcher.onDidChange(arrived);
     context.subscriptions.push(watcher);
-  })();
+  }
 }

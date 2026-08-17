@@ -43,6 +43,11 @@ else:
         #: highlight together.
         merge_traces = False
         handles_traces = frozenset({"mesh3d", "scatter3d"})
+        #: Pinned, not inherited. Inheriting takes whatever the installed
+        #: magpylib emits, so the two can never disagree and the mismatch
+        #: warning this exists for could never fire. This is the version the
+        #: payload was written against; raise it when it has been checked.
+        api_version = 1
         accepts_options = frozenset()
         #: Not yet: playback needs every step of the path captured and served a
         #: frame at a time, which is the session's job in the studio and has no

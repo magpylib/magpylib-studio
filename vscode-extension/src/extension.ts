@@ -2025,7 +2025,11 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /** Run a user script through the engine importer and show the result. */
-  const importScript = async (uri: vscode.Uri) => {
+  /** `scene` names which of the script's `show()` calls to land on, for a
+   *  caller that already knows -- a script view is one particular call, and
+   *  arriving on a different scene with a prompt to go looking for yours is a
+   *  poor answer to having clicked on it. */
+  const importScript = async (uri: vscode.Uri, scene?: number) => {
     try {
       const result = (await (await getEngine(context)).request('load_script', {
         path: uri.fsPath,
@@ -2042,6 +2046,22 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       broadcastMutation();
       openStudioPanel(context);
+      // The studio is its sidebar as much as its panel: the tree, the
+      // inspector, the variables and the history are where an imported scene
+      // is actually worked on. Leaving the container closed makes an import
+      // look like it only drew a picture. This is the same act as clicking the
+      // logo in the activity bar, and VS Code registers `<viewId>.focus` for
+      // every contributed view, so no command of our own is needed.
+      void vscode.commands.executeCommand('magpylib-studio.sceneView.focus');
+      if (scene !== undefined) {
+        // Asked for by a caller that already knows which one it wants, so the
+        // prompt below is not for them -- including for scene 0, which the
+        // import has just loaded and which is a choice like any other.
+        if (scene > 0 && scene < importedScenes.length) {
+          await mutateFromTree('load_captured', { scene });
+        }
+        return;
+      }
       if (importedScenes.length > 1) {
         const choice = await vscode.window.showInformationMessage(
           `Magpylib Studio: imported "${importedScenes[0]}" — the script has ${importedScenes.length} scene candidates.`,
@@ -3267,10 +3287,10 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'magpylib-studio.openScriptInStudio',
-      async (uri?: vscode.Uri) => {
+      async (uri?: vscode.Uri, scene?: number) => {
         const target = uri ?? vscode.window.activeTextEditor?.document.uri;
         if (target) {
-          await importScript(target);
+          await importScript(target, scene);
         }
       },
     ),

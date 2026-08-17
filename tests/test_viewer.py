@@ -2,12 +2,14 @@
 
 import base64
 import json
+import subprocess
+import sys
+import tempfile
 
 import magpylib as magpy
 import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
-from magpylib._src.defaults.defaults_utility import get_registered_backends
 
 from magpylib_studio import backend, plotly_view, threejs, viewer
 
@@ -125,13 +127,33 @@ needs_scene_graph = pytest.mark.skipif(
 def test_the_backend_is_found_by_installing_the_package():
     """No import in the user's script: magpylib resolves the entry point.
 
-    Which is also the fragile part. Discovery runs while magpylib is still
-    importing, so `backend.py` cannot reach `magpylib.graphics.backend` — see
-    the fallback in threejs.py. When that breaks, it breaks silently: a module
-    that yields no class is skipped without a word, and the name simply is not
-    there. Hence a test for the name being there at all.
+    Asked of a fresh interpreter, because in-process it proves nothing — this
+    module imports `backend`, and defining the class registers it, so the name
+    would be there with no entry point installed at all.
+
+    Worth a test because the ways it can go missing are quiet ones. The module
+    is loaded during discovery, and anything that leaves it without a class —
+    a magpylib too old for `DisplayBackend`, a package installed but not its
+    entry point — ends with the name simply not existing.
     """
-    assert backend.BACKEND_NAME in get_registered_backends()
+    code = (
+        "import magpylib\n"
+        "from magpylib._src.defaults.defaults_utility import "
+        "get_registered_backends\n"
+        f"print({backend.BACKEND_NAME!r} in get_registered_backends())\n"
+    )
+    out = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+        # not the repo: importable-from-cwd would not register it either, but
+        # the question is what an installed package gives a stranger
+        cwd=tempfile.gettempdir(),
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "True", out.stderr
 
 
 @needs_scene_graph

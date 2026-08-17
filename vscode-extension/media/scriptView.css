@@ -13,6 +13,49 @@ body {
   flex: 1;
   min-height: 0;
 }
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 10px;
+}
+#bar #status {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+/* `hidden` is only `[hidden] { display: none }` in the browser's own sheet,
+   which any rule here outranks -- and the button below sets `display`, so
+   hiding it by the attribute would do nothing at all. Same trap as
+   studio.css, stated with the specificity to win. */
+#bar [hidden] {
+  display: none;
+}
+/* Offered, not urged: this panel is a figure, and running the script again in
+   the studio is a different act with its own cost. It sits where a caption
+   would, at the size of one. */
+#promote {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 1px 8px;
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: none;
+  border-radius: 2px;
+}
+#promote:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+/* Sized off the label rather than fixed, so it tracks the editor font. */
+#promote img {
+  height: 1.25em;
+  width: auto;
+}
+
 /* The script the figure came from. It is the only thing this panel can say
    about itself that the tab title does not already say, and it is what tells
    two panels of the same scene apart -- so it stays visible rather than

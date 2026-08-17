@@ -4,6 +4,15 @@
 const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
+const promoteEl = document.getElementById("promote");
+
+// The studio can run the script again and own what it builds; it cannot be
+// given this picture. So the offer only makes sense when the payload names a
+// file -- a REPL or `python -c` reports `<interpreter>`, and there is nothing
+// to open.
+promoteEl.addEventListener("click", () => {
+  vscodeApi.postMessage({ type: "openInStudio" });
+});
 
 function plotTemplate() {
   const cls = document.body.className;
@@ -14,6 +23,9 @@ function plotTemplate() {
 }
 
 let current = null;
+//: which renderer is holding the canvas, so a payload that changes kind can
+//: take it back cleanly
+let drawing = null;
 
 /** The scene graph is a module, and modules run after this script does — so a
  *  payload can arrive before there is anything to draw it with. `load` fires
@@ -29,6 +41,16 @@ function whenScene3d(run) {
 function drawn(payload) {
   current = payload;
   statusEl.textContent = payload.script;
+  promoteEl.hidden = payload.script.startsWith("<");
+  if (drawing && drawing !== payload.kind) {
+    // The two renderers do not share a canvas. Plotly keeps its state on the
+    // element rather than in the DOM it drew, so emptying the element without
+    // telling it leaves that state describing a plot that is gone; the scene
+    // graph re-hangs its own canvas when it finds the host emptied.
+    if (drawing === "plotly") Plotly.purge(canvasEl);
+    canvasEl.innerHTML = "";
+  }
+  drawing = payload.kind;
   if (payload.kind === "scene") {
     // keepCamera is the whole point of addressing panels rather than
     // replacing them: a rerun of the script redraws this scene where the
@@ -40,12 +62,22 @@ function drawn(payload) {
   // react, not newPlot: a rerun of the script arrives as a new payload for
   // this same panel, and reacting keeps the camera the user set on the last
   // one, the same way.
-  Plotly.react(
-    canvasEl,
-    figure.data || [],
-    { ...(figure.layout || {}), template: plotTemplate() },
-    { responsive: true },
-  );
+  Plotly.react(canvasEl, {
+    data: figure.data || [],
+    layout: {
+      ...(figure.layout || {}),
+      template: plotTemplate(),
+      // What actually holds the camera across a rerun. `react` alone diffs
+      // the figure and resets the view with it, so without this the panel
+      // being addressed rather than replaced would buy nothing.
+      uirevision: "magpylib-studio",
+    },
+    // An animated figure carries its steps here. Plotly draws the Play button
+    // and the slider from `layout`, which arrives either way -- so dropping
+    // the frames leaves controls that do nothing.
+    frames: figure.frames || [],
+    config: { responsive: true },
+  });
 }
 
 window.addEventListener("message", (event) => {
