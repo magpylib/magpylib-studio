@@ -32,6 +32,12 @@ dynamic = ["version"]
 # the plotly figure; nothing else here depends on it.
 dependencies = ["magpylib>=5.2", "plotly>=5"]
 
+[project.entry-points."magpylib.backends"]
+# Enough for `magpy.show(backend="studio")` to work on a pip install. Magpylib
+# resolves this group while it is importing, so `backend.py` keeps its imports
+# to magpylib and numpy -- see the note there.
+studio = "magpylib_studio.backend:StudioBackend"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "jsonschema>=4"]
 

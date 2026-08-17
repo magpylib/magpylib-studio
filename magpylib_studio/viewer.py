@@ -13,10 +13,16 @@ it. A rerun counts from zero again, so it overwrites the files its last run
 wrote and the panels already open update in place — keeping their cameras —
 instead of a second set appearing beside them.
 
-Nothing here runs unless the renderer was asked for by name. The stamp is an
+Nothing here runs unless something was asked to draw. The stamp is an
 address, not an instruction: `pytest` in the same terminal carries it too, and
 a default set from an environment variable would have applied to every figure
 the interpreter drew. See CONTINUE.md, design decision 8.
+
+Deliberately free of plotly, and of anything else heavy. `backend.py` is
+loaded while magpylib imports — an entry point is resolved before the defaults
+tree can validate its own default backend — and this comes with it. What only
+a plotly figure needs lives in `plotly_view.py`, which a script imports for
+itself.
 """
 
 from __future__ import annotations
@@ -27,15 +33,6 @@ import os
 import sys
 import time
 from pathlib import Path
-
-import plotly.io as pio
-from plotly.io._base_renderers import ExternalRenderer
-from plotly.utils import PlotlyJSONEncoder
-
-#: Selected by name — `show(backend="plotly", plotly_renderer=RENDERER_NAME)`.
-#: Never made plotly's default from in here; that is the user's to set, for
-#: the reason in the module docstring.
-RENDERER_NAME = "magpylib-studio"
 
 #: Bumped when the payload's shape changes. A panel that does not know a
 #: version says so rather than drawing part of it.
@@ -75,11 +72,21 @@ def _next_call(script: str) -> int:
     return index
 
 
-def write_view(kind: str, body: object, *, title: str | None = None) -> Path | None:
+def write_view(
+    kind: str,
+    body: object,
+    *,
+    title: str | None = None,
+    encoder: type[json.JSONEncoder] | None = None,
+) -> Path | None:
     """Leave one figure where the window will find it.
 
     Returns the file written, or None when the script was not run from a
     studio window and there is nowhere to put it.
+
+    `encoder` is how a caller says what its own body is made of, so that this
+    module need not know: a scene payload is lists and floats already, and a
+    plotly figure holds numpy arrays that only plotly's encoder can write.
     """
     views = drop_dir()
     if views is None:
@@ -104,42 +111,6 @@ def write_view(kind: str, body: object, *, title: str | None = None) -> Path | N
     # say "too early". os.replace is atomic within a directory on both POSIX
     # and Windows.
     staging = views / f"{key}.{os.getpid()}.part"
-    staging.write_text(
-        json.dumps(payload, cls=PlotlyJSONEncoder), encoding="utf-8"
-    )
+    staging.write_text(json.dumps(payload, cls=encoder), encoding="utf-8")
     os.replace(staging, target)
     return target
-
-
-def draw_here() -> str:
-    """Send this script's plotly figures to the window it was run from.
-
-    Sets plotly's own default renderer and returns its name. A script's author
-    is entitled to do that for their script — it is the environment doing it
-    behind their back that design decision 8 rules out.
-
-    It is also the only route that works on every magpylib this package
-    supports. `show(backend="plotly", plotly_renderer=...)` reaches the figure
-    on 5.2.4.dev, and 5.2.3 drops the argument without a word — no warning, no
-    error, and a browser tab opens instead. Measured, both ways.
-    """
-    pio.renderers.default = RENDERER_NAME
-    return RENDERER_NAME
-
-
-class StudioRenderer(ExternalRenderer):
-    """Draws a plotly figure in the studio window the script was run from."""
-
-    def render(self, fig: dict) -> None:
-        if write_view("plotly", fig) is None:
-            msg = (
-                f"the {RENDERER_NAME!r} renderer draws in a Magpylib Studio "
-                "window, and this script was not run from one "
-                "(MAGPYLIB_STUDIO_DROP is unset). Run it from a terminal in a "
-                "window where the extension is active, or pick another "
-                "renderer."
-            )
-            raise RuntimeError(msg)
-
-
-pio.renderers[RENDERER_NAME] = StudioRenderer()

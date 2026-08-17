@@ -15,13 +15,31 @@ function plotTemplate() {
 
 let current = null;
 
+/** The scene graph is a module, and modules run after this script does — so a
+ *  payload can arrive before there is anything to draw it with. `load` fires
+ *  once every deferred module has executed. */
+function whenScene3d(run) {
+  if (window.scene3d) {
+    run();
+  } else {
+    window.addEventListener("load", run, { once: true });
+  }
+}
+
 function drawn(payload) {
   current = payload;
-  const figure = payload.body || {};
   statusEl.textContent = payload.script;
+  if (payload.kind === "scene") {
+    // keepCamera is the whole point of addressing panels rather than
+    // replacing them: a rerun of the script redraws this scene where the
+    // user left the camera.
+    whenScene3d(() => window.scene3d.render(canvasEl, payload.body || {}));
+    return;
+  }
+  const figure = payload.body || {};
   // react, not newPlot: a rerun of the script arrives as a new payload for
   // this same panel, and reacting keeps the camera the user set on the last
-  // one. That is the reason the panel is addressed rather than replaced.
+  // one, the same way.
   Plotly.react(
     canvasEl,
     figure.data || [],
@@ -40,7 +58,12 @@ window.addEventListener("message", (event) => {
 // The theme is the window's, and it changes under a panel that is already
 // drawn. Plotly holds the colours it was given, so they have to be re-given.
 new MutationObserver(() => {
-  if (current) {
+  if (!current) return;
+  if (current.kind === "scene") {
+    // The scene reads the editor background off the same CSS variable each
+    // time it renders, so redrawing it is what picks the new theme up.
+    whenScene3d(() => window.scene3d.render(canvasEl, current.body || {}));
+  } else {
     Plotly.relayout(canvasEl, { template: plotTemplate() });
   }
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });

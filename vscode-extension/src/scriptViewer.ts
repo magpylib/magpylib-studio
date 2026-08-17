@@ -79,6 +79,25 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
       'plotly.min.js',
     ),
   );
+  const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
+  // Same mapping as the studio's own panel: three ships ESM only and its
+  // addons import the bare name, so the specifiers are mapped rather than
+  // rewritten.
+  const threeUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(
+      context.extensionUri,
+      'node_modules',
+      'three',
+      'build',
+      'three.module.min.js',
+    ),
+  );
+  const threeAddonsUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'three', 'examples', 'jsm'),
+  );
+  const importMap = JSON.stringify({
+    imports: { three: `${threeUri}`, 'three/addons/': `${threeAddonsUri}/` },
+  });
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,6 +107,8 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   <title>Magpylib View</title>
   <link rel="stylesheet" href="${styleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
+  <script type="importmap" nonce="${nonce}">${importMap}</script>
+  <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
 <body>
   <div id="status">Waiting for a figure…</div>
@@ -162,7 +183,7 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
     );
     return undefined;
   }
-  if (payload.kind !== 'plotly') {
+  if (payload.kind !== 'plotly' && payload.kind !== 'scene') {
     say(`ignoring ${uri.fsPath}: unknown figure kind ${payload.kind}`);
     return undefined;
   }

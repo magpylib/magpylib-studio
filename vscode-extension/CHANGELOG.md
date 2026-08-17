@@ -17,13 +17,17 @@ All notable changes to the Magpylib Studio extension.
 
 ### Added
 
-- **A script's own `show()` can draw in this window.** Call
-  `magpylib_studio.viewer.draw_here()` once at the top of a magpylib script and
-  run it from a terminal here — the Run button, F5 and the integrated terminal
-  all work — and its plotly figures open in a panel beside your editor instead
-  of a browser tab. One panel per `show()` call in the script, and a rerun
-  updates the panels already open, keeping the camera you left them at, rather
-  than opening a second set.
+- **A script's own `show()` can draw in this window.** Run a magpylib script
+  from a terminal here — the Run button, F5 and the integrated terminal all
+  work — and `magpy.show(..., backend="studio")` opens a panel beside your
+  editor instead of a browser tab, drawn by the same three.js scene graph the
+  studio's own view uses. One panel per `show()` call in the script, and a
+  rerun updates the panels already open, keeping the camera you left them at,
+  rather than opening a second set.
+
+  Installing the package is all the scene graph needs; magpylib finds the
+  backend by itself. For the Plotly chart instead, call
+  `magpylib_studio.plotly_view.draw_here()` once at the top of the script.
 
   These panels are read only: no engine stands behind them, and by the time one
   draws there is usually no script either. Nothing draws here unless the script
