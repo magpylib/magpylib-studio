@@ -9,6 +9,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+/* The canvas is emptied when the panel changes renderer, so the badge cannot
+   live inside it. It hangs on the stage instead, which is only ever resized. */
+#stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
 #canvas {
   flex: 1;
   min-height: 0;
@@ -28,8 +36,63 @@ body {
    which any rule here outranks -- and the button below sets `display`, so
    hiding it by the attribute would do nothing at all. Same trap as
    studio.css, stated with the specificity to win. */
-#bar [hidden] {
+#bar [hidden],
+#overlay[hidden] {
   display: none;
+}
+/* Over the figure, because that is what it is about -- beside the path it was
+   a caption nobody read. Top *left* whatever drew the figure: Plotly puts its
+   modebar in the other corner, and a badge that moves depending on the backend
+   is one the eye has to look for. */
+#overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* A state, not a control: it says what the figure is, takes no clicks, and
+   does not pretend to be pressable. The button beside it is the thing to do
+   about it. */
+#stale {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  pointer-events: none;
+  color: var(--vscode-editorWarning-foreground);
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWarning-foreground);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+}
+/* The primary button colours, not the secondary ones: `button.secondary*` is
+   optional and several light themes leave it undefined, which left this
+   sitting on the figure with no chip at all. `button.background` is defined
+   everywhere and is the pair the editor guarantees contrast for. The shadow
+   is what separates it from whatever it happens to be floating over -- a
+   Plotly panel in a light theme is white under a white button. */
+#rerun {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  border: 1px solid var(--vscode-contrastBorder, transparent);
+  border-radius: 3px;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
+}
+#rerun:hover {
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+}
+/* The glyph is a font, so it takes the button's colour and scales with its
+   text rather than needing a size of its own. */
+#rerun .codicon {
+  font-size: 13px;
 }
 /* Offered, not urged: this panel is a figure, and running the script again in
    the studio is a different act with its own cost. It sits where a caption
@@ -42,14 +105,18 @@ body {
   font-size: 11px;
   padding: 1px 8px;
   cursor: pointer;
-  color: var(--vscode-button-secondaryForeground);
-  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
   border: none;
   border-radius: 2px;
 }
 #promote:hover {
-  background: var(--vscode-button-secondaryHoverBackground);
+  background: var(
+    --vscode-button-secondaryHoverBackground,
+    var(--vscode-button-hoverBackground, var(--vscode-button-background))
+  );
 }
+
 /* Sized off the label rather than fixed, so it tracks the editor font. */
 #promote img {
   height: 1.25em;

@@ -48,6 +48,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "magpylib-studio.toggleDrawScriptsHere",
+        "title": "Magpylib Studio: Draw Scripts in a Panel"
+      },
+      {
         "command": "magpylib-studio.openStudio",
         "title": "Magpylib Studio: Open Scene View",
         "icon": "$(open-preview)"
@@ -359,6 +363,11 @@
       }
     ],
     "viewsWelcome": [
+      {
+        "view": "magpylib-studio.sceneView",
+        "when": "config.magpylib-studio.drawScriptsHere == false",
+        "contents": "Scripts you run in this window draw with their own backend. The studio can take them instead, so a plain `magpy.show()` opens a panel here.\n[Draw Scripts in a Panel](command:magpylib-studio.toggleDrawScriptsHere)"
+      },
       {
         "view": "magpylib-studio.sceneView",
         "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA Halbach stack, a solenoid, a mirrored pair, a magnet array, a measuring plane or a turning magnet — each built from a couple of parametric steps.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\nOr ask Copilot chat to add objects with #magpyAdd."
@@ -809,6 +818,11 @@
           "type": "string",
           "default": "",
           "description": "Python interpreter used to run the magpylib-studio engine. Empty = auto-detect (.venv next to the workspace, then python3)."
+        },
+        "magpylib-studio.drawScriptsHere": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Make `studio` the default plotting backend for magpylib scripts run from a terminal in this window, so a plain `magpy.show()` draws in a panel instead of opening a Matplotlib window.\n\nApplies to **every** script run from those terminals — test runs excepted — and takes effect in terminals opened after it is changed. Scripts that set their own backend are left alone."
         }
       }
     },
@@ -1629,6 +1643,7 @@
     "watch": "tsc -watch -p ./"
   },
   "dependencies": {
+    "@vscode/codicons": "^0.0.46-24",
     "@vscode/python-extension": "^1.0.6",
     "plotly.js-dist-min": "^3.0.0",
     "three": "^0.185.1"

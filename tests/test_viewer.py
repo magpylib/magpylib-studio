@@ -1,7 +1,9 @@
 """Tests for the figures a script leaves for its window to draw."""
 
 import base64
+import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -230,3 +232,157 @@ def test_a_script_is_still_told_about_the_terminal(monkeypatch):
     monkeypatch.setattr(viewer, "_in_notebook", lambda: False)
     with pytest.raises(RuntimeError, match="Run it from a terminal"):
         go.Figure().show(renderer=plotly_view.RENDERER_NAME)
+
+
+# --- "draw scripts here", the one thing that chooses a backend for you -----
+
+
+@pytest.fixture
+def default_backend():
+    """`magpy.defaults` is process-wide; put the backend back."""
+    before = magpy.defaults.display.backend
+    yield
+    magpy.defaults.display.backend = before
+
+
+@pytest.fixture
+def asked(monkeypatch, tmp_path, default_backend):
+    """A window with the setting on.
+
+    `PYTEST_CURRENT_TEST` is deliberately not cleared here: pytest sets it
+    again for every phase, so a fixture that deletes it has been undone by the
+    time the body runs. The tests that need to look like an ordinary script
+    clear it themselves.
+    """
+    monkeypatch.setenv("MAGPYLIB_STUDIO_DROP", str(tmp_path))
+    monkeypatch.setenv(backend.CLAIM_VAR, backend.BACKEND_NAME)
+    magpy.defaults.display.backend = "auto"
+
+
+@needs_scene_graph
+def test_the_window_can_be_asked_to_choose(asked, monkeypatch):
+    monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
+    assert backend._claim_default() is True
+    assert magpy.defaults.display.backend == backend.BACKEND_NAME
+
+
+@needs_scene_graph
+def test_nothing_is_claimed_unasked(asked, monkeypatch):
+    """The address alone never chooses; that is the whole design."""
+    monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
+    monkeypatch.delenv(backend.CLAIM_VAR)
+    assert backend._claim_default() is False
+    assert magpy.defaults.display.backend == "auto"
+
+
+@needs_scene_graph
+def test_a_script_that_chose_for_itself_wins(asked, monkeypatch):
+    monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
+    magpy.defaults.display.backend = "plotly"
+    assert backend._claim_default() is False
+    assert magpy.defaults.display.backend == "plotly"
+
+
+@needs_scene_graph
+def test_a_test_run_is_left_alone(asked, monkeypatch):
+    """A courtesy, not a rule -- but a suite is what opens panels by the
+    dozen, and it is the case the setting's description warns about.
+
+    pytest has already set the variable for this very call; the test says so
+    rather than relying on it.
+    """
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests/test_x.py::test_y (call)")
+    assert backend._claim_default() is False
+    assert magpy.defaults.display.backend == "auto"
+
+
+@needs_scene_graph
+def test_a_suite_is_left_alone_at_collection_time(asked):
+    """The moment the environment variable does not cover.
+
+    Modules are imported during collection, when `PYTEST_CURRENT_TEST` is not
+    set -- and importing this module is what claims. Checked here without
+    patching anything, since this very session is the case.
+    """
+    assert "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+    assert backend._claim_default() is False
+
+
+@needs_scene_graph
+def test_a_plain_script_claims_at_import(tmp_path, monkeypatch):
+    """End to end, in an interpreter that is not a test run.
+
+    Importing the backend is what sets the default, and nothing in-process can
+    show that: pytest is in `sys.modules` here by definition.
+    """
+    env = {
+        **os.environ,
+        "MAGPYLIB_STUDIO_DROP": str(tmp_path),
+        backend.CLAIM_VAR: backend.BACKEND_NAME,
+    }
+    env.pop("PYTEST_CURRENT_TEST", None)
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import magpylib_studio.backend, magpylib as magpy;"
+            "print(magpy.defaults.display.backend)",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+        env=env,
+        cwd=tempfile.gettempdir(),
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == backend.BACKEND_NAME, out.stderr
+
+
+@needs_scene_graph
+def test_nothing_is_claimed_without_somewhere_to_draw(asked, monkeypatch):
+    """Claiming with no address makes the first show() raise instead."""
+    monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
+    monkeypatch.delenv("MAGPYLIB_STUDIO_DROP")
+    assert backend._claim_default() is False
+    assert magpy.defaults.display.backend == "auto"
+
+
+def test_a_payload_says_what_drew_it(drop):
+    """The interpreter, for whatever re-runs the script later.
+
+    A panel that has gone stale can offer to run it again, and "python" on a
+    PATH is not the same answer as the interpreter this package was importable
+    in -- which is the whole reason a stamped terminal is not sufficient.
+    """
+    path = viewer.write_view("plotly", {})
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["python"] == sys.executable
+    assert payload["claimed"] is False
+
+
+def test_a_payload_says_where_it_ran(drop):
+    """Enough to run the script again exactly as it was run."""
+    path = viewer.write_view("plotly", {})
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["cwd"] == os.getcwd()
+
+
+def test_a_payload_says_what_the_file_held(drop, tmp_path, monkeypatch):
+    """So that saving a file is not mistaken for changing it."""
+    script = tmp_path / "run.py"
+    script.write_bytes(b"import magpylib\n")
+    monkeypatch.setattr(viewer, "_script_path", lambda: str(script))
+    payload = json.loads(
+        viewer.write_view("plotly", {}).read_text(encoding="utf-8")
+    )
+    assert payload["digest"] == hashlib.sha256(script.read_bytes()).hexdigest()
+
+
+def test_a_payload_with_no_file_has_no_digest(drop, monkeypatch):
+    """A REPL has nothing to hash, and nothing to go stale against."""
+    monkeypatch.setattr(viewer, "_script_path", lambda: "<stdin>")
+    payload = json.loads(
+        viewer.write_view("plotly", {}).read_text(encoding="utf-8")
+    )
+    assert payload["digest"] is None

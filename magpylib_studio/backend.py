@@ -16,8 +16,18 @@ one, and getting there means handing the studio the script, not the picture.
 
 from __future__ import annotations
 
+import os
+import sys
+
+import magpylib as magpy
+
 from magpylib_studio import threejs
-from magpylib_studio.viewer import unaddressed, write_view
+from magpylib_studio.viewer import drop_dir, unaddressed, write_view
+
+#: Set on this window's terminals only while "draw scripts here" is on. The
+#: address (`MAGPYLIB_STUDIO_DROP`) says *where* a figure can go; this says
+#: that a script which named no backend should go there.
+CLAIM_VAR = "MAGPYLIB_STUDIO_BACKEND"
 
 #: Selected by name. Registered by magpylib's entry-point discovery, so a
 #: script needs no import of its own for this one.
@@ -57,6 +67,60 @@ else:
 
         def show(self, scene):
             payload = threejs.view_payload(scene)
-            if write_view("scene", payload, title=scene.title) is None:
+            if (
+                write_view("scene", payload, title=scene.title, claimed=CLAIMED)
+                is None
+            ):
                 raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
             return payload
+
+
+def _under_a_test_runner() -> bool:
+    """Whether this looks like a test suite rather than someone's script.
+
+    Two tests for one runner, because they catch different moments.
+    `PYTEST_CURRENT_TEST` is set per test phase and is *absent* during
+    collection -- which is exactly when this module is imported and when the
+    claim would be made, so the variable alone let a whole suite run claimed.
+    `pytest` in `sys.modules` is what holds at import time.
+
+    A courtesy and not a rule: nox, tox, sphinx-build and a script rendering
+    two hundred figures are all still here. A suite is the one that opens
+    panels by the dozen.
+    """
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
+def _claim_default() -> bool:
+    """Make `studio` the default backend, if this window asked for that.
+
+    Setting a default from the environment is action at a distance, so it is
+    hedged on all four sides:
+
+    * the window has to have asked -- the variable is stamped only while the
+      setting is on, and unticking it stops this;
+    * there has to be somewhere to draw, or the first `show()` would raise
+      instead of drawing;
+    * the script must not have chosen for itself. Only `"auto"` is replaced,
+      so `magpy.defaults.display.backend = "plotly"` in a script wins;
+    * and not under a test runner -- see `_under_a_test_runner`.
+
+    Runs while magpylib resolves entry points, which `check_format_input_backend`
+    does *before* it reads the default -- so the first `show()` of the process
+    already sees this.
+    """
+    if StudioBackend is None or os.environ.get(CLAIM_VAR) != BACKEND_NAME:
+        return False
+    if drop_dir() is None:
+        return False
+    if _under_a_test_runner():
+        return False
+    if magpy.defaults.display.backend != "auto":
+        return False
+    magpy.defaults.display.backend = BACKEND_NAME
+    return True
+
+
+#: Whether this process is drawing here because the window asked, rather than
+#: because the script did. The panel says so once, and only for these.
+CLAIMED = _claim_default()

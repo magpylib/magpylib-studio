@@ -8,7 +8,11 @@ import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 import { Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
-import { activateScriptViewer } from './scriptViewer';
+import {
+  activateScriptViewer,
+  drawScriptsHere,
+  setDrawScriptsHere,
+} from './scriptViewer';
 import {
   iconFor,
   isOperation,
@@ -1897,6 +1901,31 @@ export function activate(context: vscode.ExtensionContext): void {
   context.environmentVariableCollection.description =
     'Magpylib Studio: tells a script run here which window to draw in';
   context.environmentVariableCollection.replace('MAGPYLIB_STUDIO_DROP', drop);
+  // The address says where; this says whether. Kept as a second variable so
+  // the two stay separable: the address is always safe to carry, choosing a
+  // backend for every script in the window is not -- it is on by default, and
+  // `echo $MAGPYLIB_STUDIO_BACKEND` is then the whole explanation for why
+  // figures are going somewhere new.
+  const stampBackend = () => {
+    if (drawScriptsHere()) {
+      context.environmentVariableCollection.replace(
+        'MAGPYLIB_STUDIO_BACKEND',
+        'studio',
+      );
+    } else {
+      context.environmentVariableCollection.delete('MAGPYLIB_STUDIO_BACKEND');
+    }
+  };
+  stampBackend();
+  context.subscriptions.push(
+    // Terminals already open keep what they were given -- VS Code marks them
+    // as wanting a relaunch, which is the only honest thing to show.
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('magpylib-studio.drawScriptsHere')) {
+        stampBackend();
+      }
+    }),
+  );
   activateScriptViewer(context);
 
   const tree = new SceneTreeProvider(
@@ -3295,6 +3324,23 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand('magpylib-studio.switchScene', switchImportedScene),
+    // The switch, reachable by search rather than only from a notice that is
+    // shown once and then never again. Declining it has to be a door, not a
+    // one-way valve.
+    vscode.commands.registerCommand(
+      'magpylib-studio.toggleDrawScriptsHere',
+      async () => {
+        const on = !drawScriptsHere();
+        await setDrawScriptsHere(on);
+        void vscode.window.showInformationMessage(
+          on
+            ? 'Magpylib Studio draws scripts run in this window. Terminals ' +
+                'already open need restarting first.'
+            : 'Magpylib Studio: scripts use their own backend again. Terminals ' +
+                'already open keep the old setting until restarted.',
+        );
+      },
+    ),
     vscode.commands.registerCommand('magpylib-studio.openStudio', () =>
       openStudioPanel(context),
     ),

@@ -30,10 +30,31 @@ All notable changes to the Magpylib Studio extension.
   `magpylib_studio.plotly_view.draw_here()` once at the top of the script.
 
   These panels are read only: no engine stands behind them, and by the time one
-  draws there is usually no script either. Nothing draws here unless the script
-  asks for it by name — the window tells a script _where_ it is, never _what_ to
-  draw with, because a `pytest` run in the same terminal is indistinguishable
-  from a person running a script.
+  draws there is usually no script either.
+
+  **Draw scripts here** is on, so a plain `magpy.show()` draws in a panel
+  rather than opening a Matplotlib window. It applies to every script run from
+  this window's terminals — test runs excepted, a suite being what opens panels
+  by the dozen — and a script that sets its own backend keeps it. The first
+  time a panel appears, a notice offers to turn it off: a window cannot tell a
+  person running a script from anything else doing it, so this is a default
+  rather than an inference, and saying so once is the least it can do. Turning
+  it off is not a one-way door — **Magpylib Studio: Draw Scripts in a Panel**
+  is in the palette, an empty Scene view offers it, and the notice itself
+  offers an undo.
+
+  Worth knowing while it is on: `show(return_fig=True)` hands back the studio's
+  payload rather than a Matplotlib figure, and animation and subplots fall back
+  with a warning, since the scene view does neither yet. A script that names its
+  own backend is untouched by any of this, and never triggers the notice.
+
+  A panel says when the script it came from has been **saved since it drew** —
+  a badge over the figure and a dot on the tab, since the tab is the only thing
+  visible while the panel is in a background group. Clicking the badge runs the
+  script again, in a terminal, with the interpreter and directory it ran in
+  before; the figure comes back to the same panel and the mark clears. Offered
+  rather than automatic: some scripts are expensive, and whether to pay that on
+  every save is the author's call, not the editor's.
 
   **Open in Magpylib Studio** sits in the corner of the panel, for when looking
   is no longer enough. It opens the script the figure came from, which the

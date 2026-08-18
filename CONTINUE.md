@@ -664,12 +664,21 @@ supports.
    set it belongs to — nox, tox, sphinx-build, nbconvert, a script rendering 200
    figures — cannot be enumerated.
 
-   So: stamp the address always, never a backend name. Had the extension set
-   something like `MAGPYLIB_BACKEND=studio` on every terminal, every `pytest`
-   run in that window would have silently changed magpylib's default backend.
-   Selecting the studio automatically stays an opt-in setting, default off —
-   then when it does bite a suite, the fix is a checkbox the user knows about
-   rather than an inference nobody can see.
+   So: the address is stamped always and unconditionally; the backend name is a
+   separate variable, written only because a setting says to. That setting
+   (`magpylib-studio.drawScriptsHere`) ships **on**, so a plain `magpy.show()`
+   draws in a panel — but as a default rather than an inference, which is the
+   whole distinction. It is visible in `echo $MAGPYLIB_STUDIO_BACKEND`, a
+   notice says so the first time a panel it produced appears, and one click
+   turns it off.
+
+   Test runs are excepted, and that takes two checks rather than one:
+   `PYTEST_CURRENT_TEST` is set per test phase and is absent during
+   _collection_, which is when the module that claims is imported — so the
+   variable alone let a whole suite run claimed. `pytest in sys.modules` is
+   what covers that moment. Neither is a general answer; nox, tox and
+   sphinx-build are still out there, which is why this is a courtesy and the
+   setting is the actual control.
 
    Corollary: nothing here may sniff `VSCODE_*`. Those variables are inherited
    by anything the extension host spawns — the Interactive Window's kernel has

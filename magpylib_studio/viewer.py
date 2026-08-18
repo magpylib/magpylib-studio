@@ -66,6 +66,19 @@ def _script_path() -> str:
 _calls: dict[str, int] = {}
 
 
+def _digest(script: str) -> str | None:
+    """The script's bytes, hashed. None when there is no file to read.
+
+    Bytes rather than text: the reader on the other side hashes the file the
+    same way, and decoding it first would make the two disagree over a line
+    ending or an encoding rather than over the code.
+    """
+    try:
+        return hashlib.sha256(Path(script).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _next_call(script: str) -> int:
     index = _calls.get(script, 0)
     _calls[script] = index + 1
@@ -115,6 +128,7 @@ def write_view(
     *,
     title: str | None = None,
     encoder: type[json.JSONEncoder] | None = None,
+    claimed: bool = False,
 ) -> Path | None:
     """Leave one figure where the window will find it.
 
@@ -138,6 +152,23 @@ def write_view(
         "script": script,
         "index": index,
         "title": title,
+        # True only when the window's setting chose the backend, not the
+        # script. The panel has a thing to say the first time that happens and
+        # nothing to say when a script asked for this itself.
+        "claimed": claimed,
+        # Whatever re-runs this script has to run it with the interpreter that
+        # drew it: the package has to be importable there, and "python" on a
+        # PATH is not the same answer. Recorded now so a Re-run offered later
+        # needs no guessing, and so a stale panel can say what produced it.
+        "python": sys.executable,
+        # And where it ran: a script that reads a file beside itself, or writes
+        # one, needs the directory it was started from rather than whatever the
+        # editor would have picked.
+        "cwd": os.getcwd(),
+        # What the file held when it ran. Saving a file is not the same as
+        # changing it -- an editor writes on every save, and a panel that
+        # marks itself out of date each time is one nobody believes.
+        "digest": _digest(script),
         "written": time.time(),
         "body": body,
     }

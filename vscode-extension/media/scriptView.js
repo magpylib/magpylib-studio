@@ -5,6 +5,8 @@ const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
 const promoteEl = document.getElementById("promote");
+const overlayEl = document.getElementById("overlay");
+const rerunEl = document.getElementById("rerun");
 
 // The studio can run the script again and own what it builds; it cannot be
 // given this picture. So the offer only makes sense when the payload names a
@@ -12,6 +14,12 @@ const promoteEl = document.getElementById("promote");
 // to open.
 promoteEl.addEventListener("click", () => {
   vscodeApi.postMessage({ type: "openInStudio" });
+});
+
+// Only offered while the figure is out of date, which is when running it again
+// is a thing someone wants rather than a button sitting there being ignored.
+rerunEl.addEventListener("click", () => {
+  vscodeApi.postMessage({ type: "rerun" });
 });
 
 function plotTemplate() {
@@ -38,9 +46,12 @@ function whenScene3d(run) {
   }
 }
 
-function drawn(payload) {
+function drawn(payload, stale) {
   current = payload;
   statusEl.textContent = payload.script;
+  // Told rather than assumed: this page is rebuilt every time the tab comes
+  // back, and what it missed while it was gone is the host's to remember.
+  overlayEl.hidden = !stale;
   promoteEl.hidden = payload.script.startsWith("<");
   if (drawing && drawing !== payload.kind) {
     // The two renderers do not share a canvas. Plotly keeps its state on the
@@ -83,7 +94,9 @@ function drawn(payload) {
 window.addEventListener("message", (event) => {
   const message = event.data;
   if (message.type === "view") {
-    drawn(message.payload);
+    drawn(message.payload, message.stale);
+  } else if (message.type === "stale" && current) {
+    overlayEl.hidden = !message.stale;
   }
 });
 
