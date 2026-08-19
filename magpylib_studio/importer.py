@@ -704,7 +704,7 @@ def bounds_comment(limits):
     """What a variable's limits look like at the end of its line in a script:
 
         n = 10  # 4 to 20, whole
-        radius = 2.3  # min 1.6, slider 1.6 to 4
+        radius = 0.023  # min 0.016, slider 0.016 to 0.04
         tilt_axis = 'z'  # one of 'x', 'y', 'z'
 
     Limits used to be editor-only metadata, dropped by every script the studio

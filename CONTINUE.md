@@ -38,9 +38,11 @@ and drives it.
   pattern each — nine steps and four variables instead of twenty declared
   magnets and sixty-five steps, for a field identical to the hand-built version
   it replaced. Changing `n` rebuilds both rings and `stagger` follows it, being
-  `360/(2*n)` by definition. The soft minimum on `radius` is 1.6 for a real
-  reason: below it, 2πr < n and the default ring's unit cubes would have to
-  overlap. Object specs support an optional `"rotations"` list ({angle, axis,
+  `360/(2*n)` by definition. Every shipped scene is sized in **SI units, as a
+  real assembly**: the Halbach is 10 mm cubes on a 23 mm ring, not the metre-
+  wide magnet `dimension=[1, 1, 1]` asks for. The soft minimum on `radius` is
+  0.016 for a real reason: below it, 2πr < n·side and the default ring's cubes
+  would have to overlap. Object specs support an optional `"rotations"` list ({angle, axis,
   anchor?}, applied in order via `rotate_from_angax`; no anchor = spin in place;
   on a Collection rotates the whole group). Structural edits go through
   `_mutate_doc`: mutate doc → rebuild scene; on failure the old doc is restored
@@ -223,6 +225,16 @@ and drives it.
     and it is what lets the event export as plain runnable magpylib
     (`for i in range(1, n): …copy()…`) — a loop shape `parse_script` reads
     straight back into the event.
+- **NaN never reaches the wire.** Magpylib lifts the pen between the segments
+  of a trace with NaN (the arrows along a current path), and `json.dumps`
+  writes that as a bare `NaN` token, which `JSON.parse` rejects —
+  `engineClient.handleLine` then drops the response *without resolving its
+  request*, so the panel waits on a scene that already exists. `threejs.
+  _json_coordinates` sends `null` instead and `scene3d.withPenLifts` restores
+  the NaN; `boundByFinitePoints` bounds a trace by its real points, because a
+  NaN vertex makes the bounding sphere NaN and `fitView` then aims the camera
+  at nothing. Both halves are covered by `harness/check-scene-bounds.js` (in
+  `npm run compile`) and by `test_the_scene_payload_is_json_the_view_can_parse`.
 - **Field maps**: `get_field_map(plane?, offset?, component?, log?, sensor_id?)`
   — plotly heatmap on a plane. Colour by job (dataviz skill): sequential one-hue
   blue for magnitude, diverging blue↔grey↔red with `zmid=0` for signed
@@ -230,7 +242,11 @@ and drives it.
   magnitude falloff. With `sensor_id` it reads a **Sensor's pixel grid** instead
   (`set_pixel_grid(id, plane, size, resolution)`) — magpylib's own mechanism, so
   the plane is a real scene object that tilts with the sensor and exports to the
-  script. Sensor paths add a leading dimension to `getB`; the map uses the last
+  script. Both sizes **follow the scene**: an omitted `size`, and the default
+  `extent`, come from `_scene_extent()`, which is the span of the objects (their
+  own size, or a wire's vertices, when there is only one) rather than the
+  one-metre floor it used to have — a constant in metres maps a 23 mm halbach as
+  a single bright pixel. Sensor paths add a leading dimension to `getB`; the map uses the last
   path step. **The Field panel can now choose that source**: its map mode has an
   "on a plane / off a sensor" selector built from `list_objects`, which reports
   `pixels: [rows, cols]` for any Sensor carrying a grid, and defaults to a

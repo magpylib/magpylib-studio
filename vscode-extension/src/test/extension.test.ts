@@ -254,7 +254,7 @@ suite('magpylib-studio', () => {
     // comment, and that comment is where they are read back from — replacing
     // the whole line would quietly strip the bounds off radius and test a
     // different thing than it says it does.
-    const edited = tab.getText().replace(/^radius = [\d.]+/m, 'radius = 3.25');
+    const edited = tab.getText().replace(/^radius = [\d.]+/m, 'radius = 0.0325');
     assert.notStrictEqual(edited, tab.getText(), 'radius assignment not found');
     const editor = await vscode.window.showTextDocument(tab);
     await editor.edit((builder) => {
@@ -265,12 +265,14 @@ suite('magpylib-studio', () => {
     // The save is applied and the scene rebuilt asynchronously, so wait for
     // the value to arrive rather than for a length of time.
     const doc = await sceneWhere(
-      (d) => (d as unknown as { variables: Record<string, number> }).variables?.radius === 3.25,
+      (d) =>
+        (d as unknown as { variables: Record<string, number> }).variables?.radius ===
+        0.0325,
       'the saved script to reach the document',
     );
     assert.strictEqual(
       (doc as unknown as { variables: Record<string, number> }).variables.radius,
-      3.25,
+      0.0325,
     );
   });
 

@@ -221,7 +221,7 @@ def _mesh_payload(trace):
         "name": trace.get("name") or "",
         "object_id": trace.get("object_id"),
         "opacity": float(trace.get("opacity", 1) or 1),
-        "position": position.ravel().tolist(),
+        "position": _json_coordinates(position),
         "index": index.ravel().tolist(),
         "color": trace.get("color"),
         "uv": None if uv is None else uv.ravel().tolist(),
@@ -229,6 +229,28 @@ def _mesh_payload(trace):
         # mixes CSS names with hex, so THREE.Color parses them rather than us
         "facecolor": None if facecolor is None else [str(c) for c in facecolor],
     }
+
+
+def _json_coordinates(values):
+    """A coordinate run as JSON can actually carry it.
+
+    Magpylib separates the segments of a trace with NaN -- plotly's way of
+    lifting the pen between, say, the arrows along a current path. NaN is not
+    JSON: `json.dumps` writes a bare `NaN` token, which strict parsers reject,
+    `JSON.parse` among them. The extension's reader then drops the whole
+    response *and never resolves the request that asked for it*, so the 3D
+    view of any scene holding such a trace stayed empty with nothing said --
+    the helical winding, 120 separators in 540 points, was exactly that.
+
+    `null` is what JSON has for a value that is not one, and the view puts the
+    NaN back when it fills the buffer. Applied to meshes too, where a NaN
+    would be a bug rather than a pen-lift: the cost when there is none to find
+    is one pass, and the alternative is the same silent empty view.
+    """
+    flat = np.asarray(values, dtype=float).ravel()
+    if not np.isnan(flat).any():  # the usual case, and the cheap one
+        return flat.tolist()
+    return [None if value != value else value for value in flat.tolist()]
 
 
 def _scatter_payload(trace):
@@ -244,7 +266,7 @@ def _scatter_payload(trace):
         "name": trace.get("name") or "",
         "object_id": trace.get("object_id"),
         "opacity": float(trace.get("opacity", 1) or 1),
-        "position": position.ravel().tolist(),
+        "position": _json_coordinates(position),
         "lines": "lines" in modes,
         "markers": "markers" in modes,
         "line_color": trace.get("line_color") or "#2e91e5",

@@ -3841,11 +3841,15 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const sizeText = await vscode.window.showInputBox({
+          // No fixed default: a scene is written at whatever scale the object
+          // is, and 4 m of measuring plane over a 25 mm magnet is one pixel.
+          // Blank hands the choice to the engine, which sizes it off the scene.
           prompt: 'Grid size (m) — the plane spans ± half of this',
-          value: '4',
-          validateInput: (v) => (Number(v) > 0 ? undefined : 'A positive number'),
+          placeHolder: 'blank fits the scene',
+          validateInput: (v) =>
+            v.trim() === '' || Number(v) > 0 ? undefined : 'A positive number, or blank',
         });
-        if (!sizeText) {
+        if (sizeText === undefined) {
           return;
         }
         const resText = await vscode.window.showInputBox({
@@ -3860,7 +3864,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await mutateFromTree('set_pixel_grid', {
           object_id: target.id,
           plane,
-          size: Number(sizeText),
+          ...(sizeText.trim() === '' ? {} : { size: Number(sizeText) }),
           resolution: Number(resText),
         });
         openFieldPanel(context); // the map is the point of making a grid

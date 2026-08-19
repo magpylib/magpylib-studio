@@ -579,12 +579,51 @@ function buildMesh(item) {
   return mesh;
 }
 
+/** Bound a trace by the points that are actually points.
+ *
+ * magpylib separates the segments of a trace with NaN -- the arrows along a
+ * current path are one trace with the pen lifted between them, which is
+ * plotly's convention. GL drops the degenerate segments, so the picture comes
+ * out right, but three bounds a geometry by *every* vertex: one NaN makes the
+ * bounding box NaN, and `Box3.isEmpty()` is false for a box whose bounds are
+ * NaN, so nothing downstream notices. `fitView` then solves for a NaN camera
+ * distance and puts the camera at NaN -- a blank view -- and the raycast
+ * threshold, taken from the same sphere, goes with it, so the scene cannot be
+ * clicked either. The helical winding is 120 such separators in 540 points.
+ *
+ * Bounding it here rather than splitting the trace keeps it one draw call,
+ * and gives framing and picking real numbers to work from.
+ */
+export function boundByFinitePoints(geometry, position) {
+  const box = new THREE.Box3();
+  const point = new THREE.Vector3();
+  for (let i = 0; i + 2 < position.length; i += 3) {
+    point.set(position[i], position[i + 1], position[i + 2]);
+    if (
+      Number.isFinite(point.x) &&
+      Number.isFinite(point.y) &&
+      Number.isFinite(point.z)
+    ) {
+      box.expandByPoint(point);
+    }
+  }
+  if (box.isEmpty()) return;
+  geometry.boundingBox = box;
+  geometry.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
+}
+
+/** `null` on the wire is a pen-lift -- see `threejs._pen_lifts`. JSON has no
+ *  NaN, so the payload says it with the value JSON does have for "not a
+ *  number", and the buffer wants it back as the NaN that GL knows to drop. */
+export function withPenLifts(position) {
+  return Float32Array.from(position, (value) => (value === null ? NaN : value));
+}
+
 function buildScatter(item) {
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(item.position, 3),
-  );
+  const position = withPenLifts(item.position);
+  geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  boundByFinitePoints(geometry, position);
   const group = new THREE.Group();
   if (item.lines) {
     // plain GL lines ignore width; Line2 would honour it, at the cost of an
@@ -628,7 +667,11 @@ function sceneSphere(objectId) {
     // scene without its scale showing would cut the numbers off
     if (axes) box.expandByObject(axes);
   }
-  return box.isEmpty() ? null : box.getBoundingSphere(new THREE.Sphere());
+  if (box.isEmpty()) return null;
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  // A box with a NaN bound is not empty, and every number taken from it is
+  // NaN: better no answer than one that silently blanks the view.
+  return Number.isFinite(sphere.radius) ? sphere : null;
 }
 
 /** Outline the selected object.

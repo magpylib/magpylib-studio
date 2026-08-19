@@ -4,7 +4,37 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The helical winding example draws.** Its 3D view was empty, and had been
+  since it shipped. Magpylib separates the segments of a trace with NaN —
+  plotly's way of lifting the pen between the arrows along a current path, and
+  120 of the winding's 540 points are separators — but NaN is not JSON. The
+  engine wrote a bare `NaN` token, the extension's reader rejected the whole
+  response and returned *without resolving the request that asked for it*, so
+  the view waited forever for a scene that had already been computed. Pen-lifts
+  now travel as `null`, which JSON has, and the view puts the NaN back. The
+  camera could not have been aimed at one either: a single NaN vertex makes a
+  bounding sphere NaN, and `Box3.isEmpty()` is false for a box whose bounds are
+  NaN, so nothing noticed — traces are now bounded by their real points.
+
 ### Changed
+
+- **The example scenes are sized like real magnets.** magpylib works in SI
+  units, so `dimension=[1, 1, 1]` is a magnet a metre on a side. Every shipped
+  scene is now what it was always meant to be: the Halbach is 10 mm cubes on a
+  23 mm ring, the solenoid is 10 mm across with a 2.5 mm pitch, the array is
+  10 mm tiles on a 15 mm pitch. The field they read is in the tens to hundreds
+  of millitesla, which is what a gaussmeter would say next to the real thing.
+  The sensors came with them: a Sensor's glyph is sized in metres — the studio
+  pins it that way so moving one object cannot rescale every other — so it kept
+  magpylib's default of 1 and was drawn a metre across beside 10 mm magnets.
+  Every example now says what size its sensor is, and it is a Hall probe's.
+- **Field extents follow the scene.** The measuring plane a field map covers,
+  and the pixel grid `set_pixel_grid` makes when you do not give it a size, come
+  from the size of the objects rather than from a constant in metres — which
+  drew a centimetre assembly as one bright pixel in the middle of a 2.4 m
+  square. The pixel-grid prompt starts blank and means "fit the scene".
 
 - **The 3D view is a scene graph, not a chart.** It draws with three.js by
   default now. Objects can be clicked, dragged, turned, resized and aimed; paths

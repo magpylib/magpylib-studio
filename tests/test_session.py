@@ -14,6 +14,7 @@ from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     _BATCHABLE,
     DOC_VERSION,
+    EXAMPLES,
     MagpylibStudioSession,
     _linspace_lit,
 )
@@ -225,6 +226,81 @@ def test_get_scene_draws_pattern_copies_on_their_source(session):
     # the view is told not to offer drag handles here: an edit lands after the
     # duplication that made the copies, so the source would move alone
     assert scene["patterned"] == ["r2"]
+
+
+@pytest.mark.parametrize(
+    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
+)
+@needs_scene_graph
+def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
+    """magpylib works in SI units, so a scene written in round numbers is a
+    magnet a metre on a side. Every shipped example is a bench-top assembly.
+
+    Asserted on what is *drawn*, not on what is declared, because the two can
+    part company: a Sensor's glyph is sized absolutely -- the studio pins it
+    that way so moving one object cannot rescale every other, see
+    `threejs.pin_scene_units` -- so it kept magpylib's default size of 1 and
+    arrived a metre across beside 10 mm magnets, in every example at once.
+    """
+    session = MagpylibStudioSession()
+    session.load_example(name)
+
+    for mesh in session.get_scene()["meshes"]:
+        corners = np.array(mesh["position"], dtype=float).reshape(-1, 3)
+        extent = float(np.max(corners.max(axis=0) - corners.min(axis=0)))
+        assert extent < 0.1, (
+            f"{name}: {mesh['object_id']} is drawn {extent * 1000:.0f} mm across"
+        )
+
+
+@needs_scene_graph
+def test_the_scene_payload_is_json_the_view_can_parse():
+    """Every scene has to survive the wire, and NaN does not.
+
+    Magpylib separates the segments of a trace with NaN -- plotly's way of
+    lifting the pen between the arrows along a current path -- and json.dumps
+    writes that as a bare `NaN`, which strict parsers reject, `JSON.parse`
+    among them. `engineClient.handleLine` catches the parse error, logs to
+    stderr and returns *without resolving the request*, so the view waits for
+    a scene that was already computed and draws nothing at all. The helical
+    winding is the one shipped example with such a trace, and its 3D view was
+    empty from the day it shipped, silently.
+
+    Asserted through `serve`, because the bug lived in the transport rather
+    than in anything `get_scene` returned.
+    """
+
+    def strict(text):
+        """json.loads as JSON.parse reads it: NaN and Infinity are not JSON."""
+        return json.loads(
+            text,
+            parse_constant=lambda token: pytest.fail(
+                f"the payload carries a bare {token}, which JSON.parse rejects"
+            ),
+        )
+
+    for name in EXAMPLES:
+        calls = [
+            {"id": 1, "method": "load_example", "params": {"name": name}},
+            {"id": 2, "method": "get_scene", "params": {}},
+        ]
+        out = io.StringIO()
+        serve(
+            inp=io.StringIO("\n".join(json.dumps(c) for c in calls) + "\n"),
+            out=out,
+        )
+        scene = strict(out.getvalue().splitlines()[1])["result"]
+
+        # and a pen-lift is still a pen-lift: null, not a dropped point, which
+        # would join the arrows into one polyline through the whole winding
+        if name == "spiral":
+            lifts = [
+                value
+                for trace in scene["scatters"]
+                for value in trace["position"]
+                if value is None
+            ]
+            assert len(lifts) == 360, "the winding's pen-lifts went missing"
 
 
 @pytest.mark.parametrize(
@@ -652,7 +728,7 @@ def test_the_quiver_grid_is_a_number_to_drag():
 
     assert np.asarray(session._objs["field"].pixel).shape == (144, 3)
     # and it is the grid this example always drew, before it was parametric
-    edge, n = 2.0, 12
+    edge, n = 0.02, 12
     axis = [-edge + 2 * edge * i / (n - 1) for i in range(n)]
     listed = np.array([[u, v, 0] for v in axis for u in axis])
     drawn = np.asarray(session._objs["field"].pixel).reshape(-1, 3)
@@ -908,13 +984,13 @@ def test_a_variable_can_be_a_choice_rather_than_a_quantity():
         return np.round(s._objs["r1"].position, 3)
 
     s.set_variable("tilt", 90)
-    assert list(where()) == [0, 2.3, 0]  # about z, the default
+    assert list(where()) == [0, 0.023, 0]  # about z, the default
     assert s.set_variable("tilt_axis", "y")["ok"]
-    assert list(where()) == [0, 0, -2.3]  # the same tilt, a different axis
+    assert list(where()) == [0, 0, -0.023]  # the same tilt, a different axis
 
     refused = s.set_variable("tilt_axis", "w")
     assert not refused["ok"] and "not one of its options" in refused["error"]
-    assert list(where()) == [0, 0, -2.3], "a refused value changed the scene"
+    assert list(where()) == [0, 0, -0.023], "a refused value changed the scene"
 
     # and the axis survives being written out and read back as source
     with tempfile.TemporaryDirectory() as tmp:
@@ -987,10 +1063,10 @@ def test_hiding_an_object_survives_editing_the_script():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "scene.py")
         with open(path, "w", encoding="utf-8") as f:
-            f.write(s.to_script().replace("radius = 2.3", "radius = 2.6"))
+            f.write(s.to_script().replace("radius = 0.023", "radius = 0.026"))
         assert s.apply_script(path)["ok"]
 
-    assert s.to_dict()["variables"]["radius"] == 2.6, "the edit did not apply"
+    assert s.to_dict()["variables"]["radius"] == 0.026, "the edit did not apply"
     hidden = {o["id"] for o in s.list_objects() if o.get("visible") is False}
     assert "r2" in hidden, "the hidden magnet came back visible"
 
@@ -1219,9 +1295,9 @@ def test_load_example():
     assert len(ns["halbach"].children) == 2
     assert len(ns["ring1"].children) == 10
     # ring 2 is staggered by an 18 deg group rotation
-    assert ns["r2"].position.round(3).tolist() != [2.3, 0, 1.5]
+    assert ns["r2"].position.round(4).tolist() != [0.023, 0, 0.015]
     # the script carries the variables, not the numbers they resolve to
-    assert "radius = 2.3" in s.to_script()
+    assert "radius = 0.023" in s.to_script()
     assert "position=(radius, 0, 0.0)" in s.to_script()
 
 
@@ -1270,8 +1346,8 @@ def test_every_example_builds_and_is_worth_opening():
     assert s.get_events()["events"][-1]["label"] == (
         "spin through 51 steps about y, to 360.0°"
     )
-    assert s.set_variable("lift", 3.0) == {"ok": True}
-    assert list(s._objs["field"].position) == [0, 0, 3]  # all 144 arrows move
+    assert s.set_variable("lift", 0.03) == {"ok": True}
+    assert list(s._objs["field"].position) == [0, 0, 0.03]  # all 144 arrows move
 
     # even a table of numbers is parametric: a pixel grid's resolution cannot
     # be (an expression yields a number, not an array of another length) but
@@ -1279,9 +1355,9 @@ def test_every_example_builds_and_is_worth_opening():
     s.load_example("pixels")
     grid = np.array(s._objs["probe"].pixel)
     assert grid.shape == (7, 7, 3)
-    assert np.allclose(grid[0, 0], [-2, -2, 0])
-    assert s.set_variable("span", 8.0) == {"ok": True}
-    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-4, -4, 0])
+    assert np.allclose(grid[0, 0], [-0.02, -0.02, 0])
+    assert s.set_variable("span", 0.08) == {"ok": True}
+    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.04, -0.04, 0])
     assert len(s.get_field_map(sensor_id="probe")["data"][0]["z"]) == 7
 
 
@@ -1330,24 +1406,24 @@ def test_example_arrives_parametric():
     s = MagpylibStudioSession()
     s.load_example()
     variables = {v["name"]: v for v in s.get_variables()["variables"]}
-    assert variables["radius"]["value"] == 2.3
-    assert variables["gap"]["value"] == 1.5
+    assert variables["radius"]["value"] == 0.023
+    assert variables["gap"]["value"] == 0.015
     # bounded, so both arrive with a working slider
-    assert variables["radius"]["bounds"]["soft_min"] == 1.6  # 2πr = 10 unit cubes
+    assert variables["radius"]["bounds"]["soft_min"] == 0.016  # 2πr = 10 × 10 mm
     assert variables["gap"]["bounds"]["min"] == 0
 
     # one number moves twenty magnets, in both rings
-    assert s.set_variable("radius", 3.5) == {"ok": True}
-    assert np.allclose(s._objs["r1"].position, [3.5, 0, 0])
-    assert np.linalg.norm(s._objs["r2#4"].position[:2]).round(6) == 3.5
+    assert s.set_variable("radius", 0.035) == {"ok": True}
+    assert np.allclose(s._objs["r1"].position, [0.035, 0, 0])
+    assert np.linalg.norm(s._objs["r2#4"].position[:2]).round(6) == 0.035
     # and the rings stay where they belong on z
-    assert s.set_variable("gap", 3) == {"ok": True}
-    assert s._objs["r2"].position[2] == 3
+    assert s.set_variable("gap", 0.03) == {"ok": True}
+    assert s._objs["r2"].position[2] == 0.03
     assert s._objs["r1"].position[2] == 0
 
-    refused = s.set_variable("radius", 9)
+    refused = s.set_variable("radius", 0.09)
     assert refused["ok"] is False and "above its maximum" in refused["error"]
-    assert np.allclose(s._objs["r1"].position, [3.5, 0, 0])  # unmoved
+    assert np.allclose(s._objs["r1"].position, [0.035, 0, 0])  # unmoved
     assert len(s.get_figure()["data"]) > 0  # still renders
 
 
@@ -1542,19 +1618,19 @@ def test_collection_transforms_carry_children():
     s.load_example()
     child = np.array(s._objs["r1"].position)
 
-    assert s.move("ring1", [0, 0, 5]) == {"ok": True}
-    assert np.allclose(s._objs["ring1"].position, [0, 0, 5])
+    assert s.move("ring1", [0, 0, 0.05]) == {"ok": True}
+    assert np.allclose(s._objs["ring1"].position, [0, 0, 0.05])
     # `child` is a numpy array, so this is element-wise addition rather than
     # list concatenation. Unpacking it (RUF005) would build a six-element
     # list and quietly change what the test asserts.
-    assert np.allclose(s._objs["r1"].position, child + [0, 0, 5])  # noqa: RUF005
+    assert np.allclose(s._objs["r1"].position, child + [0, 0, 0.05])  # noqa: RUF005
 
     assert s.rotate("ring1", 90, "z", anchor=0) == {"ok": True}
-    assert np.allclose(s._objs["r1"].position, [0, 2.3, 5])
+    assert np.allclose(s._objs["r1"].position, [0, 0.023, 0.05])
 
     # a transform on the outer stack moves the nested rings too
-    assert s.move("halbach", [10, 0, 0]) == {"ok": True}
-    assert np.allclose(s._objs["r1"].position, [10, 2.3, 5])
+    assert s.move("halbach", [0.1, 0, 0]) == {"ok": True}
+    assert np.allclose(s._objs["r1"].position, [0.1, 0.023, 0.05])
 
     ns = exec_script(s.to_script())
     assert np.allclose(ns["r1"].position, s._objs["r1"].position)
@@ -1717,7 +1793,7 @@ def test_field_map_plane():
 
     s = MagpylibStudioSession()
     s.load_example()
-    fig = s.get_field_map(plane="xy", offset=0.75, resolution=12)
+    fig = s.get_field_map(plane="xy", offset=0.0075, resolution=12)
     trace = fig["data"][0]
     assert trace["type"] == "heatmap"
     assert np.array(trace["z"]).shape == (12, 12)
@@ -1749,7 +1825,9 @@ def test_field_map_from_sensor_pixel_grid():
 
     s = MagpylibStudioSession()
     s.load_example()
-    assert s.set_pixel_grid("sensor", plane="xy", size=6, resolution=10) == {"ok": True}
+    assert s.set_pixel_grid("sensor", plane="xy", size=0.06, resolution=10) == {
+        "ok": True
+    }
     pixel = np.array(
         next(p["value"] for p in s.get_params("sensor") if p["name"] == "pixel")
     )
@@ -2309,17 +2387,17 @@ def test_the_spiral_example_stays_a_helix_when_its_variables_move():
         return np.array(s._objs["winding"].vertices, dtype=float)
 
     assert len(wire()) == 61  # 20 a turn, 3 turns, and the point they share
-    assert np.allclose(np.hypot(wire()[:, 0], wire()[:, 1]), 1.2)
+    assert np.allclose(np.hypot(wire()[:, 0], wire()[:, 1]), 0.012)
 
-    for name, value in (("radius", 2.0), ("turns", 6.0), ("height", 4.8)):
+    for name, value in (("radius", 0.02), ("turns", 6.0), ("height", 0.048)):
         assert s.set_variable(name, value)["ok"]
-    height = 4.8
+    height = 0.048
     # a coil is wound to a length and a turn count; what that leaves between
     # the turns is the answer, and it follows without being set
     pitch = next(v for v in s.get_variables()["variables"] if v["name"] == "pitch")
     assert pitch["value"] == pytest.approx(height / 6.0)
     assert len(wire()) == 121  # twice the turns, so twice the wire
-    assert np.allclose(np.hypot(wire()[:, 0], wire()[:, 1]), 2.0)
+    assert np.allclose(np.hypot(wire()[:, 0], wire()[:, 1]), 0.02)
     assert np.allclose(
         [wire()[:, 2].min(), wire()[:, 2].max()], [-height / 2, height / 2]
     )
@@ -3015,8 +3093,8 @@ def test_listing_objects_shows_how_the_scene_is_written():
 
     From a real failure: asked to add a third ring to the halbach example, a
     chat model listed the objects, learned only that there were two rings,
-    and invented a 15 mm magnet at r = 55 mm for a scene whose magnets are 1
-    and whose radius is an expression. The numbers it needed were one call
+    and invented a 15 mm magnet at r = 55 mm for a scene whose magnets are
+    10 mm and whose radius is an expression. The numbers it needed were one call
     away and it had no reason to know that. Now they are in the answer it
     already asked for.
     """
@@ -3025,7 +3103,7 @@ def test_listing_objects_shows_how_the_scene_is_written():
     listed = {o["id"]: o for o in s.list_objects()}
 
     magnet = listed["r1"]
-    assert "dimension=(1, 1, 1)" in magnet["source"]  # the scale
+    assert "dimension=(0.01, 0.01, 0.01)" in magnet["source"]  # the scale
     assert "position=(radius, 0, 0.0)" in magnet["source"]  # and the parameter
     assert "magnet.Cuboid" in magnet["source"]
 
@@ -3339,7 +3417,7 @@ def test_rollback_shows_the_scene_as_it_stood():
 
     # editing a variable while previewing updates the preview, and stays there
     s.set_rollback(2)
-    assert s.set_variable("radius", 2.5) == {"ok": True}
+    assert s.set_variable("radius", 0.025) == {"ok": True}
     assert s.get_events()["rollback"] == 2
     assert [o["id"] for o in s.list_objects()] == ["halbach", "ring1"]
 
@@ -3406,7 +3484,7 @@ def test_a_step_can_be_given_a_variable_after_the_fact():
     before = np.array(s._objs["r2"].position)
     assert s.set_variable("stagger", 45) == {"ok": True}
     assert not np.allclose(s._objs["r2"].position, before)
-    assert np.allclose(s._objs["r2"].position[:2], [1.626, 1.626], atol=1e-3)
+    assert np.allclose(s._objs["r2"].position[:2], [0.01626, 0.01626], atol=1e-5)
     # exported as the variable, not as what it currently comes to
     assert "ring2.rotate_from_angax(stagger, 'z', anchor=0)" in s.to_script()
 
@@ -3427,11 +3505,12 @@ def test_a_create_event_is_where_an_object_is_changed_after_the_fact():
     before = len(s.doc["events"])
 
     assert s.edit_event(
-        create["id"], {"params": {**stored["params"], "dimension": [2, 1, 0.5]}}
+        create["id"],
+        {"params": {**stored["params"], "dimension": [0.02, 0.01, 0.005]}},
     ) == {"ok": True}
-    assert list(s._objs["r1"].dimension) == [2, 1, 0.5]
+    assert list(s._objs["r1"].dimension) == [0.02, 0.01, 0.005]
     # everything recorded after it still applies: the magnet is still orbited
-    assert np.allclose(s._objs["r1"].position, [2.3, 0, 0])
+    assert np.allclose(s._objs["r1"].position, [0.023, 0, 0])
     assert len(s.doc["events"]) == before  # an edit, not another entry
 
 

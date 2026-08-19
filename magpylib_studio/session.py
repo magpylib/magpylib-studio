@@ -19,6 +19,7 @@ Protocol surface (all JSON-serializable in/out):
   get_field_figure(output?, animation?, template?) -> 2D plotly JSON (magpylib-rendered)
   get_field_map(plane?, offset?, component?, log?, sensor_id?, …) -> heatmap JSON
   set_pixel_grid(object_id, plane?, size?, resolution?, offset?) -> {"ok": bool}
+                                       (size omitted follows the scene)
   apply_edit(object_id, path, value)   -> {"ok": bool, "error"?: str}
   add_object(object_id, type, params?, style?, rotations?, parent?) -> {"ok": ...}
   remove_object(object_id)             -> {"ok": bool, ...} (subtree if Collection)
@@ -90,9 +91,14 @@ def example_scene():
     Changing `n` rebuilds both rings, and `stagger` follows it without being
     touched, being half a magnet step by definition.
 
-    Soft bounds mark the range worth exploring — below a radius of about 1.6
-    the ten unit cubes of the default ring would have to overlap (2πr < n) —
-    while the hard bounds only rule out the physically impossible.
+    Sized as a real assembly rather than in round numbers: magpylib works in
+    SI units, so these are 10 mm cubes on a 23 mm ring, 15 mm apart — not the
+    metre-wide magnet that `dimension=[1, 1, 1]` would ask for.
+
+    Soft bounds mark the range worth exploring — below a radius of about
+    16 mm the ten 10 mm cubes of the default ring would have to overlap
+    (2πr < n·side) — while the hard bounds only rule out the physically
+    impossible.
     """
 
     def ring(number, z):
@@ -105,7 +111,7 @@ def example_scene():
                     "id": f"r{number}",
                     "type": "magnet.Cuboid",
                     "params": {
-                        "dimension": [1, 1, 1],
+                        "dimension": [0.01, 0.01, 0.01],
                         "polarization": [1, 0, 0],
                         "position": ["=radius", 0, z],
                     },
@@ -127,16 +133,21 @@ def example_scene():
     return {
         "variables": {
             "n": 10,
-            "radius": 2.3,
-            "gap": 1.5,
+            "radius": 0.023,
+            "gap": 0.015,
             "stagger": "=360 / (2 * n)",
             "tilt": 0.0,
             "tilt_axis": "z",
         },
         "variable_bounds": {
             "n": {"min": 2, "max": 60, "soft_min": 4, "soft_max": 20, "integer": True},
-            "radius": {"min": 0.5, "max": 8, "soft_min": 1.6, "soft_max": 4},
-            "gap": {"min": 0, "max": 6, "soft_min": 1, "soft_max": 3},
+            "radius": {
+                "min": 0.005,
+                "max": 0.08,
+                "soft_min": 0.016,
+                "soft_max": 0.04,
+            },
+            "gap": {"min": 0, "max": 0.06, "soft_min": 0.01, "soft_max": 0.03},
             "tilt": {"min": -180, "max": 180, "soft_min": -90, "soft_max": 90},
             # Not every variable is a quantity. An axis is a name, so a range
             # says nothing about it and a slider cannot offer one — options
@@ -173,9 +184,17 @@ def example_scene():
                 "style": {"label": "Halbach stack"},
                 "children": [ring(1, 0.0), ring(2, "=gap")],
             },
-            _bore_sensor(-1.5, 3.0),
+            _bore_sensor(-0.015, 0.03),
         ],
     }
+
+
+#: How big a sensor is drawn, in metres — the size of a real Hall probe
+#: package. It has to be said: the studio pins `sensor.sizemode` to "absolute"
+#: so that moving one object cannot rescale every other (see
+#: `threejs.pin_scene_units`), and magpylib's default size of 1 is then one
+#: metre of glyph over assemblies measured in millimetres.
+SENSOR_SIZE = 0.005
 
 
 def _bore_sensor(start, stop, steps=25, label="Sensor"):
@@ -193,7 +212,7 @@ def _bore_sensor(start, stop, steps=25, label="Sensor"):
         "params": {
             "position": np.linspace((0, 0, start), (0, 0, stop), steps).tolist()
         },
-        "style": {"label": label},
+        "style": {"label": label, "size": SENSOR_SIZE},
     }
 
 
@@ -203,8 +222,8 @@ def coil_scene():
     return {
         "variables": {
             "turns": 12,
-            "coil_radius": 1.0,
-            "pitch": 0.25,
+            "coil_radius": 0.01,
+            "pitch": 0.0025,
             "amps": 100,
             "height": "=pitch * (turns - 1)",
         },
@@ -216,8 +235,18 @@ def coil_scene():
                 "soft_max": 40,
                 "integer": True,
             },
-            "coil_radius": {"min": 0.05, "max": 10, "soft_min": 0.3, "soft_max": 3},
-            "pitch": {"min": 0.01, "max": 2, "soft_min": 0.1, "soft_max": 0.6},
+            "coil_radius": {
+                "min": 0.0005,
+                "max": 0.1,
+                "soft_min": 0.003,
+                "soft_max": 0.03,
+            },
+            "pitch": {
+                "min": 0.0001,
+                "max": 0.02,
+                "soft_min": 0.001,
+                "soft_max": 0.006,
+            },
             "amps": {"min": -10000, "max": 10000, "soft_min": 0, "soft_max": 500},
         },
         "events": [
@@ -246,7 +275,7 @@ def coil_scene():
                     }
                 ],
             },
-            _bore_sensor(-2.5, 2.5, label="On axis"),
+            _bore_sensor(-0.025, 0.025, label="On axis"),
         ],
     }
 
@@ -267,9 +296,9 @@ def spiral_scene():
     """
     return {
         "variables": {
-            "radius": 1.2,
+            "radius": 0.012,
             "turns": 3.0,
-            "height": 1.5,
+            "height": 0.015,
             "per_turn": 20,
             # Derived, not dialed: a coil is wound to a length and a turn
             # count, and what that leaves between the turns is the answer
@@ -278,9 +307,19 @@ def spiral_scene():
             "pitch": "=height / turns",
         },
         "variable_bounds": {
-            "radius": {"min": 0.05, "max": 10, "soft_min": 0.5, "soft_max": 3},
+            "radius": {
+                "min": 0.0005,
+                "max": 0.1,
+                "soft_min": 0.005,
+                "soft_max": 0.03,
+            },
             "turns": {"min": 0.25, "max": 40, "soft_min": 1, "soft_max": 8},
-            "height": {"min": 0.02, "max": 40, "soft_min": 0.4, "soft_max": 4},
+            "height": {
+                "min": 0.0002,
+                "max": 0.4,
+                "soft_min": 0.004,
+                "soft_max": 0.04,
+            },
             # Below about eight a turn reads as the polygon it is; above forty
             # the picture stops changing and only the point count grows.
             "per_turn": {
@@ -315,7 +354,7 @@ def spiral_scene():
             # Fixed rather than sized off `height`: it reads the bore of the
             # winding at every setting worth dragging to, and a sensor that
             # grew with the coil would never show it leaving the field.
-            _bore_sensor(-2.0, 2.0, label="On axis"),
+            _bore_sensor(-0.02, 0.02, label="On axis"),
         ],
     }
 
@@ -324,10 +363,10 @@ def pair_scene():
     """Two magnets facing across a gap, the second a mirror of the first —
     so it stays a mirror image while the first one is edited."""
     return {
-        "variables": {"gap": 2.0, "size": 1.0},
+        "variables": {"gap": 0.02, "size": 0.01},
         "variable_bounds": {
-            "gap": {"min": 0.1, "max": 20, "soft_min": 0.5, "soft_max": 6},
-            "size": {"min": 0.05, "max": 5, "soft_min": 0.5, "soft_max": 2},
+            "gap": {"min": 0.001, "max": 0.2, "soft_min": 0.005, "soft_max": 0.06},
+            "size": {"min": 0.0005, "max": 0.05, "soft_min": 0.005, "soft_max": 0.02},
         },
         "events": [
             {"target": "upper", "op": "mirror", "plane": "xy", "anchor": 0},
@@ -350,7 +389,7 @@ def pair_scene():
                     }
                 ],
             },
-            _bore_sensor(-3.0, 3.0, label="Through the gap"),
+            _bore_sensor(-0.03, 0.03, label="Through the gap"),
         ],
     }
 
@@ -359,12 +398,12 @@ def array_scene():
     """A magnet array: one magnet patterned into a row, the row patterned
     into a grid — two linear steps, both counts editable."""
     return {
-        "variables": {"nx": 4, "ny": 3, "pitch": 1.5, "lift": 2.0},
+        "variables": {"nx": 4, "ny": 3, "pitch": 0.015, "lift": 0.02},
         "variable_bounds": {
             "nx": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
             "ny": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
-            "pitch": {"min": 0.2, "max": 10, "soft_min": 1, "soft_max": 4},
-            "lift": {"min": 0.1, "max": 10, "soft_min": 0.5, "soft_max": 4},
+            "pitch": {"min": 0.002, "max": 0.1, "soft_min": 0.01, "soft_max": 0.04},
+            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.04},
         },
         "events": [
             {
@@ -395,7 +434,7 @@ def array_scene():
                                 "id": "tile",
                                 "type": "magnet.Cuboid",
                                 "params": {
-                                    "dimension": [1, 1, 1],
+                                    "dimension": [0.01, 0.01, 0.01],
                                     "polarization": [0, 0, 1],
                                     "position": [0, 0, 0],
                                 },
@@ -410,10 +449,11 @@ def array_scene():
                 "type": "Sensor",
                 "params": {
                     "position": [
-                        [round(-1 + 6 * i / 24, 3), 1.5, "=lift"] for i in range(25)
+                        [round(-0.01 + 0.06 * i / 24, 6), 0.015, "=lift"]
+                        for i in range(25)
                     ]
                 },
-                "style": {"label": "Above the array"},
+                "style": {"label": "Above the array", "size": SENSOR_SIZE},
             },
         ],
     }
@@ -438,11 +478,11 @@ def pixel_field_scene(resolution=7):
         return 0 if fraction == 0 else f"=span * {fraction:.6g}"
 
     return {
-        "variables": {"span": 4.0, "lift": 1.5, "mag": 1.0},
+        "variables": {"span": 0.04, "lift": 0.015, "mag": 0.01},
         "variable_bounds": {
-            "span": {"min": 0.1, "max": 40, "soft_min": 1, "soft_max": 10},
-            "lift": {"min": 0.05, "max": 20, "soft_min": 0.5, "soft_max": 5},
-            "mag": {"min": 0.05, "max": 10, "soft_min": 0.5, "soft_max": 3},
+            "span": {"min": 0.001, "max": 0.4, "soft_min": 0.01, "soft_max": 0.1},
+            "lift": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
+            "mag": {"min": 0.0005, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
         },
         "objects": [
             {
@@ -464,7 +504,7 @@ def pixel_field_scene(resolution=7):
                         for v in steps
                     ],
                 },
-                "style": {"label": "Measuring plane"},
+                "style": {"label": "Measuring plane", "size": SENSOR_SIZE},
             },
         ],
     }
@@ -488,13 +528,13 @@ def quiver_scene(density=12, steps=51):
     (…, 3) pixel array, so a flat run of density² points is the same grid to
     it as a nested one — and this way the whole thing is an expression.
     """
-    edge = 2.0
+    edge = 0.02
     span = 2 * edge
     return {
-        "variables": {"lift": 1.0, "width": 3.0, "density": density},
+        "variables": {"lift": 0.01, "width": 0.03, "density": density},
         "variable_bounds": {
-            "lift": {"min": 0.1, "max": 10, "soft_min": 0.5, "soft_max": 3},
-            "width": {"min": 0.1, "max": 10, "soft_min": 1, "soft_max": 5},
+            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
+            "width": {"min": 0.001, "max": 0.1, "soft_min": 0.01, "soft_max": 0.05},
             "density": {
                 "min": 2,
                 "max": 40,
@@ -518,7 +558,7 @@ def quiver_scene(density=12, steps=51):
                 "type": "magnet.Cuboid",
                 "params": {
                     "polarization": [0, 0, 1],
-                    "dimension": [1, "=width", 1],
+                    "dimension": [0.01, "=width", 0.01],
                 },
                 "style": {"label": "Turning magnet"},
             },
@@ -541,6 +581,7 @@ def quiver_scene(density=12, steps=51):
                 },
                 "style": {
                     "label": "Field arrows",
+                    "size": SENSOR_SIZE,
                     "pixel.field.source": "B",
                     "pixel.field.symbol": "arrow3d",
                     "pixel.field.colormap": "Viridis",
@@ -2488,8 +2529,33 @@ class MagpylibStudioSession:
             **({"skipped": skipped} if skipped else {}),
         }
 
+    def _object_size(self):
+        """How big the objects themselves are — what stands in for a span
+        when there is none, as for the single magnet at the origin that half
+        the field examples are."""
+        sizes = []
+        for obj in self._objs.values():
+            for attr in ("dimension", "diameter"):
+                value = getattr(obj, attr, None)
+                if value is not None:
+                    sizes.append(float(np.max(np.abs(np.asarray(value, float)))))
+            # A wire has no dimension: what it measures is where it goes, and
+            # a helix sitting at the origin has no span between positions
+            # either -- the whole coil is one object at one point.
+            vertices = getattr(obj, "vertices", None)
+            if vertices is not None:
+                corners = np.asarray(vertices, float).reshape(-1, 3)
+                sizes.append(float(np.max(corners.max(axis=0) - corners.min(axis=0))))
+        return max(sizes) if sizes else 1.0
+
     def _scene_extent(self):
-        """A square in-plane extent covering the sources, with margin."""
+        """A square in-plane extent covering the sources, with margin.
+
+        Taken from the scene rather than from a constant: magpylib works in
+        SI units and a real assembly is centimetres across, so the one-metre
+        floor this used to have mapped a 23 mm halbach over a 2.4 m square --
+        one bright pixel, and nothing else to read.
+        """
         points = [
             np.atleast_2d(np.array(obj.position, dtype=float))
             for obj in self._objs.values()
@@ -2499,18 +2565,24 @@ class MagpylibStudioSession:
         stacked = np.vstack(points)
         centre = (stacked.max(axis=0) + stacked.min(axis=0)) / 2
         span = float(np.max(stacked.max(axis=0) - stacked.min(axis=0)))
-        return max(span, 1.0) * 1.2, centre
+        return max(span, self._object_size()) * 1.2, centre
 
     def set_pixel_grid(
-        self, object_id, plane="xy", size=2.0, resolution=20, offset=0.0
+        self, object_id, plane="xy", size=None, resolution=20, offset=0.0
     ):
         """Give a Sensor a regular grid of pixels — magpylib's own way to map a
         field. The grid is in the sensor's LOCAL frame, so moving or rotating
         the sensor carries the measurement plane with it (any orientation, not
-        just the axis planes), and it is drawn in the 3D view."""
+        just the axis planes), and it is drawn in the 3D view.
+
+        `size` is the full width of the plane; left out it follows the scene,
+        because a default fixed in metres is a blank map for the centimetre
+        assembly a magpylib scene usually is."""
         obj = self._objs[object_id]
         if not isinstance(obj, magpy.Sensor):
             return {"ok": False, "error": f"{object_id!r} is not a Sensor"}
+        if size is None:
+            size = 2 * self._scene_extent()[0]
         axes = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}
         if plane not in axes:
             return {"ok": False, "error": f"plane must be one of {sorted(axes)}"}
