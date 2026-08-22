@@ -11,7 +11,7 @@ All notable changes to the Magpylib Studio extension.
   plotly's way of lifting the pen between the arrows along a current path, and
   120 of the winding's 540 points are separators — but NaN is not JSON. The
   engine wrote a bare `NaN` token, the extension's reader rejected the whole
-  response and returned *without resolving the request that asked for it*, so
+  response and returned _without resolving the request that asked for it_, so
   the view waited forever for a scene that had already been computed. Pen-lifts
   now travel as `null`, which JSON has, and the view puts the NaN back. The
   camera could not have been aimed at one either: a single NaN vertex makes a
@@ -23,11 +23,11 @@ All notable changes to the Magpylib Studio extension.
 - **The example scenes are sized like real magnets.** magpylib works in SI
   units, so `dimension=[1, 1, 1]` is a magnet a metre on a side. Every shipped
   scene is now what it was always meant to be: the Halbach is 10 mm cubes on a
-  23 mm ring, the solenoid is 10 mm across with a 2.5 mm pitch, the array is
-  10 mm tiles on a 15 mm pitch. The field they read is in the tens to hundreds
-  of millitesla, which is what a gaussmeter would say next to the real thing.
-  The sensors came with them: a Sensor's glyph is sized in metres — the studio
-  pins it that way so moving one object cannot rescale every other — so it kept
+  23 mm ring, the solenoid is 10 mm across with a 2.5 mm pitch, the array is 10
+  mm tiles on a 15 mm pitch. The field they read is in the tens to hundreds of
+  millitesla, which is what a gaussmeter would say next to the real thing. The
+  sensors came with them: a Sensor's glyph is sized in metres — the studio pins
+  it that way so moving one object cannot rescale every other — so it kept
   magpylib's default of 1 and was drawn a metre across beside 10 mm magnets.
   Every example now says what size its sensor is, and it is a Hall probe's.
 - **Field extents follow the scene.** The measuring plane a field map covers,
@@ -62,24 +62,23 @@ All notable changes to the Magpylib Studio extension.
   These panels are read only: no engine stands behind them, and by the time one
   draws there is usually no script either.
 
-  **Draw scripts here** is on, so a plain `magpy.show()` draws in a panel
-  rather than opening a Matplotlib window. It applies to every script run from
-  this window's terminals — test runs excepted, a suite being what opens panels
-  by the dozen — and a script that sets its own backend keeps it. The first
-  time a panel appears, a notice offers to turn it off: a window cannot tell a
-  person running a script from anything else doing it, so this is a default
-  rather than an inference, and saying so once is the least it can do. Turning
-  it off is not a one-way door — **Magpylib Studio: Draw Scripts in a Panel**
-  is in the palette, an empty Scene view offers it, and the notice itself
-  offers an undo.
+  **Draw scripts here** is on, so a plain `magpy.show()` draws in a panel rather
+  than opening a Matplotlib window. It applies to every script run from this
+  window's terminals — test runs excepted, a suite being what opens panels by
+  the dozen — and a script that sets its own backend keeps it. The first time a
+  panel appears, a notice offers to turn it off: a window cannot tell a person
+  running a script from anything else doing it, so this is a default rather than
+  an inference, and saying so once is the least it can do. Turning it off is not
+  a one-way door — **Magpylib Studio: Draw Scripts in a Panel** is in the
+  palette, an empty Scene view offers it, and the notice itself offers an undo.
 
   Worth knowing while it is on: `show(return_fig=True)` hands back the studio's
   payload rather than a Matplotlib figure, and animation and subplots fall back
   with a warning, since the scene view does neither yet. A script that names its
   own backend is untouched by any of this, and never triggers the notice.
 
-  A panel says when the script it came from has been **saved since it drew** —
-  a badge over the figure and a dot on the tab, since the tab is the only thing
+  A panel says when the script it came from has been **saved since it drew** — a
+  badge over the figure and a dot on the tab, since the tab is the only thing
   visible while the panel is in a background group. Clicking the badge runs the
   script again, in a terminal, with the interpreter and directory it ran in
   before; the figure comes back to the same panel and the mark clears. Offered

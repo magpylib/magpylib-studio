@@ -67,10 +67,7 @@ else:
 
         def show(self, scene):
             payload = threejs.view_payload(scene)
-            if (
-                write_view("scene", payload, title=scene.title, claimed=CLAIMED)
-                is None
-            ):
+            if write_view("scene", payload, title=scene.title, claimed=CLAIMED) is None:
                 raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
             return payload
 
