@@ -401,13 +401,20 @@ def pair_scene():
 
 
 def array_scene():
-    """A magnet array: one magnet patterned into a row, the row patterned
-    into a grid — two linear steps, both counts editable."""
+    """A magnet array: one magnet patterned into a row, the row into a layer,
+    the layer into a stack — three linear steps, every count editable.
+
+    The third count starts at 1, so the scene opens as the flat grid it has
+    always been. It is also the one to drag when the question is how much the
+    view can carry: each of the three spans 1..10 without leaving its soft
+    range, and all three at the top is a thousand cuboids.
+    """
     return {
-        "variables": {"nx": 4, "ny": 3, "pitch": 0.015, "lift": 0.02},
+        "variables": {"nx": 4, "ny": 3, "nz": 1, "pitch": 0.015, "lift": 0.02},
         "variable_bounds": {
             "nx": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
             "ny": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
+            "nz": {"min": 1, "max": 20, "soft_min": 1, "soft_max": 10, "integer": True},
             "pitch": {"min": 0.002, "max": 0.1, "soft_min": 0.01, "soft_max": 0.04},
             "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.04},
         },
@@ -424,6 +431,12 @@ def array_scene():
                 "count": "=ny",
                 "step": [0, "=pitch", 0],
             },
+            {
+                "target": "layer",
+                "op": "duplicate_along",
+                "count": "=nz",
+                "step": [0, 0, "=pitch"],
+            },
         ],
         "objects": [
             {
@@ -432,19 +445,26 @@ def array_scene():
                 "style": {"label": "Magnet array"},
                 "children": [
                     {
-                        "id": "row",
+                        "id": "layer",
                         "type": "Collection",
-                        "style": {"label": "Row"},
+                        "style": {"label": "Layer"},
                         "children": [
                             {
-                                "id": "tile",
-                                "type": "magnet.Cuboid",
-                                "params": {
-                                    "dimension": [0.01, 0.01, 0.01],
-                                    "polarization": [0, 0, 1],
-                                    "position": [0, 0, 0],
-                                },
-                                "style": {"label": "Tile"},
+                                "id": "row",
+                                "type": "Collection",
+                                "style": {"label": "Row"},
+                                "children": [
+                                    {
+                                        "id": "tile",
+                                        "type": "magnet.Cuboid",
+                                        "params": {
+                                            "dimension": [0.01, 0.01, 0.01],
+                                            "polarization": [0, 0, 1],
+                                            "position": [0, 0, 0],
+                                        },
+                                        "style": {"label": "Tile"},
+                                    }
+                                ],
                             }
                         ],
                     }
@@ -455,7 +475,11 @@ def array_scene():
                 "type": "Sensor",
                 "params": {
                     "position": [
-                        [round(-0.01 + 0.06 * i / 24, 6), 0.015, "=lift"]
+                        [
+                            round(-0.01 + 0.06 * i / 24, 6),
+                            0.015,
+                            "=lift + pitch * (nz - 1)",
+                        ]
                         for i in range(25)
                     ]
                 },
@@ -779,8 +803,8 @@ EXAMPLES = {
     ),
     "array": (
         "Magnet array",
-        "A magnet patterned into a row, the row into a grid — two "
-        "linear steps, both counts editable",
+        "A magnet patterned into a row, the row into a layer, the layer "
+        "into a stack — three linear steps, every count editable",
         array_scene,
     ),
     "solid": (
