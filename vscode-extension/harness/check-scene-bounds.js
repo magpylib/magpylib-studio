@@ -28,9 +28,10 @@ const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
+const { enginePython } = require("./engine-python");
+
 const EXT = path.join(__dirname, "..");
 const REPO = path.join(EXT, "..");
-const PYTHON = path.join(REPO, ".venv", "bin", "python");
 
 const PAYLOADS = `
 import json
@@ -48,9 +49,10 @@ print(json.dumps(out))
 `;
 
 async function main() {
-  if (!fs.existsSync(PYTHON)) {
+  const python = enginePython();
+  if (!python) {
     // The engine is a separate install; `npm run compile` must not need one.
-    console.log("skip  scene bounds (no engine venv at ../.venv)");
+    console.log("skip  scene bounds (no python here can import the engine)");
     return;
   }
   globalThis.window = { devicePixelRatio: 1 };
@@ -63,7 +65,7 @@ async function main() {
   const { boundByFinitePoints, withPenLifts } =
     await import("../media/scene3d.mjs");
 
-  const raw = execFileSync(PYTHON, ["-c", PAYLOADS], {
+  const raw = execFileSync(python, ["-c", PAYLOADS], {
     cwd: REPO,
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
