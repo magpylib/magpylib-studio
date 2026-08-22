@@ -132,6 +132,14 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- **The magnet array stacks.** It patterned a magnet into a row and the row
+  into a grid; it now patterns the grid into a stack as well, on a third count
+  `nz` that starts at 1 — so the scene opens as the flat array it has always
+  been, and the new slider is there when the question is how much the view can
+  carry. Each of the three counts spans 1 to 10 without leaving its soft range,
+  and all three at the top is a thousand cuboids. The probe above the array
+  rides the top of the stack rather than ending up inside it.
+
 - **The example scenes are sized like real magnets.** magpylib works in SI
   units, so `dimension=[1, 1, 1]` is a magnet a metre on a side. Every shipped
   scene is now what it was always meant to be: the Halbach is 10 mm cubes on a
