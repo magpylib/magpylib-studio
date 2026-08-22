@@ -1348,12 +1348,13 @@ def test_every_example_builds_and_is_worth_opening():
     # even a table of numbers is parametric: a pixel grid's resolution cannot
     # be (an expression yields a number, not an array of another length) but
     # every coordinate in it can
-    s.load_example("pixels")
+    s.load_example("tolerance")
     grid = np.array(s._objs["probe"].pixel)
     assert grid.shape == (7, 7, 3)
-    assert np.allclose(grid[0, 0], [-0.02, -0.02, 0])
-    assert s.set_variable("span", 0.08) == {"ok": True}
-    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.04, -0.04, 0])
+    # the patch spans ±offset, so its corner sits at (-offset, -offset)
+    assert np.allclose(grid[0, 0], [-0.002, -0.002, 0])
+    assert s.set_variable("offset", 0.006) == {"ok": True}
+    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.006, -0.006, 0])
     assert len(s.get_field_map(sensor_id="probe")["data"][0]["z"]) == 7
 
 
@@ -4033,7 +4034,7 @@ def test_every_field_magpylib_can_evaluate_is_offered():
     assert np.array(s.get_field(points=outside, field="B")["values"]).any()
 
     # and the same set reaches the map, off a sensor's own grid
-    s.load_example("pixels")
+    s.load_example("tolerance")
     figure = s.get_field_map(sensor_id="probe", field="J")
     assert "|J| (T)" in figure["layout"]["title"]["text"]
 

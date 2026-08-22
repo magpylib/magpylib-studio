@@ -68,6 +68,21 @@ All notable changes to the Magpylib Studio extension.
   — it is _answered_. Reading a mesh from a file still gets all of it, because
   nothing about an STL is known in advance.
 
+- **"Field on a plane" is a question now: placement tolerance.** It was a bare
+  cube under an abstract square, and what it demonstrated was a limitation —
+  that a pixel grid's coordinates can be parametric while its resolution cannot.
+  The scene is the same shape and asks something real instead: a probe under a
+  magnet at an air gap, and a plane that _is_ the patch the probe might be
+  misplaced within. Dragging `offset` from a reflowed part's half-millimetre out
+  to six says what that costs — 7.8% variation across the patch against 75% —
+  which is the number a spec is written in and the reason to open a field map at
+  all.
+
+  It stays a plane of Sensor pixels rather than a meshgrid of observer points,
+  and that is still the point: the grid is a scene object, drawn and saved and
+  exported, and it is the only shipped sensor `get_field_map` can read off,
+  since a heatmap needs pixels laid out as a grid rather than a run of points.
+
 ### Fixed
 
 - **The helical winding example draws.** Its 3D view was empty, and had been

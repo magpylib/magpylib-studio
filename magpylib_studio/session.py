@@ -465,30 +465,59 @@ def array_scene():
     }
 
 
-def pixel_field_scene(resolution=7):
-    """A magnet under a measuring plane: a Sensor whose pixel grid is written
-    in terms of `span`, so the patch being measured resizes with it.
+def tolerance_scene(resolution=7):
+    """A probe under a magnet, and the patch it might be misplaced within.
 
-    magpylib's own field-on-a-plane examples build a meshgrid of observer
-    points; here that grid belongs to a Sensor, so it is a real scene object
-    — drawn in the 3D view, carried by the sensor's pose, and exported. A
-    pixel grid is a table of numbers, and this one shows that even a table
-    can be parametric: resolution cannot be (an expression yields a number,
-    not an array of a different length), but every coordinate in it can.
+    The question a field map is for. A Hall sensor is placed by a pick-and-
+    place machine or a person with a jig, and neither puts it exactly where
+    the drawing says: it lands somewhere inside a tolerance. What the designer
+    is given is a spec — the reading must hold to a few percent — and what
+    decides whether the spec is met is how much the field varies across that
+    patch. The plane here *is* the tolerance: `offset` is how far off-centre
+    the probe might sit, and the map over it is what that costs.
+
+    It is a plane of pixels rather than a plane of observer points on purpose.
+    magpylib's own field-on-a-plane examples build a meshgrid and hand it to
+    `getB`; here the grid belongs to a Sensor, so it is a real scene object —
+    drawn in the 3D view, carried by the sensor's pose, saved and exported —
+    and `get_field_map(sensor_id=...)` reads the map straight off it. This is
+    the only shipped scene whose sensor can be read that way, because a
+    sensor has to know its pixels are a *grid* rather than a run of points to
+    be turned into a heatmap.
+
+    Every coordinate in that grid is an expression, which is what lets one
+    variable resize the whole patch. The count is not, and cannot be: an
+    expression yields a number, and a different resolution is a different
+    table. `resolution` is therefore an argument to this function rather than
+    a slider — the one number in the scene that is not draggable, and the
+    reason it is 7 is that 49 pixels is a map you can read at a glance.
     """
     steps = [
-        (i / (resolution - 1)) - 0.5 for i in range(resolution)
-    ]  # -0.5 … +0.5, scaled by `span` at build time
+        (2 * i / (resolution - 1)) - 1 for i in range(resolution)
+    ]  # -1 … +1, scaled to ±offset at build time
 
     def coordinate(fraction):
-        return 0 if fraction == 0 else f"=span * {fraction:.6g}"
+        return 0 if fraction == 0 else f"=offset * {fraction:.6g}"
 
     return {
-        "variables": {"span": 0.04, "lift": 0.015, "mag": 0.01},
+        "variables": {
+            "mag": 0.01,
+            # Magnet face to sensor: what the housing and the board thickness
+            # leave you, and the number a designer is usually arguing about.
+            "gap": 0.005,
+            # How far off-centre the probe might land. Sub-millimetre for a
+            # reflowed part, more for anything placed by hand.
+            "offset": 0.002,
+        },
         "variable_bounds": {
-            "span": {"min": 0.001, "max": 0.4, "soft_min": 0.01, "soft_max": 0.1},
-            "lift": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
             "mag": {"min": 0.0005, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
+            "gap": {"min": 0.0002, "max": 0.05, "soft_min": 0.001, "soft_max": 0.02},
+            "offset": {
+                "min": 0.0001,
+                "max": 0.02,
+                "soft_min": 0.0005,
+                "soft_max": 0.006,
+            },
         },
         "objects": [
             {
@@ -496,7 +525,7 @@ def pixel_field_scene(resolution=7):
                 "type": "magnet.Cuboid",
                 "params": {
                     "dimension": ["=mag", "=mag", "=mag"],
-                    "polarization": [0, 0, 1],
+                    "polarization": [0, 0, 1.3],
                 },
                 "style": {"label": "Magnet"},
             },
@@ -504,13 +533,15 @@ def pixel_field_scene(resolution=7):
                 "id": "probe",
                 "type": "Sensor",
                 "params": {
-                    "position": [0, 0, "=lift"],
+                    # Under the magnet by the air gap, measured from its face
+                    # rather than its centre — which is how a gap is quoted.
+                    "position": [0, 0, "=-(mag / 2 + gap)"],
                     "pixel": [
                         [[coordinate(u), coordinate(v), 0] for u in steps]
                         for v in steps
                     ],
                 },
-                "style": {"label": "Measuring plane", "size": SENSOR_SIZE},
+                "style": {"label": "Where the probe might sit", "size": SENSOR_SIZE},
             },
         ],
     }
@@ -726,11 +757,11 @@ EXAMPLES = {
         "mirror image as the first is edited",
         pair_scene,
     ),
-    "pixels": (
-        "Field on a plane",
-        "A magnet under a sensor whose pixel grid resizes with a "
-        "variable — open the Field view and read it off the sensor",
-        pixel_field_scene,
+    "tolerance": (
+        "Probe placement",
+        "A probe under a magnet and the patch it might be misplaced "
+        "within — the map over it is what a placement tolerance costs",
+        tolerance_scene,
     ),
     "quiver": (
         "Turning magnet, field arrows",

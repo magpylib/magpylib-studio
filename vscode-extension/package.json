@@ -386,7 +386,7 @@
       },
       {
         "view": "magpylib-studio.sceneView",
-        "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA Halbach stack, a solenoid, a mirrored pair, a magnet array, a measuring plane, a turning magnet or a superquadric mesh — each built from a couple of parametric steps.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\nOr ask Copilot chat to add objects with #magpyAdd."
+        "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA Halbach stack, a solenoid, a mirrored pair, a magnet array, a placement tolerance, a turning magnet or a superquadric mesh — each built from a couple of parametric steps.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\nOr ask Copilot chat to add objects with #magpyAdd."
       }
     ],
     "walkthroughs": [
@@ -410,7 +410,7 @@
           {
             "id": "loadExample",
             "title": "Load an example",
-            "description": "Ready-made scenes — a Halbach ring, a solenoid, a mirrored pair, a magnet array, a measuring plane, a turning magnet, a superquadric mesh — each built from a handful of parametric steps.\n[Load Example Scene…](command:magpylib-studio.loadExample)",
+            "description": "Ready-made scenes — a Halbach ring, a solenoid, a mirrored pair, a magnet array, a placement tolerance, a turning magnet, a superquadric mesh — each built from a handful of parametric steps.\n[Load Example Scene…](command:magpylib-studio.loadExample)",
             "media": {
               "markdown": "walkthroughs/load-example.md"
             },

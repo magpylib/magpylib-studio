@@ -29,30 +29,33 @@ and drives it.
   `load_example(name)`), because an example is the shortest documentation there
   is and each one leans on a different feature: a **solenoid** (linear pattern
   of current loops), a **facing pair** (mirror), a **magnet array** (two linear
-  patterns composing into a grid), a **parametric measuring plane** (a pixel
-  grid whose coordinates are expressions), and **a turning magnet under field
-  arrows** — magpylib's own animated-quiver example: a pose that is a _path_, so
-  the scene animates, and a sensor styled to draw its own reading
-  (`pixel.field.symbol = arrow3d`) — and **a superquadric** (`solid`), two
-  roundness sliders over a size: the mesh example, generated rather than read
-  from a file so the geometry itself is what the sliders move. Self-checking
-  three times over — block, cylinder and sphere are all reachable from the one
-  formula and all have magpylib primitives to agree with, to within 0.2% at
-  13920 faces, converging quadratically (`facets` is a slider so that is
-  visible). All four are **written the way the studio is meant to be used**: the
-  Halbach is two rings of one magnet and one circular pattern each — nine steps
-  and four variables instead of twenty declared magnets and sixty-five steps,
-  for a field identical to the hand-built version it replaced. Changing `n`
-  rebuilds both rings and `stagger` follows it, being `360/(2*n)` by definition.
-  Every shipped scene is sized in **SI units, as a real assembly**: the Halbach
-  is 10 mm cubes on a 23 mm ring, not the metre- wide magnet
-  `dimension=[1, 1, 1]` asks for. The soft minimum on `radius` is 0.016 for a
-  real reason: below it, 2πr < n·side and the default ring's cubes would have to
-  overlap. Object specs support an optional `"rotations"` list ({angle, axis,
-  anchor?}, applied in order via `rotate_from_angax`; no anchor = spin in place;
-  on a Collection rotates the whole group). Structural edits go through
-  `_mutate_doc`: mutate doc → rebuild scene; on failure the old doc is restored
-  and the error reported (`{"ok": false}`).
+  patterns composing into a grid), a **placement tolerance** (`tolerance`: a
+  probe under a magnet and the patch it might be misplaced within — every
+  coordinate of its pixel grid is an expression, so one variable resizes the
+  whole patch, and it is the only shipped sensor `get_field_map(sensor_id=)` can
+  read, since that needs pixels laid out as a _grid_ rather than a run of
+  points), and **a turning magnet under field arrows** — magpylib's own
+  animated-quiver example: a pose that is a _path_, so the scene animates, and a
+  sensor styled to draw its own reading (`pixel.field.symbol = arrow3d`) — and
+  **a superquadric** (`solid`), two roundness sliders over a size: the mesh
+  example, generated rather than read from a file so the geometry itself is what
+  the sliders move. Self-checking three times over — block, cylinder and sphere
+  are all reachable from the one formula and all have magpylib primitives to
+  agree with, to within 0.2% at 13920 faces, converging quadratically (`facets`
+  is a slider so that is visible). All four are **written the way the studio is
+  meant to be used**: the Halbach is two rings of one magnet and one circular
+  pattern each — nine steps and four variables instead of twenty declared
+  magnets and sixty-five steps, for a field identical to the hand-built version
+  it replaced. Changing `n` rebuilds both rings and `stagger` follows it, being
+  `360/(2*n)` by definition. Every shipped scene is sized in **SI units, as a
+  real assembly**: the Halbach is 10 mm cubes on a 23 mm ring, not the metre-
+  wide magnet `dimension=[1, 1, 1]` asks for. The soft minimum on `radius` is
+  0.016 for a real reason: below it, 2πr < n·side and the default ring's cubes
+  would have to overlap. Object specs support an optional `"rotations"` list
+  ({angle, axis, anchor?}, applied in order via `rotate_from_angax`; no anchor =
+  spin in place; on a Collection rotates the whole group). Structural edits go
+  through `_mutate_doc`: mutate doc → rebuild scene; on failure the old doc is
+  restored and the error reported (`{"ok": false}`).
 - **Clipboard & visibility**: `copy_object(id, parent?)` duplicates a spec
   (subtree included) with magpylib's label convention (`Cube_01`, `Cube_02`) and
   unique ids; `set_visible(id, bool)` hides via magpylib's own switches
