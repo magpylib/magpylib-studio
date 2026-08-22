@@ -1351,9 +1351,9 @@ def test_every_example_builds_and_is_worth_opening():
     s.load_example("tolerance")
     grid = np.array(s._objs["probe"].pixel)
     assert grid.shape == (7, 7, 3)
-    # the patch spans ±offset, so its corner sits at (-offset, -offset)
+    # a half-width, so the patch spans ±tolerance and its corner sits there
     assert np.allclose(grid[0, 0], [-0.002, -0.002, 0])
-    assert s.set_variable("offset", 0.006) == {"ok": True}
+    assert s.set_variable("tolerance", 0.006) == {"ok": True}
     assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.006, -0.006, 0])
     assert len(s.get_field_map(sensor_id="probe")["data"][0]["z"]) == 7
 

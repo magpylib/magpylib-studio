@@ -473,8 +473,15 @@ def tolerance_scene(resolution=7):
     the drawing says: it lands somewhere inside a tolerance. What the designer
     is given is a spec — the reading must hold to a few percent — and what
     decides whether the spec is met is how much the field varies across that
-    patch. The plane here *is* the tolerance: `offset` is how far off-centre
-    the probe might sit, and the map over it is what that costs.
+    patch. The plane here *is* the tolerance, and the map over it is what that
+    tolerance costs.
+
+    `tolerance` is a half-width, ± the way a placement spec is written: a part
+    quoted at ±0.5 mm is `tolerance = 0.0005`, and the patch it spans is twice
+    that across. It is not called `offset` for three reasons — nothing here is
+    displaced by it, a sensor's *offset* is its zero-field output error and
+    naming a distance that in a magnetics tool invites the wrong reading, and
+    `get_field_map(plane, offset=...)` already means a third thing.
 
     It is a plane of pixels rather than a plane of observer points on purpose.
     magpylib's own field-on-a-plane examples build a meshgrid and hand it to
@@ -497,7 +504,7 @@ def tolerance_scene(resolution=7):
     ]  # -1 … +1, scaled to ±offset at build time
 
     def coordinate(fraction):
-        return 0 if fraction == 0 else f"=offset * {fraction:.6g}"
+        return 0 if fraction == 0 else f"=tolerance * {fraction:.6g}"
 
     return {
         "variables": {
@@ -505,14 +512,15 @@ def tolerance_scene(resolution=7):
             # Magnet face to sensor: what the housing and the board thickness
             # leave you, and the number a designer is usually arguing about.
             "gap": 0.005,
-            # How far off-centre the probe might land. Sub-millimetre for a
-            # reflowed part, more for anything placed by hand.
-            "offset": 0.002,
+            # How far off-centre the probe might land, ± as a spec quotes
+            # it. Sub-millimetre for a reflowed part, more for anything
+            # placed by hand or shimmed into a housing.
+            "tolerance": 0.002,
         },
         "variable_bounds": {
             "mag": {"min": 0.0005, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
             "gap": {"min": 0.0002, "max": 0.05, "soft_min": 0.001, "soft_max": 0.02},
-            "offset": {
+            "tolerance": {
                 "min": 0.0001,
                 "max": 0.02,
                 "soft_min": 0.0005,
@@ -760,7 +768,7 @@ EXAMPLES = {
     "tolerance": (
         "Probe placement",
         "A probe under a magnet and the patch it might be misplaced "
-        "within — the map over it is what a placement tolerance costs",
+        "within — drag the tolerance and read what it costs",
         tolerance_scene,
     ),
     "quiver": (
