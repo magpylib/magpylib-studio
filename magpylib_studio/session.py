@@ -1834,6 +1834,9 @@ class MagpylibStudioSession:
         #: None outside a gesture; inside one, whether it has already recorded
         #: the state to undo back to. See `begin_interaction`.
         self._interaction: bool | None = None
+        #: What redo held when the current gesture began, to put back if the
+        #: gesture turns out to have changed nothing.
+        self._interaction_redo: list[dict] = []
         self._captured_scenes: list[dict] = []  # from the last load_script
         #: The animated capture playback reads frames from, or None when it
         #: has to be taken again. Every rebuild drops it: a scene that has
@@ -3729,12 +3732,24 @@ class MagpylibStudioSession:
         stack from then on.
         """
         self._interaction = False
+        self._interaction_redo = list(self._redo)
         return {"ok": True}
 
     def end_interaction(self):
         """Close the group opened by `begin_interaction`. Edits after this
-        record their own undo steps again."""
+        record their own undo steps again.
+
+        A gesture that ends where it began leaves nothing behind. The first
+        value of a drag records the state to come back to, so a slider taken
+        somewhere and released at the value it started from would otherwise
+        leave a step that undoes to what is already on screen — and would have
+        thrown away the redo stack to put it there. Both go back.
+        """
+        if self._interaction and self._undo and self._undo[-1]["doc"] == self.doc:
+            self._undo.pop()
+            self._redo = self._interaction_redo
         self._interaction = None
+        self._interaction_redo = []
         return {"ok": True}
 
     def set_visible(self, object_id, visible=True):
