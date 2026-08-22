@@ -64,6 +64,10 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     ) => Promise<unknown>,
     private readonly onAction: (action: string, name: string) => void,
     private readonly onMutation: () => void,
+    /** A value the pointer is still on. Separate from `onMutation` because a
+     *  gesture in progress wants the views that show it live and nothing
+     *  else: the document is not settled until the thumb is released. */
+    private readonly onPreview: () => void,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -89,14 +93,22 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
       if (message.type !== 'rpcRequest') {
         return;
       }
-      const { reqId, method, params } = message;
+      const { reqId, method, params, preview } = message;
       try {
         const result = await this.request(method, params);
+        // Answering first is what paces a drag: the panel holds the next
+        // value until this one is back, so a scene that is slow to rebuild
+        // gets asked for fewer of them rather than falling further behind.
         webviewView.webview.postMessage({ type: 'rpcResult', reqId, method, result });
         if (MUTATING.has(method)) {
-          // Dragging a variable moves everything written in terms of it —
-          // which is the whole point, and none of it is on this panel.
-          this.onMutation();
+          // Either way it moves everything written in terms of the variable —
+          // which is the whole point, and none of it is on this panel. What
+          // differs is how much of the studio is worth bringing with it.
+          if (preview) {
+            this.onPreview();
+          } else {
+            this.onMutation();
+          }
         }
       } catch (err) {
         webviewView.webview.postMessage({

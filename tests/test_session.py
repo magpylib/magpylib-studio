@@ -362,6 +362,50 @@ def test_a_whole_drag_is_one_thing_to_undo(session):
     assert np.ravel(session._objs["cube"].position) == pytest.approx(start)
 
 
+def test_a_gesture_that_ends_where_it_began_leaves_nothing_behind(session):
+    """A slider taken somewhere and released at the value it started from.
+
+    The first value of a drag records the state to come back to, so the
+    gesture left a step that undid to exactly what was already on screen —
+    and, having recorded it, had thrown away the redo stack to do it. Both go
+    back, which is why this checks redo as well: an undone edit that a
+    pointless drag makes unrepeatable is the worse half of the bug.
+
+    The test is on a variable because that is where the document really does
+    come back: a pose returned to by hand leaves a transform event that was
+    not there before, and a step that drops it is a step worth keeping.
+    """
+    session.set_variable("gap", 0.01)
+    session.set_variable("gap", 0.02)
+    assert session.undo()["ok"]  # back to 0.01, and 0.02 waiting to be redone
+    steps, redoable = len(session._undo), len(session._redo)
+
+    session.begin_interaction()
+    for value in (0.015, 0.018, 0.01):  # dragged away, and back
+        session.set_variable("gap", value)
+    session.end_interaction()
+
+    assert len(session._undo) == steps
+    assert len(session._redo) == redoable
+    assert session.doc["variables"]["gap"] == 0.01
+
+
+def test_a_gesture_that_changes_something_still_records_it(session):
+    """The other side of the same check: only an *identical* document is
+    dropped, so a drag that moved anything is still one step to undo."""
+    session.set_variable("gap", 0.01)
+    steps = len(session._undo)
+
+    session.begin_interaction()
+    for value in (0.015, 0.018, 0.02):
+        session.set_variable("gap", value)
+    session.end_interaction()
+
+    assert len(session._undo) == steps + 1
+    assert session.undo()["ok"]
+    assert session.doc["variables"]["gap"] == 0.01
+
+
 def test_edits_after_a_gesture_undo_on_their_own_again(session):
     """A group closes: the next edit is its own step, and a gesture left open
     by a view that went away is closed by the next one that begins."""

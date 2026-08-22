@@ -45,7 +45,7 @@ async function scene(): Promise<{
  * Read `scene.json` once it says what the test is waiting for.
  *
  * It is a virtual document, so VS Code serves it from cache until the
- * extension fires onDidChange — which it does on a 150 ms debounce, after the
+ * extension fires onDidChange — which it does on a 150 ms throttle, after the
  * command has already resolved. Waiting a fixed slice of time for that is
  * what this used to do, and it passed on a laptop and failed on CI, which is
  * the usual bargain. Polling for the state instead is both faster and not a

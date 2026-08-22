@@ -1773,15 +1773,35 @@ async function isolateFromPanel(
   broadcastMutation();
 }
 
+/** The surfaces a gesture keeps live: what the user is watching while they
+ *  drag, and nothing else.
+ *
+ *  Unpaced here on purpose. The rate is set where the cost is -- by whatever
+ *  is holding the gesture, which sends one value per frame at most and waits
+ *  for the round trip before the next -- so a light scene runs at the screen's
+ *  rate and a heavy one at the rebuild's. Everything fed here collapses its
+ *  own redraws to the newest state on top of that, so an extra pass costs a
+ *  request rather than a queue. Any interval imposed at this end would be a
+ *  cap on the first case and dead weight on the second.
+ *
+ *  What is left out is the point: the tree, the history, the script view and
+ *  scene.json are bookkeeping. Refreshing them per frame spends the engine on
+ *  answers nobody is looking at, and it is the same engine the view is
+ *  waiting on. They are brought up to date when the gesture ends and
+ *  broadcastMutation runs. */
+function refreshLiveSurfaces(): void {
+  inspector?.refresh();
+  // The field is the whole point of dragging a magnet somewhere, and the one
+  // thing on screen that cannot be worked out from the picture. It paces
+  // itself: a recompute that outlasts the next pose is left to finish and the
+  // newest pose is taken up after it.
+  fieldPanel?.webview.postMessage({ type: 'refresh' });
+}
+
 /** Bring the cheap surfaces up to date mid-drag, and let the next pose go. */
 function finishPreview(panel: vscode.WebviewPanel): void {
   try {
-    inspector?.refresh();
-    // The field is the whole point of dragging a magnet somewhere, and the
-    // one thing on screen that cannot be worked out from the picture. It
-    // paces itself: a recompute that outlasts the next pose is left to finish
-    // and the newest pose is taken up after it.
-    fieldPanel?.webview.postMessage({ type: 'refresh' });
+    refreshLiveSurfaces();
   } finally {
     // Answering is what paces the drag: the panel holds the next pose until
     // this one is back, so a slow scene sends fewer of them rather than
@@ -1839,15 +1859,32 @@ function scheduleBackup(): void {
   }, 1000);
 }
 
-/** Bring every surface back in sync with the engine. Debounced so a burst
- *  (an LLM chaining tool calls, a slider drag) causes one redraw, not one
- *  each. Says nothing about the scene having *changed* — see
- *  broadcastMutation; redrawing and editing are not the same event, and
- *  conflating them would put an unsaved-changes mark on a Refresh. */
+/** How long a burst of edits may collapse into one pass. Measured from the
+ *  first edit still waiting to be shown, so it is also the longest any
+ *  surface stays stale while edits keep coming. */
+const REFRESH_WINDOW_MS = 150;
+
+/** Bring every surface back in sync with the engine. Throttled so a burst —
+ *  an LLM chaining tool calls, a batch applied one operation at a time —
+ *  costs one pass per window rather than one each. Says nothing about the
+ *  scene having *changed*: see broadcastMutation; redrawing and editing are
+ *  not the same event, and conflating them would put an unsaved-changes mark
+ *  on a Refresh.
+ *
+ *  Nothing anyone is holding comes through here. A gesture runs on
+ *  refreshLiveSurfaces, paced by the hand and the scene rather than by a
+ *  clock; this is for edits that arrive on their own, where collapsing them
+ *  is what stops the tree and the script view from taking the engine's pipe
+ *  away from the view.
+ *
+ *  The window runs from the first edit still waiting rather than the last to
+ *  arrive, so a chain of edits shows the scene being built instead of nothing
+ *  until it stops. As a trailing debounce this starved outright: every edit
+ *  pushed the timer out, and a long enough chain drew once, at the end. */
 let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 function refreshSurfaces(): void {
-  if (refreshTimer) {
-    clearTimeout(refreshTimer);
+  if (refreshTimer !== undefined) {
+    return; // a pass is already due inside the window; this edit rides on it
   }
   refreshTimer = setTimeout(() => {
     refreshTimer = undefined;
@@ -1859,7 +1896,7 @@ function refreshSurfaces(): void {
     inspector?.refresh();
     refreshScript?.();
     sceneDocEmitter?.fire(SCENE_JSON_URI);
-  }, 150);
+  }, REFRESH_WINDOW_MS);
 }
 
 /** An edit happened somewhere (inspector, chat tool, tree action, panel):
@@ -2120,6 +2157,14 @@ export function activate(context: vscode.ExtensionContext): void {
       })();
     },
     broadcastMutation,
+    () => {
+      // Told directly rather than through the debounce that serves ordinary
+      // edits: a variable can move anything in the scene, and unlike a gizmo
+      // drag there is no pose reply for the view to redraw from. The panel
+      // collapses what it cannot keep up with, so this cannot outrun it.
+      currentPanel?.webview.postMessage({ type: 'refresh' });
+      refreshLiveSurfaces();
+    },
   );
   variablesTree = variables;
 
@@ -2136,8 +2181,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return (await getEngine(context)).request(method, params);
     },
     () => {
-      currentPanel?.webview.postMessage({ type: 'refresh' });
-      tree.refresh(); // label edits change tree captions
+      // Every field here writes to the scene, so this is an edit like any
+      // other: it went to the 3D view and the tree and nowhere else, which
+      // left the field panel showing a magnet that had moved, the history and
+      // the script view a step behind, and — the one that matters — the
+      // unsaved-changes mark unset and the crash backup unwritten. Nothing on
+      // this panel streams while it is dragged (its slider writes to the box
+      // beside it and applies on release), so the ordinary window is right.
+      broadcastMutation();
     },
     () => selectedObjectId,
   );

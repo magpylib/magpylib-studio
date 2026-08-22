@@ -10,11 +10,13 @@ const pending = new Map();
 let dragging = false;
 let missedRefresh = false;
 
-function rpc(method, params) {
+/** `preview` marks a value the pointer is still on: the host keeps the views
+ *  that show it live and leaves the bookkeeping until the release. */
+function rpc(method, params, { preview = false } = {}) {
   return new Promise((resolve, reject) => {
     const reqId = nextReqId++;
     pending.set(reqId, { resolve, reject });
-    vscodeApi.postMessage({ type: "rpcRequest", reqId, method, params });
+    vscodeApi.postMessage({ type: "rpcRequest", reqId, method, params, preview });
   });
 }
 
@@ -59,7 +61,25 @@ function commit(name, value) {
  * so never fired `change` at all.
  */
 function endInteractionSoon() {
-  setTimeout(() => rpc("end_interaction").catch(() => {}), 0);
+  setTimeout(() => {
+    // Whatever the frame gate or the round trip was still holding belongs to
+    // the gesture that just ended, and goes now, past both: sent after the
+    // group had closed it would undo as a step of its own.
+    //
+    // Only a drag that came back to where it started arrives here with
+    // anything left: `change` runs before this and takes the final value with
+    // it whenever the value moved. So what is waiting is the value the slider
+    // began at, and the engine may be sitting on somewhere the pointer passed
+    // through -- which is why it still has to be sent, and why it is sent as
+    // a preview. Nothing needs marking as edited by a gesture that put
+    // everything back, and the engine drops its own undo entry for one.
+    if (pendingValue) {
+      const { name, value } = pendingValue;
+      pendingValue = null;
+      rpc("set_variable", { name, value }, { preview: true }).catch(() => {});
+    }
+    rpc("end_interaction").catch(() => {});
+  }, 0);
 }
 
 /** Set the variable while the slider is still moving.
@@ -68,15 +88,25 @@ function endInteractionSoon() {
  * variable and none of it is on this panel -- so a slider that only spoke on
  * release was asking the user to let go to see what they had done.
  *
- * Paced on the round trip rather than on a timer: one set in flight and the
- * newest waiting value wins, so a variable that reshapes a hundred magnets
- * sends fewer of them instead of queueing up edits the user has already
- * dragged past. The views it feeds collapse their own redraws the same way.
+ * Held to whichever is slower, the round trip or a frame, with the newest
+ * waiting value going out and the rest dropped -- they were places the
+ * pointer passed through, not values anyone asked to see.
+ *
+ * A frame, because that is the fastest the screen can show anything: a mouse
+ * reports at 125 Hz and plenty report faster, and a scene rebuilt for a value
+ * that is overwritten before it can be drawn is work spent on nothing. A
+ * round trip, because past that the scene is the limit and there is nothing
+ * to be gained by asking again -- a variable that reshapes a hundred magnets
+ * sends fewer sets instead of queueing up ones the user has already dragged
+ * past. Neither is an interval chosen in advance: on a small scene the frame
+ * decides, on a heavy one the rebuild does, and the drag stays as smooth as
+ * that scene can be.
  *
  * `load` is not called here on purpose: it would rebuild this panel, and the
  * slider under the pointer with it.
  */
-let liveInFlight = false;
+let liveInFlight = false; // a value is on the wire
+let frameSpent = false; // one has already gone out this frame
 let pendingValue = null;
 
 function preview(name, value) {
@@ -85,11 +115,20 @@ function preview(name, value) {
 }
 
 function sendValue() {
-  if (liveInFlight || !pendingValue) return;
+  if (liveInFlight || frameSpent || !pendingValue) return;
   liveInFlight = true;
+  // Opened again on the next frame rather than on the reply, so a scene that
+  // answers in less than a frame waits for the frame and one that takes
+  // longer is never made to wait for the next: whichever is slower decides,
+  // with no rounding up to frame boundaries in between.
+  frameSpent = true;
+  requestAnimationFrame(() => {
+    frameSpent = false;
+    sendValue();
+  });
   const { name, value } = pendingValue;
   pendingValue = null;
-  rpc("set_variable", { name, value })
+  rpc("set_variable", { name, value }, { preview: true })
     .catch(() => {
       // the release value reports; a refusal mid-drag is not worth saying
     })
@@ -233,7 +272,7 @@ async function load() {
       });
       slider.addEventListener("change", () => {
         dragging = false;
-        commit(v.name, parseFloat(slider.value), { closes: true });
+        commit(v.name, parseFloat(slider.value));
       });
       slider.addEventListener("pointerup", () => {
         dragging = false;

@@ -85,6 +85,39 @@ All notable changes to the Magpylib Studio extension.
 
 ### Fixed
 
+- **An Inspector edit counts as an edit.** Typing a position, a dimension or a
+  style into the Inspector went to the 3D view and the Scene tree and nowhere
+  else. So the field panel went on showing a magnet that had moved, the script
+  view and `scene.json` stayed a step behind, and — the half that could cost
+  you work — the unsaved-changes mark stayed off and the crash backup went
+  unwritten, because both hang off the one call the Inspector was not making.
+  Every other way of editing the scene already went through it.
+
+- **A drag that ends where it began leaves nothing behind.** The first value of
+  a drag records the state to come back to, so a slider taken somewhere and
+  released at the value it started from left a step that undid to exactly what
+  was already on screen — and, having recorded that step, had cleared the redo
+  stack to do it, making an undone edit unrepeatable for no reason. The engine
+  drops the step, and puts redo back, when a gesture closes on the document it
+  opened with.
+
+- **Variable sliders move the scene while you drag them — this time on any
+  scene.** The panel had been sending values since it shipped; what swallowed
+  them was the host. Every edit reset a 150 ms debounce before redrawing, and a
+  slider's values arrive as fast as the engine can answer them — 1.4 ms on a
+  small scene — so each one pushed the redraw out again and the 3D view only
+  caught up 150 ms after the drag ended. It fired on a scene heavy enough to
+  answer more slowly than the timer, which is why it looked like it worked.
+
+  A gesture is paced by the hand and the scene now, not by a clock: one value
+  per frame at most, and never a second one before the first has come back.
+  That is the screen's own rate on a small scene and the rebuild's on a large
+  one — a thousand cuboids answer in about 190 ms, and the drag runs at that
+  instead of pretending otherwise. Dragging a gizmo already worked this way.
+  What a drag no longer does is refresh the tree, the history, the script view
+  and `scene.json` per frame: those read from the same engine the view is
+  waiting on, and they catch up when the gesture ends.
+
 - **The helical winding example draws.** Its 3D view was empty, and had been
   since it shipped. Magpylib separates the segments of a trace with NaN —
   plotly's way of lifting the pen between the arrows along a current path, and

@@ -162,6 +162,9 @@ const globals = {
   Promise,
   setTimeout,
   clearTimeout,
+  // The variables panel holds a drag to one value per frame; a run here has
+  // no frames, so the next turn of the loop is the closest honest stand-in.
+  requestAnimationFrame: (fn) => setTimeout(fn, 0),
   JSON,
   Object,
   Array,
@@ -265,51 +268,54 @@ function dump(el, depth = 0, out = []) {
   return out;
 }
 
-// -------------------------------------------------------------------- main
-async function main() {
-  const which = process.argv[2] ?? "inspector";
-  const example = process.argv[3];
-  const engine = startEngine();
+// ------------------------------------------------------------------- mount
+const PANELS = (request) => ({
+  inspector: {
+    elementIds: ["header", "step", "params", "transform", "props", "status"],
+    build: () => {
+      const { InspectorViewProvider } = require(
+        path.join(EXT, "out", "inspectorView.js"),
+      );
+      return new InspectorViewProvider(
+        uri(EXT),
+        request,
+        () => {},
+        () => undefined,
+      );
+    },
+  },
+  variables: {
+    elementIds: ["list", "empty", "help", "helpBody", "status"],
+    build: () => {
+      const { VariablesViewProvider } = require(
+        path.join(EXT, "out", "variablesView.js"),
+      );
+      return new VariablesViewProvider(
+        uri(EXT),
+        request,
+        () => {},
+        () => {},
+        () => {},
+      );
+    },
+  },
+});
 
-  if (example) {
-    await engine.request("load_example", { name: example });
-  }
-
+/**
+ * Run a panel's own script against `engine`, and hand back what a caller needs
+ * to drive it: the elements it rendered into, a pump that lets the round trips
+ * land, and every message it sent the host, in order.
+ *
+ * `overrides` replaces globals the script reads. A check that has to decide
+ * when a frame happens passes its own requestAnimationFrame, which is the
+ * only way to tell "one value per frame" from "one value, eventually".
+ */
+async function mount(which, engine, overrides = {}) {
   const request = (method, params) => engine.request(method, params);
-  const PANELS = {
-    inspector: {
-      elementIds: ["header", "step", "params", "transform", "props", "status"],
-      build: () => {
-        const { InspectorViewProvider } = require(
-          path.join(EXT, "out", "inspectorView.js"),
-        );
-        return new InspectorViewProvider(
-          uri(EXT),
-          request,
-          () => {},
-          () => undefined,
-        );
-      },
-    },
-    variables: {
-      elementIds: ["list", "empty", "help", "helpBody", "status"],
-      build: () => {
-        const { VariablesViewProvider } = require(
-          path.join(EXT, "out", "variablesView.js"),
-        );
-        return new VariablesViewProvider(
-          uri(EXT),
-          request,
-          () => {},
-          () => {},
-        );
-      },
-    },
-  };
-  const panel = PANELS[which];
+  const panel = PANELS(request)[which];
   if (!panel) {
     throw new Error(
-      `no harness for ${which}; try ${Object.keys(PANELS).join(" or ")}`,
+      `no harness for ${which}; try ${Object.keys(PANELS(request)).join(" or ")}`,
     );
   }
   for (const id of panel.elementIds) {
@@ -356,22 +362,46 @@ async function main() {
   }
   const script = fs.readFileSync(path.join(EXT, "media", named[1]), "utf8");
 
+  Object.assign(globals, overrides);
   const names = Object.keys(globals);
   // eslint-disable-next-line no-new-func
   new Function(...names, script)(...names.map((n) => globals[n]));
 
-  // The script posts { type: 'ready' } on load; deliver it like VS Code does.
-  for (const message of messagesToHost.splice(0)) {
-    await onMessage(message);
-  }
-
-  /** Let the rpc round trips settle; each one is a real subprocess call. */
-  const settle = async () => {
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 25));
-      for (const message of messagesToHost.splice(0)) await onMessage(message);
+  /** Hand the host what the panel has said, the way VS Code would, keeping a
+   *  copy: what a gesture sends, and in what order, is the thing worth
+   *  checking about a gesture. */
+  const sent = [];
+  const deliver = async () => {
+    for (const message of messagesToHost.splice(0)) {
+      sent.push(message);
+      await onMessage(message);
     }
   };
+  // The script posts { type: 'ready' } on load.
+  await deliver();
+
+  /** Let the rpc round trips settle; each one is a real subprocess call. */
+  const settle = async (rounds = 40, delay = 25) => {
+    for (let i = 0; i < rounds; i++) {
+      await new Promise((r) => setTimeout(r, delay));
+      await deliver();
+    }
+  };
+  return { panel, provider, webview, roots, settle, sent };
+}
+
+// -------------------------------------------------------------------- main
+async function main() {
+  const which = process.argv[2] ?? "inspector";
+  const example = process.argv[3];
+  const engine = startEngine();
+
+  if (example) {
+    await engine.request("load_example", { name: example });
+  }
+
+  const { panel, webview, settle } = await mount(which, engine);
+
   const show = (title) => {
     console.log(`\n=== ${title} ===`);
     for (const id of panel.elementIds) {
@@ -425,7 +455,11 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = { mount, startEngine, El };
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
