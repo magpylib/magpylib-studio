@@ -1,10 +1,23 @@
 # Hooks for pre-commit.ci, which runs org-wide on magpylib repos and fails a
 # repo that has no config at all.
 #
-# Deliberately narrower than magpylib's own: this repo is half TypeScript, and
+# Narrower than magpylib's own: this repo is half TypeScript, and
 # `npm run compile` already runs tsc, ESLint and the two contribution checks
 # over it, so the hooks here cover the Python and the things no other check
-# looks at. Formatting is the notable omission — see the note at the bottom.
+# looks at.
+#
+# Formatting is *not* among the omissions, whatever this comment used to say.
+# ruff-format and prettier were turned on deliberately (e6013f3): being the one
+# repo in the org that formats differently is a cost paid by every person who
+# touches it. Note that prettier is scoped by `types_or` below and TypeScript
+# is not in the list — .ts files are shaped by ESLint alone, and running
+# prettier over them by hand reformats a thousand lines nobody asked about.
+#
+# The one thing to know: `autoupdate_schedule` bumps the formatter versions,
+# and a new version formats differently. Let the autoupdate pull request's own
+# hook run finish before merging it, so the bump and the reformat it implies
+# travel together — merged apart, the difference lands on whoever opens the
+# next pull request, as a commit they did not write.
 ci:
   autoupdate_commit_msg: "chore(deps): update pre-commit hooks"
   autofix_commit_msg: "style: pre-commit fixes"

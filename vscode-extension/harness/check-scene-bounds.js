@@ -60,9 +60,8 @@ async function main() {
     }),
   };
   const THREE = await import("three");
-  const { boundByFinitePoints, withPenLifts } = await import(
-    "../media/scene3d.mjs"
-  );
+  const { boundByFinitePoints, withPenLifts } =
+    await import("../media/scene3d.mjs");
 
   const raw = execFileSync(PYTHON, ["-c", PAYLOADS], {
     cwd: REPO,
@@ -74,7 +73,9 @@ async function main() {
     scenes = JSON.parse(raw);
   } catch (err) {
     // The engine's own reader would drop this response and never resolve.
-    console.log(`FAIL  the scene payload is not JSON the view can read: ${err.message}`);
+    console.log(
+      `FAIL  the scene payload is not JSON the view can read: ${err.message}`,
+    );
     process.exit(1);
   }
 

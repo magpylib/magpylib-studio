@@ -216,7 +216,7 @@ def test_a_scene_asked_for_outside_a_window_says_so(monkeypatch):
 
 
 def test_a_notebook_is_told_something_it_can_act_on(monkeypatch):
-    """"Run it from a terminal" is no advice to a kernel started by the editor.
+    """ "Run it from a terminal" is no advice to a kernel started by the editor.
 
     A notebook never carries the address, and magpylib already draws inline
     there, so the message names the thing to do instead.
@@ -373,16 +373,12 @@ def test_a_payload_says_what_the_file_held(drop, tmp_path, monkeypatch):
     script = tmp_path / "run.py"
     script.write_bytes(b"import magpylib\n")
     monkeypatch.setattr(viewer, "_script_path", lambda: str(script))
-    payload = json.loads(
-        viewer.write_view("plotly", {}).read_text(encoding="utf-8")
-    )
+    payload = json.loads(viewer.write_view("plotly", {}).read_text(encoding="utf-8"))
     assert payload["digest"] == hashlib.sha256(script.read_bytes()).hexdigest()
 
 
 def test_a_payload_with_no_file_has_no_digest(drop, monkeypatch):
     """A REPL has nothing to hash, and nothing to go stale against."""
     monkeypatch.setattr(viewer, "_script_path", lambda: "<stdin>")
-    payload = json.loads(
-        viewer.write_view("plotly", {}).read_text(encoding="utf-8")
-    )
+    payload = json.loads(viewer.write_view("plotly", {}).read_text(encoding="utf-8"))
     assert payload["digest"] is None

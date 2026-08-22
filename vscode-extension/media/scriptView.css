@@ -87,7 +87,10 @@ body {
   box-shadow: 0 1px 3px rgb(0 0 0 / 35%);
 }
 #rerun:hover {
-  background: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+  background: var(
+    --vscode-button-hoverBackground,
+    var(--vscode-button-background)
+  );
 }
 /* The glyph is a font, so it takes the button's colour and scales with its
    text rather than needing a size of its own. */
@@ -105,8 +108,14 @@ body {
   font-size: 11px;
   padding: 1px 8px;
   cursor: pointer;
-  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
-  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(
+    --vscode-button-secondaryForeground,
+    var(--vscode-button-foreground)
+  );
+  background: var(
+    --vscode-button-secondaryBackground,
+    var(--vscode-button-background)
+  );
   border: none;
   border-radius: 2px;
 }
