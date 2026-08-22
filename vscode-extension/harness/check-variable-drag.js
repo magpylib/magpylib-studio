@@ -26,14 +26,8 @@
  * 3. A release that does commit commits once. The flush in (2) must not send
  *    the value `change` has already sent.
  */
-const fs = require("fs");
-const path = require("path");
-
+const { enginePython } = require("./engine-python");
 const { mount, startEngine } = require("./webview-harness");
-
-const EXT = path.join(__dirname, "..");
-const REPO = path.join(EXT, "..");
-const PYTHON = path.join(REPO, ".venv", "bin", "python");
 
 let failures = 0;
 let engine; // module scope so a thrown check still takes the engine with it
@@ -43,9 +37,9 @@ function check(ok, message) {
 }
 
 async function main() {
-  if (!fs.existsSync(PYTHON)) {
+  if (!enginePython()) {
     // The engine is a separate install; `npm run compile` must not need one.
-    console.log("skip  variable drag (no engine venv at ../.venv)");
+    console.log("skip  variable drag (no python here can import the engine)");
     return;
   }
   engine = startEngine();

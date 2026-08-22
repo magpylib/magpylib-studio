@@ -19,6 +19,8 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 
+const { enginePython } = require("./engine-python");
+
 const EXT = path.join(__dirname, "..");
 const REPO = path.join(EXT, "..");
 
@@ -208,7 +210,10 @@ Module._load = (request, parent, isMain) =>
 
 // ----------------------------------------------------------- engine bridge
 function startEngine() {
-  const python = path.join(REPO, ".venv", "bin", "python");
+  const python = enginePython();
+  if (!python) {
+    throw new Error("no python here can import magpylib_studio");
+  }
   const proc = spawn(python, ["-m", "magpylib_studio"], { cwd: REPO });
   const pending = new Map();
   let buffer = "";
