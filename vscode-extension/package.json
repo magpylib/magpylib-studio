@@ -158,6 +158,22 @@
         "icon": "$(add)"
       },
       {
+        "command": "magpylib-studio.addMesh",
+        "title": "Magpylib Studio: Add Triangular Mesh..."
+      },
+      {
+        "command": "magpylib-studio.importMesh",
+        "title": "Magpylib Studio: Import Mesh..."
+      },
+      {
+        "command": "magpylib-studio.meshFromPoints",
+        "title": "Magpylib Studio: Mesh from Points..."
+      },
+      {
+        "command": "magpylib-studio.meshFromFormula",
+        "title": "Magpylib Studio: Mesh from a Formula..."
+      },
+      {
         "command": "magpylib-studio.setPosition",
         "title": "Set Position..."
       },
@@ -370,7 +386,7 @@
       },
       {
         "view": "magpylib-studio.sceneView",
-        "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA Halbach stack, a solenoid, a mirrored pair, a magnet array, a measuring plane or a turning magnet — each built from a couple of parametric steps.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\nOr ask Copilot chat to add objects with #magpyAdd."
+        "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA Halbach stack, a solenoid, a mirrored pair, a magnet array, a placement tolerance, a turning magnet or a superquadric mesh — each built from a couple of parametric steps.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\nOr ask Copilot chat to add objects with #magpyAdd."
       }
     ],
     "walkthroughs": [
@@ -394,7 +410,7 @@
           {
             "id": "loadExample",
             "title": "Load an example",
-            "description": "Six ready-made scenes — a Halbach ring, a solenoid, a mirrored pair, a magnet array, a measuring plane, a turning magnet — each built from a handful of parametric steps.\n[Load Example Scene…](command:magpylib-studio.loadExample)",
+            "description": "Ready-made scenes — a Halbach ring, a solenoid, a mirrored pair, a magnet array, a placement tolerance, a turning magnet, a superquadric mesh — each built from a handful of parametric steps.\n[Load Example Scene…](command:magpylib-studio.loadExample)",
             "media": {
               "markdown": "walkthroughs/load-example.md"
             },
@@ -661,6 +677,11 @@
           "group": "1_move@3"
         },
         {
+          "command": "magpylib-studio.importMesh",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^magpyCollection/",
+          "group": "1_move@4"
+        },
+        {
           "command": "magpylib-studio.moveTo",
           "when": "view == magpylib-studio.sceneView && viewItem =~ /^magpy/",
           "group": "1_move@1"
@@ -717,6 +738,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "magpylib-studio.addMesh",
+          "when": "false"
+        },
         {
           "command": "magpylib-studio.selectObject",
           "when": "false"
@@ -862,7 +887,7 @@
         "displayName": "Add magpylib object",
         "toolReferenceName": "magpyAdd",
         "canBeReferencedInPrompt": true,
-        "modelDescription": "Add ONE new object to the Magpylib Studio scene; to create several objects use the batch tool in a single call instead. 'type' is a dotted magpylib class path like 'magnet.Cuboid', 'magnet.Cylinder', 'magnet.Sphere', 'current.Circle' or 'Sensor'. 'params' are the constructor kwargs (e.g. polarization, dimension/diameter, position; a Sensor position may be a list of [x,y,z] points forming a path). 'rotations' optionally rotates the object after construction (e.g. Halbach arrangements: orbit with anchor 0, then spin in place). Type 'Collection' creates a group; pass 'parent' (a Collection id) to nest an object inside a group - rotations on a Collection rotate the whole group. On failure the result contains the constructor/validation error - fix and retry. Note: on magnets the default magnetization coloring masks the base 'color' style - for a visible solid color also include 'magnetization.mode': 'arrow'. VALUES MAY BE EXPRESSIONS: any number here can instead be a string starting with '=' naming the scene's variables, e.g. \"=gap\" or [0, 0, \"=gap*2\"] - use one whenever the user describes a quantity as a parameter or repeats it across objects, so changing it later moves everything at once. The variable must already exist (set variable tool). Strings without '=' stay literal, so an axis is still 'z'. For a ring, a circular array or a Halbach arrangement, do NOT add the magnets one by one: add ONE magnet inside a Collection and call the duplicate around tool, which keeps the count editable. WHEN ADDING TO A SCENE THAT ALREADY EXISTS, COPY HOW IT IS WRITTEN: list the objects first and read the 'source' of the ones you are extending, then reuse their dimensions, their polarization and their variables instead of choosing your own. If the existing ring is at position=(radius, 0, gap) with n copies, the next one belongs at (radius, 0, 2*gap) with count '=n' - not at real-world millimetre values, and not with a hard-coded count, which would leave the new part frozen while the sliders move everything else.",
+        "modelDescription": "Add ONE new object to the Magpylib Studio scene; to create several objects use the batch tool in a single call instead. 'type' is a dotted magpylib class path like 'magnet.Cuboid', 'magnet.Cylinder', 'magnet.Sphere', 'current.Circle' or 'Sensor'. 'params' are the constructor kwargs (e.g. polarization, dimension/diameter, position; a Sensor position may be a list of [x,y,z] points forming a path). 'rotations' optionally rotates the object after construction (e.g. Halbach arrangements: orbit with anchor 0, then spin in place). A 'magnet.TriangularMesh' takes no vertices or faces: it takes a 'mesh_source', either {\"from\": \"file\", \"path\": \"rotor.stl\", \"scale\": 0.001} to read a mesh file - scale converts the file's units to metres, and a CAD export is almost always in millimetres, so 1 there makes a magnet a thousand times too big - or {\"from\": \"hull\", \"points\": [[x,y,z], ...]} for the convex hull of a point cloud. List the objects afterwards and read the 'mesh' field: a mesh that comes back open, disconnected or self-intersecting still computes a field, and that field is wrong - say so rather than carrying on. Type 'Collection' creates a group; pass 'parent' (a Collection id) to nest an object inside a group - rotations on a Collection rotate the whole group. On failure the result contains the constructor/validation error - fix and retry. Note: on magnets the default magnetization coloring masks the base 'color' style - for a visible solid color also include 'magnetization.mode': 'arrow'. VALUES MAY BE EXPRESSIONS: any number here can instead be a string starting with '=' naming the scene's variables, e.g. \"=gap\" or [0, 0, \"=gap*2\"] - use one whenever the user describes a quantity as a parameter or repeats it across objects, so changing it later moves everything at once. The variable must already exist (set variable tool). Strings without '=' stay literal, so an axis is still 'z'. For a ring, a circular array or a Halbach arrangement, do NOT add the magnets one by one: add ONE magnet inside a Collection and call the duplicate around tool, which keeps the count editable. WHEN ADDING TO A SCENE THAT ALREADY EXISTS, COPY HOW IT IS WRITTEN: list the objects first and read the 'source' of the ones you are extending, then reuse their dimensions, their polarization and their variables instead of choosing your own. If the existing ring is at position=(radius, 0, gap) with n copies, the next one belongs at (radius, 0, 2*gap) with count '=n' - not at real-world millimetre values, and not with a hard-coded count, which would leave the new part frozen while the sliders move everything else.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -876,7 +901,7 @@
             },
             "params": {
               "type": "object",
-              "description": "Constructor kwargs, e.g. {\"polarization\": [0,0,1], \"diameter\": 1, \"position\": [0,2,0]}."
+              "description": "Constructor kwargs, e.g. {\"polarization\": [0,0,1], \"diameter\": 1, \"position\": [0,2,0]}. A TriangularMesh takes \"mesh_source\" instead of vertices/faces."
             },
             "style": {
               "type": "object",

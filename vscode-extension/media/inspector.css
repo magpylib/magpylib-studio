@@ -167,6 +167,12 @@ input.expr {
   padding: 0 0 3px 6px;
   font-size: 11px;
 }
+/* A hint that is not an aside: a mesh whose field cannot be trusted has to
+   read differently from the line above it saying how many faces it has. */
+.hint.warning {
+  opacity: 1;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
 textarea {
   width: 100%;
   box-sizing: border-box;

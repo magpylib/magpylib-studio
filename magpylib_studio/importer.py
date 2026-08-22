@@ -512,6 +512,68 @@ class _Unparseable(Exception):
     """The script is not in the shape to_script emits; run it instead."""
 
 
+#: The classmethods a mesh source is written with, and the keyword each one
+#: carries its source in. See session._mesh_source_lit for the other half.
+_MESH_FACTORIES = {
+    "from_pyvista": "polydata",
+    "from_ConvexHull": "points",
+    "from_mesh": "mesh",
+}
+
+
+def _mesh_source_from(factory, node, read):
+    """A mesh classmethod's argument -> the source it stands for.
+
+    This is why a mesh survives the round trip as a *source*: executed
+    instead, `pv.read("rotor.stl")` would come back as the fifty thousand
+    numbers that were in the file that day, and a hull of eight expressions
+    as the eight points they happened to evaluate to — and the next save
+    would write those into the document in place of the thing it means.
+
+    `read` is the caller's value reader rather than `ast.literal_eval` for
+    exactly that reason: a hull's corners are usually written in terms of the
+    scene's variables (that is the whole point of building a shape here
+    rather than importing one), and a reader that only takes literals sends
+    the file down the execute path, where the parametrisation is lost.
+    """
+    if factory == "from_ConvexHull":
+        return {"from": "hull", "points": read(node)}
+    if factory == "from_mesh":
+        # `_superquadric(size, roundness, around, across)` — the helper the
+        # export writes, read back as the four arguments that describe it.
+        if (
+            not isinstance(node, ast.Call)
+            or getattr(node.func, "id", None) != "_superquadric"
+            or len(node.args) != 4
+        ):
+            raise _Unparseable(ast.unparse(node))
+        size, roundness, around, across = (read(arg) for arg in node.args)
+        return {
+            "from": "superquadric",
+            "size": size,
+            "roundness": roundness,
+            "around": around,
+            "across": across,
+        }
+    scale = 1
+    if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "scale":
+        if len(node.args) != 1:
+            raise _Unparseable(ast.unparse(node))
+        scale = read(node.args[0])
+        node = node.func.value
+    if (
+        not isinstance(node, ast.Call)
+        or getattr(node.func, "attr", None) != "read"
+        or len(node.args) != 1
+    ):
+        raise _Unparseable(ast.unparse(node))
+    return {
+        "from": "file",
+        "path": ast.literal_eval(node.args[0]),
+        **({"scale": scale} if scale != 1 else {}),
+    }
+
+
 def _event_from_call(node, target, variables, value=None):
     """One `obj.move(...)` / `obj.rotate_from_angax(...)` back into an event.
 
@@ -831,8 +893,11 @@ def parse_script(source):
             if isinstance(stmt, ast.For):
                 events.append(_duplicate_from_loop(stmt, objects, set(variables)))
                 continue
-            if isinstance(stmt, ast.FunctionDef) and stmt.name == "_mirror":
-                continue  # the helper the studio emits, re-emitted on the way out
+            if isinstance(stmt, ast.FunctionDef) and stmt.name in (
+                "_mirror",
+                "_superquadric",
+            ):
+                continue  # helpers the studio emits, re-emitted on the way out
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 call = stmt.value
                 if isinstance(call.func, ast.Attribute):  # noqa: SIM102
@@ -939,6 +1004,13 @@ def parse_script(source):
             # name = magpy.Type(...) — an object; otherwise a variable
             if isinstance(stmt.value, ast.Call) and _dotted_from_call(stmt.value):
                 dotted = _dotted_from_call(stmt.value)
+                # `magpy.magnet.TriangularMesh.from_pyvista(...)` — the type
+                # with the classmethod that made it on the end. Split off
+                # here so everything downstream sees the type it always saw.
+                head, _, tail = dotted.rpartition(".")
+                factory = tail if tail in _MESH_FACTORIES else ""
+                if factory:
+                    dotted = head
                 spec = {"id": name, "type": dotted, "params": {}, "style": {}}
                 for arg in stmt.value.args:  # positional args are children
                     if not isinstance(arg, ast.Name) or arg.id not in objects:
@@ -948,6 +1020,10 @@ def parse_script(source):
                 for kw in stmt.value.keywords:
                     if kw.arg == "style":
                         spec["style"] = _flatten_style(ast.literal_eval(kw.value))
+                    elif factory and kw.arg == _MESH_FACTORIES[factory]:
+                        spec["params"]["mesh_source"] = _mesh_source_from(
+                            factory, kw.value, value
+                        )
                     else:
                         spec["params"][kw.arg] = value(kw.value)
                 if dotted == "Collection":

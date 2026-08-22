@@ -38,6 +38,8 @@ _PUBLIC = {
     "set_param",
     "get_params",
     "get_transform",
+    "inspect_mesh",
+    "set_base_dir",
     "move",
     "rotate",
     "set_transform",

@@ -77,7 +77,7 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[dev]"
 # the extension (from vscode-extension/)
 npm install
 npm run compile     # tsc + eslint + webview, contribution and version checks
-npm test            # thirteen tests in a real Extension Development Host
+npm test            # nineteen tests in a real Extension Development Host
 ```
 
 Then open **the repo root** in VS Code and press `F5` — not the
@@ -118,6 +118,26 @@ it, as GitHub already does.
   min/max gets a slider, and is enforced the same way. `sweep()` re-folds the
   scene once per value of a variable, which is affordable because a rebuild is
   milliseconds.
+- **A mesh is recorded as where it came from.** `TriangularMesh` is the one
+  class whose parameters nobody types — fifty thousand numbers arrive from a CAD
+  export — so a create event holds `mesh_source` (the file, its scale, a hash of
+  what was in it; the point cloud to take the hull of; or the superellipsoid to
+  sample) and the build performs it. The same rule as transforms: record the
+  call, not the result. A document stays a description of a scene rather than a
+  copy of the STL, the script export still says `pv.read("rotor.stl")`, and both
+  round-trip byte for byte. Resolving is the one expensive step in a system
+  where a rebuild happens on every slider drag — reorienting a 20k-face mesh
+  takes 16 s — so what a source resolves to is cached, and each rebuild is
+  handed the answers rather than asked to find them again. **What the checks
+  found travels with the object**: an open or disconnected mesh still computes a
+  field, and that field is wrong, so the tree row, the Inspector and the reading
+  itself say so rather than leaving it to a warning on a stream nobody reads.
+  What each source is _trusted_ for differs: a file gets every check, a hull
+  skips the one a convex body cannot fail, and a generated superellipsoid skips
+  both the quadratic face repair (its winding is consistent by construction, so
+  pointing it outward is one signed volume) and the self-intersection test (a
+  radial parametrisation cannot cross itself). Skipped answers are recorded as
+  answers, not as silence — magpylib re-asks an open question on every redraw.
 - **One schema contract.** The same JSON Schema drives the inspector widgets
   _and_ the LLM tool inputs.
 - **Validation is shared.** Every edit goes through magpylib, and a bad edit is
@@ -157,7 +177,7 @@ line — no ports, no framework.
 
 | group     | methods                                                                                                                                                         |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| inspect   | `list_objects` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history`                                                 |
+| inspect   | `list_objects` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                |
 | structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                       |
 | edit      | `apply_edit` (style) · `set_param` · `reset_style`                                                                                                              |
 | transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                           |
@@ -167,7 +187,7 @@ line — no ports, no framework.
 | view      | `get_figure` (3D) · `get_field_figure` (along a sensor path) · `get_field_map` (plane heatmap) · `get_sweep_figure`                                             |
 | field     | `get_field` — summed B/H at points or along a sensor · `sweep` — the field against a variable                                                                   |
 | undo      | `undo` · `redo` · `goto_history`                                                                                                                                |
-| I/O       | `load_scene` · `load_script` · `apply_script` · `load_captured` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script`                    |
+| I/O       | `load_scene` · `set_base_dir` · `load_script` · `apply_script` · `load_captured` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script`   |
 | bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                          |
 
 Mutating methods return `{"ok": bool, "error"?: str}`. Everything is
@@ -186,7 +206,7 @@ printf '%s\n' \
 
 ## Status
 
-The engine is covered by 104 tests against both magpylib versions
+The engine is covered by 254 tests against both magpylib versions
 (`.venv/bin/python -m pytest -q`).
 
 The extension is checked at three levels, all wired into `npm run compile` so
@@ -195,7 +215,7 @@ both the host code and the webview scripts; two contribution checks (every
 declared command registered, every menu clause matching a context value the tree
 can set, every palette entry safe to invoke with no argument); and a DOM harness
 that runs a panel's real script against a real engine
-(`npm run inspect -- halbach`). On top of that, `npm test` runs thirteen
+(`npm run inspect -- halbach`). On top of that, `npm test` runs nineteen
 integration tests **inside a real Extension Development Host** — activation, the
 engine subprocess answering through the virtual `scene.json`, a removal taking a
 pattern's copies with it, the script tab applying an edit on save, the engine

@@ -368,7 +368,9 @@ def as_number(value):
 #: one of these is an id or a label — `as_number` would rename the object
 #: rather than fix its arithmetic — and `style` covers a whole subtree of
 #: them, so it carries down to everything inside.
-_NAMING_KEYS = frozenset({"id", "target", "parent", "op", "type", "path", "style"})
+_NAMING_KEYS = frozenset(
+    {"id", "target", "parent", "op", "type", "path", "style", "source", "sha256"}
+)
 
 
 def normalized(value, naming=False):

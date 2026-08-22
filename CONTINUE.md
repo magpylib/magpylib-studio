@@ -29,11 +29,20 @@ and drives it.
   `load_example(name)`), because an example is the shortest documentation there
   is and each one leans on a different feature: a **solenoid** (linear pattern
   of current loops), a **facing pair** (mirror), a **magnet array** (two linear
-  patterns composing into a grid), a **parametric measuring plane** (a pixel
-  grid whose coordinates are expressions), and **a turning magnet under field
-  arrows** — magpylib's own animated-quiver example: a pose that is a _path_, so
-  the scene animates, and a sensor styled to draw its own reading
-  (`pixel.field.symbol = arrow3d`). All four are **written the way the studio is
+  patterns composing into a grid), a **placement tolerance** (`tolerance`: a
+  probe under a magnet and the patch it might be misplaced within — every
+  coordinate of its pixel grid is an expression, so one variable resizes the
+  whole patch, and it is the only shipped sensor `get_field_map(sensor_id=)` can
+  read, since that needs pixels laid out as a _grid_ rather than a run of
+  points), and **a turning magnet under field arrows** — magpylib's own
+  animated-quiver example: a pose that is a _path_, so the scene animates, and a
+  sensor styled to draw its own reading (`pixel.field.symbol = arrow3d`) — and
+  **a superquadric** (`solid`), two roundness sliders over a size: the mesh
+  example, generated rather than read from a file so the geometry itself is what
+  the sliders move. Self-checking three times over — block, cylinder and sphere
+  are all reachable from the one formula and all have magpylib primitives to
+  agree with, to within 0.2% at 13920 faces, converging quadratically (`facets`
+  is a slider so that is visible). All four are **written the way the studio is
   meant to be used**: the Halbach is two rings of one magnet and one circular
   pattern each — nine steps and four variables instead of twenty declared
   magnets and sixty-five steps, for a field identical to the hand-built version
@@ -64,6 +73,66 @@ and drives it.
   Position/orientation are excluded — they are transform-managed. Shown as the
   Inspector's **properties** section, and prompted (prefilled, with units) when
   adding an object.
+- **Meshes (`magnet.TriangularMesh`) — recorded as their source, not their
+  vertices.** `magpylib_studio/meshes.py`: an STL reader (binary and ASCII, no
+  new dependency), pyvista for everything else where it is installed, and
+  `from_ConvexHull` over a point cloud. A create event holds
+  `params.mesh_source = {"from": "file", "path", "scale", "sha256"}` or
+  `{"from": "hull", "points": [...]}`; `_resolve_params` performs it on the way
+  into every build. Named `mesh_source` rather than `mesh` because magpylib
+  already has a `mesh` kwarg (`from_mesh(mesh=...)`) meaning the triangle array,
+  and one word with two meanings in one namespace is how this goes wrong later.
+  - **Why not inline.** Measured before choosing: a 1000-vertex part is a 207 KB
+    document and a 103 KB script on one line, and a real CAD export is 20× that.
+  - **Why the cache is not an optimisation.** Also measured: 20k faces reorient
+    in **16 s** and construct in **0.1 ms** once the faces are right. A rebuild
+    happens on every slider drag, so the resolved mesh is cached (keyed by
+    realpath + mtime + size + scale + reorient) and objects are then built with
+    every check `skip`. `meshes.stamp_status` hands back the `status_open`
+    magpylib would otherwise warn about not having — the one private-attribute
+    touch, guarded.
+  - **Validity is data, not a warning.** `status_of` reports open / disconnected
+    / self-intersecting with counts, plus `flipped` (how many faces
+    reorientation turned around — magpylib's own `status_reoriented` is always
+    True and says nothing). It rides on `list_objects` entries, on `get_params`,
+    and as `warnings` on `get_field`. The tree badges it, the Inspector explains
+    it, the import notifies once.
+  - **DOC_VERSION 3.** A v2 engine would build a TriangularMesh with neither
+    vertices nor faces and lose the object; worse, saving would replace a
+    400-byte reference with the megabytes it resolved to.
+  - `set_base_dir(path, rebase=)` / `load_scene(base_dir=)`: a relative mesh
+    path is relative to the _document_, which only the host knows. `rebase` is
+    the difference between the two ways a document comes to be somewhere —
+    _opened_ from a directory, its paths already mean what they say; _moved_
+    there by Save As, they still mean the old place and are rewritten to name
+    the same files from the new one. The extension rebases before the bytes are
+    written (or the file on disk names parts relative to where the scene used to
+    live) and puts them back if the write fails. The crash backup is the odd
+    case: it sits in extension storage while the scene it describes lives where
+    it was last saved, so the restore passes that directory explicitly instead
+    of the backup's own.
+  - **Three source kinds**, and what each one is trusted for. `file` gets
+    everything: welding, magpylib's quadratic `reorient_faces`, and the
+    expensive self-intersection test, because nothing about an STL is known in
+    advance. `hull` gets reorientation (scipy's simplices are not wound
+    consistently with each other) but not the self-intersection test, which a
+    convex body cannot fail. `superquadric` gets neither: the sheet is wound
+    consistently by construction, so orienting it outward is one signed volume
+    (`meshes.outward`, O(n)) rather than a quadratic repair, and a radial
+    parametrisation cannot self-intersect. Both skipped answers are recorded as
+    **False rather than None** — None reads as "unasked", and magpylib re-asks
+    it on the display path at seconds a redraw.
+  - The two cheap checks (open, disconnected) run on _everything_, generated
+    shapes included, and earned it immediately: `cos(±π/2)` is 6.1e-17, so a
+    superquadric's pole rows came out as rings of `around` distinct points and
+    each cap was a ring of needles around a hole. The mesh reported itself open
+    at exactly 2 × around edges. Poles are now set, not computed.
+  - **Not done for meshes**: mirroring one still refuses (it would have to flip
+    vertices — the refusal is honest and tested); reopening a big scene re-pays
+    the reorientation, because the cache is in-memory only; `misc.Triangle`,
+    `current.TriangleSheet`, `current.TriangleStrip` and `misc.CustomSource` are
+    still unreachable from the UI.
+
 - **The document IS the log.** `doc["events"]` is the whole scene: `create`,
   `remove` and `reparent` alongside the transforms and `duplicate_around`.
   `doc["objects"]` is a **projection**, rebuilt by `_project()` on every build
@@ -775,6 +844,11 @@ supports.
 - The events panel shows the log but cannot yet **drag** to reorder (↑/↓ buttons
   only), and editing a create event's params redirects you to the Inspector
   rather than doing it in place.
+- **A disk cache for resolved meshes**, keyed by content hash. In-memory only
+  today, so opening a scene with a 20k-face part pays the 16 s reorientation
+  every time it is opened rather than every time the file changes. The hash is
+  already in the document; what is missing is somewhere disposable to put the
+  answer.
 - **Optimisation** on top of `sweep()` (find the gap that flattens the field) is
   a small step now that a rebuild-and-measure loop exists.
 - **Try it live**: open `vscode-extension/` in VS Code, F5, run "Magpylib

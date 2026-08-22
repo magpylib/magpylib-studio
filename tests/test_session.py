@@ -228,9 +228,7 @@ def test_get_scene_draws_pattern_copies_on_their_source(session):
     assert scene["patterned"] == ["r2"]
 
 
-@pytest.mark.parametrize(
-    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
-)
+@pytest.mark.parametrize("name", list(EXAMPLES))
 @needs_scene_graph
 def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     """magpylib works in SI units, so a scene written in round numbers is a
@@ -303,9 +301,7 @@ def test_the_scene_payload_is_json_the_view_can_parse():
             assert len(lifts) == 360, "the winding's pen-lifts went missing"
 
 
-@pytest.mark.parametrize(
-    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
-)
+@pytest.mark.parametrize("name", list(EXAMPLES))
 @needs_scene_graph
 def test_every_id_the_scene_names_can_be_edited(name):
     """The invariant the whole 3D view rests on, over every shipped example.
@@ -1352,12 +1348,13 @@ def test_every_example_builds_and_is_worth_opening():
     # even a table of numbers is parametric: a pixel grid's resolution cannot
     # be (an expression yields a number, not an array of another length) but
     # every coordinate in it can
-    s.load_example("pixels")
+    s.load_example("tolerance")
     grid = np.array(s._objs["probe"].pixel)
     assert grid.shape == (7, 7, 3)
-    assert np.allclose(grid[0, 0], [-0.02, -0.02, 0])
-    assert s.set_variable("span", 0.08) == {"ok": True}
-    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.04, -0.04, 0])
+    # a half-width, so the patch spans ±tolerance and its corner sits there
+    assert np.allclose(grid[0, 0], [-0.002, -0.002, 0])
+    assert s.set_variable("tolerance", 0.006) == {"ok": True}
+    assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.006, -0.006, 0])
     assert len(s.get_field_map(sensor_id="probe")["data"][0]["z"]) == 7
 
 
@@ -4037,7 +4034,7 @@ def test_every_field_magpylib_can_evaluate_is_offered():
     assert np.array(s.get_field(points=outside, field="B")["values"]).any()
 
     # and the same set reaches the map, off a sensor's own grid
-    s.load_example("pixels")
+    s.load_example("tolerance")
     figure = s.get_field_map(sensor_id="probe", field="J")
     assert "|J| (T)" in figure["layout"]["title"]["text"]
 

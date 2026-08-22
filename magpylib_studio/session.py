@@ -33,8 +33,13 @@ Protocol surface (all JSON-serializable in/out):
   duplicate_along(object_id, count, step)  -> {"ok": bool, ...} (linear pattern)
   mirror(object_id, plane?, normal?, anchor?) -> {"ok": bool, ...} (one reflection)
   get_transform(object_id)             -> {position, orientation, path_length, ...}
+  inspect_mesh(source)                 -> {faces, vertices, extent, status, sha256}
+  set_base_dir(path, rebase?)          -> {"ok": bool, "rebased"?: int}
+                                          what a relative mesh path is relative
+                                          to; `rebase` says the document moved
+                                          there rather than came from there
   reset_style(object_id, path?)        -> {"ok": bool, "error"?: str}
-  load_scene(scene | path)             -> {"ok": bool, "error"?: str}
+  load_scene(scene | path, base_dir?)  -> {"ok": bool, "error"?: str}
   load_script(path, scene?)            -> {"ok", "scene", "scenes": [labels], ...}
   load_captured(scene)                 -> same (switch between captured scenes)
   apply_script(path)                   -> {"ok", "warnings"?} (edited to_script back in)
@@ -67,6 +72,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
@@ -76,7 +82,7 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, style_compat, threejs
+from magpylib_studio import expressions, meshes, style_compat, threejs
 
 
 def example_scene():
@@ -459,30 +465,67 @@ def array_scene():
     }
 
 
-def pixel_field_scene(resolution=7):
-    """A magnet under a measuring plane: a Sensor whose pixel grid is written
-    in terms of `span`, so the patch being measured resizes with it.
+def tolerance_scene(resolution=7):
+    """A probe under a magnet, and the patch it might be misplaced within.
 
-    magpylib's own field-on-a-plane examples build a meshgrid of observer
-    points; here that grid belongs to a Sensor, so it is a real scene object
-    — drawn in the 3D view, carried by the sensor's pose, and exported. A
-    pixel grid is a table of numbers, and this one shows that even a table
-    can be parametric: resolution cannot be (an expression yields a number,
-    not an array of a different length), but every coordinate in it can.
+    The question a field map is for. A Hall sensor is placed by a pick-and-
+    place machine or a person with a jig, and neither puts it exactly where
+    the drawing says: it lands somewhere inside a tolerance. What the designer
+    is given is a spec — the reading must hold to a few percent — and what
+    decides whether the spec is met is how much the field varies across that
+    patch. The plane here *is* the tolerance, and the map over it is what that
+    tolerance costs.
+
+    `tolerance` is a half-width, ± the way a placement spec is written: a part
+    quoted at ±0.5 mm is `tolerance = 0.0005`, and the patch it spans is twice
+    that across. It is not called `offset` for three reasons — nothing here is
+    displaced by it, a sensor's *offset* is its zero-field output error and
+    naming a distance that in a magnetics tool invites the wrong reading, and
+    `get_field_map(plane, offset=...)` already means a third thing.
+
+    It is a plane of pixels rather than a plane of observer points on purpose.
+    magpylib's own field-on-a-plane examples build a meshgrid and hand it to
+    `getB`; here the grid belongs to a Sensor, so it is a real scene object —
+    drawn in the 3D view, carried by the sensor's pose, saved and exported —
+    and `get_field_map(sensor_id=...)` reads the map straight off it. This is
+    the only shipped scene whose sensor can be read that way, because a
+    sensor has to know its pixels are a *grid* rather than a run of points to
+    be turned into a heatmap.
+
+    Every coordinate in that grid is an expression, which is what lets one
+    variable resize the whole patch. The count is not, and cannot be: an
+    expression yields a number, and a different resolution is a different
+    table. `resolution` is therefore an argument to this function rather than
+    a slider — the one number in the scene that is not draggable, and the
+    reason it is 7 is that 49 pixels is a map you can read at a glance.
     """
     steps = [
-        (i / (resolution - 1)) - 0.5 for i in range(resolution)
-    ]  # -0.5 … +0.5, scaled by `span` at build time
+        (2 * i / (resolution - 1)) - 1 for i in range(resolution)
+    ]  # -1 … +1, scaled to ±offset at build time
 
     def coordinate(fraction):
-        return 0 if fraction == 0 else f"=span * {fraction:.6g}"
+        return 0 if fraction == 0 else f"=tolerance * {fraction:.6g}"
 
     return {
-        "variables": {"span": 0.04, "lift": 0.015, "mag": 0.01},
+        "variables": {
+            "mag": 0.01,
+            # Magnet face to sensor: what the housing and the board thickness
+            # leave you, and the number a designer is usually arguing about.
+            "gap": 0.005,
+            # How far off-centre the probe might land, ± as a spec quotes
+            # it. Sub-millimetre for a reflowed part, more for anything
+            # placed by hand or shimmed into a housing.
+            "tolerance": 0.002,
+        },
         "variable_bounds": {
-            "span": {"min": 0.001, "max": 0.4, "soft_min": 0.01, "soft_max": 0.1},
-            "lift": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
             "mag": {"min": 0.0005, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
+            "gap": {"min": 0.0002, "max": 0.05, "soft_min": 0.001, "soft_max": 0.02},
+            "tolerance": {
+                "min": 0.0001,
+                "max": 0.02,
+                "soft_min": 0.0005,
+                "soft_max": 0.006,
+            },
         },
         "objects": [
             {
@@ -490,7 +533,7 @@ def pixel_field_scene(resolution=7):
                 "type": "magnet.Cuboid",
                 "params": {
                     "dimension": ["=mag", "=mag", "=mag"],
-                    "polarization": [0, 0, 1],
+                    "polarization": [0, 0, 1.3],
                 },
                 "style": {"label": "Magnet"},
             },
@@ -498,13 +541,116 @@ def pixel_field_scene(resolution=7):
                 "id": "probe",
                 "type": "Sensor",
                 "params": {
-                    "position": [0, 0, "=lift"],
+                    # Under the magnet by the air gap, measured from its face
+                    # rather than its centre — which is how a gap is quoted.
+                    "position": [0, 0, "=-(mag / 2 + gap)"],
                     "pixel": [
                         [[coordinate(u), coordinate(v), 0] for u in steps]
                         for v in steps
                     ],
                 },
-                "style": {"label": "Measuring plane", "size": SENSOR_SIZE},
+                "style": {"label": "Where the probe might sit", "size": SENSOR_SIZE},
+            },
+        ],
+    }
+
+
+def solid_scene():
+    """One formula, and most of the solids a magnet is ever modelled as.
+
+    A superellipsoid: two exponents over a size, which is enough to be a box,
+    a cylinder, a sphere, a pillow or a diamond, and everything on the way
+    between them (Barr, IEEE CG&A 1(1), 1981 — the family Gielis's
+    superformula later generalised). `plan` rounds the shape seen from above,
+    square through circular to a diamond; `profile` rounds it seen from the
+    side, flat-topped through domed.
+
+        plan  profile
+        0.05  0.05      a block             — magpylib's Cuboid
+        1     0.05      a cylinder          — magpylib's Cylinder
+        1     1         a sphere            — magpylib's Sphere
+        1     0.3       a rounded-edge disc — no magpylib class
+        2     2         an octahedron
+
+    Which is the point, twice over. The shapes with no class are the ones
+    real magnets actually are — the rounded block, the barrel, the chamfered
+    disc — and until a mesh could be built here, reaching them meant leaving
+    for CAD and coming back with an STL.
+
+    And the three that *do* have a class make the example self-checking. Set
+    the sliders to any of the first three rows and the mesh reproduces the
+    primitive magpylib computes analytically: at `facets = 120` (13920
+    faces), measured off a point beside the magnet, all three agree to
+    within 0.2%. The error falls as the square of the face count — for the
+    sphere, 2.8% at 480 faces, 0.67% at 2112, 0.16% at 8832, 0.058% at
+    24960 — which is why `facets` is a slider. Discretisation is a thing to
+    watch rather than be told about, and this is a mesh whose right answer
+    is known.
+    """
+    return {
+        "variables": {
+            "width": 0.02,
+            "depth": 0.02,
+            "height": 0.01,
+            "plan": 0.35,
+            "profile": 0.35,
+            "facets": 48,
+            "lift": 0.01,
+        },
+        "variable_bounds": {
+            "width": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
+            "depth": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
+            "height": {"min": 0.0005, "max": 0.2, "soft_min": 0.003, "soft_max": 0.04},
+            # Never 0: at 0 every point on a face collapses onto its corner
+            # and there is no surface left. 2 is the diamond; past it the
+            # solid pinches inward, which is a different kind of shape and
+            # not one anybody casts a magnet as.
+            "plan": {"min": 0.05, "max": 2, "soft_min": 0.05, "soft_max": 1},
+            "profile": {"min": 0.05, "max": 2, "soft_min": 0.05, "soft_max": 1},
+            # Below about twelve the sphere reads as the polyhedron it is;
+            # above a hundred the picture stops changing and only the face
+            # count grows. Both ends are worth visiting once.
+            "facets": {
+                "min": 6,
+                "max": 200,
+                "soft_min": 12,
+                "soft_max": 96,
+                "integer": True,
+            },
+            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.04},
+        },
+        "objects": [
+            {
+                "id": "magnet",
+                "type": "magnet.TriangularMesh",
+                "params": {
+                    "mesh_source": {
+                        "from": "superquadric",
+                        "size": ["=width", "=depth", "=height"],
+                        # (pole to pole, around) — the order the formula takes
+                        # them in, which is why `profile` leads.
+                        "roundness": ["=profile", "=plan"],
+                        "around": "=facets",
+                        "across": "=round(facets / 2)",
+                    },
+                    "polarization": [0, 0, 1.3],
+                },
+                "style": {"label": "Superquadric magnet"},
+            },
+            # Straight up from the top: the lift-off curve a datasheet plots,
+            # and the reading that says what the rounding costs.
+            {
+                "id": "sensor",
+                "type": "Sensor",
+                "params": {
+                    "position": {
+                        expressions.SAMPLED: {
+                            "count": 25,
+                            "of": [0, 0, "=height / 2 + lift * (1 + 5 * t)"],
+                        }
+                    }
+                },
+                "style": {"label": "Above the magnet", "size": SENSOR_SIZE},
             },
         ],
     }
@@ -619,11 +765,11 @@ EXAMPLES = {
         "mirror image as the first is edited",
         pair_scene,
     ),
-    "pixels": (
-        "Field on a plane",
-        "A magnet under a sensor whose pixel grid resizes with a "
-        "variable — open the Field view and read it off the sensor",
-        pixel_field_scene,
+    "tolerance": (
+        "Probe placement",
+        "A probe under a magnet and the patch it might be misplaced "
+        "within — drag the tolerance and read what it costs",
+        tolerance_scene,
     ),
     "quiver": (
         "Turning magnet, field arrows",
@@ -636,6 +782,13 @@ EXAMPLES = {
         "A magnet patterned into a row, the row into a grid — two "
         "linear steps, both counts editable",
         array_scene,
+    ),
+    "solid": (
+        "One formula, many solids",
+        "A superellipsoid mesh: two roundness sliders turn a block into "
+        "a cylinder into a sphere — matching Cuboid, Cylinder and Sphere "
+        "as they pass",
+        solid_scene,
     ),
 }
 
@@ -683,6 +836,9 @@ _PARAM_DOCS = {
     "diameter": "diameter (m)",
     "vertices": "corner/path points (m)",
     "faces": "triangle indices into vertices",
+    "mesh_source": "where the mesh comes from: a file to read, or the convex "
+    "hull of a point cloud. Scale converts the file's units to metres "
+    "(0.001 for a CAD export in mm)",
     "current": "electrical current (A)",
     "moment": "magnetic moment (A·m²)",
     "pixel": "sensor pixel positions in local coordinates (m)",
@@ -720,6 +876,62 @@ _BESIDE = object()
 
 # Emitted into a script that contains a mirror, since magpylib has none. Kept
 # in one piece so what runs and what parse_script reads back cannot drift.
+#: What a superquadric source is written as, since magpylib has no class for
+#: one. A helper rather than the triangles it produces, for the same reason
+#: the mirror below is a helper: the script stays parametric, so the shape
+#: still follows the variables its size and roundness are written in.
+#:
+#: It returns triangles rather than vertices and faces so the call can be one
+#: expression — `from_mesh` does the welding magpylib would do anyway. The
+#: pole triangles are dropped here, in soup form, where a flat triangle is
+#: still recognisable as one having two identical corners; after welding it
+#: is a face naming a vertex twice, and `from_mesh` keeps those.
+_SUPERQUADRIC_HELPER = [
+    "def _superquadric(size, roundness, around, across):",
+    '    """A superellipsoid as triangles: one formula for the box, the sphere,',
+    "    the cylinder and everything between (Barr, IEEE CG&A 1(1), 1981).",
+    "    `roundness` is (pole-to-pole, around); 1, 1 is an ellipsoid, both",
+    '    small is a box, and (small, 1) is a cylinder."""',
+    # `exponent`, not `e`: a bare `e` is one of the names an expression may
+    # use, and `math_names_in_source` reads the finished script for them —
+    # so a parameter called `e` put `from math import e` at the top of every
+    # script with a superquadric in it, importing a constant nothing used.
+    "    def signed(v, exponent):",
+    "        return np.sign(v) * np.abs(v) ** exponent",
+    "",
+    "    (a, b, c) = np.asarray(size, dtype=float) / 2",
+    "    e1, e2 = roundness",
+    "    lat, lon = np.meshgrid(",
+    "        np.linspace(-np.pi / 2, np.pi / 2, across),",
+    "        np.linspace(-np.pi, np.pi, around, endpoint=False),",
+    "        indexing='ij',",
+    "    )",
+    "    ring = signed(np.cos(lat), e1)",
+    "    grid = np.stack(",
+    "        [",
+    "            a * ring * signed(np.cos(lon), e2),",
+    "            b * ring * signed(np.sin(lon), e2),",
+    "            c * signed(np.sin(lat), e1),",
+    "        ],",
+    "        axis=-1,",
+    "    )",
+    "    grid[0], grid[-1] = (0, 0, -c), (0, 0, c)  # the poles, set not computed",
+    "    right = np.roll(np.arange(around), -1)",
+    "    top, bottom = grid[:-1], grid[1:]",
+    "    tri = np.concatenate(",
+    "        [",
+    "            np.stack([top, top[:, right], bottom[:, right]], axis=2),",
+    "            np.stack([top, bottom[:, right], bottom], axis=2),",
+    "        ]",
+    "    ).reshape(-1, 3, 3)",
+    "    flat = (",
+    "        np.all(tri[:, 0] == tri[:, 1], axis=1)",
+    "        | np.all(tri[:, 1] == tri[:, 2], axis=1)",
+    "        | np.all(tri[:, 0] == tri[:, 2], axis=1)",
+    "    )",
+    "    return tri[~flat]",
+]
+
 _MIRROR_HELPER = [
     "def _mirror(obj, normal, anchor=(0, 0, 0)):",
     '    """A reflected copy. Polarization is an axial vector: its component',
@@ -894,7 +1106,14 @@ def _walk_specs(specs):
 #: replace. (`spacing`, from the same release, needs no bump: an engine that
 #: does not know the field ignores it and builds the same scene, only writing
 #: the path back out as the other of the two calls that describe it.)
-DOC_VERSION = 2
+#:
+#: 3: a TriangularMesh may be written as `mesh_source` — the file to read or
+#: the cloud to take the hull of — instead of its vertices and faces. Version
+#: 2 would build the object with neither, which magpylib refuses, so the
+#: object would be lost to `broken` on a document that is perfectly good; and
+#: an engine that dropped the source and saved would replace a 400-byte
+#: reference with the five megabytes it happened to resolve to.
+DOC_VERSION = 3
 
 try:
     __version__ = _package_version("magpylib-studio")
@@ -938,6 +1157,22 @@ _SPEC_KEYS = (
 )
 
 
+def _mesh_first(params):
+    """`mesh_source` at the front of a create's params, as the script says it.
+
+    A mesh source is not one keyword argument among others: it names the
+    classmethod that makes the object, so it leads the call. A document read
+    back from that script has to agree with the document that wrote it down
+    to the key order, or the script tab churns on its first save.
+    """
+    if not isinstance(params, dict) or "mesh_source" not in params:
+        return params
+    return {
+        "mesh_source": params["mesh_source"],
+        **{k: v for k, v in params.items() if k != "mesh_source"},
+    }
+
+
 def _canonical(doc):
     """One spelling per value, whichever way the document was built.
 
@@ -951,7 +1186,7 @@ def _canonical(doc):
             if spec.get(key) == {}:
                 del spec[key]
         if "params" in spec:
-            spec["params"] = expressions.normalized(spec["params"])
+            spec["params"] = _mesh_first(expressions.normalized(spec["params"]))
     if doc.get("variables") == {}:
         del doc["variables"]
     elif "variables" in doc:
@@ -968,6 +1203,9 @@ def _canonical(doc):
             del doc["variable_bounds"]
     if doc.get("events"):
         doc["events"] = expressions.normalized(doc["events"])
+        for event in doc["events"]:
+            if event.get("params"):
+                event["params"] = _mesh_first(event["params"])
     # Every document that reaches a session comes through here, so this is
     # where it gets stamped: whatever it was written by, what we hand back is
     # ours and says so.
@@ -1456,16 +1694,59 @@ def _event_label(event):
     return f"{kind} {_lit(angle)}° about {axis}"
 
 
+def _mesh_source_lit(source):
+    """A mesh source -> (the classmethod that performs it, its argument).
+
+    magpylib has no constructor for "the mesh in this file", so a script
+    says it the way magpylib's own CAD example does — `from_pyvista` over
+    `pv.read`, with the scale as pyvista's own `.scale()`. The export
+    therefore needs pyvista where the studio itself did not (it reads STL
+    without it); that is the cost of writing the source rather than fifty
+    thousand numbers, and it buys a script that still says *rotor.stl*
+    instead of the mesh that was in it that day.
+    """
+    if source.get("from") == "hull":
+        return "from_ConvexHull", f"points={_lit(source.get('points') or [])}"
+    if source.get("from") == "superquadric":
+        return "from_mesh", (
+            "mesh=_superquadric("
+            f"{_lit(source.get('size'))}, {_lit(source.get('roundness'))}, "
+            f"{_lit(source.get('around', 48))}, {_lit(source.get('across', 24))})"
+        )
+    read = f"pv.read({str(source.get('path') or '')!r})"
+    scale = source.get("scale", 1)
+    if scale != 1:
+        read += f".scale({_lit(scale)})"
+    return "from_pyvista", f"polydata={read}"
+
+
+def _create_parts(params):
+    """Create-event params as `key=value` script fragments.
+
+    A `mesh_source` param is not one of those: it names a classmethod and
+    supplies its argument, so it comes back separately and first.
+    """
+    factory, parts = "", []
+    for key, value in params.items():
+        if key == "mesh_source":
+            name, argument = _mesh_source_lit(value)
+            factory = f".{name}"
+            parts.insert(0, argument)
+        else:
+            parts.append(f"{key}={_lit(value)}")
+    return factory, parts
+
+
 def _event_source(event):
     """One event as the line it stands for, for a history list."""
     op = event.get("op", "rotate_from_angax")
     target = event["target"]
     if op == "create":
-        args = [f"{k}={_lit(v)}" for k, v in (event.get("params") or {}).items()]
+        factory, args = _create_parts(event.get("params") or {})
         if event.get("parent"):
             args.append(f"parent={event['parent']!r}")
         ctor = "Collection" if event["type"] == "Collection" else event["type"]
-        return f"{target} = magpy.{ctor}({', '.join(args)})"
+        return f"{target} = magpy.{ctor}{factory}({', '.join(args)})"
     if op == "remove":
         return f"remove {target}"
     if op == "reparent":
@@ -1558,6 +1839,19 @@ class MagpylibStudioSession:
         #: has to be taken again. Every rebuild drops it: a scene that has
         #: changed no longer moves the way the captured run says it does.
         self._animated = None
+        #: What a mesh source resolved to last time, keyed by the identity of
+        #: what it read (see meshes._cache_key). This is not an optimisation
+        #: to be dropped when it gets awkward: reorienting a 20k-face mesh
+        #: takes 16 s and a rebuild happens on every slider drag, so without
+        #: it a scene with one CAD part in it cannot be edited at all.
+        self._mesh_cache: dict = {}
+        #: object id -> what the checks found, filled while building. Kept
+        #: beside the objects rather than on them because the built object
+        #: has its checks skipped: it is the cache that knows.
+        self._mesh_status: dict[str, dict] = {}
+        #: Where a relative mesh path is relative *to* — the directory of the
+        #: document, which only the host knows, so it says (see load_scene).
+        self._base_dir: str | None = None
         self._build()
 
     def _record_state(self, label, doc_before):
@@ -1587,6 +1881,9 @@ class MagpylibStudioSession:
         the log relative to the children they carry.
         """
         self._animated = None  # the captured run is of a scene that no longer is
+        # Refilled as the objects are built. The cache behind it is not
+        # cleared: it is keyed by what was read, not by which scene read it.
+        self._mesh_status = {}
         self._vars = expressions.resolve_variables(self.doc.get("variables") or {})
         # Hard bounds are checked here rather than where a value is typed, so
         # they hold however the variable arrived at its value — including
@@ -1724,7 +2021,7 @@ class MagpylibStudioSession:
             **({"style": event["style"]} if event.get("style") else {}),
             **({"visible": False} if event.get("visible") is False else {}),
         }
-        params = self._resolve(dict(event.get("params") or {}))
+        params = self._resolve_params(event.get("params") or {}, object_id)
         if event["type"] == "Collection":
             # Positional children, the form a script uses: they exist already.
             adopted = [self._objs[c] for c in event.get("children") or []]
@@ -1733,6 +2030,7 @@ class MagpylibStudioSession:
                 self._parents[child] = object_id
         else:
             obj = _resolve_type(event["type"])(**params)
+        self._stamp_mesh(obj, object_id)
         for path, value in (event.get("style") or {}).items():
             style_compat.set_style(obj, path, value)  # same call the GUI/LLM makes
         self._objs[object_id] = obj
@@ -2056,15 +2354,88 @@ class MagpylibStudioSession:
 
         return expressions.resolve(value, lookup)
 
+    def _resolve_params(self, params, object_id=None):
+        """Create-event params -> constructor keyword arguments.
+
+        Two steps, and the second is why this exists rather than a bare
+        `_resolve`: variables are substituted, and then a `mesh` source is
+        *performed* — the file read, the hull computed, the faces welded and
+        checked — because what the document stores for a TriangularMesh is
+        the call that makes the mesh rather than the mesh itself. What the
+        checks found is kept for `object_id` so the scene can be asked later
+        without redoing them; see `meshes`.
+        """
+        resolved = self._resolve(dict(params))
+        source = resolved.pop("mesh_source", None)
+        if source is None:
+            return resolved
+        mesh = meshes.resolve(source, base_dir=self._base_dir, cache=self._mesh_cache)
+        if object_id is not None:
+            recorded = source.get("sha256")
+            self._mesh_status[object_id] = {
+                **mesh["status"],
+                "source": meshes.describe(source, mesh),
+                "faces": len(mesh["faces"]),
+                "vertices": len(mesh["vertices"]),
+                # The file is not what it was when this scene was saved. Not
+                # an error — a newer CAD export is usually the point — but a
+                # scene that quietly means something else than it did is
+                # worth one line in the UI.
+                **(
+                    {"changed": True}
+                    if recorded and recorded != mesh.get("sha256")
+                    else {}
+                ),
+            }
+        return {**resolved, **meshes.constructor_kwargs(mesh)}
+
+    def _origin_of(self, object_id):
+        """The spec an object's parameters live on: itself, or — for a copy a
+        pattern generated — the object it was copied from."""
+        if object_id in self._specs:
+            return object_id
+        for source, copies in self._derived.items():
+            if object_id in copies:
+                return source
+        return object_id
+
+    def _stamped_mesh_source(self, params):
+        """Record what the mesh file held at the moment it was reached for.
+
+        Written on the way in rather than checked on the way out: the point
+        of the hash is to notice, on some later open, that the STL is not
+        the one this scene was built from — which needs the old one written
+        down while it is still the current one. A caller that supplied its
+        own is left alone, and a file that cannot be hashed is not an error
+        here: the build is about to say so, in better words.
+        """
+        source = (params or {}).get("mesh_source")
+        if not isinstance(source, dict) or source.get("from") != "file":
+            return params
+        if source.get("sha256"):
+            return params
+        try:
+            sha = meshes.digest(meshes.source_path(source, self._base_dir))
+        except (meshes.MeshError, OSError):
+            return params
+        return {**params, "mesh_source": {**source, "sha256": sha}}
+
+    def _stamp_mesh(self, obj, object_id):
+        """Give a built mesh back the check results its construction skipped."""
+        status = self._mesh_status.get(object_id)
+        if status is not None:
+            meshes.stamp_status(obj, status)
+
     def _build_spec(self, spec):
         """Build one spec (recursing into Collection children) into a live object."""
-        params = self._resolve(dict(spec.get("params", {})))
+        params = self._resolve_params(spec.get("params", {}), spec["id"])
         if spec["type"] == "Collection":
             children = [self._build_spec(c) for c in spec.get("children", [])]
             obj = magpy.Collection(*children, **params)
         else:
             cls = _resolve_type(spec["type"])
             obj = cls(**params)
+        self._stamp_mesh(obj, spec["id"])
         for path, value in spec.get("style", {}).items():
             style_compat.set_style(obj, path, value)  # same call the GUI/LLM makes
         if spec["id"] in self._objs:
@@ -2214,6 +2585,16 @@ class MagpylibStudioSession:
                     # a sensor carrying a measuring grid is a field source a UI
                     # can offer to read off, so say so where it is listed
                     **self._pixel_shape(self._objs[spec["id"]]),
+                    # A mesh that is open, disconnected or self-intersecting
+                    # still computes a field, and the number it returns is
+                    # wrong — badly enough to change its sign. That is not
+                    # something to make a caller ask a second question about,
+                    # so it rides along with the object it is true of.
+                    **(
+                        {"mesh": self._mesh_status[spec["id"]]}
+                        if spec["id"] in self._mesh_status
+                        else {}
+                    ),
                     # the copies this object's pattern made, when they are
                     # being counted rather than listed
                     **(
@@ -2268,12 +2649,43 @@ class MagpylibStudioSession:
         …) with their current values and shape, for inspector widgets.
         Position/orientation are excluded: those are transform-managed."""
         obj = self._objs[object_id]
+        # A pattern's copy has no spec of its own, but it is a copy *of* one,
+        # and what it is made of is written there. Reading its origin is what
+        # keeps a copied mesh from arriving as the table its source exists to
+        # avoid: measured at 48 × 24 facets, 947 bytes against 111 kB, and a
+        # hundredfold worse at the top of the `facets` slider.
+        origin = self._origin_of(object_id)
         try:
-            written = self._spec(object_id).get("params", {})
+            written = self._spec(origin).get("params", {})
         except KeyError:
             written = {}  # a generated copy has no spec to have written it
         out = []
+        source = written.get("mesh_source")
+        if source is not None:
+            # First, because it is what the object *is* — the same order the
+            # script writes it in, where it is the classmethod rather than an
+            # argument.
+            out.append(
+                {
+                    "name": "mesh_source",
+                    "value": source,
+                    "kind": "mesh",
+                    "doc": _PARAM_DOCS["mesh_source"],
+                    "unit": "",
+                    **(
+                        {"status": self._mesh_status[origin]}
+                        if origin in self._mesh_status
+                        else {}
+                    ),
+                }
+            )
         for name in _PARAM_ATTRS:
+            if source is not None and name in ("vertices", "faces"):
+                # What the source came out as, not what it is — the same
+                # reason a sampled path is not offered as its points. Nobody
+                # edits fifty thousand welded vertices; what is editable is
+                # which file they came from, which is the entry above.
+                continue
             value = getattr(obj, name, None)
             if value is None:
                 continue
@@ -2308,6 +2720,99 @@ class MagpylibStudioSession:
                 entry["written"] = written[name]
             out.append(entry)
         return out
+
+    def inspect_mesh(self, source):
+        """Read a mesh source without putting it in the scene.
+
+        What an import dialog needs before it commits: how many faces are in
+        there, how big the thing is — an STL carries no units, and a CAD
+        export is almost always in millimetres, so seeing `24.5 x 12 x 8`
+        is what makes `scale` an informed choice rather than a guess — and
+        whether it is a closed body at all. `extent` is in whatever units
+        the source is in *after* the spec's own scale, so calling this
+        without one reports the file's own numbers.
+
+        Resolving here also warms the cache the build will use, so the
+        object appears without the file being read a second time.
+        """
+        try:
+            mesh = meshes.resolve(
+                source, base_dir=self._base_dir, cache=self._mesh_cache
+            )
+        except Exception as e:  # noqa: BLE001 - a bad file is a result, not a crash
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        vertices = mesh["vertices"]
+        low, high = vertices.min(axis=0), vertices.max(axis=0)
+        return {
+            "ok": True,
+            "vertices": len(vertices),
+            "faces": len(mesh["faces"]),
+            "extent": _wire(high - low),
+            "center": _wire((high + low) / 2),
+            "status": mesh["status"],
+            **({"sha256": mesh["sha256"]} if "sha256" in mesh else {}),
+        }
+
+    def set_base_dir(self, path=None, rebase=False):
+        """Say which directory a relative mesh path is relative to.
+
+        The document's own, which only the host knows: this process is
+        started wherever the editor happened to start it, and a scene that
+        resolved its STL against *that* would find it or not depending on
+        how the editor was launched.
+
+        `rebase` is the difference between the two ways a document comes to
+        be somewhere, and it is not a detail: *opened* from a directory, its
+        relative paths already mean what they say and rewriting them would
+        break them; *moved* there — Save As — they still mean the old place,
+        and leaving them alone breaks them instead. Rebasing rewrites each
+        relative mesh path so it names the same file from the new directory.
+        A path that has no way back (a different drive) becomes absolute,
+        which is worth more than a relative path that is wrong.
+
+        Only relative ones. An absolute path means the same file wherever
+        the document goes, which is the reason to have written one.
+        """
+        if path == self._base_dir:
+            # Said on every save, and a rebuild drops the captured animation
+            # among other things. Nothing to re-resolve if nothing moved.
+            return {"ok": True}
+        previous = self._base_dir
+        self._base_dir = path
+        moved = self._rebase_meshes(previous, path) if rebase else 0
+        try:
+            self._build()
+        except Exception as e:  # noqa: BLE001 - a bad rebuild is a result
+            self._base_dir = previous
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": True, **({"rebased": moved} if moved else {})}
+
+    def _rebase_meshes(self, previous, current):
+        """Rewrite relative mesh paths so they still name the files they did.
+
+        Edits the create events in place rather than going through
+        `_mutate_doc`: the paths describe the same meshes as before, so this
+        is not a change to the scene and has no business on the undo stack.
+        What it changes is how the same scene is spelled from where it now
+        lives.
+        """
+        moved = 0
+        for event in self.doc.get("events") or []:
+            source = (event.get("params") or {}).get("mesh_source")
+            if not isinstance(source, dict) or source.get("from") != "file":
+                continue
+            written = source.get("path")
+            if not written or os.path.isabs(written):
+                continue
+            was = os.path.join(previous or os.getcwd(), written)
+            try:
+                source["path"] = os.path.relpath(was, current or os.getcwd())
+            except ValueError:
+                # No relative path exists between them — a different drive on
+                # Windows. Absolute is then the only spelling that is true.
+                source["path"] = os.path.abspath(was)
+            moved += 1
+        return moved
 
     def get_transform(self, object_id):
         """World pose of an object, for the inspector's transform widgets."""
@@ -2527,7 +3032,34 @@ class MagpylibStudioSession:
             # Named, not merely omitted: a reading that silently leaves out a
             # source the caller can see in the scene is the wrong kind of quiet.
             **({"skipped": skipped} if skipped else {}),
+            # Same principle, one step further in: these sources were *not*
+            # left out, and one of them is a mesh whose geometry does not
+            # close. magpylib computes a field for it anyway — the number
+            # above is that field — so the caller is told which source makes
+            # it untrustworthy rather than left to compare it against nothing.
+            **(
+                {"warnings": complaints}
+                if (complaints := self._mesh_complaints(sources))
+                else {}
+            ),
         }
+
+    def _mesh_complaints(self, sources):
+        """One sentence for each mesh among `sources` that cannot be believed.
+
+        Generated copies are not looked up: they share their original's
+        source and would each repeat its complaint, which is the same
+        sentence a dozen times for one broken STL.
+        """
+        named = {id(obj): object_id for object_id, obj in self._objs.items()}
+        out = []
+        for source in sources:
+            object_id = named.get(id(source))
+            status = self._mesh_status.get(object_id)
+            if status and meshes.is_unreliable(status):
+                label = getattr(source.style, "label", None) or object_id
+                out.append(meshes.complaint(label, status))
+        return out
 
     def _object_size(self):
         """How big the objects themselves are — what stands in for a span
@@ -2826,6 +3358,7 @@ class MagpylibStudioSession:
             return {"ok": False, "error": f"object id {object_id!r} already exists"}
         if parent is not None and self._spec(parent)["type"] != "Collection":
             return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+        params = self._stamped_mesh_source(params)
 
         def mutate(doc):
             self._append(
@@ -3300,13 +3833,16 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"reset {object_id} {path or 'style'}")
 
-    def load_scene(self, scene):
+    def load_scene(self, scene, base_dir=None):
         """Replace the whole document. `scene` is a document dict or a path to
         a JSON file containing one. (Script -> document is deferred by design.)
 
         A host with its own filesystem access should pass the dict: reading
         the file here only works where this process can open() it, which is
-        not everywhere a document can live.
+        not everywhere a document can live. It should pass `base_dir` with
+        it — the directory the document was read from, which is what a
+        relative mesh path is relative to. Passing the *path* fills it in;
+        passing the dict cannot, which is why the parameter exists.
 
         Versions: older documents (including every one written before the
         field existed) are migrated; a newer one is refused, because reading
@@ -3314,6 +3850,7 @@ class MagpylibStudioSession:
         whatever it added. See DOC_VERSION.
         """
         if isinstance(scene, str):
+            base_dir = base_dir or os.path.dirname(os.path.abspath(scene))
             try:
                 with open(scene, encoding="utf-8") as f:
                     scene = json.load(f)
@@ -3342,11 +3879,32 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             self.doc = _canonical(_migrate_events(json.loads(json.dumps(scene))))
+            # A mesh source that arrived without a hash gets one now, while
+            # the file it names is in front of us: a hand-written document,
+            # or one parsed back from a script, which has no way to say what
+            # was in the file. Only the missing ones — a hash already in the
+            # document is the baseline the *next* open compares against, and
+            # replacing it with what the file says today is exactly how a
+            # changed part would go unnoticed.
+            for event in self.doc.get("events") or []:
+                if event.get("op") != "create":
+                    continue
+                stamped = self._stamped_mesh_source(event.get("params"))
+                if stamped is not event.get("params"):
+                    event["params"] = stamped
 
-        # Tolerant: a document is allowed to carry events that no longer
-        # apply — you can make one that way — so it has to be allowed to open
-        # again, with the breakage reported rather than the file refused.
-        return self._mutate_doc(mutate, "load scene", tolerant=True)
+        # After the guards, never before them: a load that is *refused* must
+        # leave nothing behind, and this used to repoint the base directory of
+        # the document that stayed open — whose relative mesh paths then
+        # resolved somewhere else on the next rebuild. Restored on failure for
+        # the same reason, since the build can still fall over below.
+        previous_base = self._base_dir
+        if base_dir is not None:
+            self._base_dir = base_dir
+        result = self._mutate_doc(mutate, "load scene", tolerant=True)
+        if not result["ok"]:
+            self._base_dir = previous_base
+        return result
 
     def load_script(self, path, scene=0):
         """Import an existing magpylib script by EXECUTING it (same trust as
@@ -3506,6 +4064,31 @@ class MagpylibStudioSession:
             for spec in _walk_specs(doc.get("objects") or []):
                 if spec["id"] in hidden:
                     spec["visible"] = False
+
+        # And so is what a mesh file held. A script says which file a mesh
+        # comes from; it has no way to say what was in it when this scene was
+        # saved, which is the only thing the hash is for. So it is carried
+        # from the document being replaced — but only for a source still
+        # naming the same file, because a script edit that repoints a mesh at
+        # a different part is not a part that changed underneath us.
+        was = {
+            event["target"]: (event.get("params") or {})["mesh_source"]
+            for event in before.get("events") or []
+            if event.get("op") == "create"
+            and isinstance((event.get("params") or {}).get("mesh_source"), dict)
+        }
+        for event in doc.get("events") or []:
+            source = (event.get("params") or {}).get("mesh_source")
+            if event.get("op") != "create" or not isinstance(source, dict):
+                continue
+            previous = was.get(event["target"])
+            if (
+                previous
+                and not source.get("sha256")
+                and source.get("path") == previous.get("path")
+                and previous.get("sha256")
+            ):
+                source["sha256"] = previous["sha256"]
 
         result = self.load_scene(doc)
         if not result["ok"]:
@@ -4148,11 +4731,22 @@ class MagpylibStudioSession:
         events = [e for e in log if e.get("op") != "create"]
         mirrors = [e for e in events if e.get("op") == "mirror"]
         needs_scipy = mirrors or any(e.get("op") == "orientation" for e in events)
+        # A mesh read from a file is written as `pv.read(...)`, which is the
+        # one import the studio does not itself need — see _mesh_source_lit.
+        # A superquadric is written as the helper that computes it, magpylib
+        # having no class for one, and that helper is numpy.
+        mesh_sources = [
+            (spec.get("params") or {}).get("mesh_source", {})
+            for spec in spec_of.values()
+        ]
+        needs_pyvista = any(m.get("from") == "file" for m in mesh_sources)
+        needs_superquadric = any(m.get("from") == "superquadric" for m in mesh_sources)
         # np.linspace and np.arange are how an evenly spaced run of values is
         # written, whether it reached the script as a path or as a parameter;
         # the mirror helper needs numpy too, and any of them is enough.
         needs_numpy = (
             mirrors
+            or needs_superquadric
             or any(
                 _path_call(e) or expressions.is_sampled(_op_path_value(e))
                 for e in events
@@ -4166,6 +4760,8 @@ class MagpylibStudioSession:
         lines = ["import magpylib as magpy"]
         if needs_numpy:
             lines.append("import numpy as np")
+        if needs_pyvista:
+            lines.append("import pyvista as pv")
         if needs_scipy:
             lines.append("from scipy.spatial.transform import Rotation as R")
         # An expression goes into the script verbatim, which is what keeps the
@@ -4176,6 +4772,8 @@ class MagpylibStudioSession:
         # script calls are no longer the same list.
         maths_slot = len(lines)
         lines.append("")
+        if needs_superquadric:
+            lines += [*_SUPERQUADRIC_HELPER, ""]
         if mirrors:
             # A helper rather than a frozen pose per copy: magpylib has no
             # mirror, but a script that computes one stays parametric — the
@@ -4203,9 +4801,16 @@ class MagpylibStudioSession:
         def define(target):
             """One object, plus the line that puts it in its group."""
             spec = spec_of[target]
-            parts = []
+            parts, factory = [], ""
             for key, value in spec.get("params", {}).items():
-                if expressions.is_sampled(value):
+                if key == "mesh_source":
+                    # Not a parameter but the call that makes the object:
+                    # `TriangularMesh.from_pyvista(polydata=...)`. First in
+                    # the argument list because it is what the object is.
+                    factory, argument = _mesh_source_lit(value)
+                    factory = f".{factory}"
+                    parts.insert(0, argument)
+                elif expressions.is_sampled(value):
                     # The sample is named just above the object that uses it,
                     # which is where a person writing this would put it.
                     sample, source = _sampled_source(value, taken)
@@ -4216,7 +4821,7 @@ class MagpylibStudioSession:
             if spec.get("style"):
                 parts.append(f"style={_nest(spec['style'])!r}")
             ctor = "Collection" if spec["type"] == "Collection" else spec["type"]
-            lines.append(f"{target} = magpy.{ctor}({', '.join(parts)})")
+            lines.append(f"{target} = magpy.{ctor}{factory}({', '.join(parts)})")
             if parent_of.get(target) is not None:
                 lines.append(f"{parent_of[target]}.add({target})")
 
