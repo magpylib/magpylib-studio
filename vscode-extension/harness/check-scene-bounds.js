@@ -23,6 +23,12 @@
  *
  * It builds the geometry the way `buildScatter` does, out of the same two
  * helpers, because the bug was never in either half alone.
+ *
+ * The scene graph needs a magpylib newer than the released one, and where
+ * that is what is installed there is no scene to measure — so this skips on
+ * the engine's own `threejs.available()`, which is what the Python tests skip
+ * on too. It is not a check that can be made to pass there; it is a check
+ * with nothing to look at.
  */
 const { execFileSync } = require("child_process");
 const fs = require("fs");
@@ -35,7 +41,16 @@ const REPO = path.join(EXT, "..");
 
 const PAYLOADS = `
 import json
+from magpylib_studio import threejs
 from magpylib_studio.session import EXAMPLES, MagpylibStudioSession
+
+if not threejs.available():
+    # Nothing to check: there is no scene graph to build. Said from here
+    # rather than guessed at from the JS side, so it is the engine's own
+    # answer -- the same one \`needs_scene_graph\` skips the Python tests on.
+    print(json.dumps({"unavailable": "this magpylib has no display-backend API"}))
+    raise SystemExit
+
 out = {}
 for name in EXAMPLES:
     s = MagpylibStudioSession()
@@ -73,6 +88,10 @@ async function main() {
   let scenes;
   try {
     scenes = JSON.parse(raw);
+    if (scenes.unavailable) {
+      console.log(`skip  scene bounds (${scenes.unavailable})`);
+      return;
+    }
   } catch (err) {
     // The engine's own reader would drop this response and never resolve.
     console.log(
