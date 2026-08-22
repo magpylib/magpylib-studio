@@ -16,7 +16,13 @@ function rpc(method, params, { preview = false } = {}) {
   return new Promise((resolve, reject) => {
     const reqId = nextReqId++;
     pending.set(reqId, { resolve, reject });
-    vscodeApi.postMessage({ type: "rpcRequest", reqId, method, params, preview });
+    vscodeApi.postMessage({
+      type: "rpcRequest",
+      reqId,
+      method,
+      params,
+      preview,
+    });
   });
 }
 

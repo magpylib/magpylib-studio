@@ -194,7 +194,10 @@ async function main() {
 
   const { variables } = await engine.request("get_variables");
   const n = variables.find((v) => v.name === "n");
-  check(n?.value === 24, `the scene is left holding the released value: n=${n?.value}`);
+  check(
+    n?.value === 24,
+    `the scene is left holding the released value: n=${n?.value}`,
+  );
 }
 
 main()

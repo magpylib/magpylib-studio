@@ -88,8 +88,8 @@ All notable changes to the Magpylib Studio extension.
 - **An Inspector edit counts as an edit.** Typing a position, a dimension or a
   style into the Inspector went to the 3D view and the Scene tree and nowhere
   else. So the field panel went on showing a magnet that had moved, the script
-  view and `scene.json` stayed a step behind, and — the half that could cost
-  you work — the unsaved-changes mark stayed off and the crash backup went
+  view and `scene.json` stayed a step behind, and — the half that could cost you
+  work — the unsaved-changes mark stayed off and the crash backup went
   unwritten, because both hang off the one call the Inspector was not making.
   Every other way of editing the scene already went through it.
 
@@ -110,13 +110,13 @@ All notable changes to the Magpylib Studio extension.
   answer more slowly than the timer, which is why it looked like it worked.
 
   A gesture is paced by the hand and the scene now, not by a clock: one value
-  per frame at most, and never a second one before the first has come back.
-  That is the screen's own rate on a small scene and the rebuild's on a large
-  one — a thousand cuboids answer in about 190 ms, and the drag runs at that
-  instead of pretending otherwise. Dragging a gizmo already worked this way.
-  What a drag no longer does is refresh the tree, the history, the script view
-  and `scene.json` per frame: those read from the same engine the view is
-  waiting on, and they catch up when the gesture ends.
+  per frame at most, and never a second one before the first has come back. That
+  is the screen's own rate on a small scene and the rebuild's on a large one — a
+  thousand cuboids answer in about 190 ms, and the drag runs at that instead of
+  pretending otherwise. Dragging a gizmo already worked this way. What a drag no
+  longer does is refresh the tree, the history, the script view and `scene.json`
+  per frame: those read from the same engine the view is waiting on, and they
+  catch up when the gesture ends.
 
 - **The helical winding example draws.** Its 3D view was empty, and had been
   since it shipped. Magpylib separates the segments of a trace with NaN —
@@ -132,13 +132,13 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
-- **The magnet array stacks.** It patterned a magnet into a row and the row
-  into a grid; it now patterns the grid into a stack as well, on a third count
-  `nz` that starts at 1 — so the scene opens as the flat array it has always
-  been, and the new slider is there when the question is how much the view can
-  carry. Each of the three counts spans 1 to 10 without leaving its soft range,
-  and all three at the top is a thousand cuboids. The probe above the array
-  rides the top of the stack rather than ending up inside it.
+- **The magnet array stacks.** It patterned a magnet into a row and the row into
+  a grid; it now patterns the grid into a stack as well, on a third count `nz`
+  that starts at 1 — so the scene opens as the flat array it has always been,
+  and the new slider is there when the question is how much the view can carry.
+  Each of the three counts spans 1 to 10 without leaving its soft range, and all
+  three at the top is a thousand cuboids. The probe above the array rides the
+  top of the stack rather than ending up inside it.
 
 - **The example scenes are sized like real magnets.** magpylib works in SI
   units, so `dimension=[1, 1, 1]` is a magnet a metre on a side. Every shipped
