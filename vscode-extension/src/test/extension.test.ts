@@ -162,6 +162,71 @@ async function writeJson(uri: vscode.Uri, value: unknown): Promise<void> {
 
 /** Every error the extension raised at the user during the run. A test host
  *  flashes these past too fast to read, so they are recorded and checked. */
+/**
+ * Stand in for the prompts a command puts up, so a modal flow can run
+ * unattended. The suite already does this for the message boxes; an import is
+ * three more of them and cannot be driven any other way.
+ */
+function answering({
+  open,
+  save,
+  pick,
+  input,
+}: {
+  open?: vscode.Uri[];
+  save?: vscode.Uri;
+  pick?: (items: readonly vscode.QuickPickItem[]) => unknown;
+  input?: string[];
+}): { restore: () => void } {
+  const window = vscode.window as unknown as Record<string, unknown>;
+  const real = {
+    showOpenDialog: window.showOpenDialog,
+    showSaveDialog: window.showSaveDialog,
+    showQuickPick: window.showQuickPick,
+    showInputBox: window.showInputBox,
+  };
+  const boxes = [...(input ?? [])];
+  window.showOpenDialog = async () => open;
+  window.showSaveDialog = async () => save;
+  window.showQuickPick = async (items: readonly vscode.QuickPickItem[]) =>
+    pick ? pick(await items) : (await items)[0];
+  window.showInputBox = async () => boxes.shift();
+  return {
+    restore: () => Object.assign(window, real),
+  };
+}
+
+/** A closed cube as a binary STL, in the file's own units — the shape of what
+ *  a CAD tool hands over, header word and all. */
+function binaryCubeStl(size: number): Buffer {
+  const corners = [
+    [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+    [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],
+  ].map((c) => c.map((v) => v * size));
+  const quads = [
+    [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+    [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+  ];
+  const triangles: number[][][] = [];
+  for (const [a, b, c, d] of quads) {
+    triangles.push([corners[a], corners[b], corners[c]]);
+    triangles.push([corners[a], corners[c], corners[d]]);
+  }
+  const out = Buffer.alloc(84 + 50 * triangles.length);
+  out.write('solid written by a test', 0);
+  out.writeUInt32LE(triangles.length, 80);
+  triangles.forEach((triangle, i) => {
+    let at = 84 + 50 * i + 12; // past the normal, which magpylib recomputes
+    for (const vertex of triangle) {
+      for (const component of vertex) {
+        out.writeFloatLE(component, at);
+        at += 4;
+      }
+    }
+  });
+  return out;
+}
+
 const errorsShown: string[] = [];
 
 suite('magpylib-studio', () => {
@@ -600,6 +665,128 @@ suite('magpylib-studio', () => {
       item.contextValue,
       'absentObject',
       'the object menus act on objects the scene has; this is the absence of one',
+    );
+  });
+
+  test('a mesh row says what is wrong with the mesh', async () => {
+    // The one thing about a mesh that a picture cannot show: an open body
+    // draws exactly like a closed one and computes a field that is wrong in
+    // sign as well as size. The row is where that has to be said, because it
+    // is the only part of the mesh anyone reads before trusting a number.
+    const objects: SceneObject[] = [
+      {
+        id: 'good',
+        type: 'magnet.TriangularMesh',
+        label: 'good',
+        parent: null,
+        visible: true,
+        mesh: { open: false, faces: 12, vertices: 8, source: 'cube.stl · 12 faces' },
+      },
+      {
+        id: 'bad',
+        type: 'magnet.TriangularMesh',
+        label: 'bad',
+        parent: null,
+        visible: true,
+        mesh: { open: true, open_edges: 12, faces: 10, source: 'rotor.stl · 10 faces' },
+      },
+    ];
+    const tree = new SceneTreeProvider(
+      vscode.Uri.file('/'),
+      async () => objects,
+      async () => {},
+      async () => [],
+    );
+    const roots = await tree.getChildren();
+
+    const good = tree.getTreeItem(roots[0] as SceneObject);
+    assert.strictEqual(good.description, 'cube.stl · 12 faces', 'where it came from');
+
+    const bad = tree.getTreeItem(roots[1] as SceneObject);
+    assert.match(String(bad.description), /open at 12 edges/, 'and what is wrong');
+    assert.strictEqual(
+      (bad.iconPath as vscode.ThemeIcon).id,
+      'warning',
+      'a source whose field is wrong must not look like one whose field is right',
+    );
+  });
+
+  test('importing a mesh file records the file, not the mesh', async function () {
+    this.timeout(60000);
+    // The flow nothing else reaches: a dialog, the question of what units the
+    // file is in, and an object built from the answer. Driven by standing in
+    // for the three prompts, which is the only way a modal runs unattended.
+    await vscode.commands.executeCommand('magpylib-studio.newScene', DISCARD);
+    await sceneWhere(nothing, 'the scene to clear');
+
+    const stl = vscode.Uri.file(join(mkdtempSync(join(tmpdir(), 'magpy-')), 'part.stl'));
+    await vscode.workspace.fs.writeFile(stl, Buffer.from(binaryCubeStl(10)));
+
+    const answers = answering({
+      open: [stl],
+      // millimetres, then the id, then the polarization
+      pick: (items) => items.find((i) => /Millimetres/.test(i.label)),
+      input: ['rotor', '0, 0, 1.3'],
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.importMesh');
+      const doc = await sceneWhere(holding('rotor'), 'the imported mesh');
+      const created = doc.events.find((e) => e.op === 'create') as unknown as {
+        params: { mesh_source: { from: string; path: string; scale: number; sha256: string } };
+      };
+      const source = created.params.mesh_source;
+
+      assert.strictEqual(source.from, 'file');
+      assert.match(source.path, /part\.stl$/);
+      assert.strictEqual(source.scale, 0.001, 'millimetres, as answered');
+      assert.strictEqual(source.sha256.length, 64, 'what the file held, recorded');
+      assert.ok(
+        !JSON.stringify(doc).includes('"vertices"'),
+        'the document should name the file rather than copy it',
+      );
+    } finally {
+      answers.restore();
+    }
+  });
+
+  test('a mesh built from a formula survives being saved and opened', async function () {
+    this.timeout(60000);
+    // A superquadric is generated rather than read, so the document has no
+    // file to point at — only the numbers that make the shape. This is the
+    // round trip that says those numbers are the document.
+    await loadExample('solid', 'magnet');
+    const doc = await scene();
+    const created = doc.events.find((e) => e.op === 'create') as unknown as {
+      params: { mesh_source: { from: string } };
+    };
+    assert.strictEqual(created.params.mesh_source.from, 'superquadric');
+    assert.ok(
+      !JSON.stringify(doc).includes('"vertices"'),
+      'a generated mesh is its formula, not the points it came out as',
+    );
+
+    // `saveSceneAs` takes no target: it always asks, so a test has to answer.
+    // Handing it a Uri instead is what left this sitting on a save dialog in a
+    // window nobody was watching — the failure the comment on the save test
+    // above predicts, arriving as a hang rather than a red line.
+    const file = tempScene('formula.magpy.json');
+    const answers = answering({ save: file });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.saveSceneAs');
+      await fileWhere(file, (d) => Array.isArray(d.events), 'the scene to be written');
+    } finally {
+      answers.restore();
+    }
+
+    await vscode.commands.executeCommand('magpylib-studio.newScene', DISCARD);
+    await sceneWhere(nothing, 'the scene to clear');
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', file, DISCARD);
+    const reopened = await sceneWhere(holding('magnet'), 'the scene to open again');
+
+    assert.deepStrictEqual(
+      reopened.events,
+      doc.events,
+      'the same scene, spelled the same way',
     );
   });
 

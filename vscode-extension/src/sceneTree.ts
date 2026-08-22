@@ -14,6 +14,44 @@ export interface SceneObject {
    *  have, and why it does not: the log still records everything that
    *  happened to it, and steps you cannot see are steps you cannot undo. */
   absent?: AbsentReason;
+  /** What the checks found for a mesh built from a source. An open or
+   *  disconnected mesh computes a field, and the number is wrong — so the
+   *  row says so rather than waiting to be clicked. */
+  mesh?: MeshStatus;
+}
+
+/** The engine's verdict on one mesh; see `magpylib_studio/meshes.py`. */
+export interface MeshStatus {
+  open?: boolean | null;
+  disconnected?: boolean | null;
+  selfintersecting?: boolean | null;
+  open_edges?: number;
+  parts?: number;
+  intersecting_faces?: number;
+  /** How many faces reorientation had to turn around. Repaired, not wrong. */
+  flipped?: number;
+  /** The file is not what it was when this scene was saved. */
+  changed?: boolean;
+  faces?: number;
+  vertices?: number;
+  /** `cube.stl · 12 faces`, or `hull of 30 points`. */
+  source?: string;
+}
+
+/** What is wrong with a mesh, in the order a row has room to say it, or
+ *  undefined when nothing is. Kept beside the type it reads because both the
+ *  tree and the inspector have to say the same thing about the same mesh. */
+export function meshFault(status: MeshStatus): string | undefined {
+  if (status.open) {
+    return status.open_edges ? `open at ${status.open_edges} edges` : 'open';
+  }
+  if (status.disconnected) {
+    return status.parts ? `${status.parts} separate parts` : 'disconnected';
+  }
+  if (status.selfintersecting) {
+    return 'self-intersecting';
+  }
+  return undefined;
 }
 
 /** Why an object with a history is missing from the scene: it was deleted,
@@ -240,8 +278,35 @@ export class SceneTreeProvider
       item.iconPath = iconFor(obj.type, this.extensionUri);
       return item;
     }
+    const fault = obj.mesh && meshFault(obj.mesh);
     item.description = obj.visible ? obj.type : `${obj.type} · hidden`;
     item.tooltip = `${obj.id} — ${obj.type}${obj.visible ? '' : ' (hidden)'}`;
+    if (obj.mesh) {
+      // A mesh's row says where it came from, because that is what the object
+      // is — the file, not the forty thousand numbers in it.
+      item.description = `${obj.mesh.source ?? obj.type}${
+        obj.visible ? '' : ' · hidden'
+      }`;
+      item.tooltip = new vscode.MarkdownString(
+        [
+          `**${obj.id}** — ${obj.type}`,
+          obj.mesh.source ? `\n\n${obj.mesh.source}` : '',
+          obj.mesh.vertices ? ` · ${obj.mesh.vertices} vertices` : '',
+          fault
+            ? `\n\n$(warning) This mesh is **${fault}**. magpylib computes a ` +
+              `field for it anyway, and that field is not to be trusted.`
+            : '',
+          obj.mesh.flipped
+            ? `\n\n${obj.mesh.flipped} faces were turned around on import ` +
+              `to point outward.`
+            : '',
+          obj.mesh.changed
+            ? `\n\n$(info) The file has changed since this scene was saved.`
+            : '',
+        ].join(''),
+      );
+      item.tooltip.supportThemeIcons = true;
+    }
     // visibility is part of contextValue so the inline eye can flip its icon
     item.contextValue =
       (obj.type === 'Collection' ? 'magpyCollection' : 'magpyObject') +
@@ -249,6 +314,15 @@ export class SceneTreeProvider
     item.iconPath = obj.visible
       ? iconFor(obj.type, this.extensionUri)
       : new vscode.ThemeIcon('eye-closed', new vscode.ThemeColor('disabledForeground'));
+    if (fault && obj.visible) {
+      // The one thing that outranks knowing what shape it is: a source whose
+      // field is wrong looks exactly like one whose field is right.
+      item.iconPath = new vscode.ThemeIcon(
+        'warning',
+        new vscode.ThemeColor('problemsWarningIcon.foreground'),
+      );
+      item.description = `${obj.mesh?.source ?? obj.type} · ${fault}`;
+    }
     item.command = {
       command: 'magpylib-studio.selectObject',
       title: 'Select in Studio',

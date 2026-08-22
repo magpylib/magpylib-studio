@@ -147,6 +147,57 @@ function makeWidget(path, spec, value) {
   return wrap;
 }
 
+// Which numbers of a mesh source the Inspector offers, per kind of source.
+//
+// `roundness` is two exponents nobody has intuition for until they have seen
+// where they land, so its doc names the shapes rather than describing the
+// formula: that is what makes it a knob rather than a number.
+const MESH_FIELDS = {
+  file: [
+    {
+      key: "scale",
+      name: "scale",
+      unit: "m per file unit",
+      fallback: 1,
+      doc: "0.001 for a file drawn in millimetres, which is most of them.",
+    },
+  ],
+  superquadric: [
+    {
+      key: "size",
+      name: "size",
+      unit: "m",
+      components: ["w", "d", "h"],
+      fallback: [0.02, 0.02, 0.01],
+      doc: "width, depth and height of the solid.",
+    },
+    {
+      key: "roundness",
+      name: "roundness",
+      unit: "",
+      components: ["profile", "plan"],
+      fallback: [1, 1],
+      doc:
+        "profile rounds it seen from the side, plan seen from above. " +
+        "0.05/0.05 is a block, 0.05/1 a cylinder, 1/1 a sphere, 2/2 a diamond.",
+    },
+    {
+      key: "around",
+      name: "around",
+      unit: "samples",
+      fallback: 48,
+      doc: "How many samples around. More faces, closer to the true solid.",
+    },
+    {
+      key: "across",
+      name: "across",
+      unit: "samples",
+      fallback: 24,
+      doc: "How many samples pole to pole.",
+    },
+  ],
+};
+
 function render() {
   const openGroups = new Set(
     Array.from(propsEl.querySelectorAll("details[open]")).map(
@@ -461,6 +512,97 @@ async function loadParams() {
       hint.textContent =
         "Drag the variables it is written in terms of, or edit it in the script tab.";
       shown.append(summary, area, hint);
+      box.appendChild(shown);
+    } else if (p.kind === "mesh") {
+      // Where the mesh comes from, not the mesh. The same reason as the
+      // sampled case above: the vertices are what the source came out as,
+      // and handing forty thousand of them to the table editor would offer
+      // an edit nobody wants over numbers the document does not even keep.
+      const spec = p.value || {};
+      const status = p.status || {};
+      const shown = document.createElement("details");
+      shown.className = "matrix";
+      shown.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent =
+        "mesh — " + (status.source || spec.path || "source");
+      summary.title = p.doc;
+      shown.appendChild(summary);
+
+      const said = (text, className) => {
+        const line = document.createElement("div");
+        line.className = className || "hint";
+        line.textContent = text;
+        shown.appendChild(line);
+      };
+      if (status.faces) {
+        said(status.faces + " faces · " + status.vertices + " vertices");
+      }
+      const fault = status.open
+        ? status.open_edges
+          ? "open at " + status.open_edges + " edges"
+          : "open"
+        : status.disconnected
+          ? status.parts
+            ? "in " + status.parts + " separate parts"
+            : "disconnected"
+          : status.selfintersecting
+            ? "self-intersecting"
+            : "";
+      if (fault) {
+        // Said in the panel that shows the numbers this mesh produces,
+        // because that is where believing them happens.
+        said(
+          "This mesh is " +
+            fault +
+            ". magpylib computes a field for it, and that field is not to " +
+            "be trusted: the inside-outside test it rests on needs a closed " +
+            "body.",
+          "hint warning",
+        );
+      }
+      if (status.flipped) {
+        said(
+          status.flipped +
+            " faces were turned around on import to point outward.",
+        );
+      }
+      if (status.changed) {
+        said("The file has changed since this scene was saved.");
+      }
+      // What of the source is worth editing in place, per kind. A hull's
+      // points are not here: a table of corners is what the script tab is
+      // for, and this panel is for the handful of numbers that are really
+      // knobs. Everything below writes the whole source back, because it is
+      // one value in the document however many fields it shows.
+      const fields = MESH_FIELDS[spec.from] || [];
+      for (const f of fields) {
+        const row = document.createElement("div");
+        row.className = "row";
+        const label = document.createElement("label");
+        label.append(document.createTextNode(f.name + " "));
+        label.appendChild(unitTag(f.unit));
+        label.title = f.doc;
+        const wrap = document.createElement("div");
+        wrap.className = "widget";
+        const current = spec[f.key] === undefined ? f.fallback : spec[f.key];
+        if (f.components) {
+          wrap.style.display = "block";
+          wrap.appendChild(
+            vecRow(f.components, current, (value) =>
+              commit(Object.assign({}, spec, { [f.key]: value })),
+            ),
+          );
+        } else {
+          wrap.appendChild(
+            numberInput(current, current, (value) =>
+              commit(Object.assign({}, spec, { [f.key]: value })),
+            ),
+          );
+        }
+        row.append(label, wrap, document.createElement("span"));
+        shown.appendChild(row);
+      }
       box.appendChild(shown);
     } else {
       // Tables (vertices, faces, sensor pixels). A 12x12 pixel grid on

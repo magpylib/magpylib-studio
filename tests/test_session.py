@@ -228,9 +228,7 @@ def test_get_scene_draws_pattern_copies_on_their_source(session):
     assert scene["patterned"] == ["r2"]
 
 
-@pytest.mark.parametrize(
-    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
-)
+@pytest.mark.parametrize("name", list(EXAMPLES))
 @needs_scene_graph
 def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     """magpylib works in SI units, so a scene written in round numbers is a
@@ -303,9 +301,7 @@ def test_the_scene_payload_is_json_the_view_can_parse():
             assert len(lifts) == 360, "the winding's pen-lifts went missing"
 
 
-@pytest.mark.parametrize(
-    "name", ["halbach", "coil", "spiral", "pair", "pixels", "quiver", "array"]
-)
+@pytest.mark.parametrize("name", list(EXAMPLES))
 @needs_scene_graph
 def test_every_id_the_scene_names_can_be_edited(name):
     """The invariant the whole 3D view rests on, over every shipped example.

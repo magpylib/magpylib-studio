@@ -4,6 +4,70 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+### Added
+
+- **Triangular meshes — magnets shaped like the part they are.** `Add Object…`
+  gains **Triangular mesh**, which asks where the shape comes from: a mesh file
+  or the convex hull of a point cloud. STL is read by the engine itself, binary
+  and ASCII, with no new dependency; OBJ, PLY and the rest go through pyvista
+  where it is installed and say so where it is not. Until now
+  `magnet.TriangularMesh` was the one magpylib class the studio could show but
+  not make: its parameters are fifty thousand numbers, and there is no box to
+  type those into.
+
+  **The scene records the file, not the mesh.** A create event holds
+  `mesh_source` — the path, its scale, and a hash of what was in it — the same
+  way the transform log holds `move` rather than the pose it worked out. A
+  thousand-face part is four hundred bytes of document instead of two hundred
+  kilobytes of vertices, the script export still says `pv.read("rotor.stl")`
+  rather than the array that came out of it, and both survive the round trip
+  byte for byte. A file that has moved breaks its own object and nothing else; a
+  file that has _changed_ since the scene was saved says so.
+
+  **The import is asked what units it is in.** No mesh format carries them, and
+  a 10 mm part read as metres is a magnet ten metres wide that still draws and
+  still computes a field. The dialog shows the size each answer produces, with
+  millimetres first because that is what a CAD export is.
+
+  **A mesh that cannot be trusted says so wherever it is used.** Open,
+  disconnected and self-intersecting are checked on the way in and reported on
+  the tree row, in the Inspector and beside the field it produces — magpylib
+  computes a field for an open mesh, and that field is wrong in sign as well as
+  in size. Import still succeeds: a mesh you cannot load is a mesh you cannot
+  fix. Faces wound inconsistently are turned around on the way in and the count
+  is reported, because "12 of your 4000 faces were inside out" is the difference
+  between trusting this import and checking the next one.
+
+  The checks are why the file is read once and remembered: reorienting a
+  20k-face mesh takes 16 s, and a scene is rebuilt from its log on every slider
+  drag. What a source resolves to is cached, and the object each rebuild
+  constructs is handed the answers rather than asked to find them again — which
+  the 3D view needs as much as the field does, since drawing a mesh whose checks
+  are unanswered re-runs the self-intersection test on the way to the screen
+  (283 ms a redraw on a 4000-face part, against 11 ms).
+
+- **One formula, many solids — the seventh example scene.** A superellipsoid
+  magnet (Barr, IEEE CG&A 1(1), 1981; the family Gielis's superformula later
+  generalised): two roundness sliders over a size, which is enough to be a
+  block, a cylinder, a sphere, a rounded-edge disc or an octahedron and
+  everything between. The shapes with no magpylib class are the ones real
+  magnets actually are, and reaching them used to mean leaving for CAD and
+  coming back with an STL.
+
+  The three that _do_ have a class make the example check itself: set the
+  sliders to a block, a cylinder or a sphere and the mesh reproduces what
+  magpylib computes analytically, within 0.2% at 13920 faces. `facets` is a
+  slider too, because the error falls as the square of the face count — 2.8% at
+  480 faces, 0.67% at 2112, 0.058% at 24960 — and a tolerance you can watch
+  converge is a different thing from one you are asked to accept.
+
+  Its shape is generated rather than read, which the engine takes advantage of:
+  a sheet wound consistently by construction needs one signed volume to point it
+  outward rather than magpylib's quadratic face repair, and a radial
+  parametrisation cannot self-intersect, so the most expensive check is not run
+  — it is _answered_. Reading a mesh from a file still gets all of it, because
+  nothing about an STL is known in advance.
+
 ### Fixed
 
 - **The helical winding example draws.** Its 3D view was empty, and had been

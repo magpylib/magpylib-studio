@@ -16,6 +16,8 @@ import {
 import {
   iconFor,
   isOperation,
+  meshFault,
+  MeshStatus,
   SceneNode,
   SceneObject,
   SceneOperation,
@@ -146,6 +148,9 @@ const OBJECT_TEMPLATES: {
   detail: string;
   params: Record<string, unknown>;
   rows?: Record<string, { noun: string; min: number; max?: number }>;
+  /** Picked from this menu, handled by a command of its own: some objects
+   *  are not made by filling in their constructor's arguments. */
+  command?: string;
 }[] = [
   {
     label: 'Cuboid magnet',
@@ -219,12 +224,136 @@ const OBJECT_TEMPLATES: {
     params: {},
   },
   {
+    label: 'Triangular mesh',
+    type: 'magnet.TriangularMesh',
+    detail: 'a magnet shaped like a CAD part — from a mesh file, or a point cloud',
+    params: {},
+    // Not a set of parameters anybody types: a file dialog and the question of
+    // what units the file is in are a flow of their own. One row, because one
+    // magpylib class is one thing to add — which of the two ways to make it is
+    // the first question that flow asks, not a second thing in this list.
+    command: 'magpylib-studio.addMesh',
+  },
+  {
     label: 'Collection',
     type: 'Collection',
     detail: 'a group that moves, rotates and sums its field as one',
     params: {},
   },
 ];
+
+/** Units an imported mesh might be drawn in, and what they are in metres.
+ *
+ *  A mesh file carries no units at all — the one thing every format leaves
+ *  out — so this is a question that has to be asked rather than detected.
+ *  Millimetres lead because that is what a CAD export is, and because the
+ *  alternative failure is silent: a 10 mm part read as metres is a magnet ten
+ *  metres wide, which still computes a field, still draws, and is wrong by a
+ *  factor of a thousand in every number that comes off it. */
+const MESH_UNITS: { label: string; scale: number; detail?: string }[] = [
+  { label: 'Millimetres', scale: 0.001, detail: 'what almost every CAD export is in' },
+  { label: 'Centimetres', scale: 0.01 },
+  { label: 'Metres', scale: 1, detail: 'the file is already in SI' },
+  { label: 'Inches', scale: 0.0254 },
+];
+
+/** Superellipsoid settings worth starting from, named by the shape they are.
+ *
+ *  `plan` rounds the solid seen from above — square through circular to a
+ *  diamond — and `profile` rounds it seen from the side, flat-topped through
+ *  domed. Three of these reproduce a magpylib primitive exactly, which is
+ *  both the reassurance that the mesh path is right and the explanation of
+ *  what the two numbers do; the rest are the shapes magpylib has no class
+ *  for, which is why anyone would reach for this. */
+const SUPERQUADRIC_SHAPES: {
+  label: string;
+  id: string;
+  plan: number;
+  profile: number;
+  detail: string;
+}[] = [
+  {
+    label: 'Rounded block',
+    id: 'block',
+    plan: 0.35,
+    profile: 0.35,
+    detail: 'a magnet with its edges taken off — no magpylib class for it',
+  },
+  {
+    label: 'Block',
+    id: 'block',
+    plan: 0.05,
+    profile: 0.05,
+    detail: 'square corners: the same field as magnet.Cuboid',
+  },
+  {
+    label: 'Cylinder',
+    id: 'disc',
+    plan: 1,
+    profile: 0.05,
+    detail: 'round in plan, flat on top: the same field as magnet.Cylinder',
+  },
+  {
+    label: 'Sphere',
+    id: 'ball',
+    plan: 1,
+    profile: 1,
+    detail: 'the same field as magnet.Sphere',
+  },
+  {
+    label: 'Rounded disc',
+    id: 'pill',
+    plan: 1,
+    profile: 0.4,
+    detail: 'a disc with a rounded rim — a pot magnet',
+  },
+  {
+    label: 'Diamond',
+    id: 'diamond',
+    plan: 2,
+    profile: 2,
+    detail: 'an octahedron; past 2 the faces pinch inward',
+  },
+];
+
+/** A file name -> an id that is a legal Python name, since the script export
+ *  binds the object to it: `Rotor v2.stl` cannot be `Rotor v2`. */
+function idFromFileName(name: string): string {
+  const stem = name.replace(/\.[^.]+$/, '');
+  return stem.replace(/\W/g, '_').replace(/^(?=\d)/, 'm_').toLowerCase() || 'mesh';
+}
+
+/** `24.5 × 12 × 8 mm`, for a size that has to be recognised at a glance. */
+function sizeInMillimetres(extent: number[], scale: number): string {
+  return `${extent.map((e) => +(e * scale * 1000).toPrecision(4)).join(' × ')} mm`;
+}
+
+/**
+ * Say what an import found, once, at the moment it happened.
+ *
+ * The tree row carries this too, but a row is somewhere you look and an
+ * import is something you did. An open mesh computes a field that is wrong in
+ * sign as well as in size, and learning that later, from an icon, is learning
+ * it after the number has been believed.
+ */
+function reportMeshImport(name: string, status: MeshStatus, faces?: number): void {
+  const fault = meshFault(status);
+  if (fault) {
+    vscode.window.showWarningMessage(
+      `Magpylib Studio: ${name} is ${fault}. It is in the scene and magpylib ` +
+        `computes a field for it, but that field is not to be trusted — the ` +
+        `inside-outside test it rests on needs a closed body.`,
+    );
+    return;
+  }
+  vscode.window.setStatusBarMessage(
+    status.flipped
+      ? `Magpylib Studio: ${name} imported — ${faces ?? '?'} faces, ` +
+          `${status.flipped} turned around to point outward`
+      : `Magpylib Studio: ${name} imported — ${faces ?? '?'} faces, closed`,
+    5000,
+  );
+}
 
 /**
  * The poses of an evenly spaced ramp, arithmetic-for-arithmetic as numpy's
@@ -2853,10 +2982,58 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** Point the studio at a file (or at nothing, for an unsaved scene) and
    *  record whether it currently differs from it. */
-  const setSceneFile = async (uri: vscode.Uri | undefined, dirty = false) => {
+  const setSceneFile = async (
+    uri: vscode.Uri | undefined,
+    dirty = false,
+    { rebase = false, baseDir }: { rebase?: boolean; baseDir?: string } = {},
+  ) => {
     sceneFile = uri;
     sceneDirty = dirty;
     showSceneFile();
+    // A mesh path in the document is relative to the document, which only
+    // this side knows: the engine was started wherever the editor happened to
+    // start it.
+    //
+    // `rebase` says the document *moved* rather than that it was opened from
+    // here — Save As. Its relative mesh paths still mean the old directory,
+    // so the engine rewrites them to mean the same files from the new one.
+    // Opening is the opposite case and must not rebase: there the paths
+    // already say what they mean.
+    //
+    // With no file at all the workspace folder stands in, rather than
+    // nothing: a relative path in an unsaved scene has to resolve against
+    // *something*, and leaving it to the engine's working directory makes it
+    // depend on how the editor was launched.
+    const base =
+      baseDir ??
+      (uri
+        ? path.dirname(uri.fsPath)
+        : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+    try {
+      const moved = (await (
+        await getEngine(context)
+      ).request('set_base_dir', { path: base ?? null, rebase })) as {
+        ok: boolean;
+        error?: string;
+        rebased?: number;
+      };
+      if (!moved.ok) {
+        // Swallowing this is how a scene ends up drawn as broken with no
+        // explanation: the meshes are the part of it that a directory change
+        // can invalidate, and they are exactly the part nothing else reports.
+        vscode.window.showWarningMessage(
+          `Magpylib Studio: the scene could not be rebuilt for its new ` +
+            `location — ${moved.error ?? 'unknown error'}`,
+        );
+      } else if (moved.rebased) {
+        // The paths in the document changed, so what is on screen was built
+        // from something else a moment ago.
+        broadcastMutation();
+      }
+    } catch {
+      // An engine that is not up yet is told at load time instead, which is
+      // the only moment it matters — see the open path below.
+    }
     await rememberScene();
   };
 
@@ -2911,6 +3088,17 @@ export function activate(context: vscode.ExtensionContext): void {
         return false;
       }
     }
+    // Before the bytes, not after: a scene saved into a new directory has to
+    // be written with its mesh paths already meaning that directory, or the
+    // file on disk names parts relative to where the scene used to live.
+    const cameFrom = sceneFile;
+    const movedTo = path.dirname(target.fsPath);
+    const movingHouse = sceneFile
+      ? path.dirname(sceneFile.fsPath) !== movedTo
+      : movedTo !== vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (movingHouse) {
+      await setSceneFile(target, sceneDirty, { rebase: true });
+    }
     try {
       const doc = await (await getEngine(context)).request('to_dict');
       await vscode.workspace.fs.writeFile(
@@ -2918,6 +3106,12 @@ export function activate(context: vscode.ExtensionContext): void {
         Buffer.from(JSON.stringify(doc, null, 2) + '\n', 'utf8'),
       );
     } catch (err) {
+      // Put the paths back. A save that did not happen must leave the scene
+      // as it was, and the rebase above already rewrote every relative mesh
+      // path to mean a directory this scene is now not in.
+      if (movingHouse) {
+        await setSceneFile(cameFrom, sceneDirty, { rebase: true });
+      }
       vscode.window.showErrorMessage(
         `Magpylib Studio: could not save — ${err instanceof Error ? err.message : err}`,
       );
@@ -2937,7 +3131,7 @@ export function activate(context: vscode.ExtensionContext): void {
    */
   const openSceneFile = async (
     uri: vscode.Uri,
-    { reveal = true } = {},
+    { reveal = true, baseDir }: { reveal?: boolean; baseDir?: string } = {},
   ): Promise<boolean> => {
     let scene: unknown;
     try {
@@ -2949,7 +3143,23 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       return false;
     }
-    if (!(await mutateFromTree('load_scene', { scene }, { checkVariables: false }))) {
+    // base_dir with the scene rather than after it: a mesh source is resolved
+    // while the document is being built, so a relative path has to be
+    // answerable before load_scene returns, not once the file is set.
+    //
+    // `baseDir` overrides where that is, for the one case where the file
+    // being read is not where the scene lives: the crash backup, which sits
+    // in extension storage while its relative mesh paths mean the folder the
+    // scene was last saved in. Without it the meshes resolve against the
+    // storage directory, are lost to `broken`, and stay drawn that way —
+    // correcting the base afterwards rebuilds the scene but nothing had told
+    // the views to look again.
+    const loaded = await mutateFromTree(
+      'load_scene',
+      { scene, base_dir: baseDir ?? path.dirname(uri.fsPath) },
+      { checkVariables: false },
+    );
+    if (!loaded) {
       return false; // the engine said why (wrong format, or a newer version)
     }
     await setSceneFile(uri);
@@ -3464,6 +3674,12 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!pick) {
           return;
         }
+        if (pick.t.command) {
+          // Its own flow — a file dialog, or an editor full of points — but
+          // reached from the menu where someone went looking for it.
+          await vscode.commands.executeCommand(pick.t.command, obj);
+          return;
+        }
         const suggestion = pick.t.type.split('.').pop()!.toLowerCase();
         const id = await vscode.window.showInputBox({
           prompt: `Id for the new ${pick.label.toLowerCase()}`,
@@ -3591,6 +3807,284 @@ export function activate(context: vscode.ExtensionContext): void {
         // exist leaves the Inspector showing an error about it
         if (await mutateFromTree('add_object', params)) {
           selectObjectInStudio(context, id); // show it in the Inspector
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'magpylib-studio.addMesh',
+      async (obj?: SceneObject) => {
+        // Which of the two ways to make a mesh, asked where the difference
+        // is a difference between shapes rather than between menu entries.
+        // Both flows are commands of their own as well, for the palette.
+        const source = await vscode.window.showQuickPick(
+          [
+            {
+              label: 'From a mesh file',
+              detail: 'an STL, OBJ or PLY — the part as it was drawn',
+              command: 'magpylib-studio.importMesh',
+            },
+            {
+              label: 'From a point cloud',
+              detail: 'the convex hull of points you type — no file behind it',
+              command: 'magpylib-studio.meshFromPoints',
+            },
+            {
+              label: 'From a formula',
+              detail: 'a superellipsoid: block, cylinder, sphere and between',
+              command: 'magpylib-studio.meshFromFormula',
+            },
+          ],
+          { placeHolder: 'Triangular mesh — where does its shape come from?' },
+        );
+        if (!source) {
+          return;
+        }
+        await vscode.commands.executeCommand(source.command, obj);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'magpylib-studio.importMesh',
+      async (obj?: SceneObject) => {
+        const picked = await vscode.window.showOpenDialog({
+          canSelectMany: false,
+          openLabel: 'Import Mesh',
+          // STL is read by the engine itself; everything else goes through
+          // pyvista, which the engine says so about when it is not installed
+          // rather than leaving the format out of the dialog.
+          filters: {
+            Meshes: ['stl', 'obj', 'ply', 'vtk', 'vtp', 'vtu'],
+            'All files': ['*'],
+          },
+          defaultUri: sceneFile
+            ? vscode.Uri.joinPath(sceneFile, '..')
+            : vscode.workspace.workspaceFolders?.[0]?.uri,
+        });
+        if (!picked?.length) {
+          return;
+        }
+        const file = picked[0];
+        const engine = await getEngine(context);
+        // Read before adding: what is in the file decides the next two
+        // questions, and a file that cannot be read should say so here rather
+        // than as a broken object in the tree.
+        const report = (await engine.request('inspect_mesh', {
+          source: { from: 'file', path: file.fsPath },
+        })) as {
+          ok: boolean;
+          error?: string;
+          faces?: number;
+          vertices?: number;
+          extent?: number[];
+          sha256?: string;
+          status?: MeshStatus;
+        };
+        if (!report.ok) {
+          vscode.window.showErrorMessage(`Magpylib Studio: ${report.error}`);
+          return;
+        }
+        const extent = report.extent ?? [0, 0, 0];
+        const unit = await vscode.window.showQuickPick(
+          MESH_UNITS.map((u) => ({
+            label: u.label,
+            // The size the choice produces, so the right one is the one that
+            // looks like the part — not an arithmetic problem to do in your
+            // head against a number in unknown units.
+            description: `→ ${sizeInMillimetres(extent, u.scale)}`,
+            detail: u.detail,
+            u,
+          })),
+          {
+            placeHolder:
+              `${basename(file)} — ${report.faces} faces, ` +
+              `${extent.map((e) => +e.toPrecision(4)).join(' × ')} as written. ` +
+              `What is it drawn in?`,
+          },
+        );
+        if (!unit) {
+          return;
+        }
+        const id = await vscode.window.showInputBox({
+          prompt: `Id for the mesh from ${basename(file)}`,
+          value: idFromFileName(basename(file)),
+          validateInput: (v) =>
+            /^[A-Za-z_]\w*$/.test(v)
+              ? undefined
+              : 'Letters, digits, underscores; must not start with a digit.',
+        });
+        if (!id) {
+          return;
+        }
+        const polarization = await vscode.window.showInputBox({
+          prompt: `Polarization of "${id}" as x, y, z (T)`,
+          value: '0, 0, 1',
+          validateInput: (v) =>
+            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
+        });
+        if (polarization === undefined) {
+          return;
+        }
+        // Relative to the document wherever it can be: a scene and the part it
+        // was built from usually travel together, and an absolute path is
+        // right on exactly one machine. `..` means the file is outside the
+        // document's folder, where relative buys nothing and reads worse.
+        const base = sceneFile
+          ? path.dirname(sceneFile.fsPath)
+          : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const relative = base ? path.relative(base, file.fsPath) : '';
+        const stored = relative && !relative.startsWith('..') ? relative : file.fsPath;
+        const params: Record<string, unknown> = {
+          object_id: id,
+          type: 'magnet.TriangularMesh',
+          params: {
+            mesh_source: {
+              from: 'file',
+              path: stored,
+              scale: unit.u.scale,
+              ...(report.sha256 ? { sha256: report.sha256 } : {}),
+            },
+            polarization: parseTerms(polarization)!,
+          },
+          style: { label: basename(file) },
+        };
+        if (obj?.type === 'Collection') {
+          params.parent = obj.id; // right-clicked a group: import into it
+        }
+        if (await mutateFromTree('add_object', params)) {
+          selectObjectInStudio(context, id);
+          reportMeshImport(basename(file), report.status ?? {}, report.faces);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'magpylib-studio.meshFromPoints',
+      async (obj?: SceneObject) => {
+        const id = await vscode.window.showInputBox({
+          prompt: 'Id for the new mesh',
+          value: 'hull',
+          validateInput: (v) =>
+            /^[A-Za-z_]\w*$/.test(v)
+              ? undefined
+              : 'Letters, digits, underscores; must not start with a digit.',
+        });
+        if (!id) {
+          return;
+        }
+        const points = await askPointRows(context, {
+          name: `${id}-points`,
+          subject: 'A mesh',
+          noun: 'points',
+          header: [
+            'One point per line — x, y, z in metres. The magnet is the convex',
+            'hull of them, so a point inside the shape the others make',
+            'changes nothing.',
+            '',
+            'Numbers or expressions: 0, 0, gap',
+          ],
+          example: ['0, 0, 0', '0.01, 0, 0', '0, 0.01, 0', '0, 0, 0.01'],
+          width: 3,
+          min: 4, // fewer than four is a plane, and a plane has no hull
+        });
+        if (!points) {
+          return;
+        }
+        await closePointEditor(context, `${id}-points`);
+        const polarization = await vscode.window.showInputBox({
+          prompt: `Polarization of "${id}" as x, y, z (T)`,
+          value: '0, 0, 1',
+          validateInput: (v) =>
+            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
+        });
+        if (polarization === undefined) {
+          return;
+        }
+        const params: Record<string, unknown> = {
+          object_id: id,
+          type: 'magnet.TriangularMesh',
+          params: {
+            mesh_source: { from: 'hull', points },
+            polarization: parseTerms(polarization)!,
+          },
+          style: { label: 'Mesh' },
+        };
+        if (obj?.type === 'Collection') {
+          params.parent = obj.id;
+        }
+        if (await mutateFromTree('add_object', params)) {
+          selectObjectInStudio(context, id);
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'magpylib-studio.meshFromFormula',
+      async (obj?: SceneObject) => {
+        // The presets are the documentation. Two exponents is not a thing
+        // anyone has intuition about until they have seen which shapes they
+        // land on, so the menu names the shapes and fills in the numbers —
+        // and leaves them on the object, where they are sliders.
+        const shape = await vscode.window.showQuickPick(
+          SUPERQUADRIC_SHAPES.map((preset) => ({
+            label: preset.label,
+            description: `plan ${preset.plan}, profile ${preset.profile}`,
+            detail: preset.detail,
+            preset,
+          })),
+          { placeHolder: 'Superellipsoid — which shape to start from?' },
+        );
+        if (!shape) {
+          return;
+        }
+        const id = await vscode.window.showInputBox({
+          prompt: 'Id for the new mesh',
+          value: shape.preset.id,
+          validateInput: (v) =>
+            /^[A-Za-z_]\w*$/.test(v)
+              ? undefined
+              : 'Letters, digits, underscores; must not start with a digit.',
+        });
+        if (!id) {
+          return;
+        }
+        const size = await vscode.window.showInputBox({
+          prompt: `Size of "${id}" as width, depth, height (m)`,
+          value: '0.02, 0.02, 0.01',
+          validateInput: (v) =>
+            parseTerms(v)?.length === 3
+              ? undefined
+              : 'Three numbers, e.g. 0.02, 0.02, 0.01',
+        });
+        if (size === undefined) {
+          return;
+        }
+        const polarization = await vscode.window.showInputBox({
+          prompt: `Polarization of "${id}" as x, y, z (T)`,
+          value: '0, 0, 1',
+          validateInput: (v) =>
+            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
+        });
+        if (polarization === undefined) {
+          return;
+        }
+        const params: Record<string, unknown> = {
+          object_id: id,
+          type: 'magnet.TriangularMesh',
+          params: {
+            mesh_source: {
+              from: 'superquadric',
+              size: parseTerms(size)!,
+              // (pole to pole, around), the order the formula takes them in
+              roundness: [shape.preset.profile, shape.preset.plan],
+              around: 48,
+              across: 24,
+            },
+            polarization: parseTerms(polarization)!,
+          },
+          style: { label: shape.preset.label },
+        };
+        if (obj?.type === 'Collection') {
+          params.parent = obj.id;
+        }
+        if (await mutateFromTree('add_object', params)) {
+          selectObjectInStudio(context, id);
         }
       },
     ),
@@ -3989,7 +4483,17 @@ export function activate(context: vscode.ExtensionContext): void {
     // comes back the same way: marked unsaved, named in the view title, and
     // one New Scene away from gone.
     if (remembered.dirty && sceneBackupFile && (await exists(sceneBackupFile))) {
-      if (await openSceneFile(sceneBackupFile, { reveal: false })) {
+      if (
+        await openSceneFile(sceneBackupFile, {
+          reveal: false,
+          // The backup is bytes in extension storage; the scene they describe
+          // lives where it was last saved, and its relative mesh paths mean
+          // that folder rather than this one.
+          baseDir: file
+            ? path.dirname(file.fsPath)
+            : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+        })
+      ) {
         // what is on disk is now what the engine holds, which is what makes
         // it usable again if this engine dies too
         backupIsCurrent = true;
