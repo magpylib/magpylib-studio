@@ -590,7 +590,189 @@ written.
 
 ---
 
-## 12. Open questions
+## 12. Workflow integration: human, human+agent, agent-only
+
+### 12.0 The governing constraint
+
+Studio is a **millisecond tool**: mutate the document, `_build` folds the log,
+1.7 ms, redraw. Sliders drag live. `sweep()` re-folds once per value. Every
+interaction in it assumes instant feedback.
+
+FEM is a **minute-to-hour operation**. So the integration question is not where
+to put a button. It is: _how does a millisecond-latency tool host a
+minute-latency operation, three different ways?_ Everything below follows from
+that, and the three consequences in §12.1 precede any UI decision.
+
+### 12.1 Three consequences that come before any UI
+
+**A FEM result is not part of the document.** The document is the log and
+`_build` is a pure fold; a solve is a _derived artifact_ keyed by scene state,
+in a separate store. It never enters `doc["events"]`, never appears in undo,
+never gets emitted by `to_script`. `sweep()` already sets exactly this
+precedent: it re-folds N times, records nothing in history and leaves the
+document on the value it started from. Validation inherits that contract
+verbatim.
+
+**The cache key splits sources from probes.** This is what makes a minute-long
+operation feel usable: _the field solution does not depend on where you probe
+it_. Hash the sources, materials and domain — **not** the sensors. Then moving a
+sensor, or changing a pixel-grid resolution, re-reads the existing solution
+instantly, while changing a magnet or a μr invalidates and re-solves. **Solve
+once, probe forever.** The partition falls straight out of the existing model:
+an event either affects the field (magnets, currents, anything with μr ≠ 1, and
+the transforms carrying them) or it affects observation (sensors, pixel grids) —
+and `sources_all` / `sensors_all` already draw that line.
+
+Two corollaries. Store the _solution_ (mesh plus solution vector, or a sampled
+grid), not "B at these twelve points" — the twelve numbers throw away what makes
+the next question cheap. And because `set_rollback`, `undo` and `goto_history`
+are views over the same fold, **stepping back to a state that was already solved
+is a cache hit**: history navigation becomes free FEM navigation, at no extra
+design cost.
+
+**The RPC protocol has to grow jobs, and this is the first time studio has
+needed it.** Verified: `rpc.py`'s `serve()` is a strictly serial blocking loop —
+one line in, one line out, in order; every write echoes a request `id`, so there
+are no server-initiated notifications; and there is no `threading`, `asyncio` or
+`subprocess` anywhere in the engine. A solve called through it would freeze the
+scene tree, the inspector, the sliders and the 3D view for minutes.
+
+So the FEM work forces a **worker subprocess**, **server-initiated
+notifications**, a **job id space** and **cancellation**. Design it once for all
+three modes rather than three times — and note it pays for something the studio
+already wanted, since mesh reorientation (16 s at 20k faces) blocks the same
+loop today.
+
+### 12.2 Human
+
+**Staleness is a first-class visual state, not a spinner.** The panel always
+shows the analytic result, instantly; the FEM result overlays it and is visibly
+marked stale the moment the source hash moves. Never render a FEM number beside
+geometry that has changed. §10.8 says a wrong number with a solver's name on it
+is worse than no number — a stale one is exactly that, and it is the likeliest
+way to ship one.
+
+The invalidation has an obvious home: `broadcastMutation()` in the extension is
+already "every path that changes the scene ends up here, which makes it the one
+place that can honestly say the scene no longer matches its file". It is
+therefore also the one place that can honestly say a FEM overlay has gone stale.
+
+**The residual is the product, not the FEM field.** What a human wants on screen
+is the analytic-vs-FEM _difference_ across a sweep — already the shape of
+`get_sweep_figure`, one hue light→dark over observation points.
+
+**Never automatic.** Solving costs time, CPU and possibly a license token. It is
+an explicit action, the way the Field panel is an on-demand panel. Auto-solving
+on scene change would be both hostile and expensive.
+
+**A Validation panel as a queue** — runs listed by scene hash, tier, solver,
+status and residual, each cancellable.
+
+**Convergence is displayed, not hidden.** §1.1 is a discipline, and a discipline
+survives a hurried user only if the UI enforces it: a solve without a refinement
+sweep renders as **provisional**, with the badge given the same weight as the
+number.
+
+**The sweep is the actual workflow.** Variables panel → Sweep…, except this time
+it queues N solves instead of N folds. The human sets it up, leaves, and comes
+back to a residual curve. Everything analytic is free, so the scarce input is
+judgement: **the human's real job is choosing which points deserve FEM.**
+
+**And a walk-away path.** `to_aedt_script()` written to a file and opened in
+Maxwell by hand is a legitimate endpoint. Not everything should be driven from
+studio; that is §4's handoff artifact doing its job.
+
+### 12.3 Human + agent
+
+**Tools split by cost, and the hook already exists.** `registerLmTools` already
+has two factories: `queryTool` (read-only — `invocationMessage` only) and
+`editTool` (mutating — adds `confirmationMessages`, then `broadcastMutation()`).
+FEM is a **third category**: read-only with respect to the document, yet
+expensive and confirmation-worthy. It needs a `jobTool` — confirmed like an
+edit, non-mutating like a query, and returning a job id rather than a result.
+
+- `#magpyValidate` — queues a solve. **Always confirmed.**
+- `#magpyResidual` / `#magpyValidationStatus` — read cached results. Free,
+  unconfirmed, called freely.
+
+Worth noticing what this does to the confirmation vocabulary. `confirmation()`
+covers exactly three methods today — `clear_scene`, `remove_object`,
+`remove_event` — and all three are about **loss**. FEM would be the first about
+**cost**: "this will take twenty minutes and a licence token." Same mechanism, a
+new reason, and the message text has to say so.
+
+**The agent's value is interpreting the residual, not producing it.** "0.4 %
+deviation up to a 3 mm gap, 11 % beyond — the pole piece is saturating" is an
+LLM-shaped task over small structured numbers. So the payload should be a
+residual _summary with metadata_, never a field dump.
+
+**Put the caveats in the payload, not the prompt** — and this is not a new
+invention here, it is the house style. `get_field` already returns `skipped` and
+`warnings` beside its values, with the reason written down: _"a reading that
+silently leaves out a source the caller can see in the scene is the wrong kind
+of quiet"_, and _"the caller is told which source makes it untrustworthy rather
+than left to compare it against nothing."_ A FEM result is the same principle
+applied to a slower number: scene hash, staleness and convergence state ride
+**inline**, so a model cannot summarise the number without the caveat already in
+its context. A system-prompt instruction to mention convergence is droppable; a
+field in the JSON being summarised is not.
+
+**Good at the setup, bad at the call.** Building a tier-1 comparison — set μr,
+place probes at least one element clear of every interface (§10.2), choose a
+domain multiple — is mechanical rule-following, which is exactly what an agent
+is for. Deciding whether 3 % matters for the product is not, and the tools
+should not pretend otherwise.
+
+### 12.4 Agent-only
+
+The headless loop is the attractive one: **propose geometry → analytic sweep
+(ms) → rank candidates → FEM-validate the few → read residual → revise.** The
+ms/minute asymmetry is what makes it tractable — explore analytically for free,
+spend FEM budget sparingly. It is this document's thesis with the human taken
+out of the middle.
+
+Three things it needs that the other two modes do not:
+
+**1. An explicit budget.** An agent with an unbounded queue burns a cluster or a
+licence pool. The engine takes a budget — n solves, wall-clock, or licence-hours
+— and refuses past it. This is the agent-only equivalent of the human's
+confirmation dialog: same function, different mechanism.
+
+**2. Gates as machine-readable contracts.** §9's gates are already written as
+assertions ("tier-0 error < 0.5 % of mean |B|, converging under both knobs").
+Expose them as callable checks and an agent can act on pass/fail without
+interpreting prose.
+
+**3. ⚠ Refusal, not warning, on unconverged results.** The severe failure mode:
+an agent hill-climbing on a residual that is mesh noise will optimise the noise,
+confidently, for hours. A human glances at a "provisional" badge; an agent
+ignores a warning field. So **§1.1 must become an API-level invariant** — the
+engine does not _return_ a residual lacking convergence metadata. It errors.
+
+**Replayability is a real advantage here.** Because the document _is_ the log,
+an agent's whole exploration reconstructs from the events plus the stored scene
+hashes and solver versions. A GUI-driven FEM tool leaves that history in
+somebody's head.
+
+**And the mode maps onto the backend split.** Agent-only is where AEDT fits
+worst — licence tokens, a desktop-bound product, no headless guarantee. Open
+solver for agent loops; AEDT for human handoff. That is §4's seam arriving from
+a different direction, which is usually a sign it is real.
+
+### 12.5 What all three share
+
+**One job API in the engine** — `validate(...) -> job_id`, `job_status(job_id)`,
+`read_result(source_hash, probes)` — with human, agent and headless as three
+presentations of it. That is studio's existing architecture (framework-agnostic
+engine, thin shell) applied to the new capability rather than worked around.
+
+**One invariant: every number carries its provenance** — source hash, solver and
+version, convergence state, staleness. A badge in the UI, a field in the tool
+payload, a key in the RPC result. The same fact, rendered three ways.
+
+---
+
+## 13. Open questions
 
 - **Which solver.** Decided by G3. Verdict gets written into §5.
 - **Home of code.** §4 recommends the A+B split; confirm at M1 when the layer's
