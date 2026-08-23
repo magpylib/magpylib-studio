@@ -118,6 +118,25 @@ take **diameter**, and `Cuboid` takes **full** edge lengths while `create_box`
 takes a corner. Both are the kind of bug that produces a plausible-looking
 field.
 
+**Core already provides more than the layer needs to invent.** All public, all
+verified in this checkout:
+
+| Public API                                   | What it buys the layer                                                                                                                                                                                                |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_trace(path_ind=-1, vertices=25)`        | A **world-frame surface triangulation for every source class** (x/y/z + i/j/k), with a refinement knob. The universal STL fallback — no boolean reconstruction needed for `CylinderSegment`, `Tetrahedron` or a mesh. |
+| `volume`, `centroid`                         | Solver-free geometry conformance (§8.2). `barycenter` is deprecated; use `centroid`.                                                                                                                                  |
+| `dipole_moment`                              | Far-field sanity check, and a much cheaper truncation diagnostic (§10.1).                                                                                                                                             |
+| `sources_all`, `sensors_all`, `children_all` | Traversal without touching privates.                                                                                                                                                                                  |
+| `getJ` / `getM`                              | The occupancy test (§8.2).                                                                                                                                                                                            |
+| `magpy.mu_0`                                 | 1.256 637 061 27e−6                                                                                                                                                                                                   |
+
+**But prefer an exact primitive over `get_trace` wherever the target has one.**
+A faceted cylinder is a _different body_, and the FEM will faithfully solve the
+faceted one — a geometry error that is not a translation bug and that will not
+converge away under mesh refinement. Exact box/cylinder/sphere where the solver
+offers them; `get_trace` only for classes without one; and the facet count is
+then another convergence knob under §1.1.
+
 ### 3.2 The ideal/physical switch — do not skip this
 
 A magpylib magnet is μr = 1 by construction. A Maxwell magnet with the same Br
@@ -316,7 +335,7 @@ physics where you can run it.**
 No solver, no vendor, no document. Every convention in §3.1 pinned by a test.
 Milliseconds. Runs everywhere. This is most of the correctness.
 
-### 8.2 The `getJ` occupancy test — solver-free geometry conformance
+### 8.2 Solver-free geometry conformance — the `getJ` occupancy test
 
 The cheapest high-value test in the plan, and it needs nothing installed.
 
@@ -336,6 +355,12 @@ target side — a pure-Python evaluator for the primitives, and NGSolve/OCC wher
 the material coefficient can be evaluated at points. **It does not work for
 AEDT**, which cannot be queried without a license; that path relies on §8.3–8.5
 instead.
+
+**A second, even cheaper check rides beside it.** Compare the emitted geometry's
+volume against magpylib's public `volume`, and its centre against `centroid`.
+Two scalars, no grid — and they catch a whole-body scale or unit error
+instantly, which is precisely the case an occupancy grid sampled too coarsely
+would wave through.
 
 ### 8.3 Golden text + AST conformance
 
@@ -421,8 +446,10 @@ agreement: analytic / material-response / FEM. → **G4:** the "magpylib alone i
 X % low" curve over L/D reproduces the expectation the docs already state (~5 %
 for typical geometries). _First publishable artifact._
 
-**M5 — Units.** §6. Independent of M1–M4, blocks M6. → **G5:** every existing
-document loads unchanged; script round-trip stable.
+**M5 — Units.** §6. Independent of M1–M4, blocks M6. Cheaper than it looks:
+studio already carries `_PARAM_UNITS` beside `_PARAM_ATTRS`, so half the table
+exists. → **G5:** every existing document loads unchanged; script round-trip
+stable.
 
 **M6 — pyAEDT emitter.** Reuses M1 wholesale. Golden text + AST + signature
 conformance in CI; manual Maxwell gate produces AEDT fixtures. → **G6:** tier-0
@@ -454,13 +481,14 @@ GetDP's shell transformation if the spike goes that way; AEDT's balloon boundary
 on the Ansys side, which approximates open boundaries far better than a zero-A
 outer wall.
 
-**A diagnostic worth building:** compare magpylib's analytic far field against
-the FEM field _on the truncation surface_. If they differ by more than a set
-tolerance, the box is too small — reported to the user rather than silently
-absorbed into the residual. (Using the analytic field as an outer Dirichlet
-condition to shrink the box is a tempting extension, but it is only valid when
-no soft-magnetic body perturbs the far field. Treat it as a speculative
-optimization, not a given.)
+**A diagnostic worth building, and it is cheap:** magpylib exposes
+`dipole_moment` publicly, so the far field of any body is one line — no full
+analytic evaluation needed. Compare it against the FEM field _on the truncation
+surface_. If they differ by more than a set tolerance, the box is too small —
+reported to the user rather than silently absorbed into the residual. (Using the
+analytic field as an outer Dirichlet condition to shrink the box is a tempting
+extension, but it is only valid when no soft-magnetic body perturbs the far
+field. Treat it as a speculative optimization, not a given.)
 
 ### 10.2 Where you are allowed to evaluate
 
@@ -517,7 +545,52 @@ tier-0 regression is a release blocker, not a warning.
 
 ---
 
-## 11. Open questions
+## 11. What magpylib core provides — and the two gaps
+
+Checked rather than assumed. **Nothing in this plan is blocked by core** — §3.1
+lists what it already gives us, and it is more than expected. Two changes would
+make life materially easier, and both are worth making on their own merits.
+
+### 11.1 `susceptibility` / μr as a documented property — the sharp one
+
+`hasattr(cuboid, "susceptibility")` is **False**. `magpylib-material-response`
+monkey-attaches it, searching "at object level or parent level if needed".
+
+That attribute is exactly the `physical`-mode input of §3.2. Without a shared
+convention the FEM exporter must invent its own home for μr, and it will differ
+from material-response's — at which point the tier-1 three-way comparison is
+comparing magnets that are **not the same magnet**, and the discrepancy will
+look like physics. Small change, high leverage, and needed anyway the moment
+material-response lands in core.
+
+### 11.2 Public constructor-parameter introspection
+
+Studio hardcodes the table:
+
+```python
+_PARAM_ATTRS = ("polarization", "magnetization", "dimension", "diameter",
+                "vertices", "faces", "current", "moment", "pixel")
+```
+
+The physics layer needs an identical one. A new magnet class in core then falls
+silently through **both** copies. One accessor upstream replaces two drifting
+tables — and studio's `get_params` gets to delete its own.
+
+### 11.3 Nice to have
+
+- **`contains(points)`.** `getJ != 0` works as a membership proxy but fails for
+  an unmagnetized body and for currents. material-response already ships
+  `mask_inside`, so the capability exists downstream.
+- **A stable "kind + parameters" description**, so an exporter dispatches on a
+  declared shape rather than on `type(obj).__name__` plus a per-class attribute
+  table.
+
+Neither gap blocks M1. Both are small enough to land upstream while M1 is being
+written.
+
+---
+
+## 12. Open questions
 
 - **Which solver.** Decided by G3. Verdict gets written into §5.
 - **Home of code.** §4 recommends the A+B split; confirm at M1 when the layer's
