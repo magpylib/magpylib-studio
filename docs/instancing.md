@@ -92,11 +92,23 @@ the feature that makes code-as-truth unnecessary, which is `docs/direction.md`
 
 ## 5. Open questions
 
-1. **Version pinning and updates.** The `sha256` above pins a definition, which
-   is what reproducibility requires — but then updating a part is an explicit
-   re-pin, like a lockfile. Is that the right ergonomics, or does it need a
-   "check for updates" affordance? Godot does not pin and instances break;
-   Onshape pins to a version and updating is deliberate. Onshape looks right.
+1. **What a hash mismatch does.** _Whether_ to record one is not open: an
+   instance puts part of the scene in a file that can change underneath it, so
+   without a hash the same document stops describing the same scene over time —
+   and `docs/fem.md` §12.1 keys the FEM cache on field-affecting events, so an
+   unpinned instance lets the cache hand back a solve computed for geometry that
+   is no longer there. The precedent is already in the repo rather than in an
+   argument: `mesh_source` carries `sha256` for exactly this, and `meshes.py`
+   says why — _"sha256 is for telling a person their STL changed"_. A definition
+   document is an STL with parameters.
+
+   What is open is the response. Meshes **warn**. Instances may want to
+   **refuse** until the reference is re-pinned, lockfile-style, because a
+   changed mesh gives you a visibly different shape while a changed definition
+   can move a field a few percent and look entirely normal. Godot does not pin
+   at all and its instances break; Onshape pins to a version and updating is
+   deliberate.
+
 2. **Nested instances.** A definition containing an instance. Needs cycle
    detection — `move_object` already cycle-checks a reparent, so the idea
    exists, but this one spans files.
