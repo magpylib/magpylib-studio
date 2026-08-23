@@ -54,7 +54,6 @@ let scriptFile: vscode.Uri | undefined;
 /** Re-render the script tab from the scene; set during activation. */
 let refreshScript: (() => void) | undefined;
 /** The tab holds text the engine rejected: leave it alone until it applies. */
-let scriptRejected = false;
 /** What we last put in that file — the scene changes far more often than its
  *  script does (a style edit renders identically), and rewriting it on every
  *  mutation would reload the editor under the user for nothing. */
@@ -2938,10 +2937,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /**
    * Write the scene's script into the tab. Unsaved edits are never clobbered:
-   * a scene change while the user is mid-edit leaves their text alone, and so
-   * does text the engine rejected (they are presumably fixing it). `force`
-   * re-renders anyway — used when opening the tab and after a successful
-   * apply, where the engine's rendering is by definition the truth.
+   * a scene change while the user is mid-edit leaves their text alone.
+   * `force` re-renders anyway — used when opening the tab, and after a save
+   * the user declined to import, where the engine's rendering is the truth.
    */
   const writeScriptFile = async (force = false) => {
     if (!scriptFile) {
@@ -2951,7 +2949,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!open && !force) {
       return; // no tab to keep in sync; opening one renders it fresh
     }
-    if (!force && (open?.isDirty || scriptRejected)) {
+    if (!force && open?.isDirty) {
       return;
     }
     const text = (await (await getEngine(context)).request<string>('to_script')) + '\n';
@@ -2998,28 +2996,26 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  /** Saving the script tab rebuilds the scene from it. */
-  const applyScriptFile = async (doc: vscode.TextDocument) => {
-    scriptOnDisk = doc.getText(); // the file is the user's text now, not ours
-    const result = (await (await getEngine(context)).request('apply_script', {
-      path: scriptFile!.fsPath,
-    })) as { ok: boolean; error?: string; warnings?: string[] };
-    if (!result.ok) {
-      scriptRejected = true;
-      vscode.window.showErrorMessage(`Magpylib Studio script: ${result.error}`);
-      return;
-    }
-    scriptRejected = false;
-    broadcastMutation();
-    // The scene, not the text, is canonical: show what the engine actually
-    // built (ids sanitised, transforms resolved, comments gone).
-    await writeScriptFile(true);
-    if (result.warnings?.length) {
-      vscode.window.showWarningMessage(
-        `Magpylib Studio script applied — ${result.warnings.join('; ')}`,
-      );
+  /**
+   * Saving the script tab does not apply the edit, because generation is
+   * one-way (`docs/direction.md` §5.1). Running an edited script can only
+   * recover the objects it leaves behind, so applying it silently resolved
+   * every expression to a number, flattened every pattern into its copies and
+   * dropped the slider limits — a save that changed nothing still degraded the
+   * scene. Offering the same thing as an explicit *import* keeps the capability
+   * and stops it being something a reflexive Cmd+S does to you.
+   */
+  const offerScriptImport = async (doc: vscode.TextDocument) => {
+    const build = 'Build a new scene from this';
+    const choice = await vscode.window.showWarningMessage(
+      'The script tab renders the scene — edits here are not applied back to it.',
+      { modal: false },
+      build,
+    );
+    if (choice === build) {
+      await importScript(doc.uri);
     } else {
-      vscode.window.setStatusBarMessage('Magpylib Studio: scene updated from script', 2000);
+      await writeScriptFile(true); // put the rendering back
     }
   };
 
@@ -3435,7 +3431,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.workspace.registerTextDocumentContentProvider('magpylib-studio', sceneDocProvider),
     vscode.commands.registerCommand('magpylib-studio.viewScript', async () => {
-      scriptRejected = false; // opening the tab starts from the real scene
       await writeScriptFile(!scriptDoc()?.isDirty); // never over unsaved edits
       const doc = await vscode.workspace.openTextDocument(scriptFile!);
       // Reuse the group it is already in, the way the Studio and Field panels
@@ -3464,13 +3459,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const reason = scriptSaveReason;
       scriptSaveReason = undefined;
-      // Applying is deliberate. With files.autoSave on a delay, a save lands
-      // between keystrokes, and running a half-typed script would spray
-      // errors and rewrite the buffer mid-edit; Cmd+S still applies as usual.
+      // Only a deliberate save asks. With files.autoSave on a delay, a save
+      // lands between keystrokes, and prompting mid-edit would be noise.
       if (reason === vscode.TextDocumentSaveReason.AfterDelay) {
         return;
       }
-      await applyScriptFile(doc);
+      await offerScriptImport(doc);
     }),
     vscode.commands.registerCommand('magpylib-studio.saveScene', () => saveScene()),
     vscode.commands.registerCommand('magpylib-studio.saveSceneAs', () =>

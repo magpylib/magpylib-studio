@@ -42,7 +42,6 @@ Protocol surface (all JSON-serializable in/out):
   load_scene(scene | path, base_dir?)  -> {"ok": bool, "error"?: str}
   load_script(path, scene?)            -> {"ok", "scene", "scenes": [labels], ...}
   load_captured(scene)                 -> same (switch between captured scenes)
-  apply_script(path)                   -> {"ok", "warnings"?} (edited to_script back in)
   list_examples()                      -> {"examples": [{name, label, description}]}
   load_example(name?)                  -> {"ok": bool, "error"?: str}
   clear_scene()                        -> {"ok": bool, "error"?: str}
@@ -1337,45 +1336,6 @@ def _id_list(ids, limit=5):
     return head if len(ids) <= limit else f"{head} (+{len(ids) - limit} more)"
 
 
-def _round_trip_warnings(before, after):
-    """What re-importing a script changed beyond the edit the user made.
-
-    Only the deterministic losses are reported: a diff of ids or parameters
-    would just be describing the user's own edit back at them. A script states
-    each object's final pose, so recorded transform sequences come back as the
-    single equivalent transform, and a group transform comes back distributed
-    over the children it moved.
-    """
-    old = {s["id"]: s for s in _walk_specs(before["objects"])}
-    new = {s["id"]: s for s in _walk_specs(after["objects"])}
-
-    def counts(doc):
-        tally = {}
-        for event in doc.get("events") or []:
-            tally[event["target"]] = tally.get(event["target"], 0) + 1
-        return tally
-
-    was, now = counts(before), counts(after)
-    collapsed, ungrouped = [], []
-    for oid, spec in old.items():
-        if oid not in new or was.get(oid, 0) <= now.get(oid, 0):
-            continue
-        bucket = ungrouped if spec.get("type") == "Collection" else collapsed
-        bucket.append(oid)
-    warnings = []
-    if collapsed:
-        warnings.append(
-            "transform steps collapsed into one equivalent "
-            f"transform: {_id_list(collapsed)}"
-        )
-    if ungrouped:
-        warnings.append(
-            "group transforms are now baked into the children they "
-            f"moved: {_id_list(ungrouped)}"
-        )
-    return warnings
-
-
 def _replay(obj, ops):
     """Replay recorded magpylib transform calls on a live object.
 
@@ -1432,9 +1392,9 @@ def _linspace_lit(value):
     A path is the one thing a document holds that is long by nature: an
     animation is a hundred poses, and written out it is a hundred triples on
     one line — six thousand characters where the script that made it said
-    `np.linspace((0,0,0), (0.1,0.1,0.1), 100)`. Nothing is lost by writing
-    the call instead, because `importer._linspace_value` reads it back into
-    the same hundred points.
+    `np.linspace((0,0,0), (0.1,0.1,0.1), 100)`. Writing the call instead is
+    for whoever reads the script: the document keeps the points, and running
+    the script rebuilds them.
 
     Exact equality is the whole guard. Reproduced, not approximated, or the
     literal stands — a path that merely looks evenly spaced is not one, and
@@ -4202,139 +4162,6 @@ class MagpylibStudioSession:
             result["scenes"] = [c["label"] for c in self._captured_scenes]
             if entry["warnings"]:
                 result["warnings"] = entry["warnings"]
-        return result
-
-    def apply_script(self, path):
-        """Replace the document with the scene an edited `to_script()` output
-        describes, by EXECUTING it (same trust as load_script).
-
-        Two ways in, and the result says which one ran ("mode"):
-
-        - "parsed": the file is still in the shape to_script emits, so it is
-          read as source. Variables, the order of a transform sequence and
-          group transforms all survive, because nothing was executed and
-          nothing had to be inferred from final poses.
-        - "executed": anything else (a loop, a helper, numpy) is run, and the
-          objects it leaves behind are introspected — the load_script route.
-          That cannot see how the scene was written, so it reports in
-          "warnings" what it had to flatten: transform sequences come back as
-          the single equivalent transform, group transforms baked into the
-          children they moved. Geometry survives; the writing of it does not.
-        """
-        from magpylib_studio import importer
-
-        before = json.loads(json.dumps(self.doc))
-        try:
-            with open(path, encoding="utf-8") as f:
-                source = f.read()
-        except OSError as e:
-            return {"ok": False, "error": str(e)}
-
-        doc, why_not = importer.parse_script(source)
-        warnings, namespace = [], None
-        if doc is None:
-            try:
-                namespace, _ = importer.run_script(path)
-                doc, warnings = importer.document_from_namespace(namespace)
-            except Exception as e:  # noqa: BLE001 - report errors, don't crash
-                return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-        # A script that had to be *run* cannot state its variables: what comes
-        # back is the object graph it left behind, and a scene's
-        # parametrisation is not a thing one of those has. No variables there
-        # means "this route could not tell", not "the user deleted them" — so
-        # they are carried, each taking whatever the script's own module-level
-        # binding gives it, since editing `n = 4` in the file is how you would
-        # expect to change it. Until this existed, adding one `for` loop to a
-        # generated script dropped every variable in the scene, and the only
-        # thing said about it was that there had been a loop.
-        if namespace is not None and before.get("variables"):
-            kept = {}
-            for name, was in before["variables"].items():
-                now = _plain(namespace.get(name))
-                stated = isinstance(now, int | float) and not isinstance(now, bool)
-                kept[name] = now if stated else was
-            doc["variables"] = {**kept, **(doc.get("variables") or {})}
-            # Carried, but no longer wired to anything: the objects written in
-            # terms of them came back as the numbers they evaluated to. Saying
-            # so is the difference between a scene whose sliders went missing
-            # and one whose sliders are visibly waiting to be reconnected.
-            used = expressions.referenced_names(doc.get("events") or [])
-            orphaned = [name for name in kept if name not in used]
-            if orphaned:
-                warnings = [
-                    *warnings,
-                    f"nothing in the scene refers to {_id_list(orphaned)} any "
-                    "more — running the script replaced what did with the "
-                    "values they worked out to. The variables are kept, so "
-                    "you can point the rebuilt objects back at them.",
-                ]
-
-        # A script states a variable's limits in the comment on its line, and
-        # what it states wins — that is the point of writing them down. This
-        # carries the rest: a hand-written script says nothing about limits,
-        # and neither does one whose comment somebody deleted, and neither is
-        # a script asking for the sliders to go.
-        carried = {
-            name: limits
-            for name, limits in (before.get("variable_bounds") or {}).items()
-            if name in (doc.get("variables") or {})
-        }
-        if carried:
-            doc["variable_bounds"] = {**carried, **(doc.get("variable_bounds") or {})}
-        # And so is a hidden object. `visible` says "do not draw this, but keep
-        # summing it into the field" — a studio idea with no magpylib spelling,
-        # so a script cannot carry it either. It used to be the one piece of
-        # editor state that a script edit silently discarded: hide a magnet,
-        # change one line of the script, save, and it was visible again.
-        hidden = {
-            spec["id"]
-            for spec in _walk_specs(before.get("objects") or [])
-            if spec.get("visible") is False
-        }
-        if hidden:
-            for event in doc.get("events") or []:
-                if event.get("op") == "create" and event["target"] in hidden:
-                    event["visible"] = False
-            for spec in _walk_specs(doc.get("objects") or []):
-                if spec["id"] in hidden:
-                    spec["visible"] = False
-
-        # And so is what a mesh file held. A script says which file a mesh
-        # comes from; it has no way to say what was in it when this scene was
-        # saved, which is the only thing the hash is for. So it is carried
-        # from the document being replaced — but only for a source still
-        # naming the same file, because a script edit that repoints a mesh at
-        # a different part is not a part that changed underneath us.
-        was = {
-            event["target"]: (event.get("params") or {})["mesh_source"]
-            for event in before.get("events") or []
-            if event.get("op") == "create"
-            and isinstance((event.get("params") or {}).get("mesh_source"), dict)
-        }
-        for event in doc.get("events") or []:
-            source = (event.get("params") or {}).get("mesh_source")
-            if event.get("op") != "create" or not isinstance(source, dict):
-                continue
-            previous = was.get(event["target"])
-            if (
-                previous
-                and not source.get("sha256")
-                and source.get("path") == previous.get("path")
-                and previous.get("sha256")
-            ):
-                source["sha256"] = previous["sha256"]
-
-        result = self.load_scene(doc)
-        if not result["ok"]:
-            return result
-        if not self._history_paused and self._undo:
-            self._undo[-1]["label"] = "edit script"
-        result["mode"] = "executed" if why_not else "parsed"
-        if why_not:
-            warnings = warnings + _round_trip_warnings(before, self.doc)
-        if warnings:
-            result["warnings"] = warnings
         return result
 
     def list_examples(self):

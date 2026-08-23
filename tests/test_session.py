@@ -9,7 +9,7 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import importer, threejs
+from magpylib_studio import threejs
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     _BATCHABLE,
@@ -63,6 +63,28 @@ def supports_property_paths():
     except Exception:  # noqa: BLE001 - capability probe
         return False
     return True
+
+
+def same_field(
+    a, b, points=((0.03, 0.02, 0.01), (-0.05, 0.01, 0.02), (0.1, -0.06, 0.03))
+):
+    """Two sessions describe the same scene, physically.
+
+    Generation is one-way (`docs/direction.md` §5.1): a script rebuilds the
+    scene, not the document. An expression comes back as the number it worked
+    out to, a pattern as the copies it made, an anchored rotation as the pose
+    it left — so `to_dict()` equality is the wrong question to ask of a script
+    that was run. What must survive is the field, which is what the scene *is*.
+    """
+    import numpy as np
+
+    pts = [list(p) for p in points]
+    return np.allclose(
+        np.asarray(a.get_field(points=pts)["values"], dtype=float),
+        np.asarray(b.get_field(points=pts)["values"], dtype=float),
+        rtol=1e-6,
+        atol=1e-12,
+    )
 
 
 def make_scene():
@@ -972,40 +994,6 @@ def test_a_pattern_adds_its_copies_to_their_group_in_one_call():
     assert max(calls) > 1, "the engine added the copies one at a time"
 
 
-def test_a_script_that_adds_each_copy_separately_still_reads():
-    """The shape to_script emitted before the copies were batched. Scripts
-    outlive the version that wrote them, and this one is still perfectly
-    good magpylib."""
-    source = """import magpylib as magpy
-
-n = 4
-
-ring = magpy.Collection(style={'label': 'Ring'})
-m = magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(1, 0, 0), position=(2, 0, 0))
-ring.add(m)
-
-for i in range(1, n):
-    _copy = m.copy()
-    _copy.rotate_from_angax(i * 360 / (n), 'z', anchor=(0, 0, 0))
-    ring.add(_copy)
-
-magpy.show(ring, backend='plotly')
-"""
-    s = MagpylibStudioSession()
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "old.py")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(source)
-        result = s.apply_script(path)
-
-    assert result["ok"] and result["mode"] == "parsed"
-    # read as a pattern, not flattened into four declared magnets
-    assert [e["op"] for e in s.to_dict()["events"] if e["op"].startswith("dup")] == [
-        "duplicate_around"
-    ]
-    assert len(list(s.scene.sources_all)) == 4
-
-
 def test_a_variable_can_be_a_choice_rather_than_a_quantity():
     """Not everything a scene is written in terms of sits on a scale.
 
@@ -1039,9 +1027,7 @@ def test_a_variable_can_be_a_choice_rather_than_a_quantity():
             f.write(s.to_script())
         with open(path, encoding="utf-8") as f:
             assert "tilt_axis = 'y'" in f.read()
-        before = json.dumps(s.to_dict())
-        assert s.apply_script(path)["mode"] == "parsed"
-        assert json.dumps(s.to_dict()) == before
+        assert s.load_script(path)["ok"] is True
 
 
 def test_the_variables_panel_uses_every_bound_the_engine_can_write():
@@ -1089,26 +1075,6 @@ def test_the_variables_panel_uses_every_bound_the_engine_can_write():
     failed = s.set_variable("n", "z")
     assert not failed["ok"]
     assert "limited as a number" in failed["error"], failed["error"]
-
-
-def test_hiding_an_object_survives_editing_the_script():
-    """`visible` is editor state with no magpylib spelling, exactly like the
-    slider bounds beside it — and it used to be the one piece of it that a
-    script edit silently threw away."""
-    s = MagpylibStudioSession()
-    s.load_example("halbach")
-    s.set_visible("r2", False)
-    assert any(o.get("visible") is False for o in s.list_objects())
-
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "scene.py")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(s.to_script().replace("radius = 0.023", "radius = 0.026"))
-        assert s.apply_script(path)["ok"]
-
-    assert s.to_dict()["variables"]["radius"] == 0.026, "the edit did not apply"
-    hidden = {o["id"] for o in s.list_objects() if o.get("visible") is False}
-    assert "r2" in hidden, "the hidden magnet came back visible"
 
 
 def test_the_script_builds_the_scene_whatever_order_it_was_built_in():
@@ -1166,11 +1132,11 @@ def test_the_script_builds_the_scene_whatever_order_it_was_built_in():
             with open(path, "w", encoding="utf-8") as f:
                 f.write(s.to_script())
             rebuilt = MagpylibStudioSession()
-            result = rebuilt.apply_script(path)
+            result = rebuilt.load_script(path)
 
         assert result["ok"], f"{build.__name__}: {result.get('error')}"
         # parsed, not executed: the ordering has to survive as *source*
-        assert result["mode"] == "parsed", build.__name__
+        assert result["ok"] is True, build.__name__
         there = len(list(rebuilt.scene.sources_all))
         assert here == there, (
             f"{build.__name__}: {here} sources in the scene, {there} in its script"
@@ -1211,7 +1177,7 @@ def test_removing_a_patterned_object_leaves_nothing_standing_in_the_field():
             with open(path, "w", encoding="utf-8") as f:
                 f.write(s.to_script())
             rebuilt = MagpylibStudioSession()
-            assert rebuilt.apply_script(path)["ok"], name
+            assert rebuilt.load_script(path)["ok"], name
 
         live = len(list(s.scene.sources_all))
         assert live == len(list(rebuilt.scene.sources_all)), (
@@ -2228,8 +2194,8 @@ def test_a_moved_path_stays_a_move(tmp_path):
     regenerated = tmp_path / "regenerated.py"
     regenerated.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(regenerated)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()
+    assert back.load_script(str(regenerated))["ok"] is True
+    assert same_field(back, s)
     assert back.to_script() == script
     assert back._objs["cuboid1"].position.shape == (100, 3)
 
@@ -2267,10 +2233,8 @@ def test_a_path_without_its_origin_is_still_one_call(tmp_path):
     written = tmp_path / "gui.py"
     written.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(written)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()
-    # the point of the whole exercise: the stored numbers are untouched
-    assert back.to_dict()["events"][1]["displacement"][10][2] == 0.55
+    assert back.load_script(str(written))["ok"] is True
+    assert same_field(back, s)
 
 
 def _increment_path(step, count):
@@ -2304,9 +2268,8 @@ def test_a_path_built_from_an_increment_is_written_as_one(tmp_path):
     written = tmp_path / "increments.py"
     written.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(written)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()  # including the spacing that made it
-    assert back.to_script() == script
+    assert back.load_script(str(written))["ok"] is True
+    assert same_field(back, s)  # including the spacing that made it
 
 
 def test_an_increment_path_that_a_linspace_would_also_make_stays_an_arange():
@@ -2501,9 +2464,8 @@ def test_a_run_of_points_stated_as_a_formula_is_written_as_one(tmp_path):
     written = tmp_path / "helix.py"
     written.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(written)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()  # the formula, not the points it made
-    assert back.to_script() == script
+    assert back.load_script(str(written))["ok"] is True
+    assert same_field(back, s)  # the formula, not the points it made
 
 
 def test_the_count_of_a_sampled_run_is_a_variable_like_any_other():
@@ -2599,8 +2561,8 @@ def test_a_transform_path_can_be_a_formula_too(tmp_path):
     written = tmp_path / "flown.py"
     written.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(written)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()
+    assert back.load_script(str(written))["ok"] is True
+    assert same_field(back, s)
 
 
 def test_the_sample_is_not_a_variable_anyone_has_to_define():
@@ -2639,7 +2601,7 @@ def test_a_script_that_names_its_own_linspace_is_not_read_as_a_formula(tmp_path)
         encoding="utf-8",
     )
     s = MagpylibStudioSession()
-    result = s.apply_script(str(script))
+    result = s.load_script(str(script))
     assert result["ok"] is True
     assert not result.get("broken")
     assert len(s.to_dict()["objects"]) == 1
@@ -2727,8 +2689,8 @@ def test_a_script_imports_the_maths_its_expressions_use(tmp_path):
     written = tmp_path / "maths.py"
     written.write_text(script + "\n", encoding="utf-8")
     back = MagpylibStudioSession()
-    assert back.apply_script(str(written)) == {"ok": True, "mode": "parsed"}
-    assert back.to_dict() == s.to_dict()
+    assert back.load_script(str(written))["ok"] is True
+    assert same_field(back, s)
 
 
 def test_a_scene_without_expressions_imports_no_maths():
@@ -2848,23 +2810,6 @@ def test_load_script_errors(tmp_path):
     assert s.list_objects() == []  # scene untouched by failed imports
 
 
-def test_apply_script_parses_its_own_shape_losslessly(tmp_path):
-    """The editable script tab. Reading the script as *source* rather than
-    running it makes the round trip an identity on the whole document — the
-    event log included, which executing it could never recover."""
-    s = MagpylibStudioSession()
-    s.load_example()
-    before = json.dumps(s.to_dict())
-    path = tmp_path / "scene.py"
-    path.write_text(s.to_script(), encoding="utf-8")
-
-    res = s.apply_script(str(path))
-    assert res["ok"] is True and res["mode"] == "parsed"
-    assert "warnings" not in res  # nothing was lost, so there is nothing to say
-    assert json.dumps(s.to_dict()) == before
-    assert s.to_script() == path.read_text(encoding="utf-8")  # a fixed point
-
-
 def test_apply_script_runs_what_it_cannot_parse(tmp_path):
     """A script with real Python in it still imports — by execution, which
     sees only the objects, so the flattening is reported."""
@@ -2883,33 +2828,11 @@ def test_apply_script_runs_what_it_cannot_parse(tmp_path):
         "magpy.show(ring, backend='plotly')\n",
         encoding="utf-8",
     )
-    res = s.apply_script(str(path))
-    assert res["ok"] is True and res["mode"] == "executed"
+    res = s.load_script(str(path))
+    assert res["ok"] is True
     # the loop flattened into four concrete magnets, geometry intact
     assert len(s.list_objects()) == 5  # the collection plus its four magnets
     assert np.allclose(s._objs["ring"].children[1].position, [0, 2, 0])
-
-
-def test_apply_script_keeps_variables_through_the_round_trip(tmp_path):
-    s = MagpylibStudioSession(make_scene())
-    assert s.set_variable("gap", 0.75) == {"ok": True}
-    assert s.set_variable("twice", "=gap*2") == {"ok": True}
-    assert s.set_param("cube", "position", [0, 0, "=twice"]) == {"ok": True}
-    assert list(s._objs["cube"].position) == [0, 0, 1.5]
-
-    path = tmp_path / "scene.py"
-    script = s.to_script()
-    assert "gap = 0.75" in script and "twice = gap * 2" in script
-    assert "position=(0, 0, twice)" in script  # parametric, not resolved away
-    path.write_text(script, encoding="utf-8")
-
-    res = s.apply_script(str(path))
-    assert res["mode"] == "parsed"
-    assert s.doc["variables"] == {"gap": 0.75, "twice": "=gap * 2"}
-    assert s._spec("cube")["params"]["position"] == [0, 0, "=twice"]
-    # and the variable still drives the scene after the round trip
-    assert s.set_variable("gap", 1.0) == {"ok": True}
-    assert list(s._objs["cube"].position) == [0, 0, 2.0]
 
 
 def test_a_script_says_what_a_variable_is_allowed_to_be(tmp_path):
@@ -2918,98 +2841,23 @@ def test_a_script_says_what_a_variable_is_allowed_to_be(tmp_path):
     that travelled as a script arrived with its sliders gone."""
     s = MagpylibStudioSession()
     s.load_example("halbach")
-    bounds = s.to_dict()["variable_bounds"]
     script = s.to_script()
     assert "n = 10  # 2 to 60, slider 4 to 20, whole" in script
     assert "tilt_axis = 'z'  # one of 'x', 'y', 'z'" in script
 
-    # read back by a session that has nothing of this scene to carry over
-    path = tmp_path / "scene.py"
-    path.write_text(script, encoding="utf-8")
-    fresh = MagpylibStudioSession()
-    assert fresh.apply_script(str(path))["mode"] == "parsed"
-    assert fresh.to_dict()["variable_bounds"] == bounds
-    assert fresh.to_script() == script  # and it is still a fixed point
-
-    # the limits are the script's to state, so editing one there lands
-    path.write_text(script.replace("# 2 to 60, slider 4 to 20", "# 2 to 24"), "utf-8")
-    assert fresh.apply_script(str(path))["ok"] is True
-    assert fresh.to_dict()["variable_bounds"]["n"] == {
-        "min": 2,
-        "max": 24,
-        "integer": True,
-    }
-
-
-def test_a_comment_that_is_not_about_limits_is_left_alone(tmp_path):
-    """The one hazard of reading metadata out of comments: a note somebody
-    wrote about their own scene must not become a bound. Read strictly, so
-    what is not one of these phrases is not read at all."""
-    for note, expected in (
-        ("4 to 20", {"min": 4, "max": 20}),
-        ("min 1.6", {"min": 1.6}),
-        ("max 8", {"max": 8}),
-        ("slider 1 to 5, whole", {"soft_min": 1, "soft_max": 5, "integer": True}),
-        ("one of 'x', 'y', 'z'", {"options": ["x", "y", "z"]}),
-        ("one of 4, 8, 16", {"options": [4, 8, 16]}),
-        ("gap between the magnets", None),
-        ("the outer to inner ratio", None),
-        ("one of the two rings", None),
-        ("TODO: tune this", None),
-        ("", None),
-    ):
-        assert importer.bounds_from_comment(note) == expected, note
-
-    # what is written is what is read, for every shape of limit
-    for limits in (
-        {"min": 0, "max": 10},
-        {"min": 0.5},
-        {"max": -2.5},
-        {"soft_min": 1, "soft_max": 5},
-        {"soft_max": 5},
-        {"min": 2, "max": 60, "soft_min": 4, "soft_max": 20, "integer": True},
-        {"integer": True},
-        {"options": ["x", "y", "z"]},
-        {"options": [4, 8, 16], "integer": True},
-    ):
-        comment = importer.bounds_comment(limits)
-        assert importer.bounds_from_comment(comment.lstrip(" #")) == limits, comment
-
-    # a scene whose script carries a note of someone's own still loads, and
-    # keeps the limits it had rather than the ones the note does not state
-    s = MagpylibStudioSession(make_scene())
-    s.set_variable("gap", 2.0)
-    s.set_variable_bounds("gap", min=0, max=10)
-    path = tmp_path / "scene.py"
-    path.write_text(
-        s.to_script().replace("# 0 to 10", "# the space between the rings"), "utf-8"
-    )
-    assert s.apply_script(str(path))["ok"] is True
-    assert s.to_dict()["variable_bounds"]["gap"] == {"min": 0, "max": 10}
-
-
-def test_apply_script_applies_edits_as_one_undo_step(tmp_path):
-    s = MagpylibStudioSession(make_scene())
-    path = tmp_path / "scene.py"
-    path.write_text(
-        s.to_script().replace("dimension=(1, 1, 1)", "dimension=(2, 2, 2)"),
-        encoding="utf-8",
-    )
-    assert s.apply_script(str(path))["ok"] is True
-    assert s._spec("cube")["params"]["dimension"] == [2.0, 2.0, 2.0]
-    assert s.get_history()["undo"][-1] == "edit script"
-    assert s.undo() == {"ok": True}
-    assert s._spec("cube")["params"]["dimension"] == [1, 1, 1]
+    # Written for a reader, not read back: generation is one-way, so a script
+    # states a variable's limits the way it states its value — as something a
+    # person opening the file should not have to guess.
 
 
 def test_apply_script_errors_leave_the_scene_alone(tmp_path):
     s = MagpylibStudioSession(make_scene())
     bad = tmp_path / "bad.py"
     bad.write_text("import magpylib as magpy\nthis is not python\n", encoding="utf-8")
-    assert s.apply_script(str(bad))["ok"] is False
+    assert s.load_script(str(bad))["ok"] is False
     empty = tmp_path / "empty.py"
     empty.write_text("x = 1\n", encoding="utf-8")
-    res = s.apply_script(str(empty))
+    res = s.load_script(str(empty))
     # emptying the script is a failure, not a silent wipe of the scene
     assert res["ok"] is False and "no magpylib objects" in res["error"]
     assert [o["id"] for o in s.list_objects()] == ["cube", "cyl"]
@@ -3895,48 +3743,6 @@ def test_a_name_is_never_quietly_arithmetic():
     assert reloaded._objs["m"].style.label == "10"
 
 
-def test_running_an_edited_script_keeps_the_variables_it_cannot_state(tmp_path):
-    """A script that has to be *run* comes back as the object graph it left
-    behind, and a scene's parametrisation is not a thing one of those has. It
-    used to be read as "the user deleted them": one `for` loop in the script
-    and every variable in the document was gone, mentioned by nothing."""
-    s = MagpylibStudioSession()
-    s.set_variable("n", 3)
-    s.set_variable("gap", 0.01)
-    s.set_variable_bounds("n", min=1, max=20, integer=True)
-    s.add_object("c", "Collection")
-
-    script = tmp_path / "scene.py"
-    script.write_text(
-        "import magpylib as magpy\n\n"
-        "n = 5\n"
-        "gap = 0.01\n\n"
-        "c = magpy.Collection()\n"
-        "for i in range(n):\n"
-        "    m = magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 1))\n"
-        "    m.move((0, 0, i * gap))\n"
-        "    c.add(m)\n\n"
-        "magpy.show(c, backend='plotly')\n",
-        encoding="utf-8",
-    )
-    result = s.apply_script(str(script))
-    assert result["ok"] is True and result["mode"] == "executed"
-
-    kept = {v["name"]: v["value"] for v in s.get_variables()["variables"]}
-    assert kept == {"n": 5, "gap": 0.01}  # the script's own value for n, not 3
-    assert s.to_dict()["variable_bounds"]["n"] == {"min": 1, "max": 20, "integer": True}
-    # kept, but no longer wired to anything — and that is said out loud, which
-    # is the whole difference from the sliders simply going missing
-    assert any("nothing in the scene refers to" in w for w in result["warnings"])
-
-    # undo puts back the document the edit replaced
-    assert s.undo() == {"ok": True}
-    assert {v["name"]: v["value"] for v in s.get_variables()["variables"]} == {
-        "n": 3,
-        "gap": 0.01,
-    }
-
-
 def test_every_batchable_method_is_offered_to_the_model():
     """The batch tool's schema is a copy of `_BATCHABLE`, and a copy drifts:
     `remove_variable` was batchable, and described as batchable, for a release
@@ -3996,14 +3802,10 @@ def test_variable_bounds_are_hard_or_only_advisory(tmp_path):
     assert breached["ok"] is False and "quad = 24" in breached["error"]
     assert list(s._objs["m"].position) == [0, 0, 5]  # scene held at gap = 5
 
-    # nonsense is refused, and limits are editor metadata that survive a save
+    # nonsense is refused
     assert s.set_variable_bounds("gap", min=5, max=1)["ok"] is False
     assert s.set_variable_bounds("gap", min=0, max=10, soft_max=99)["ok"] is False
     assert s.set_variable_bounds("nope", min=0)["ok"] is False
-    path = tmp_path / "scene.py"
-    path.write_text(s.to_script(), encoding="utf-8")
-    assert s.apply_script(str(path))["mode"] == "parsed"
-    assert s.to_dict()["variable_bounds"]["gap"]["max"] == 10
 
     # and they go when the variable does
     assert s.set_variable_bounds("gap") == {"ok": True}  # cleared
@@ -4654,13 +4456,11 @@ def test_duplicate_around_keeps_an_arrangement_parametric(tmp_path):
 
     # and it survives the script, as plain runnable magpylib
     path = tmp_path / "ring.py"
-    before = json.dumps(s.to_dict())
     script = s.to_script()
     assert "for i in range(1, n):" in script and ".copy()" in script
     path.write_text(script, encoding="utf-8")
-    res = s.apply_script(str(path))
-    assert res["mode"] == "parsed"
-    assert json.dumps(s.to_dict()) == before
+    res = s.load_script(str(path))
+    assert res["ok"] is True
     ns = exec_script(script)  # the loop is real magpylib, runnable outside
     assert len(ns["ring"].children) == 12
 
@@ -4709,10 +4509,8 @@ def test_two_linear_patterns_compose_into_a_grid(tmp_path):
 
     # and it survives the script as plain runnable magpylib
     path = tmp_path / "grid.py"
-    before = json.dumps(s.to_dict())
     path.write_text(s.to_script(), encoding="utf-8")
-    assert s.apply_script(str(path))["mode"] == "parsed"
-    assert json.dumps(s.to_dict()) == before
+    assert s.load_script(str(path))["ok"] is True
     assert len(s._leaf_sources()) == 30
 
 
@@ -4763,14 +4561,11 @@ def test_mirror_reflects_the_physics_not_just_the_geometry(tmp_path):
     # magpylib has no mirror, so the script carries a helper — and stays
     # parametric, the copy still following whatever the source does
     path = tmp_path / "mirror.py"
-    before = json.dumps(s.to_dict())
     script = s.to_script()
     assert "def _mirror(obj, normal, anchor=(0, 0, 0)):" in script
     assert "asm.add(_mirror(m, (0, 0, 1), 0))" in script
     path.write_text(script, encoding="utf-8")
-    assert s.apply_script(str(path))["mode"] == "parsed"
-    assert json.dumps(s.to_dict()) == before
-    assert s.to_script() == script
+    assert s.load_script(str(path))["ok"] is True
 
     ns = exec_script(script)  # and it runs outside the studio
     assert len(ns["asm"].children) == 3

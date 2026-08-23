@@ -22,7 +22,7 @@ that touches none of this.
 
 ## Track F — Foundation
 
-### F1 — Kill the round trip
+### F1 — Kill the round trip ✅
 
 **What.** `parse_script` goes, with the matched emitter/parser idiom pairs
 (`_mirror`, `_superquadric`, the `for i in range(1, n)` loop shape, the
@@ -33,13 +33,17 @@ recording only.
 generates one-way. This is a deletion with a known shape and it shrinks the
 surface F2 has to work in.
 
-**The decision inside it.** The script tab stops being applied on save. That is
-a UI change, not only a deletion, and it should be decided rather than
-discovered. `load_script` and `apply_script` keep working by execution, which is
-already their fallback.
+**Decided while doing it.** Applying by execution was tried first and is worse
+than the cliff: running an edited script recovers only the objects it leaves
+behind, so a save that changed nothing still resolved every expression to a
+number, flattened every pattern into its copies and dropped the slider limits —
+silent degradation on `Cmd+S`. So `apply_script` is gone too, and saving the tab
+offers "Build a new scene from this" instead: the same capability, explicit and
+opt-in. `load_script` is unchanged.
 
-**Done when.** The round trip is gone, import still works by execution, and the
-two-tier cliff is unreachable.
+**Done.** `importer.py` 1133 → 372 lines, `apply_script` and
+`_round_trip_warnings` removed, the extension rewired, 261 tests green and ruff
+clean.
 
 ### F2 — Parameterised instancing
 

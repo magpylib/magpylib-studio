@@ -573,8 +573,17 @@ material-response lands in core.
 Studio hardcodes the table:
 
 ```python
-_PARAM_ATTRS = ("polarization", "magnetization", "dimension", "diameter",
-                "vertices", "faces", "current", "moment", "pixel")
+_PARAM_ATTRS = (
+    "polarization",
+    "magnetization",
+    "dimension",
+    "diameter",
+    "vertices",
+    "faces",
+    "current",
+    "moment",
+    "pixel",
+)
 ```
 
 The physics layer needs an identical one. A new magnet class in core then falls
