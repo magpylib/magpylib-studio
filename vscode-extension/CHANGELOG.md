@@ -4,6 +4,8 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+## [0.4.0]
+
 ### Added
 
 - **Triangular meshes — magnets shaped like the part they are.** `Add Object…`
