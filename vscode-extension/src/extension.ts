@@ -2153,6 +2153,8 @@ export function activate(context: vscode.ExtensionContext): void {
           await editVariableProperties(found);
         } else if (action === 'remove') {
           await mutateFromTree('remove_variable', { name });
+        } else if (action === 'restore') {
+          await mutateFromTree('restore_variable', { name });
         }
       })();
     },
@@ -3641,9 +3643,13 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         if (await mutateFromTree('load_example', { name: chosen })) {
           // An example is a starting point, not a document: it has no file of
-          // its own, and it counts as unsaved so that Save asks where to put it
-          // rather than writing over whatever was open before.
-          await setSceneFile(undefined, true);
+          // its own, and nothing in it is yours until you change something.
+          // Marked unsaved on arrival it asked to be saved on the way out of
+          // every example anyone looked at, which is a modal dialog in front
+          // of work nobody did. Save still asks where to put it — that comes
+          // from having no file, not from being dirty — and the first edit
+          // marks it like any other scene.
+          await setSceneFile(undefined);
         }
         openStudioPanel(context); // loading a scene should show it
       },
@@ -4688,7 +4694,10 @@ export function createWebviewHtml(
 </head>
 <body>
   <div id="canvas"></div>
-  <div id="readout" hidden></div>
+  <div id="readout" hidden>
+        <div id="readoutHead"></div>
+        <div id="readoutFields"></div>
+      </div>
   <div id="statusbar">
     <span id="mode">
       <button id="modeEdit" type="button" class="on"

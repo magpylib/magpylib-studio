@@ -17,6 +17,14 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Deciding nothing. The row still works — the value is still the variable's,
+   and other things may come to be written in terms of it — so this is dimmed
+   rather than disabled: a statement about what it currently reaches, not a
+   control taken away. */
+.row.inert .name,
+.row.inert input {
+  opacity: 0.55;
+}
 input[type="range"] {
   width: 100%;
   padding: 0;

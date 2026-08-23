@@ -406,9 +406,11 @@ suite('magpylib-studio', () => {
   test('the scene knows its file, and says so when it drifts from it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
-    // an example is a starting point, not a document: no file, and unsaved
+    // An example is a starting point, not a document: no file, and nothing
+    // unsaved until something is changed. Save still has somewhere to ask
+    // about, because there is no file — being dirty was never what did that.
     assert.strictEqual(sceneFileState().file, undefined);
-    assert.strictEqual(sceneFileState().dirty, true);
+    assert.strictEqual(sceneFileState().dirty, false, 'an untouched example is not work');
 
     const file = tempScene('state.magpy.json');
     await writeJson(file, await scene());

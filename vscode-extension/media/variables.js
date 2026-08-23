@@ -154,6 +154,14 @@ function button(glyph, title, action, name) {
   return el;
 }
 
+/** What a variable is being overruled on, in as few words as it takes. */
+function where(shadowed) {
+  const first = `${shadowed[0].object_id}'s ${shadowed[0].field}`;
+  return shadowed.length > 1
+    ? `${first} (and ${shadowed.length - 1} more)`
+    : first;
+}
+
 /** Read off the engine's own allow-list, so it cannot go stale. */
 async function loadHelp() {
   const help = await rpc("expression_help", {});
@@ -194,6 +202,14 @@ async function load() {
     const name = document.createElement("span");
     name.className = "name";
     name.textContent = v.name;
+    // A variable can be perfectly well defined and decide nothing: a drag
+    // states a pose outright and the expression that used to decide it stays
+    // in the create step, replayed and then overwritten. The slider still
+    // slides, and nothing moves. Better to say which it is than to leave
+    // someone dragging a control that has quietly stopped being connected.
+    if (v.inert) {
+      row.classList.add("inert");
+    }
     // The '=' is what makes it an expression, not merely being a string: a
     // variable constrained to options holds a *name* ("z"), and treating that
     // as an expression chopped its first character off and showed an empty
@@ -222,6 +238,14 @@ async function load() {
     if (b.integer) name.title += " — whole numbers only";
     if (choices) {
       name.title += " — one of " + choices.join(", ");
+    }
+    // Appended like the qualifiers above rather than written over them: what
+    // the variable is comes first, and what has stopped heeding it after.
+    if (v.inert) {
+      name.title += v.shadowed
+        ? ` — nothing follows it any more: ${where(v.shadowed)} is stated` +
+          ` outright by a later step, and \u21ba drops that step`
+        : " — nothing in the scene is written in terms of it yet";
     }
     if (isExpression) {
       text.classList.add("expr");
@@ -304,6 +328,17 @@ async function load() {
       // Everything about the variable except its value, which is the box
       // beside this: one menu rather than a button each, because the row is
       // as wide as a sidebar and the slider is what should have the space.
+      ...(v.shadowed
+        ? [
+            button(
+              "\u21ba",
+              `Let ${v.name} decide ${where(v.shadowed)} again, by dropping the ` +
+                `step that states it outright`,
+              "restore",
+              v.name,
+            ),
+          ]
+        : []),
       button("⋯", "Edit " + v.name + "…", "edit", v.name),
       button("✕", "Remove " + v.name, "remove", v.name),
     );

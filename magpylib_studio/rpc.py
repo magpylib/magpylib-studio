@@ -19,6 +19,7 @@ from magpylib_studio.session import MagpylibStudioSession
 # Only these methods are callable over the wire (no dunders / private helpers).
 _PUBLIC = {
     "list_objects",
+    "restore_variable",
     "get_schema",
     "get_values",
     "get_figure",
