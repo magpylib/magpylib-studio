@@ -464,6 +464,11 @@ instantly and queues FEM asynchronously without blocking the UI.
 FEMM as the 2D nonlinear oracle. Public deliverable: _here is where the analytic
 model stops_.
 
+**M9 — The agent skill (§13).** Only after M7, because a skill may only describe
+an API that exists. → **G9:** an eval suite shows an agent given the skill
+refuses to compare unconverged numbers, respects a budget, and propagates
+provenance into what it reports.
+
 **Later / maybe never:** tier 4 force, filament currents, reverse import.
 
 ---
@@ -772,7 +777,88 @@ payload, a key in the RPC result. The same fact, rendered three ways.
 
 ---
 
-## 13. Open questions
+## 13. Serving external agents
+
+The engine should be drivable by an autonomous agent that was not written
+against this repo — a Claude Code or Agent SDK session that loads a skill file
+and runs an analysis unattended. It is a good fit, with two hard constraints.
+
+### 13.1 This document is not that file, and must not become it
+
+`FEM.md` is a **plan**: it argues, records the alternatives it rejected, carries
+open questions, and above all **describes a system that does not exist yet**.
+Hand it to an autonomous agent today and the agent will call `validate()` and
+`read_result()` in good faith, with a citation. Plausible hallucination backed
+by an authoritative-looking document is the worst failure mode an agent artifact
+has.
+
+A skill is the opposite artifact: imperative, present tense, current state only,
+no history and no roads not taken. Two files, the skill derived from the plan,
+and **the skill does not exist until the capability does** (M9).
+
+### 13.2 The guardrail lives in the engine, never in the skill
+
+The README already states the principle this needs:
+
+> **Validation is shared.** Every edit goes through magpylib, and a bad edit is
+> _reported_ (`{"ok": false, "error": …}`), not raised — so a GUI shows an error
+> and an LLM self-corrects. **There is no second validation layer.**
+
+Skill text is advisory, and an agent under pressure drops advisory text. So the
+division is:
+
+- **The engine refuses** — a residual without convergence metadata (§12.4), a
+  solve past budget, a comparison mixing `ideal` and `physical` modes (§3.2).
+- **The skill explains why**, so the agent self-corrects instead of fighting the
+  refusal.
+
+A skill that tried to _be_ the guardrail would be exactly the second validation
+layer this project says it does not have.
+
+### 13.3 Why the fit is good
+
+Cheap exhaustive exploration plus sparse expensive verification is the
+well-shaped agent profile, and magpylib supplies the cheap half outright: exact,
+millisecond, fully parameterised. The agent sweeps thousands of configurations
+analytically and spends FEM budget on the few that matter — this document's
+thesis, run unattended.
+
+And because **the document is the log**, every autonomous exploration replays
+from the events plus the stored scene hashes and solver versions. Most
+agent-driven engineering analysis leaves no reconstructible trail; this one
+cannot help leaving one.
+
+The counterweight from §12.3 holds: the skill defines the remit as **producing
+the numbers and the boundary, never deciding acceptability**. Whether 3 %
+matters is a product question, and it stays with the person who owns the
+product.
+
+### 13.4 One contract, three hosts
+
+VS Code LM tools (exists) · a skill file for Claude Code / Agent SDK agents
+(new) · raw JSON-RPC (exists). That is §12.5's one job API with a third
+presentation, and it extends a principle the README already states — **"One
+schema contract: the same JSON Schema drives the inspector widgets _and_ the LLM
+tool inputs."**
+
+Which points at the strongest version of the idea. `expression_help()` already
+returns the operators and functions **read off the allow-list that enforces
+them**, with a test comparing the two, precisely so the help cannot drift from
+what evaluates. **Generate the skill's tool reference the same way** — from the
+API surface, with a test that they agree — so a skill shipped with the package
+cannot describe an API the package does not have.
+
+### 13.5 The one thing that has to happen now
+
+Everything above waits for M7. One thing does not: **design the job API
+refusal-first.** Retrofitting refusal once agents depend on permissive behaviour
+is far harder than building it in, and §12.4's failure mode — hill-climbing on
+mesh noise, confidently, for hours — only surfaces when something is already
+running unattended.
+
+---
+
+## 14. Open questions
 
 - **Which solver.** Decided by G3. Verdict gets written into §5.
 - **Home of code.** §4 recommends the A+B split; confirm at M1 when the layer's
