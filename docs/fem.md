@@ -785,12 +785,12 @@ and runs an analysis unattended. It is a good fit, with two hard constraints.
 
 ### 13.1 This document is not that file, and must not become it
 
-`FEM.md` is a **plan**: it argues, records the alternatives it rejected, carries
-open questions, and above all **describes a system that does not exist yet**.
-Hand it to an autonomous agent today and the agent will call `validate()` and
-`read_result()` in good faith, with a citation. Plausible hallucination backed
-by an authoritative-looking document is the worst failure mode an agent artifact
-has.
+`docs/fem.md` is a **plan**: it argues, records the alternatives it rejected,
+carries open questions, and above all **describes a system that does not exist
+yet**. Hand it to an autonomous agent today and the agent will call `validate()`
+and `read_result()` in good faith, with a citation. Plausible hallucination
+backed by an authoritative-looking document is the worst failure mode an agent
+artifact has.
 
 A skill is the opposite artifact: imperative, present tense, current state only,
 no history and no roads not taken. Two files, the skill derived from the plan,

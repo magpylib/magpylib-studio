@@ -1,201 +1,158 @@
-# Tasks — preparing for the FEM work
+# Tasks
 
-The executable breakdown sitting between `FEM.md` (the plan) and doing it.
-`DIRECTION.md` holds the architectural position; the review that produced this
-list found the two do not collide.
+What to do next, ordered by what gates what. The reasoning behind each item
+lives in the plan it came from — this file stays thin enough to work from.
 
-## The review finding that matters
+| Question                    | Document                                 |
+| --------------------------- | ---------------------------------------- |
+| What is this?               | [README.md](README.md)                   |
+| What is built?              | [CONTINUE.md](CONTINUE.md)               |
+| **What do I do next?**      | **this file**                            |
+| Why is it going that way?   | [docs/direction.md](docs/direction.md)   |
+| How does instancing work?   | [docs/instancing.md](docs/instancing.md) |
+| How does FEM validation go? | [docs/fem.md](docs/fem.md)               |
 
-The direction research landed on **keep the document as the artifact**, and
-`FEM.md` §12.1 already assumes exactly that: a cache key over source-affecting
-events, `sources_all` / `sensors_all` as the partition, `set_rollback` and
-`undo` as free FEM navigation. Had the answer been code-as-truth, all of §12.1
-would need rewriting to a trace hash. It does not.
-
-**So the open direction question blocks nothing below.** One positive
-interaction rather than a dependency: parameterised instancing would give FEM a
-library of validated assemblies and sweeps over instance parameters.
-
-## Ordering
-
-- **C starts now** — no blockers at all; needs no solver and no studio change.
-- **B starts now, in parallel** — the longest lead, and it is upstream review
-  time rather than ours.
-- **A1 and A2 before any studio-side FEM UI.** A2's cost rises the longer it
-  waits.
-- **D is independent**, and shrinks the maintenance surface before FEM adds to
-  it.
+**Track F (foundation) is primary.** It is what studio _is_ under the
+positioning in `docs/direction.md` §1, and everything else is an application of
+it. M runs in parallel because its lead time is upstream review rather than
+ours. V is downstream of F except for V1, which is orthogonal — a different repo
+that touches none of this.
 
 ---
 
-## Group A — studio work the FEM plan needs
+## Track F — Foundation
 
-### A1 — Jobs in the RPC protocol
+### F1 — Kill the round trip
 
-**What.** Worker subprocess, server-initiated notifications, a job id space,
-cancellation.
+**What.** `parse_script` goes, with the matched emitter/parser idiom pairs
+(`_mirror`, `_superquadric`, the `for i in range(1, n)` loop shape, the
+`_name_copy` line emitted and then skipped). `to_script` becomes export and
+recording only.
 
-**Why.** `serve()` is a strictly serial blocking loop: one line in, one line
-out, in order; every write echoes a request `id`, so there are no
-server-initiated messages; and there is no `threading`, `asyncio` or
-`subprocess` anywhere in the engine. A solve through it freezes the scene tree,
-the inspector, the sliders and the 3D view for minutes. It also pays for
-something already wanted — mesh reorientation blocks the same loop at 16 s for
-20k faces.
+**Why.** `docs/direction.md` §2 and §5.1. Every project in its §4 table
+generates one-way. This is a deletion with a known shape and it shrinks the
+surface F2 has to work in.
 
-**Done when.** A long call runs without blocking any other request, reports
-progress, and can be cancelled; the existing test suite still passes.
+**The decision inside it.** The script tab stops being applied on save. That is
+a UI change, not only a deletion, and it should be decided rather than
+discovered. `load_script` and `apply_script` keep working by execution, which is
+already their fallback.
 
-**Blocks.** `FEM.md` M7, and all three workflows in §12.
+**Done when.** The round trip is gone, import still works by execution, and the
+two-tier cliff is unreachable.
 
-### A2 — Refusal-first job API
+### F2 — Parameterised instancing
 
-**What.** The job API **errors**, rather than warns, on: a residual without
-convergence metadata, a solve past budget, and a comparison mixing `ideal` and
-`physical` mode.
+**What.** A definition document with declared parameters, and an `instance`
+event that references it with arguments. Design in
+[docs/instancing.md](docs/instancing.md).
 
-**Why.** §13.5. A human glances at a "provisional" badge; an agent ignores a
-warning field and hill-climbs on mesh noise, confidently, for hours. And the
-guardrail cannot live in a skill file — the README's _"there is no second
-validation layer"_ settles where it goes. Cheap now, expensive once callers
-depend on permissive behaviour.
+**Why.** The missing reuse feature. All four wanted units of reuse are
+composition units, and a structured format composes if it has instancing plus
+exported parameters.
 
-**Done when.** Each of the three refusals has a test asserting an error rather
-than a warning.
+**Design first.** Six open questions in `docs/instancing.md` §5 — version
+pinning, nested instances, composition with patterns, editing through an
+instance, whether a document's variables are its signature, and whether
+same-document definitions are worth having. This is the highest-design-risk item
+in the plan and the most tempting to start coding.
 
-### A3 — Source/probe hash partition
+**Done when.** Design questions closed, then: an instance resolves in `_build`,
+`to_script` emits a call, a definition round-trips by hash, and a pattern of
+instances works.
 
-**What.** A content hash over field-affecting events only — magnets, currents,
-anything with μr ≠ 1, and the transforms carrying them — excluding sensors and
-pixel grids.
+### F3 — GUI as parameter binder
 
-**Why.** Solve once, probe forever. Moving a sensor must not invalidate a solve.
+**What.** Introspect a definition's parameters, render widgets, rebuild, draw.
 
-**Done when.** Moving a sensor leaves the hash unchanged; changing a magnet
-changes it; and undoing back to a previous state reproduces that state's earlier
-hash exactly. The last property is what turns history navigation into free FEM
-navigation.
+**Depends on** F2 — there are no parameters to bind until definitions exist.
 
-### A4 — Units
+**Why.** `docs/direction.md` §5.3. The sync surface shrinks to "parameters →
+widgets", which cannot drift. Proven shape: OpenSCAD Customizer, Storybook
+controls, Streamlit.
 
-**What.** A unit _kind_ on a variable, beside `integer`; one model unit per
-document; emitters convert at the boundary; the UI formats.
+### F4 — Grow `expressions.py` toward Starlark
 
-**Why.** AEDT wants `"5mm"`, solvers want consistent SI, and `FEM.md` §6 chose
-metadata over unit-carrying values so no document migrates. Cheaper than that
-section implies: `_PARAM_UNITS` already sits beside `_PARAM_ATTRS`.
-
-**Done when.** Every existing document loads unchanged and the script round-trip
-is stable.
-
-**Blocks.** M6.
+**Deliberately not scheduled.** `docs/direction.md` §5.4 — the right answer and
+the expensive one. Starlark took Google eight years. Nothing forces the choice
+yet.
 
 ---
 
-## Group B — magpylib core (start now; upstream lead time is the constraint)
+## Track M — magpylib core (start now; the constraint is upstream review)
 
-### B1 — `susceptibility` / μr as a documented property
+### M1 — `susceptibility` / μr as a documented property
 
-**What.** A real property on magnets, rather than the attribute
-`magpylib-material-response` monkey-attaches and searches parents for.
-
-**Why.** It is the `physical`-mode input. Without a shared convention the
-exporter invents its own home for μr and it differs from material-response's —
-at which point tier 1's three-way comparison silently compares magnets that are
-**not the same magnet**, and the discrepancy looks like physics.
+**Why.** It is the `physical`-mode input (`docs/fem.md` §3.2). Without a shared
+convention the exporter invents its own home for μr and it differs from
+`magpylib-material-response`'s — at which point tier 1's three-way comparison
+silently compares magnets that are **not the same magnet**, and the discrepancy
+looks like physics.
 
 **Done when.** Merged upstream, or a documented studio-side convention exists
 that material-response also reads.
 
-### B2 — Public constructor-parameter introspection
+### M2 — Public constructor-parameter introspection
 
-**What.** One accessor upstream replacing studio's hardcoded `_PARAM_ATTRS`.
-
-**Why.** The physics layer needs the identical table, so a new magnet class in
-core would fall silently through **both** copies.
+**Why.** Studio hardcodes `_PARAM_ATTRS`; the physics layer (V1) needs the
+identical table, so a new magnet class in core would fall silently through
+**both** copies.
 
 **Done when.** `get_params` reads it instead of the literal tuple.
 
 ---
 
-## Group C — the physics layer (unblocked, start today)
+## Track V — Validation
 
-### C1 — Package skeleton and the home decision
+Full plan and its gates in [docs/fem.md](docs/fem.md). Only V1 is orthogonal to
+Track F; the rest build on the foundation and should follow it.
 
-**What.** Settle `FEM.md` §4's split — physics on magpylib objects in a
-standalone package, parametrics on the document in studio — and create it.
+### V1 — The physics layer (orthogonal — start any time)
 
-**Done when.** It imports, has CI, and depends only on magpylib.
+Package skeleton and the §4 home decision · conventions module (§3.1's verified
+table, including the two off-by-two traps) · the required `ideal`/`physical`
+mode switch (§3.2) · solver-free conformance: the `getJ` occupancy test plus the
+volume/centroid check.
 
-### C2 — Conventions module
+**Why it can run alongside F.** Different repo, magpylib objects only, no
+solver, no studio change, no open decision. Reaches `docs/fem.md`'s **G1** with
+nothing installed.
 
-**What.** Pose → euler, J → (Hc, μr, world direction), geometry-parameter
-normalisation. Pure functions, no solver, no vendor, no document.
+### V2 — Units
 
-**Why.** `FEM.md` §3.1's table, verified against a live checkout — including the
-two off-by-two traps: `Cylinder` and `Sphere` take **diameter**, and `Cuboid`
-takes **full** edge lengths while `create_box` takes a corner.
+Unit _kind_ on a variable beside `integer`; one model unit per document;
+emitters convert at the boundary. Cheaper than `docs/fem.md` §6 implies —
+`_PARAM_UNITS` already sits beside `_PARAM_ATTRS`. **Interacts with F2**: a
+definition's parameters want units for the same reason its variables do.
 
-**Done when.** Every row of that table is pinned by a test.
+### V3 — Jobs in the RPC protocol
 
-### C3 — The ideal / physical switch
+Worker subprocess, server-initiated notifications, a job id space, cancellation.
+`serve()` is a strictly serial blocking loop with no threading, asyncio or
+subprocess anywhere in the engine, so a solve through it freezes the whole UI
+for minutes. Also pays for mesh reorientation blocking the same loop at 16 s.
 
-**What.** A required mode argument with no default.
+### V4 — Refusal-first job API
 
-**Why.** §3.2. A μr = 1 magnet and a μr = 1.05 magnet with the same Br are
-different magnets. `ideal` validates our translation; `physical` measures the
-modelling error. Conflating them yields a comparison that means nothing while
-looking rigorous.
+Errors, not warnings, on: a residual without convergence metadata, a solve past
+budget, a comparison mixing `ideal` and `physical`. `docs/fem.md` §13.5 — an
+agent ignores a warning field and hill-climbs on mesh noise. **Cost rises the
+longer callers depend on permissive behaviour**, so decide the shape early even
+if the work lands late.
 
-**Done when.** No call site can omit it.
+### V5 — Source/probe hash partition
 
-### C4 — Solver-free conformance tests
-
-**What.** The `getJ` occupancy test, plus the volume/centroid check beside it.
-
-**Why.** Catches centre-vs-corner, diameter-vs-radius, degrees-vs-radians,
-local-vs-world polarisation and a wrong Euler convention — with **nothing
-installed**.
-
-**Done when.** Green for `Cuboid`, `Cylinder`, `Sphere` and `CylinderSegment`
-against a pure-Python membership evaluator. This is `FEM.md`'s **G1**.
-
----
-
-## Group D — drag reduction
-
-### D1 — Kill `parse_script`; `to_script` becomes export only
-
-**What.** Remove the read-back path and the matched emitter/parser idiom pairs
-(`_mirror`, `_superquadric`, the `for i in range(1, n)` loop shape, the
-`_name_copy` line that is emitted and then skipped).
-
-**Why.** `DIRECTION.md` §2's cliff and §5.1, and every project in its §4 table
-generating one-way. Shrink the maintenance surface before FEM adds to it.
-
-**Careful.** `load_script`, `apply_script` and the script tab depend on it. The
-script tab stops being applied on save — that is a UI change, not only a
-deletion, and it needs deciding rather than discovering.
-
-**Done when.** The round trip is gone, import still works by execution, and the
-two-tier cliff is no longer reachable.
-
-### D2 — ~~Rewrite `DIRECTION.md`~~ **done**
-
-Rewritten around _data is the artifact / one-way generation / parameterised
-instancing_, with code-as-truth kept as §7's recorded-and-rejected alternative
-and §4 carrying the Bazel, Jsonnet, Onshape, Godot and OpenSCAD evidence.
+A content hash over field-affecting events only, excluding sensors and pixel
+grids. Solve once, probe forever. Undo back to a previous state must reproduce
+that state's earlier hash — that property is what turns history navigation into
+free FEM navigation.
 
 ---
 
-## Not started, and why
+## Not scheduled, and why
 
-- **Anything downstream of `FEM.md`'s G3 spike** — the solver is deliberately
-  undecided until it is measured.
-- **Parameterised instancing** (`DIRECTION.md` §5.2) — the missing reuse
-  feature, and the answer to all four units of reuse. Agreed in principle, not
-  scoped, and not a FEM dependency, so it is deliberately not in the groups
-  above.
-- **Growing `expressions.py` toward Starlark** (`DIRECTION.md` §5.4) — the right
-  answer and the expensive one. Nothing forces the choice yet.
-- **The agent skill (M9)** — a skill may only describe an API that exists.
+- **Anything downstream of `docs/fem.md`'s G3 spike** — the solver is
+  deliberately undecided until it is measured.
+- **F4** — see above.
+- **The agent skill** (`docs/fem.md` M9) — a skill may only describe an API that
+  exists.

@@ -4,7 +4,8 @@
 from the evidence in §4 and is not implemented. §7 records the alternative that
 was argued first and rejected — kept because the reasoning is worth having, and
 because it is how this file's conclusion arrived. Companion to `CONTINUE.md`
-(what is built), `FEM.md` (where validation goes) and `TASKS.md` (what to do).
+(what is built), `docs/fem.md` (where validation goes) and `TASKS.md` (what to
+do).
 
 ---
 
@@ -60,7 +61,7 @@ already visible:
   forever.
 
 And the failure is not graceful.
-[`importer.py:861`](magpylib_studio/importer.py):
+[`importer.py:861`](../magpylib_studio/importer.py):
 
 > _"A script in the shape `to_script` emits -> (document, None), or (None,
 > reason) when it is anything else and **has to be executed**."_
@@ -353,11 +354,11 @@ added.
 | `to_script`, as export and recording   | the matched emitter/parser pairs |
 | field, figures, field maps, sweeps     | the two-tier cliff               |
 | `expressions.py` — and §5.4 grows it   | the script tab applying on save  |
-| the whole of `FEM.md`                  |                                  |
+| the whole of `docs/fem.md`             |                                  |
 
-`FEM.md` is unaffected in particular: §12.1 already assumes the document stays
-the artifact, keys its cache on source-affecting events, and treats `undo` and
-`set_rollback` as free navigation over the same fold.
+`docs/fem.md` is unaffected in particular: §12.1 already assumes the document
+stays the artifact, keys its cache on source-affecting events, and treats `undo`
+and `set_rollback` as free navigation over the same fold.
 
 ---
 

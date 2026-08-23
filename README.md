@@ -237,7 +237,18 @@ fails at first contact, before anyone sees a feature — and it is what lets
 `.vsix` attached to each release is the same build, for anyone who would rather
 install it by hand.
 
-See [CONTINUE.md](CONTINUE.md) for the current state and what is next.
+## Project documents
+
+| Question                    | Document                                 |
+| --------------------------- | ---------------------------------------- |
+| What is built?              | [CONTINUE.md](CONTINUE.md)               |
+| What is next?               | [TASKS.md](TASKS.md)                     |
+| Why is it going that way?   | [docs/direction.md](docs/direction.md)   |
+| How does instancing work?   | [docs/instancing.md](docs/instancing.md) |
+| How does FEM validation go? | [docs/fem.md](docs/fem.md)               |
+
+The three at the root are the state, the work and the front door; `docs/` holds
+the long-form thinking behind them.
 
 ## License
 
