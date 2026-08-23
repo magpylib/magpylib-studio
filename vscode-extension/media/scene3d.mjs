@@ -50,6 +50,11 @@ let anchors = {}; // studio id -> where the object is
 let paths = {}; // studio id -> every frame it passes through, when it has one
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
+//: Sources a later step copies. Their copies are drawn on their own node and
+//: under their own id, so what the handles hold is the whole pattern -- which
+//: is what a drag now moves, the engine recording it before the step that
+//: copies it rather than after.
+let patterned = new Set();
 // What the polarization handles turn. The object must not turn with them, so
 // they cannot be attached to it: this stands in, and only its rotation is read.
 const proxy = new THREE.Object3D();
@@ -362,7 +367,14 @@ function setGizmoMode(mode) {
     return gizmoMode;
   }
   gizmo.setSpace(spaceOf());
-  if (gizmoMode === "polarization") {
+  // Handles on a stand-in, for the drags whose picture can only come from the
+  // engine. Aiming a polarization turns the vector and not the magnet. And
+  // nothing local is honest about a patterned source: its copies hang on this
+  // very node, but a move of the source moves them by the mirror of it, and a
+  // turn turns them about somewhere else entirely -- only the rebuild knows
+  // where they go. A node that is going to be rebuilt cannot be the one the
+  // handles are on, so they go here instead.
+  if (gizmoMode === "polarization" || patterned.has(primaryId())) {
     // The handles sit on the object and turn the stand-in. Two things have to
     // line up for them to follow a turned magnet: the stand-in must carry the
     // object's rotation, *and* the handles must be drawn against it -- three
@@ -370,8 +382,15 @@ function setGizmoMode(mode) {
     // mode it forces there, which is why resize followed and this did not.
     proxy.position.copy(node.getWorldPosition(new THREE.Vector3()));
     proxy.quaternion.copy(quaternionOf(orientations[primaryId()]));
+    // A resize is read off this: it has to start the drag unscaled, or the
+    // last one's factor would be counted twice.
+    proxy.scale.set(1, 1, 1);
     proxy.userData.objectId = primaryId();
-    gizmo.mode = "rotate";
+    // Aiming a polarization is a turn of the stand-in and nothing else; every
+    // other mode is itself. Hard-coding "scale" here was right while this
+    // branch only ever carried the two, and became a move that resized as
+    // soon as it carried all four.
+    gizmo.mode = gizmoMode === "polarization" ? "rotate" : gizmoMode;
     gizmo.attach(proxy);
     return gizmoMode;
   }
@@ -999,6 +1018,43 @@ function primaryId() {
   return selectedIds[0];
 }
 
+/** What a drag would have recorded, for a pose said in numbers instead.
+ *
+ * A drag moves an object by moving every frame of its path: a sensor that
+ * sweeps through a gap *is* a track, and putting it somewhere means putting
+ * the track there — not replacing it with the single pose it was left at.
+ * Typing into the readout has to mean the same thing, or the two ways of
+ * saying where something goes leave different documents, and the typed one
+ * quietly throws a path away.
+ *
+ * The reference is where the object is, which is what the boxes read out: a
+ * typed value is a destination, and the whole track moves so that the object
+ * arrives at it.
+ */
+function poseEdit(objectId, field, numbers) {
+  const path = paths[objectId];
+  if (!path || (field !== "position" && field !== "orientation")) {
+    return numbers;
+  }
+  if (field === "position") {
+    const delta = new THREE.Vector3()
+      .fromArray(numbers)
+      .sub(new THREE.Vector3().fromArray(anchors[objectId] || [0, 0, 0]));
+    return path.position.map((frame) =>
+      new THREE.Vector3().fromArray(frame).add(delta).toArray(),
+    );
+  }
+  // The turn that takes it from where it points to what was typed, applied to
+  // every frame: each one turns by the same amount, so the track keeps its
+  // shape -- the same rule `report` follows for a drag.
+  const turned = quaternionOf(numbers).multiply(
+    quaternionOf(orientations[objectId]).invert(),
+  );
+  return path.orientation.map((frame) =>
+    rotvecOf(turned.clone().multiply(quaternionOf(frame))),
+  );
+}
+
 /** The object after this one, so a keystroke can walk the scene. */
 function nextObject(objectId) {
   const drawn = [...byObjectId.keys()].filter(Boolean);
@@ -1036,6 +1092,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   }
   shapes = payload.shapes || {};
   polarizations = payload.polarizations || {};
+  patterned = new Set(payload.patterned || []);
 
   discard(held);
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
@@ -1084,6 +1141,7 @@ window.scene3d = {
   spaceOf,
   toggleSpace,
   axisView,
+  poseEdit,
   canResize: (objectId) => Boolean(shapes[objectId]),
   canAim: (objectId) => Boolean(polarizations[objectId]),
   byObjectId,

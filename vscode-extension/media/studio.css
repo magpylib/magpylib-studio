@@ -59,7 +59,7 @@ body {
   top: 8px;
   right: 10px;
   z-index: 2;
-  padding: 3px 8px;
+  padding: 3px 6px;
   border: 1px solid var(--vscode-panel-border, #444);
   border-radius: 4px;
   background: var(
@@ -68,9 +68,70 @@ body {
   );
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  white-space: pre;
-  opacity: 0.9;
+  /* Anchored to the right, so what varies in width -- a long object id, a
+     third box, a sentence about a variable -- ends flush and ragged on the
+     left, where nothing is being read down a column. */
+  text-align: right;
   pointer-events: none; /* scenery: the view underneath is what is being used */
+}
+#readoutHead {
+  opacity: 0.7;
+  /* The line the numbers fall back to when they are not boxes -- several
+     objects at once, a mesh reporting a factor -- pads its columns with
+     spaces, and this is what keeps them. */
+  white-space: pre;
+}
+#readoutFields:not(:empty) {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 1px;
+}
+#readoutFields .unit {
+  opacity: 0.7;
+  margin-left: 2px;
+}
+/* The exception to the scenery above: these are for typing into. Everything
+   else in the corner stays click-through, so the view underneath is still
+   what the pointer is for.
+   Underlined rather than boxed: three bordered fields over a 3D view read as
+   a form that has landed on it, and the numbers are the point -- the line is
+   only there to say they can be typed in. */
+#readout input {
+  pointer-events: auto;
+  padding: 0 1px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+#readout input:hover {
+  background: var(--vscode-input-background, transparent);
+}
+#readout input:focus {
+  outline: none;
+  background: var(--vscode-input-background, transparent);
+  border-bottom-color: var(--vscode-focusBorder);
+}
+/* What a drag is about to take over. Said on the object rather than in the
+   editor's status bar, because it is a fact about the thing under the
+   pointer, and it has to still be there while the drag is going on -- a
+   remark that expires after six seconds is one that expires mid-gesture. */
+#readout[data-takes]::after {
+  content: attr(data-takes);
+  display: block;
+  margin-top: 2px;
+  /* Narrow on purpose: this is a block, and the corner is sized to fit its
+     widest child, so a wide sentence here would set the width of everything
+     above it and leave the numbers marooned at the end of an empty line. Two
+     short lines cost nothing; one long one costs the whole panel. */
+  white-space: pre-wrap;
+  max-width: 15em;
+  color: var(--vscode-editorWarning-foreground, #cca700);
 }
 
 /* The key list opens *above* the bar rather than inside it: a status bar that

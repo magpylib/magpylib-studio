@@ -20,6 +20,7 @@ function drawingScene() {
 function setMode(editing) {
   if (editing === drawingScene()) return;
   show("");
+  renderReadout();
   // Plotly keeps its state on the element, not in the DOM it drew. Emptying
   // the element without telling it leaves that state describing a plot that
   // is no longer there, and the next `react` diffs against the phantom and
@@ -47,6 +48,8 @@ const snapEl = document.getElementById("snap");
 const projectionEl = document.getElementById("projection");
 const selectionEl = document.getElementById("selection");
 const readoutEl = document.getElementById("readout");
+const readoutHeadEl = document.getElementById("readoutHead");
+const readoutFieldsEl = document.getElementById("readoutFields");
 const animateEl = document.getElementById("animate");
 const axesEl = document.getElementById("axes");
 const axesLabelEl = document.getElementById("axesLabel");
@@ -58,6 +61,10 @@ let poseInFlight = false;
 let pendingPose = null;
 let dragging = null; // { objectId, keep } while a handle is held
 let parametric = {}; // objectId -> which drag-written fields a variable decides
+//: What the scene last said each object's draggable fields hold, keyed the
+//: way DRAG_WRITES names them. The corner reads its numbers from here rather
+//: than asking the engine again: they arrive with every redraw anyway.
+let held = { position: {}, orientation: {}, shape: {}, polarization: {} };
 let snapping = false;
 
 //: What each drag writes, which is what an expression deciding it loses to.
@@ -134,6 +141,12 @@ async function refreshFigure() {
     showSceneGraphControls(true);
     patterned = new Set(payload.patterned);
     parametric = payload.parametric || {};
+    held = {
+      position: payload.anchors || {},
+      orientation: payload.orientations || {},
+      shape: payload.shapes || {},
+      polarization: payload.polarizations || {},
+    };
     say(
       `Ready — ${payload.meshes.length} meshes, ${payload.scatters.length} lines`,
     );
@@ -263,6 +276,7 @@ function playPause() {
   if (playing) {
     say("Capturing the run\u2026"); // the first one is slow
     show("");
+    renderReadout();
     playStartedAt = 0; // set from the first frame, once its timing is known
     showFrame(Number(frameEl.value));
   }
@@ -369,7 +383,14 @@ canvasEl.addEventListener("objecttransform", (event) => {
   }
   dragging = null;
   pendingPose = null; // the final pose supersedes anything still waiting
-  vscodeApi.postMessage({ type: "transformObject", ...event.detail });
+  // `transformObjects`, plural, is the name the host answers to. Singular it
+  // went nowhere: the pose the drag ended on was never recorded, the undo
+  // group it opened was never closed -- so the next edit anywhere was
+  // swallowed into it and left nothing to undo -- and the scene was never
+  // marked as having changed, so a window closed after a drag offered to save
+  // nothing. Every gesture looked right, because the previews had already
+  // done the work; only what happens at the end of one was missing.
+  vscodeApi.postMessage({ type: "transformObjects", ...event.detail });
 });
 
 // Told at the start, so the edits the drag is about to make are grouped into
@@ -379,9 +400,29 @@ canvasEl.addEventListener("objecttransform", (event) => {
 // playback yields, since the pointer is the one being asked.
 canvasEl.addEventListener("dragstart", (event) => {
   if (playing) playPause();
-  const { objectId, mode } = event.detail;
-  // aiming polarization redraws the magnet's colours, so it keeps nothing
-  dragging = { objectId, keep: mode === "polarization" ? null : objectId };
+  // `objectIds`, plural, is what the view sends: a drag can carry a whole
+  // selection. Read as `objectId` this was undefined every time, which cost
+  // more than it looks -- nothing was ever held through a redraw, and the
+  // warning that a drag is about to take a value away from the variable
+  // deciding it was looked up under an undefined key and so never once
+  // appeared.
+  const { objectIds, mode } = event.detail;
+  const objectId = objectIds[0];
+  // Nothing is kept where the picture has to come from the engine to be
+  // right: aiming a polarization redraws the magnet's colours, and a
+  // patterned source's copies move by the mirror or the pitch of the drag
+  // rather than with it, which only a rebuild knows. Neither has the handles
+  // on that node -- see setGizmoMode -- so there is nothing to swap out from
+  // under them.
+  //
+  // Several objects at once is the exception: they are hung on the rig for
+  // the length of the drag, and a rebuild that took their nodes away would
+  // leave them drawn twice, once on the rig and once from the payload. They
+  // keep their nodes, and a pattern among them catches up at the release.
+  const rebuilt =
+    mode === "polarization" ||
+    (objectIds.length === 1 && patterned.has(objectId));
+  dragging = { objectId, keep: rebuilt ? null : objectIds };
   vscodeApi.postMessage({
     type: "dragStart",
     objectId,
@@ -448,10 +489,29 @@ function showPose(pose) {
         (Math.abs(n) < 1e-12 ? 0 : n).toFixed(decimals).padStart(width),
       )
       .join(", ");
-  const parts = [];
   // a path reports every frame; the one it ends on is the one worth reading
   const last = (value) =>
     Array.isArray(value[0]) ? value[value.length - 1] : value;
+  // The boxes are the readout while they are up: the same numbers, in the
+  // same place, live at pointer rate. What they cannot hold falls through to
+  // the line below -- several objects at once, or a mesh reporting a factor.
+  const live = edit.position
+    ? last(edit.position)
+    : edit.orientation
+      ? last(edit.orientation)
+      : edit.polarization
+        ? edit.polarization
+        : edit.shape && !Array.isArray(edit.shape.value[0])
+          ? [].concat(edit.shape.value)
+          : null;
+  const read = FIELD_READS[DRAG_WRITES[gizmoEl.value]];
+  const boxes = readoutFieldsEl.querySelectorAll("input").length;
+  if (!extra && live && read && boxes === live.length) {
+    fillReadout(live, read.decimals);
+    showReadout();
+    return;
+  }
+  const parts = [];
   if (edit.position)
     parts.push(`position ${numbers(last(edit.position), 4, 9)} m`);
   if (edit.orientation) {
@@ -483,8 +543,179 @@ function say(text) {
 
 /** Put something in the corner of the view, or take it away. */
 function show(text) {
-  readoutEl.hidden = !text;
-  readoutEl.textContent = text || "";
+  readoutHeadEl.textContent = text || "";
+  showReadout();
+}
+
+/** The corner is worth showing if anything in it has something to say. */
+function showReadout() {
+  readoutEl.hidden =
+    !readoutHeadEl.textContent &&
+    !readoutFieldsEl.children.length &&
+    !readoutEl.dataset.takes;
+}
+
+//: How each field reads: what to call it, what it is in, and how much of it
+//: is worth showing. Fixed decimals rather than significant figures — see
+//: `showPose` for why that matters at pointer rate.
+const FIELD_READS = {
+  // `width` is what the widest value of that kind actually needs -- "-0.0100"
+  // is seven characters, "-180.0" is six -- rather than one size for all of
+  // them, which left every box holding as much empty space as digits.
+  position: { unit: "m", decimals: 4, width: "7ch" },
+  orientation: { unit: "°", decimals: 1, width: "6ch" },
+  polarization: { unit: "T", decimals: 4, width: "7ch" },
+  shape: { unit: "m", decimals: 4, width: "7ch" },
+};
+
+/** The numbers the handles are writing, when they are numbers you could type.
+ *
+ * Null where they are not: several objects at once have no single value to
+ * show, and a mesh's parameter is its whole vertex array — a resize of one
+ * reports the factor it was scaled by, which is worth reading and is not a
+ * value anybody types.
+ */
+function editableField() {
+  const objectId = selectedIds[0];
+  const field = DRAG_WRITES[gizmoEl.value];
+  if (!objectId || selectedIds.length > 1 || !field) return null;
+  const value = held[field][objectId];
+  if (value === undefined) return null;
+  const numbers = field === "shape" ? value.value : value;
+  if (!Array.isArray(numbers) || Array.isArray(numbers[0])) return null;
+  return {
+    objectId,
+    field,
+    attr: field === "shape" ? value.attr : field,
+    numbers,
+    ...FIELD_READS[field],
+  };
+}
+
+/** The numbers the gizmo is dragging, as boxes you can also type into.
+ *
+ * A drag is for finding a value and a keyboard is for saying one, and they
+ * are wanted in the same breath: drag until it looks right, then say the
+ * number it should have been. The boxes follow the handles while they move
+ * and take a typed value when they stop, so neither is a trip to another
+ * panel for the object already under the pointer.
+ *
+ * Rebuilt only when what they are showing changes, so a redraw arriving while
+ * something is being typed cannot pull the box out from under the cursor —
+ * and the one being typed in is left alone even then.
+ */
+let readoutKey = "";
+function renderReadout() {
+  const shown = drawingScene() && !playing ? editableField() : null;
+  if (!shown) {
+    readoutKey = "";
+    readoutFieldsEl.replaceChildren();
+    showReadout();
+    return;
+  }
+  // The unit belongs with the numbers, not in the line above them: there it
+  // made the head wider than the boxes, and the block as wide as the longer
+  // of the two whichever way round that fell.
+  readoutHeadEl.textContent = `${shown.objectId} · ${shown.attr}`;
+  const key = `${shown.objectId}/${shown.attr}/${shown.numbers.length}`;
+  if (key !== readoutKey) {
+    readoutKey = key;
+    const unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = shown.unit;
+    readoutFieldsEl.replaceChildren(
+      ...shown.numbers.map((_, index) => numberBox(index, shown.width)),
+      unit,
+    );
+  }
+  fillReadout(shown.numbers, shown.decimals);
+  showReadout();
+}
+
+function numberBox(index, width) {
+  const box = document.createElement("input");
+  box.style.width = width;
+  // Not `type="number"`: the spinners are noise at this size, and a stepper
+  // on a value in metres steps by a metre.
+  box.type = "text";
+  box.inputMode = "decimal";
+  box.dataset.index = String(index);
+  box.title = "Type a value, or drag the handles";
+  box.addEventListener("change", commitReadout);
+  box.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") commitReadout();
+    else if (event.key === "Escape") {
+      renderReadout(); // put back what the scene says
+      box.blur();
+    }
+  });
+  return box;
+}
+
+function fillReadout(numbers, decimals) {
+  for (const box of readoutFieldsEl.querySelectorAll("input")) {
+    // Never over the one being typed in: a redraw lands on every edit
+    // anywhere, and half a number replaced mid-keystroke is unusable.
+    if (box === document.activeElement) continue;
+    const value = numbers[Number(box.dataset.index)];
+    box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
+  }
+}
+
+/** Send what was typed, as the same edit the release of a drag sends. */
+function commitReadout() {
+  const shown = editableField();
+  if (!shown) return;
+  const typed = [...readoutFieldsEl.querySelectorAll("input")].map(
+    (box, index) => {
+      const value = Number(box.value);
+      return Number.isFinite(value) ? value : shown.numbers[index];
+    },
+  );
+  if (typed.every((value, index) => value === shown.numbers[index])) {
+    renderReadout(); // nothing said, and anything unreadable typed goes back
+    return;
+  }
+  const edit = { objectId: shown.objectId };
+  if (shown.field === "shape") {
+    edit.shape = { attr: shown.attr, value: typed };
+  } else {
+    // Through the view, which knows whether this object is a track: a typed
+    // pose has to move a path the way dragging it does, rather than replacing
+    // twenty-five frames with the one number typed into the box.
+    edit[shown.field] = window.scene3d.poseEdit(
+      shown.objectId,
+      shown.field,
+      typed,
+    );
+  }
+  vscodeApi.postMessage({ type: "transformObjects", edits: [edit] });
+}
+
+/** Say what a drag in the mode now in force would take over.
+ *
+ * A position written `=gap / 2` is decided by a variable, and a drag sets it
+ * outright -- the number the pointer leaves it at, with nothing deciding it
+ * any more. That is a fair thing to do and a poor thing to discover
+ * afterwards, so it is said on the object, before the drag rather than during
+ * it, and it stays said for as long as the mode and the selection would do
+ * it.
+ *
+ * Nothing has to clear it: the payload stops listing the field the moment the
+ * drag has taken it over, so the next redraw takes the warning away by
+ * itself.
+ */
+function showTakeover() {
+  const names =
+    (parametric[selectedIds[0]] || {})[DRAG_WRITES[gizmoEl.value]] || [];
+  if (names.length) {
+    readoutEl.dataset.takes =
+      `${names.join(", ")} ${names.length > 1 ? "decide" : "decides"} this — ` +
+      `a drag takes it over`;
+  } else {
+    delete readoutEl.dataset.takes;
+  }
+  showReadout();
 }
 
 function sendPose() {
@@ -495,32 +726,38 @@ function sendPose() {
   vscodeApi.postMessage({ type: "previewTransform", ...pose });
 }
 
-/** Show the handles, unless the selected object is one a drag cannot honour.
+/** Show the handles, less the ones the selected object cannot honour.
  *
- * A pattern's copies are drawn on their source's node, so the ring is one
- * object to click -- but an edit to the source is recorded after the
- * duplication that made the copies, so dragging it would move one magnet out
- * of the ring and leave the rest. Better to say so than to do it.
+ * A pattern's copies are drawn on their source's node and under its id, so
+ * the ring is one object to click and one object to drag -- and dragging it
+ * moves the ring, because the engine records the edit before the step that
+ * copies it rather than after. What is still refused is a resize of something
+ * with no single dimension to drag, which is most things.
+ *
+ * `asked` marks the calls that came from the user reaching for a mode, which
+ * are the only ones worth a passing remark: this also runs on every redraw
+ * and on every selection, and a status bar that repeats itself is one nobody
+ * reads.
  */
-function applyGizmo() {
-  const blocked = selectedIds.some((id) => patterned.has(id));
-  gizmoEl.disabled = blocked;
-  const wanted = blocked ? "none" : gizmoEl.value;
+function applyGizmo({ asked = false } = {}) {
+  const wanted = gizmoEl.value;
   const inEffect = window.scene3d?.setGizmoMode(wanted);
+  showTakeover(); // the selection or the mode has moved: so may have this
+  renderReadout(); // and so may the numbers, and which of them there are
+  if (inEffect === wanted) {
+    gizmoEl.title = "What a drag does (W, E, R, P, Q)";
+    return;
+  }
   // The reason a control will not do something belongs on that control, not
   // in the one line the live numbers need: a sentence there is gone by the
   // next redraw anyway, and the tooltip is still there when it is wanted.
-  if (blocked) {
-    gizmoEl.title = `${selectedIds[0]} is patterned — dragging it would leave its copies behind`;
-  } else if (inEffect !== wanted) {
-    gizmoEl.value = inEffect; // asked to resize something with no size to drag
-    gizmoEl.title = selectedIds[0]
-      ? `${selectedIds[0]} has no single dimension to drag — resize it in the Inspector`
-      : "Select an object first";
-    notice(gizmoEl.title); // said once, where it fades, since a key was pressed
-  } else {
-    gizmoEl.title = "What a drag does (W, E, R, P, Q)";
-  }
+  const id = selectedIds[0];
+  gizmoEl.value = inEffect; // asked to resize something with no size to drag
+  showTakeover(); // the mode just changed under us
+  gizmoEl.title = id
+    ? `${id} has no single dimension to drag — resize it in the Inspector`
+    : "Select an object first";
+  if (asked) notice(gizmoEl.title); // where it fades, since a key was pressed
 }
 
 /** A passing remark, in VS Code's own status bar, which expires by itself
@@ -540,11 +777,11 @@ function notice(text) {
  */
 function showAxes() {
   axesEl.value = window.scene3d?.spaceOf() || "world";
-  axesEl.disabled = gizmoEl.value === "scale" || gizmoEl.disabled;
+  axesEl.disabled = gizmoEl.value === "scale";
 }
 
 gizmoEl.addEventListener("change", () => {
-  applyGizmo();
+  applyGizmo({ asked: true });
   showAxes();
 });
 
@@ -604,9 +841,8 @@ window.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   const scene3d = window.scene3d;
   if (GIZMO_KEYS[key]) {
-    if (gizmoEl.disabled) return;
     gizmoEl.value = GIZMO_KEYS[key];
-    applyGizmo();
+    applyGizmo({ asked: true });
   } else if ("xyz".includes(key)) {
     constrain(key);
   } else if (key === "a") {
@@ -664,9 +900,12 @@ window.addEventListener("message", (event) => {
     // a plain pick, or the Scene tree: one object, and the set restarts
     selectedIds = message.objectId ? [message.objectId] : [];
     window.scene3d?.highlight(selectedIds);
-    applyGizmo();
+    // Picking something is the moment to hear that the mode in force does not
+    // apply to it: the alternative is an empty view and a tooltip nobody has
+    // a reason to hover. Once per selection, not once per redraw.
+    applyGizmo({ asked: true });
     showSelection();
-    show(""); // the last drag's numbers were about something else
+    renderReadout(); // the last drag's numbers were about something else
   } else if (message.type === "refresh") {
     // Pushed by the host after any edit (inspector, chat tool, tree, a
     // variable slider being dragged) — the one that can arrive fastest.
