@@ -54,6 +54,18 @@ jobs:
       # The extension spawns `python -m magpylib_studio`; with no .venv here it
       # falls through to python3 on PATH, which is this one.
       - run: pip install -e .
+      # The 3D scene graph needs magpylib's display-backend API, which is not
+      # in a release yet. Without it `check:scene` has nothing to measure and
+      # says so, and `npm run compile` goes green having skipped the check
+      # that exists to catch a scene the view cannot draw -- so the one place
+      # it was meant to guard was the one place it was silent. It also means
+      # the extension is exercised where its main view can actually draw.
+      #
+      # The cost is that this job now rides on magpylib main. Released is
+      # still covered, by the engine job's other leg.
+      - name: Use magpylib main, which the scene graph needs
+        run:
+          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
       - name: Install
         working-directory: vscode-extension
         run: npm ci
