@@ -1,7 +1,7 @@
 # FEM integration — plan
 
 Companion to `CONTINUE.md`. Written to be committed and edited in place as
-decisions land. Where a decision is made, the reason it was made *and* the
+decisions land. Where a decision is made, the reason it was made _and_ the
 reason the alternative was rejected are both recorded — the alternatives here
 are all defensible, so a bare verdict would be re-litigated in six months.
 
@@ -13,9 +13,9 @@ Status: **nothing is built yet.** This is M0.
 
 Magpylib computes the field of ideally polarized bodies, analytically, in
 milliseconds. FEM computes the field of real materials in a truncated domain,
-numerically, in minutes. The interesting thing is not that one checks the
-other. It is that **the gap between them is a measurable quantity, and that
-quantity is the domain boundary of the analytic model.**
+numerically, in minutes. The interesting thing is not that one checks the other.
+It is that **the gap between them is a measurable quantity, and that quantity is
+the domain boundary of the analytic model.**
 
 The pitch is therefore not "validate magpylib with FEM". It is:
 
@@ -27,10 +27,9 @@ The pitch is therefore not "validate magpylib with FEM". It is:
 `apply_demag(collection, susceptibility=...)` is a dense interaction-matrix MoM
 over meshed cells; it buys self-demagnetization, inhomogeneous polarization and
 linear soft-magnetic μr ~ 1000. It does **not** buy nonlinear B-H (saturation),
-eddy currents, transients or thermal coupling. So once it is integrated, the
-FEM claim narrows from the vague "validates everything" to the sharp and
-defensible **"finds the saturation boundary, and audits the MoM in its hard
-regime"**.
+eddy currents, transients or thermal coupling. So once it is integrated, the FEM
+claim narrows from the vague "validates everything" to the sharp and defensible
+**"finds the saturation boundary, and audits the MoM in its hard regime"**.
 
 ### 1.1 The standing rule
 
@@ -38,28 +37,27 @@ regime"**.
 > both.**
 
 Both sides have knobs — mesh refinement and domain size on the FEM side, cell
-count on the MoM side, `meshing` on `getFT`. A comparison that sweeps neither
-is two unconverged numbers with the residual reported as physics. This rule is
-why every fixture in §8 carries convergence metadata, and why the M3 gate is
-about *convergence* rather than about a single error figure.
+count on the MoM side, `meshing` on `getFT`. A comparison that sweeps neither is
+two unconverged numbers with the residual reported as physics. This rule is why
+every fixture in §8 carries convergence metadata, and why the M3 gate is about
+_convergence_ rather than about a single error figure.
 
 ---
 
 ## 2. The validation ladder
 
 The backbone of the whole plan. Each tier turns on exactly one physical effect,
-has a different oracle, and answers a different question. **Do not merge
-tiers** — a disagreement that could have come from two sources tells you
-nothing.
+has a different oracle, and answers a different question. **Do not merge tiers**
+— a disagreement that could have come from two sources tells you nothing.
 
-| Tier | Physics on | Oracle | What a pass means |
-|---|---|---|---|
-| **0** | μr = 1, one body, vacuum | magpylib analytic (**exact**) | The *translation* is correct: pose, units, sign, Hc, geometry |
-| **1** | μr = 1.05 (NdFeB self-demag) | material-response, cross-checked by FEM | Three-way agreement; and the size of magpylib's own error is now *measured* |
-| **2** | linear soft-magnetic, μr ~ 1000 | FEM (material-response under audit) | The MoM is trustworthy at N cells — or it is not, and we know the N |
-| **3** | nonlinear B-H | FEM only (FEMM in 2D) | Both analytic methods are **out of domain**; the deliverable is the boundary |
-| **4** | force & torque | `getFT` vs virtual work / Maxwell stress | Deferred; see §10.5 |
-| — | eddy currents, transient, thermal | — | **Explicitly out of scope.** Named so nobody expects it. |
+| Tier  | Physics on                        | Oracle                                   | What a pass means                                                            |
+| ----- | --------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------- |
+| **0** | μr = 1, one body, vacuum          | magpylib analytic (**exact**)            | The _translation_ is correct: pose, units, sign, Hc, geometry                |
+| **1** | μr = 1.05 (NdFeB self-demag)      | material-response, cross-checked by FEM  | Three-way agreement; and the size of magpylib's own error is now _measured_  |
+| **2** | linear soft-magnetic, μr ~ 1000   | FEM (material-response under audit)      | The MoM is trustworthy at N cells — or it is not, and we know the N          |
+| **3** | nonlinear B-H                     | FEM only (FEMM in 2D)                    | Both analytic methods are **out of domain**; the deliverable is the boundary |
+| **4** | force & torque                    | `getFT` vs virtual work / Maxwell stress | Deferred; see §10.5                                                          |
+| —     | eddy currents, transient, thermal | —                                        | **Explicitly out of scope.** Named so nobody expects it.                     |
 
 **Tier 0 is the only tier where the answer is known a priori**, and it is
 therefore the only tier that can find bugs in our own code rather than in
@@ -104,16 +102,16 @@ Pure functions over magpylib objects. No solver import, no vendor import, no
 document. Every convention below was **verified against magpylib 5.x in this
 checkout**, not read off documentation:
 
-| Quantity | magpylib | Verified |
-|---|---|---|
-| `Cuboid` | `position` = **center**; `dimension` = **full** edge lengths (a,b,c); body spans ±dim/2 in the local frame | `getJ` at center = J, just past the +x face = 0 |
-| `Cylinder` | `dimension` = (**diameter**, height); axis = local z; z ∈ ±h/2 | `getJ` at z=1.9 = J, z=2.1 = 0 for h=4 |
-| `Sphere` | `diameter`, not radius | — |
-| `CylinderSegment` | `dimension` = (r1, r2, h, φ1, φ2), **degrees**; position = center of the full cylinder; z ∈ ±h/2 | probe inside at (1.5, 0.1, 0), outside at z=0.6 for h=1 |
-| polarization | `.polarization` is in the **local frame** | 90° about x maps (0,0,1) → (0,−1,0) |
-| world-frame J | `orientation.apply(polarization)` | matches `getJ` inside the body exactly |
-| magnetization | M = J/μ0 | 1 T → 795 774.715 564 55 A/m, μ0 = 1.256 637 061 27e−6 |
-| pose → euler | `orientation.as_euler("ZXZ", degrees=True)` (scipy uppercase = **intrinsic**) | 90° about x → (0, 90, 0) |
+| Quantity          | magpylib                                                                                                   | Verified                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `Cuboid`          | `position` = **center**; `dimension` = **full** edge lengths (a,b,c); body spans ±dim/2 in the local frame | `getJ` at center = J, just past the +x face = 0         |
+| `Cylinder`        | `dimension` = (**diameter**, height); axis = local z; z ∈ ±h/2                                             | `getJ` at z=1.9 = J, z=2.1 = 0 for h=4                  |
+| `Sphere`          | `diameter`, not radius                                                                                     | —                                                       |
+| `CylinderSegment` | `dimension` = (r1, r2, h, φ1, φ2), **degrees**; position = center of the full cylinder; z ∈ ±h/2           | probe inside at (1.5, 0.1, 0), outside at z=0.6 for h=1 |
+| polarization      | `.polarization` is in the **local frame**                                                                  | 90° about x maps (0,0,1) → (0,−1,0)                     |
+| world-frame J     | `orientation.apply(polarization)`                                                                          | matches `getJ` inside the body exactly                  |
+| magnetization     | M = J/μ0                                                                                                   | 1 T → 795 774.715 564 55 A/m, μ0 = 1.256 637 061 27e−6  |
+| pose → euler      | `orientation.as_euler("ZXZ", degrees=True)` (scipy uppercase = **intrinsic**)                              | 90° about x → (0, 90, 0)                                |
 
 Two off-by-two traps are recorded above deliberately: `Cylinder` and `Sphere`
 take **diameter**, and `Cuboid` takes **full** edge lengths while `create_box`
@@ -128,15 +126,14 @@ and μr = 1.05 is **a different magnet**, and it will disagree — correctly.
 So every emitter takes an explicit mode:
 
 - **ideal** (μr = 1): reproduces magpylib exactly. Used for tier 0. Validates
-  *our translation*.
+  _our translation_.
 - **physical** (μr from the datasheet): the real magnet. Used for tiers 1+.
-  Measures *the modelling error*.
+  Measures _the modelling error_.
 
 Conflating these is the single easiest way to produce a comparison that means
-nothing while looking rigorous. The mode is a required argument with no
-default.
+nothing while looking rigorous. The mode is a required argument with no default.
 
-### 3.3 What is *not* in the layer
+### 3.3 What is _not_ in the layer
 
 Anything that touches the studio document: variables, the event log, `sweep()`,
 `_scene_extent()`, the UI. See §4.
@@ -148,20 +145,20 @@ Anything that touches the studio document: variables, the event log, `sweep()`,
 Asked to compare rather than assume. Three options, and the recommendation is a
 split rather than a pick.
 
-**A. Standalone `magpylib-fem`.** Operates on magpylib objects only.
-*For:* a plain magpylib user gets the validation story without ever opening
-studio — which matters, since tier-1 is a community deliverable. Heavy solver
-deps and a heavy CI matrix (NGSolve wheels, possibly Windows for FEMM) stay out
-of studio's 181-test suite and its 0.26 s cold start. Own release cadence.
-*Against:* a third repo; and the *parametric* half genuinely needs the document,
-so it would be stranded.
+**A. Standalone `magpylib-fem`.** Operates on magpylib objects only. _For:_ a
+plain magpylib user gets the validation story without ever opening studio —
+which matters, since tier-1 is a community deliverable. Heavy solver deps and a
+heavy CI matrix (NGSolve wheels, possibly Windows for FEMM) stay out of studio's
+181-test suite and its 0.26 s cold start. Own release cadence. _Against:_ a
+third repo; and the _parametric_ half genuinely needs the document, so it would
+be stranded.
 
-**B. Inside magpylib-studio.** *For:* direct access to the document, the event
-log, `sweep()` and `_scene_extent()`; one repo, no version dance.
-*Against:* solver dependencies land in a package whose selling point is being a
-light engine; a plain magpylib user gets nothing.
+**B. Inside magpylib-studio.** _For:_ direct access to the document, the event
+log, `sweep()` and `_scene_extent()`; one repo, no version dance. _Against:_
+solver dependencies land in a package whose selling point is being a light
+engine; a plain magpylib user gets nothing.
 
-**C. Inside magpylib core.** *Rejected.* Core is deliberately analytic-only and
+**C. Inside magpylib core.** _Rejected._ Core is deliberately analytic-only and
 has no parametric document to export from. A vendor emitter there is a coupling
 with no upside for the library's actual job.
 
@@ -169,10 +166,10 @@ with no upside for the library's actual job.
 
 Not a compromise — the actual boundary:
 
-- **`magpylib-fem`**: everything that operates on *magpylib objects*. Geometry
+- **`magpylib-fem`**: everything that operates on _magpylib objects_. Geometry
   and material translation, pose, the occupancy test (§8.2), solver drivers,
   comparison metrics, fixtures. Solvers as optional extras.
-- **magpylib-studio**: everything that operates on the *document*. Variables →
+- **magpylib-studio**: everything that operates on the _document_. Variables →
   design variables, event log → modeler history, `sweep()` → parametric setup,
   the residual view. Depends on `magpylib-fem` as an extra.
 
@@ -205,27 +202,26 @@ verdict is written back into this section.
 
 ### 5.2 Candidates
 
-| | 3D | PM source | Python | License | Open bdy | Nonlinear |
-|---|---|---|---|---|---|---|
-| **NGSolve/Netgen** | ✓ | ✓ tutorial | ✓✓ pip, `netgen.occ` | LGPL | ✗ DIY | DIY |
-| **Gmsh + GetDP** | ✓ | ✓✓ mature `.pro` | gmsh pip / getdp subprocess | GPL ⚠ | ✓✓ shell transform | ✓ |
-| **Elmer** | ✓ | ✓ | ✗ SIF files | LGPL | partial | ✓ |
-| **FEMM + pyfemm** | ✗ 2D | ✓✓ | ✓ | free-ish | ✓ | ✓✓ |
-| dolfinx / scikit-fem / PyMFEM | ✓ | you write it | ✓ | — | DIY | DIY |
+|                               | 3D   | PM source        | Python                      | License  | Open bdy           | Nonlinear |
+| ----------------------------- | ---- | ---------------- | --------------------------- | -------- | ------------------ | --------- |
+| **NGSolve/Netgen**            | ✓    | ✓ tutorial       | ✓✓ pip, `netgen.occ`        | LGPL     | ✗ DIY              | DIY       |
+| **Gmsh + GetDP**              | ✓    | ✓✓ mature `.pro` | gmsh pip / getdp subprocess | GPL ⚠    | ✓✓ shell transform | ✓         |
+| **Elmer**                     | ✓    | ✓                | ✗ SIF files                 | LGPL     | partial            | ✓         |
+| **FEMM + pyfemm**             | ✗ 2D | ✓✓               | ✓                           | free-ish | ✓                  | ✓✓        |
+| dolfinx / scikit-fem / PyMFEM | ✓    | you write it     | ✓                           | —        | DIY                | DIY       |
 
 **The honest read: GetDP is stronger on physics, NGSolve is stronger on
-integration.** NGSolve's `netgen.occ` gives `Box`/`Cylinder`/`Sphere`
-primitives that mirror magpylib's the same way pyAEDT's modeler does, so one
-geometry emitter serves both targets — that is a real architectural saving.
-GetDP brings mature magnetostatic formulations *including* a shell
-transformation for the open boundary, which is the thing most likely to
-dominate our error budget. This tension is exactly why it is a spike and not a
-verdict.
+integration.** NGSolve's `netgen.occ` gives `Box`/`Cylinder`/`Sphere` primitives
+that mirror magpylib's the same way pyAEDT's modeler does, so one geometry
+emitter serves both targets — that is a real architectural saving. GetDP brings
+mature magnetostatic formulations _including_ a shell transformation for the
+open boundary, which is the thing most likely to dominate our error budget. This
+tension is exactly why it is a spike and not a verdict.
 
-FEMM is not a competitor: it is a **2D nonlinear oracle**. Seconds per solve
-and decades of validation mean you can run hundreds of axisymmetric cases,
-which is how tier 3 gets any statistical weight. Plan to have it *as well*, not
-*instead*.
+FEMM is not a competitor: it is a **2D nonlinear oracle**. Seconds per solve and
+decades of validation mean you can run hundreds of axisymmetric cases, which is
+how tier 3 gets any statistical weight. Plan to have it _as well_, not
+_instead_.
 
 The pure-FEM-library options are rejected as backends for one reason: you would
 be writing a solver (gauge fixing, truncation, PM source term) rather than
@@ -266,8 +262,8 @@ AEDT wants `"5mm"`, solvers want consistent SI.
 ### Why not unit-carrying values
 
 Because `"5mm"` does not start with `=`, so today it is a **string literal**.
-Making it a quantity breaks the one rule expressions.py is built on — *a string
-starting with `=` is an expression, anything else is a literal* — which is the
+Making it a quantity breaks the one rule expressions.py is built on — _a string
+starting with `=` is an expression, anything else is a literal_ — which is the
 rule that keeps `"z"` an axis name with no per-field whitelist. That rule is
 worth more than dimensional analysis.
 
@@ -277,7 +273,7 @@ worth more than dimensional analysis.
 `CONTINUE.md` worry becomes moot), untouched evaluator semantics, readable AEDT
 output, readable sliders.
 
-**Does not buy:** dimensional *checking*. `gap * current` will not be caught.
+**Does not buy:** dimensional _checking_. `gap * current` will not be caught.
 That is the honest cost, and it is the right trade — magpylib does not check
 dimensions either, and inventing a dimensional algebra to serve a display
 concern is the tail wagging the dog.
@@ -305,8 +301,8 @@ Ansys emitter first means the translation is only ever validated by eyeball —
 and eyeball validation of a plausible-looking field is not validation.
 
 Doing the open path first means that by the time the AEDT script exists, its
-physics layer has already been checked against an exact analytic solution and
-an independent numerical one.
+physics layer has already been checked against an exact analytic solution and an
+independent numerical one.
 
 ---
 
@@ -328,7 +324,7 @@ The cheapest high-value test in the plan, and it needs nothing installed.
 body, zero outside** (verified). So:
 
 > Sample `getJ` on a grid. Compare against a point-membership predicate built
-> from the *emitted* geometry. Any disagreement is a translation bug.
+> from the _emitted_ geometry. Any disagreement is a translation bug.
 
 This catches the entire class of translation errors — center-vs-corner,
 diameter-vs-radius, degrees-vs-radians, local-vs-world polarization, wrong euler
@@ -345,8 +341,8 @@ instead.
 
 Every emitter's output is deterministic strings; snapshot them. The project
 already has this discipline (canonical expression spacing, fixed document key
-order — "the same document is the same text however it was assembled"), so a
-new emitter inherits it.
+order — "the same document is the same text however it was assembled"), so a new
+emitter inherits it.
 
 Then parse the emitted script with `ast` and check every call against an
 allow-list with the right arity and kwargs.
@@ -363,9 +359,9 @@ from ansys.aedt.core.modeler.modeler_3d import Modeler3D
 # every call in the emitted script: does the method exist? are the kwargs real?
 ```
 
-This catches the *actual* failure mode — pyAEDT renaming a kwarg on
-`pip install -U`. There is precedent: the package already moved from `pyaedt`
-to `ansys.aedt.core`. Zero license cost, highest value per line in the suite.
+This catches the _actual_ failure mode — pyAEDT renaming a kwarg on
+`pip install -U`. There is precedent: the package already moved from `pyaedt` to
+`ansys.aedt.core`. Zero license cost, highest value per line in the suite.
 
 ### 8.5 Open-solver reference solves
 
@@ -373,15 +369,15 @@ Nightly / `-m solver`, not on every PR. Compared against committed fixtures.
 
 ### 8.6 The licensed Maxwell gate
 
-Manual, before a release, on the Maxwell 3D seat. A handful of reference
-scenes, not a suite. Regenerates the AEDT fixtures; **the diff is reviewed**.
+Manual, before a release, on the Maxwell 3D seat. A handful of reference scenes,
+not a suite. Regenerates the AEDT fixtures; **the diff is reviewed**.
 
 ### 8.7 Fixture discipline
 
 `fixtures/<scene>.<solver>.json`, holding: scene hash, solver name + version,
-mesh and domain parameters, probe points, B values, **and convergence
-metadata** (§1.1). Regeneration is an explicit command. A change in numbers
-without a change in scene is a finding, not a rubber stamp.
+mesh and domain parameters, probe points, B values, **and convergence metadata**
+(§1.1). Regeneration is an explicit command. A change in numbers without a
+change in scene is a finding, not a rubber stamp.
 
 ### 8.8 ⚠ Publishing benchmark numbers
 
@@ -398,51 +394,48 @@ primary rather than a nice-to-have.
 Front-loaded so the cheap, reversible work comes first and each stage can stop
 without waste.
 
-**M0 — Decide and record.** This document. *No gate.*
+**M0 — Decide and record.** This document. _No gate._
 
 **M1 — Physics layer, target-free.** Pure functions plus tests; §3.1 conventions
 and §3.2 mode switch. Lands in `magpylib-fem`. No solver, no vendor, no
-document.
-→ **G1:** every convention pinned by a test; occupancy test (§8.2) green for
-the four primitives against a pure-Python membership evaluator.
-*This milestone is worth having even if everything after it is abandoned.*
+document. → **G1:** every convention pinned by a test; occupancy test (§8.2)
+green for the four primitives against a pure-Python membership evaluator. _This
+milestone is worth having even if everything after it is abandoned._
 
 **M2 — Driver interface + reference scene set.** Define `solve(...)` (§5.3).
-Choose ~6 scenes: cube, cylinder, sphere, facing pair, Halbach ring,
-magnet + pole piece.
-→ **G2:** the interface is implementable on paper for both candidates.
+Choose ~6 scenes: cube, cylinder, sphere, facing pair, Halbach ring, magnet +
+pole piece. → **G2:** the interface is implementable on paper for both
+candidates.
 
 **M3 — The spike. Two backends, one scene, measured.** Timeboxed. A 10 mm cube,
 1 T, μr = 1, probes on a line from 5 mm to 50 mm. Measure tier-0 error against
-*both* convergence knobs, wall-clock at an interactive mesh, lines of code,
-install friction on three platforms.
-→ **G3 (go/no-go):** tier-0 error converges under mesh refinement **and**
-domain growth to < 0.5 % of mean |B| on the probe line, in at least one backend,
-at tolerable cost. **If it does not converge, stop and re-plan** — everything
-downstream is worthless without tier 0. Write the verdict back into §5.
+_both_ convergence knobs, wall-clock at an interactive mesh, lines of code,
+install friction on three platforms. → **G3 (go/no-go):** tier-0 error converges
+under mesh refinement **and** domain growth to < 0.5 % of mean |B| on the probe
+line, in at least one backend, at tolerable cost. **If it does not converge,
+stop and re-plan** — everything downstream is worthless without tier 0. Write
+the verdict back into §5.
 
 **M4 — Tiers 0 and 1 across the reference set.** Fixtures committed. Three-way
-agreement: analytic / material-response / FEM.
-→ **G4:** the "magpylib alone is X % low" curve over L/D reproduces the
-expectation the docs already state (~5 % for typical geometries).
-*First publishable artifact.*
+agreement: analytic / material-response / FEM. → **G4:** the "magpylib alone is
+X % low" curve over L/D reproduces the expectation the docs already state (~5 %
+for typical geometries). _First publishable artifact._
 
-**M5 — Units.** §6. Independent of M1–M4, blocks M6.
-→ **G5:** every existing document loads unchanged; script round-trip stable.
+**M5 — Units.** §6. Independent of M1–M4, blocks M6. → **G5:** every existing
+document loads unchanged; script round-trip stable.
 
 **M6 — pyAEDT emitter.** Reuses M1 wholesale. Golden text + AST + signature
-conformance in CI; manual Maxwell gate produces AEDT fixtures.
-→ **G6:** tier-0 agreement in Maxwell matches the open solver's tier-0
-agreement to within the two solvers' own spread.
+conformance in CI; manual Maxwell gate produces AEDT fixtures. → **G6:** tier-0
+agreement in Maxwell matches the open solver's tier-0 agreement to within the
+two solvers' own spread.
 
 **M7 — Studio integration.** Document → FEM; `sweep()` → parametric comparison;
-residual view; domain-size diagnostic.
-→ **G7:** a slider drag re-runs analytic instantly and queues FEM
-asynchronously without blocking the UI.
+residual view; domain-size diagnostic. → **G7:** a slider drag re-runs analytic
+instantly and queues FEM asynchronously without blocking the UI.
 
 **M8 — Tiers 2 and 3, and the boundary story.** Soft-magnetic; saturation with
-FEMM as the 2D nonlinear oracle. Public deliverable: *here is where the analytic
-model stops*.
+FEMM as the 2D nonlinear oracle. Public deliverable: _here is where the analytic
+model stops_.
 
 **Later / maybe never:** tier 4 force, filament currents, reverse import.
 
@@ -462,7 +455,7 @@ on the Ansys side, which approximates open boundaries far better than a zero-A
 outer wall.
 
 **A diagnostic worth building:** compare magpylib's analytic far field against
-the FEM field *on the truncation surface*. If they differ by more than a set
+the FEM field _on the truncation surface_. If they differ by more than a set
 tolerance, the box is too small — reported to the user rather than silently
 absorbed into the residual. (Using the analytic field as an outer Dirichlet
 condition to shrink the box is a tempting extension, but it is only valid when
@@ -481,15 +474,15 @@ clearance in the fixture.
 
 `current.Circle` and `current.Polyline` are ideal filaments: infinite field on
 the wire, no volume. FEM needs a cross-section, and Maxwell needs closed loops
-or terminals on a boundary. This is a *modelling decision the user must make*,
+or terminals on a boundary. This is a _modelling decision the user must make_,
 not something an exporter may guess. Follow the existing precedent — `mirror`
 refuses a Tetrahedron by name, honestly — and either refuse or require an
 explicit cross-section.
 
 ### 10.4 material-response scaling
 
-`apply_demag` builds a dense interaction matrix: O(n²) in cells. Tier 2 (μr ~
-1000) is exactly where cell counts want to explode and the matrix conditions
+`apply_demag` builds a dense interaction matrix: O(n²) in cells. Tier 2 (μr
+~ 1000) is exactly where cell counts want to explode and the matrix conditions
 badly. Use `max_dist` / `pairs_matching`, and cap scene size in tier-2 fixtures.
 
 ### 10.5 Force is cancellation-prone
@@ -500,13 +493,13 @@ mesh-noise-dominated, both have independent convergence knobs. Folding force
 into tiers 0–3 would contaminate them. It gets its own tier, its own criteria,
 and it goes last.
 
-*(Sanity check already run: two 1 m, 1 T cubes 3 m apart, both polarized +z,
+_(Sanity check already run: two 1 m, 1 T cubes 3 m apart, both polarized +z,
 give −2331 N on the target — side-by-side parallel dipoles repel. The sign is
-right, which is the first thing to check in any force comparison.)*
+right, which is the first thing to check in any force comparison.)_
 
 ### 10.6 License hygiene
 
-Studio is BSD-3. LGPL (NGSolve, Elmer) is fine as an *optional import*. GPL
+Studio is BSD-3. LGPL (NGSolve, Elmer) is fine as an _optional import_. GPL
 (gmsh, GetDP) stays at **subprocess distance** and never becomes a hard
 dependency. FEMM has its own free-but-not-OSI license. And see §8.8 for Ansys.
 
@@ -533,8 +526,8 @@ tier-0 regression is a release blocker, not a warning.
   (§10.1) — worth a measurement, not yet worth a commitment.
 - **The reverse direction.** FEM result → magpylib source (interpolated field or
   `CustomSource`), which would close the loop for system-level modelling. The
-  magpylib docs already gesture at exactly this: *"the field might not be
+  magpylib docs already gesture at exactly this: _"the field might not be
   accessible through Magpylib, e.g. when demagnetization is included, but it can
-  be computed with a 3rd party FE tool"*. Not planned; noted because the docs
+  be computed with a 3rd party FE tool"_. Not planned; noted because the docs
   asked for it first.
 - **Is tier 4 (force) worth the trouble at all**, given §10.5.
