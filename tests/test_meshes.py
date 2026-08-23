@@ -718,12 +718,17 @@ def test_a_superquadric_script_imports_nothing_it_does_not_use():
         pytest.param("hull", id="from a point cloud"),
     ],
 )
-def test_a_mesh_survives_the_script_round_trip_as_a_source(source, cube_stl, tmp_path):
-    """The document is canonical and the script is generated, and the two have
-    to agree down to the byte or the script tab churns on its first save. The
-    stake here is higher than usual: parsed, the mesh stays a reference;
-    *executed*, `pv.read(...)` would come back as the numbers that were in
-    the file that day, and the next save would write them into the document.
+def test_a_mesh_is_recorded_as_its_source_not_its_vertices(source, cube_stl, tmp_path):
+    """A mesh is held as where it came from, in the document and in the script
+    alike — measured before it was chosen: a 1000-vertex part is a 207 KB
+    document and a 103 KB script on one line, and a real CAD export is 20x
+    that.
+
+    This used to also assert that reading the script back kept the reference,
+    which only held while the script was *parsed*. Generation is one-way now
+    (`docs/direction.md` §5.1), so running a script rebuilds the geometry the
+    file held that day. What the reference protects is the document and the
+    script it writes, which is what is checked here.
     """
     session = MagpylibStudioSession()
     if source == "file":
@@ -737,15 +742,13 @@ def test_a_mesh_survives_the_script_round_trip_as_a_source(source, cube_stl, tmp
     session.move("rotor", [0, 0, 0.05])
     document = session.to_dict()
 
-    script = tmp_path / "scene.py"
-    script.write_text(session.to_script())
-    reopened = MagpylibStudioSession()
-    reopened.set_base_dir(str(cube_stl.parent))
-    result = reopened.apply_script(str(script))
+    spec = document["objects"][0]
+    assert "mesh_source" in spec["params"], "the document holds the source"
+    assert "vertices" not in spec["params"], "and not what it resolved to"
 
-    assert result["ok"] is True
-    assert result["mode"] == "parsed"  # not executed: the reference survives
-    assert json.dumps(reopened.to_dict()) == json.dumps(document)
+    text = session.to_script()
+    assert len(text) < 4000, "the script names the source rather than inlining it"
+    assert "faces=" not in text
 
 
 def test_the_script_says_what_a_magpylib_user_would_have_written(cube_stl):

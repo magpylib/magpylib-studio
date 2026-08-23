@@ -523,29 +523,35 @@ and drives it.
     ($(code) icon on the Scene view), Save Scene As… (.py or .json via
     extension), Load Scene from File… (JSON; also linked in the empty-view
     welcome).
-  - **The script tab is editable both ways**: it is a real file in extension
-    storage (a content provider has no write side), regenerated from the scene
-    on every edit and applied back with `apply_script` on save — one undo step
-    labelled "edit script". Edits are never clobbered while the buffer is dirty
-    or while it holds text the engine rejected. `to_script` deliberately emits
-    no wrapper Collection (`magpy.show(a, b, …)`), and the importer names nested
-    children from script variables, so script → doc → script is an identity on
-    ids and structure. **Two ways in, reported as `mode`:** _parsed_ — the file
-    is still in the shape `to_script` emits, so `importer.parse_script` reads it
-    as source: variables, event order and group transforms all survive, literals
-    keep the form they were written in, and the whole document round-trips
-    byte-identically (verified on the 24-object example). _executed_ — anything
-    else (a loop, a helper, numpy) is run and introspected, which cannot see how
-    the scene was written, so it warns about what it flattened. The script tab
-    is therefore also the **only UI variables and duplicate events have**: you
-    write them as Python, save, and they land in the document. Being a real
-    file, VS Code restores its tab across a window reload — so the path is fixed
-    at activation (not when the tab is first opened) and
-    `adoptRestoredScriptTab` re-renders whatever was restored against the scene
-    the engine has _now_; otherwise the tab silently shows the previous window's
-    project until it is closed and reopened. That is also why the extension
-    activates on `onStartupFinished`: a tab it owns can be on screen before the
-    user asks for anything. Unsaved edits (hot exit) are still left alone.
+  - **The script tab renders the scene; it does not read back.** It is a real
+    file in extension storage (a content provider has no write side),
+    regenerated from the scene on every edit. Edits are never clobbered while
+    the buffer is dirty. `to_script` deliberately emits no wrapper Collection
+    (`magpy.show(a, b, …)`), and the importer names nested children from script
+    variables.
+    - **Generation is one-way** (`docs/direction.md` §5.1). `parse_script` and
+      `apply_script` are gone, and with them the matched emitter/parser idiom
+      pairs and the two-tier cliff: a structured tier defined by whatever
+      `to_script` happened to emit, which one helper function or one scipy call
+      dropped you out of silently. `importer.py` went from 1133 lines to 372.
+    - **Why the tab is not editable-both-ways any more.** Applying by execution
+      was tried and is worse than the cliff. Running an edited script recovers
+      only the objects it leaves behind — so a save that changed _nothing_ still
+      resolved every expression to a number (`=360/(2*n)` → `18.0`), flattened
+      every pattern into its copies, and dropped the slider limits. Silent
+      degradation on `Cmd+S`. Saving now offers **"Build a new scene from
+      this"**, which runs `importScript` — the same capability, made explicit
+      and opt-in rather than something a reflexive save does to you.
+    - Consequence worth knowing: **variables and duplicate events have no
+      text-editing UI any more**. They have panels; the script is no longer a
+      way in. Being a real file, VS Code restores its tab across a window reload
+      — so the path is fixed at activation (not when the tab is first opened)
+      and `adoptRestoredScriptTab` re-renders whatever was restored against the
+      scene the engine has _now_; otherwise the tab silently shows the previous
+      window's project until it is closed and reopened. That is also why the
+      extension activates on `onStartupFinished`: a tab it owns can be on screen
+      before the user asks for anything. Unsaved edits (hot exit) are still left
+      alone.
   - Python resolution: `magpylib-studio.pythonPath` setting → workspace/.venv →
     repo-root/.venv → `python3`. Engine stderr → output channel.
   - Verified via `node` smoke test driving compiled `EngineClient` against the
