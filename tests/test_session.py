@@ -3557,8 +3557,13 @@ def test_a_create_event_is_where_an_object_is_changed_after_the_fact():
 
 def test_placing_an_object_repeatedly_does_not_grow_the_log():
     """Nudging a position field is one act of placing something. A log that
-    grew by two entries per nudge would be unreadable, which is the thing it
-    most needs not to be."""
+    grew by an entry per nudge would be unreadable, which is the thing it most
+    needs not to be.
+
+    One entry, not two: placing something says nothing about which way it
+    faces, and an orientation recorded anyway goes on pinning it against
+    everything that turns the rest — see `_set_world_pose`.
+    """
     s = MagpylibStudioSession()
     s.add_object(
         "m", "magnet.Cuboid", {"polarization": [0, 0, 1], "dimension": [1, 1, 1]}
@@ -3566,12 +3571,7 @@ def test_placing_an_object_repeatedly_does_not_grow_the_log():
     s.add_object("n", "magnet.Sphere", {"polarization": [0, 0, 1], "diameter": 1})
     for x in range(4):
         s.set_transform("m", position=[x, 0, 0])
-    assert [e["op"] for e in s.doc["events"]] == [
-        "create",
-        "create",
-        "position",
-        "orientation",
-    ]
+    assert [e["op"] for e in s.doc["events"]] == ["create", "create", "position"]
 
     # but once anything else has happened, order matters and it must append
     s.set_transform("n", position=[9, 0, 0])
@@ -3580,14 +3580,19 @@ def test_placing_an_object_repeatedly_does_not_grow_the_log():
         "create",
         "create",
         "position",
-        "orientation",
         "position",
-        "orientation",
         "position",
-        "orientation",
     ]
+
     assert list(s._objs["m"].position) == [7, 0, 0]
     assert list(s._objs["n"].position) == [9, 0, 0]
+
+    # a pose given both ways still records both, and still collapses to one
+    for x in range(3):
+        s.set_transform("m", position=[x, 1, 0], orientation=[0, 0, x])
+    assert [e["op"] for e in s.doc["events"]][-2:] == ["position", "orientation"]
+    assert len(s.doc["events"]) == 7
+    assert list(s._objs["m"].position) == [2, 1, 0]
 
 
 def test_ordinary_edits_still_refuse_to_break_things():
@@ -4255,6 +4260,365 @@ def test_sweep_reads_the_field_and_leaves_the_scene_where_it_found_it():
     fig = s.get_sweep_figure("gap", [0.01, 0.02])
     assert fig["data"][0]["x"] == [0.01, 0.02]
     assert "gap" in fig["layout"]["title"]["text"]
+
+
+def _mirrored_pair():
+    """A magnet and the mirror image of it — the shape of the shipped pair."""
+    s = MagpylibStudioSession()
+    s.add_object("pair", "Collection")
+    s.add_object(
+        "upper",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, -1], "dimension": [1, 1, 1], "position": [0, 0, 1]},
+        parent="pair",
+    )
+    assert s.mirror("upper", plane="xy", anchor=0) == {"ok": True}
+    return s
+
+
+def test_an_edit_to_a_copied_object_goes_in_before_the_copying():
+    """Dragging the magnet of a mirrored pair moves the pair.
+
+    The copy is taken from the source as it stands when the mirror step runs.
+    Recorded after it — which is where anything appended lands — a move took
+    the source out of its own pattern and left the copy behind, and the view
+    could only refuse the drag, because the copies are drawn on the source's
+    own node and what the handles hold is the pair.
+    """
+    import numpy as np
+
+    s = _mirrored_pair()
+    assert s.set_transform("upper", position=[1, 0, 2]) == {"ok": True}
+
+    assert np.allclose(np.ravel(s._objs["upper"].position), [1, 0, 2])
+    assert np.allclose(np.ravel(s._objs["upper#1"].position), [1, 0, -2])
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops.index("position") < ops.index("mirror")
+
+    # A gesture sends a pose per frame, and each supersedes the last where it
+    # stands: the log holds one pin however long the drag ran.
+    assert s.set_transform("upper", position=[2, 0, 3]) == {"ok": True}
+    assert [e["op"] for e in s.doc["events"]] == ops
+    assert np.allclose(np.ravel(s._objs["upper#1"].position), [2, 0, -3])
+
+
+def test_a_lattice_moves_as_one_when_its_source_is_dragged():
+    """Two pattern steps, and an edit to the magnet belongs before both.
+
+    Before the first, not merely before the one that copied the magnet: the
+    row is copied too, and a move that went in between them would carry the
+    first row and leave the others.
+    """
+    import numpy as np
+
+    s = MagpylibStudioSession()
+    s.add_object("grid", "Collection")
+    s.add_object("row", "Collection", parent="grid")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [1, 1, 1]},
+        parent="row",
+    )
+    assert s.duplicate_along("m", 3, [2, 0, 0]) == {"ok": True}
+    assert s.duplicate_along("row", 2, [0, 2, 0]) == {"ok": True}
+    before = sorted(tuple(np.ravel(o.position)) for o in s._leaf_sources())
+    assert len(before) == 6
+
+    assert s.move("m", [0, 0, 5]) == {"ok": True}
+
+    after = sorted(tuple(np.ravel(o.position)) for o in s._leaf_sources())
+    assert after == sorted(tuple(np.add(p, [0, 0, 5])) for p in before)
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops.index("move") < ops.index("duplicate_along")
+
+
+def test_a_new_pattern_step_still_goes_at_the_end():
+    """Patterning something already patterned is not an edit the existing
+    copies should have been made from — it is another way of making copies."""
+    s = _mirrored_pair()
+    assert s.duplicate_along("upper", 2, [5, 0, 0]) == {"ok": True}
+    assert [e["op"] for e in s.doc["events"]][-2:] == ["mirror", "duplicate_along"]
+
+
+def test_a_pose_that_would_be_overridden_is_recorded_where_it_takes_effect():
+    """A log that already moves the object after the pattern step.
+
+    Inserting before something that overrides it would record an edit with no
+    effect at all. The copies stay behind, as they did before any of this —
+    which is visible, and so is the lesser evil.
+    """
+    import numpy as np
+
+    s = _mirrored_pair()
+    doc = s.to_dict()
+    doc["events"].append(
+        {"id": "e99", "target": "upper", "op": "position", "value": [0, 0, 1]}
+    )
+    assert s.load_scene(doc)["ok"] is True
+
+    assert s.set_transform("upper", position=[3, 0, 1]) == {"ok": True}
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops.index("mirror") < ops.index("position")
+    assert np.allclose(np.ravel(s._objs["upper"].position), [3, 0, 1])
+
+
+def test_the_rollback_bar_still_says_where_an_edit_goes():
+    """An explicit answer to the question beats an inferred one: while the
+    history is rolled back, an edit goes in at the step being shown."""
+    s = _mirrored_pair()
+    assert s.set_rollback(2)["ok"] is True
+    assert s.set_transform("upper", position=[3, 0, 1])["inserted_at"] == 2
+    s.set_rollback()
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops == ["create", "create", "position", "mirror"]
+
+
+def test_a_variable_stops_being_named_once_a_drag_has_taken_the_field():
+    """What a view warns about before a drag, and must stop warning after.
+
+    The warning is worth having: a position written `=gap / 2` is decided by a
+    variable, and a drag sets it outright. But the expression stays in the
+    document — overruled by the absolute pose recorded after it, not replaced
+    — so naming it from the document alone went on warning about a drag that
+    had already happened, which for anything more permanent than a passing
+    remark is a warning that never goes away.
+    """
+    s = MagpylibStudioSession()
+    assert s.set_variable("gap", 2) == {"ok": True}
+    s.add_object("pair", "Collection")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {
+            "polarization": [0, 0, 1],
+            "dimension": [1, 1, 1],
+            "position": [0, 0, "=gap / 2"],
+        },
+        parent="pair",
+    )
+    assert s._parametric_fields()["m"]["position"] == ["gap"]
+
+    # A nudge starts from wherever the variable put it: still deciding.
+    assert s.move("m", [0, 0, 1]) == {"ok": True}
+    assert s._parametric_fields()["m"]["position"] == ["gap"]
+
+    # Set outright, it is not.
+    assert s.set_transform("m", position=[0, 0, 5]) == {"ok": True}
+    assert "position" not in s._parametric_fields().get("m", {})
+    assert s.doc["objects"][0]["children"][0]["params"]["position"][2] == "=gap / 2"
+
+    # Said in an expression again, it decides again.
+    assert s.set_transform("m", position=[0, 0, "=gap"]) == {"ok": True}
+    assert s._parametric_fields()["m"]["position"] == ["gap"]
+
+
+def _driven_magnet():
+    """A magnet whose height off the origin is decided by a variable."""
+    s = MagpylibStudioSession()
+    assert s.set_variable("gap", 2) == {"ok": True}
+    s.add_object("pair", "Collection")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {
+            "polarization": [0, 0, 1],
+            "dimension": [1, 1, 1],
+            "position": [0, 0, "=gap / 2"],
+        },
+        parent="pair",
+    )
+    return s
+
+
+def test_a_variable_a_later_step_overrules_says_so_and_can_be_given_back():
+    """Why a slider can move and nothing happen, and what to do about it.
+
+    A drag states a pose outright. The expression that used to decide it is
+    not removed — it stays in the create step, replayed and then overwritten —
+    so the variable goes on resolving, the slider goes on sliding, and the
+    scene stops listening. Nothing is broken and nothing is lost, which is
+    exactly why it needs saying: there is nothing to notice.
+    """
+    import numpy as np
+
+    s = _driven_magnet()
+    named = lambda: {v["name"]: v for v in s.get_variables()["variables"]}  # noqa: E731
+    assert "inert" not in named()["gap"]
+
+    assert s.set_transform("m", position=[0, 0, 5]) == {"ok": True}
+    gap = named()["gap"]
+    assert gap["inert"] is True
+    assert gap["shadowed"] == [
+        {
+            "object_id": "m",
+            "field": "position",
+            "events": [gap["shadowed"][0]["events"][0]],
+        }
+    ]
+    # the expression is still there: this is a step standing in front of it
+    assert s.doc["objects"][0]["children"][0]["params"]["position"][2] == "=gap / 2"
+    assert s.set_variable("gap", 8) == {"ok": True}
+    assert np.allclose(np.ravel(s._objs["m"].position), [0, 0, 5])
+
+    result = s.restore_variable("gap")
+    assert result["ok"] is True and result["removed"]
+    assert "inert" not in named()["gap"]
+    assert np.allclose(np.ravel(s._objs["m"].position), [0, 0, 4])  # gap is 8
+    assert s.set_variable("gap", 2) == {"ok": True}
+    assert np.allclose(np.ravel(s._objs["m"].position), [0, 0, 1])
+
+
+def test_a_variable_nothing_refers_to_is_inert_with_nothing_to_restore():
+    """The other way to decide nothing: never having been written anywhere.
+    Worth the same mark and a different sentence — there is no step to drop."""
+    s = _driven_magnet()
+    assert s.set_variable("spare", 3) == {"ok": True}
+    spare = {v["name"]: v for v in s.get_variables()["variables"]}["spare"]
+    assert spare["inert"] is True
+    assert "shadowed" not in spare
+    assert s.restore_variable("spare")["ok"] is False
+
+
+def test_a_variable_lives_through_the_variable_that_uses_it():
+    """`stagger = 360 / (2 * n)` keeps `n` alive — while `stagger` is alive."""
+    s = MagpylibStudioSession()
+    assert s.set_variable("n", 4) == {"ok": True}
+    assert s.set_variable("half", "=n / 2") == {"ok": True}
+    inert = lambda: {  # noqa: E731
+        v["name"] for v in s.get_variables()["variables"] if v.get("inert")
+    }
+    assert inert() == {"n", "half"}  # nothing is built from either yet
+
+    s.add_object("grid", "Collection")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [1, 1, 1]},
+        parent="grid",
+    )
+    assert s.duplicate_along("m", "=half", [2, 0, 0]) == {"ok": True}
+    assert inert() == set()  # the step uses half, and half is written in n
+
+
+def test_a_move_records_a_move_and_not_a_turn():
+    """A drag that moved something and turned nothing must not pin its
+    orientation.
+
+    An invented pin outlives the gesture that invented it. In the halbach
+    example a magnet dragged once stopped following the tilt slider for good:
+    the drag wrote a position *and* an orientation, and while the position
+    could be recognised as standing in front of `radius` and taken back, the
+    orientation stood in front of nothing anybody had written — so nothing
+    referred to it, nothing offered to remove it, and it went on holding that
+    one magnet still while every other turned.
+    """
+    import numpy as np
+
+    s = MagpylibStudioSession()
+    assert s.set_variable("tilt", 0) == {"ok": True}
+    s.add_object("rig", "Collection")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [1, 1, 1], "position": [2, 0, 0]},
+        parent="rig",
+    )
+    assert s.rotate("rig", angle="=tilt", axis="z", anchor=0) == {"ok": True}
+
+    assert s.set_transform("m", position=[3, 0, 0]) == {"ok": True}
+    assert [e["op"] for e in s.doc["events"] if e["target"] == "m"] == [
+        "create",
+        "position",
+    ]
+
+    # the step that turns the rig still turns what was dragged
+    assert s.set_variable("tilt", 90) == {"ok": True}
+    assert np.allclose(
+        s._objs["m"].orientation.as_rotvec(degrees=True),
+        [0, 0, np.pi / 2 * 180 / np.pi],
+    )
+
+    # and a drag that does turn something still records the turn
+    assert s.set_transform("m", orientation=[0, 0, 45]) == {"ok": True}
+    assert [e["op"] for e in s.doc["events"] if e["target"] == "m"] == [
+        "create",
+        "position",
+        "orientation",
+    ]
+
+
+def _tilted_ring():
+    """A magnet patterned into a ring, and a tilt of the whole assembly — the
+    shape of the shipped halbach, and the one that has steps replaying over an
+    edit to the magnet."""
+    s = MagpylibStudioSession()
+    assert s.set_variable("tilt", 0) == {"ok": True}
+    s.add_object("rig", "Collection")
+    s.add_object("ring", "Collection", parent="rig")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [1, 1, 1], "position": [4, 0, 0]},
+        parent="ring",
+    )
+    assert s.duplicate_around("m", 4, "z", anchor=[0, 0, 0]) == {"ok": True}
+    assert s.rotate("rig", angle="=tilt", axis="z", anchor=0) == {"ok": True}
+    return s
+
+
+def test_a_pose_written_before_a_step_that_replays_lands_where_it_was_put():
+    """Dragging a magnet in an assembly that is already turned.
+
+    The pose goes in before the step that copies it, so the copies follow —
+    but the steps after it replay over it, and a tilt of the whole rig is one
+    of those. Written as the world pose the pointer let go at, the object
+    would be carried off by exactly that tilt. It has to be written in the
+    frame it will be replayed from, which means measuring what will be
+    replayed: see `_replay_frame`.
+    """
+    import numpy as np
+
+    s = _tilted_ring()
+    assert s.set_variable("tilt", 30) == {"ok": True}
+
+    assert s.set_transform("m", position=[6, 0, 1]) == {"ok": True}
+    assert np.allclose(np.ravel(s._objs["m"].position), [6, 0, 1], atol=1e-9)
+
+    # before the copying, so the ring follows it
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops.index("position") < ops.index("duplicate_around")
+    assert len(s._leaf_sources()) == 4
+    turned = np.ravel(s._objs["m#1"].position)
+    assert np.allclose(np.linalg.norm(turned[:2]), np.linalg.norm([6, 0]))
+
+    # And the tilt still carries it, which is what it stopped doing before:
+    # dropped at 30 degrees and taken to 90, it is turned by the 60 between
+    # them -- not by 90, which would mean the drop had gone in as though the
+    # assembly stood square.
+    assert s.set_variable("tilt", 90) == {"ok": True}
+    turn = np.deg2rad(60)
+    assert np.allclose(
+        np.ravel(s._objs["m"].position),
+        [6 * np.cos(turn), 6 * np.sin(turn), 1],
+        atol=1e-9,
+    )
+
+
+def test_a_pose_a_later_step_pins_is_still_recorded_at_the_end():
+    """A step that carries an object can be solved for; one that states its
+    pose outright cannot — it replaces this edit rather than replaying over
+    it, so there is nothing to write in front of it."""
+    s = _tilted_ring()
+    doc = s.to_dict()
+    doc["events"].append(
+        {"id": "e99", "target": "m", "op": "position", "value": [1, 1, 1]}
+    )
+    assert s.load_scene(doc)["ok"] is True
+
+    assert s.set_transform("m", position=[6, 0, 1]) == {"ok": True}
+    ops = [e["op"] for e in s.doc["events"]]
+    assert ops.index("duplicate_around") < ops.index("position")
 
 
 def test_duplicate_around_keeps_an_arrangement_parametric(tmp_path):

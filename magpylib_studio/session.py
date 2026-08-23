@@ -819,6 +819,11 @@ EXAMPLES = {
 
 # Editable constructor parameters, introspected off the live object.
 # `magnetization` is absent on purpose: it is derived from polarization.
+#: The steps that read an object and leave copies of it behind. An edit to
+#: such an object has to be recorded before the first of them, or the copies
+#: are rebuilt from a version of it that no longer exists.
+_PATTERN_OPS = frozenset({"duplicate_along", "duplicate_around", "mirror"})
+
 _PARAM_ATTRS = (
     "polarization",
     "magnetization",
@@ -884,6 +889,13 @@ _DRAG_WRITES = {
     "shape": (("dimension", "diameter"), ()),
     "polarization": (("polarization",), ()),
 }
+
+#: The ops that state a pose outright rather than adding to it. One of these,
+#: written in numbers, is the point where a variable stops deciding a field:
+#: everything said before it still replays, and is then overwritten. A `move`
+#: is not among them — a numeric nudge of an expression-driven position leaves
+#: the expression deciding where the nudge starts from.
+_ABSOLUTE_OPS = frozenset({"position", "orientation"})
 
 
 # A mirror borrows the body's own z-flip symmetry, so only shapes that have
@@ -1861,6 +1873,9 @@ class MagpylibStudioSession:
         #: What redo held when the current gesture began, to put back if the
         #: gesture turns out to have changed nothing.
         self._interaction_redo: list[dict] = []
+        #: Per object, the motion the steps after its edit replay over it —
+        #: measured once per gesture. See `_replay_frame`.
+        self._replay_frames: dict = {}
         self._captured_scenes: list[dict] = []  # from the last load_script
         #: The animated capture playback reads frames from, or None when it
         #: has to be taken again. Every rebuild drops it: a scene that has
@@ -2962,9 +2977,23 @@ class MagpylibStudioSession:
             mine = [e for e in events if e.get("target") == spec["id"]]
             fields = {}
             for field, (keys, ops) in _DRAG_WRITES.items():
+                sources = [params.get(key) for key in keys] + [
+                    e for e in mine if e.get("op") in ops
+                ]
+                # Everything up to the last outright write in numbers is
+                # answered by it: the variable still appears in the document,
+                # and no longer decides anything the object does. Saying it
+                # did would be a warning that never goes away -- the drag it
+                # warns about having already happened.
+                spent = [
+                    index
+                    for index, source in enumerate(sources)
+                    if isinstance(source, dict)
+                    and source.get("op") in _ABSOLUTE_OPS
+                    and not expressions.contains_expression(source)
+                ]
                 names = expressions.referenced_names(
-                    [params.get(key) for key in keys]
-                    + [e for e in mine if e.get("op") in ops]
+                    sources[spent[-1] + 1 :] if spent else sources
                 )
                 if names:
                     fields[field] = sorted(names)
@@ -3420,37 +3449,126 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"remove {object_id}")
 
-    def _set_world_pose(self, object_id, world_pos, world_rot):
+    def _replay_frame(self, object_id, at):
+        """The rigid motion the steps after `at` will apply to `object_id`.
+
+        A pose recorded in the middle of a log is not the pose the object ends
+        up at: what follows replays over it. Tilting the whole assembly is one
+        of those, and a pose written in front of it lands somewhere else by
+        exactly that tilt — which is why an absolute pose used to be recorded
+        at the end, where nothing followed it. Now that it goes in front of
+        the step that copies the object, the motion it will be carried through
+        has to be measured and taken back out first.
+
+        This is the "probe scene" `_set_world_pose` says it used to build,
+        needed again for the same reason it was needed then: the log no longer
+        ends where the pose is written.
+
+        Returns `(turn, shift)`, where a pose `p` recorded at `at` replays to
+        `turn.apply(p) + shift` — or None where that cannot be measured: a
+        path on either side has no single pose to solve for, and an object
+        that does not exist yet at `at` has nothing to read.
+        """
+        obj = self._objs.get(object_id)
+        if obj is None:
+            return None
+        after_pos = np.asarray(obj.position, dtype=float)
+        after_rot = obj.orientation
+        if after_pos.ndim > 1:
+            return None
+        saved = self._rollback
+        try:
+            self._rollback = at
+            self._build()
+            staged = self._objs.get(object_id)
+            if staged is None:
+                return None
+            before_pos = np.asarray(staged.position, dtype=float)
+            before_rot = staged.orientation
+        finally:
+            # Put the view back but do not rebuild: the caller is inside a
+            # mutation, and `_mutate_doc` builds the real scene on its way out.
+            self._rollback = saved
+        if before_pos.ndim > 1:
+            return None
+        turn = after_rot * before_rot.inv()
+        return turn, after_pos - turn.apply(before_pos)
+
+    def _replay_frame_for(self, object_id, at):
+        """`_replay_frame`, measured once per gesture.
+
+        A drag writes a pose per frame, and the steps that replay over it do
+        not change while the pointer is down — only the pose does. Measuring
+        costs a build, which is the one thing a drag cannot spend per frame.
+        """
+        if self._interaction is None:
+            return self._replay_frame(object_id, at)
+        if object_id not in self._replay_frames:
+            self._replay_frames[object_id] = self._replay_frame(object_id, at)
+        return self._replay_frames[object_id]
+
+    def _set_world_pose(self, object_id, world_pos=None, world_rot=None, insert=True):
         """Pin an object (and, for a Collection, its subtree) to a WORLD pose.
 
         magpylib positions are world coordinates, and the log ends here, so
         the assignment needs no parent-frame correction: nothing runs after it
         to move the object again. Before the log existed this had to measure
         the frame its ancestors would re-apply, by building a probe scene.
+
+        Only what it is given. A drag that moved something and turned nothing
+        has no business recording an orientation — and one recorded anyway
+        outlives its own gesture: it goes on pinning the object against every
+        later step that would have turned it, long after the position it came
+        with has been changed, restored or dropped. Filling in "the
+        orientation it happens to have" is not a no-op; it is a decision that
+        this object no longer takes part in what turns the rest.
         """
-        ops = [
-            {"op": "position", "value": np.round(world_pos, 9).tolist()},
-            {
-                "op": "orientation",
-                "rotvec": np.round(world_rot.as_rotvec(degrees=True), 9).tolist(),
-            },
-        ]
+        events = self.doc.setdefault("events", [])
+        at = self._pattern_step_at(object_id) if insert else None
+        if at is not None:
+            frame = self._replay_frame_for(object_id, at)
+            if frame is None:
+                at = None  # nothing to solve for: back to the end of the log
+            else:
+                turn, shift = frame
+                if world_pos is not None:
+                    world_pos = turn.inv().apply(
+                        np.asarray(world_pos, dtype=float) - shift
+                    )
+                if world_rot is not None:
+                    world_rot = turn.inv() * world_rot
+        ops = []
+        if world_pos is not None:
+            ops.append({"op": "position", "value": np.round(world_pos, 9).tolist()})
+        if world_rot is not None:
+            ops.append(
+                {
+                    "op": "orientation",
+                    "rotvec": np.round(world_rot.as_rotvec(degrees=True), 9).tolist(),
+                }
+            )
+        if not ops:
+            return
         # A pin supersedes the pin it directly follows. Nudging a position
         # field is one act of placing an object, not a dozen — and a log that
         # grew by two entries per nudge would be unreadable, which is the
-        # thing it most needs not to be. Only at the very end of the log:
-        # once anything else has happened, order matters and this must append.
-        events = self.doc.setdefault("events", [])
-        tail = events[-2:]
+        # thing it most needs not to be. Only where this pin belongs: once
+        # anything else has happened after that point, order matters and a
+        # fresh pair goes in rather than one being written over.
+        end = len(events) if at is None else at
+        tail = events[max(0, end - len(ops)) : end]
         if (
-            len(tail) == 2
+            len(tail) == len(ops)
             and all(e.get("target") == object_id for e in tail)
-            and [e.get("op") for e in tail] == ["position", "orientation"]
+            and [e.get("op") for e in tail] == [op["op"] for op in ops]
         ):
-            events[-2] = {**tail[0], **_plain(ops[0])}
-            events[-1] = {**tail[1], **_plain(ops[1])}
+            for offset, op in enumerate(ops):
+                events[end - len(ops) + offset] = {
+                    **tail[offset],
+                    **_plain(op),
+                }
         else:
-            self._log(object_id, ops)
+            self._log(object_id, ops, at=at)
 
     # --- editing the log ---------------------------------------------------
     def _append(self, event):
@@ -3479,18 +3597,86 @@ class MagpylibStudioSession:
         raise KeyError(f"unknown object id {object_id!r}")
 
     # --- transforms --------------------------------------------------------
-    def _log(self, object_id, ops):
-        """Append transform ops to the end of the event log."""
+    def _pattern_step_at(self, object_id):
+        """Where an edit to `object_id` goes in, or None for the end of the log.
+
+        A step that copies an object reads it as it stands when the step runs,
+        so an edit recorded *after* it moves the source out of its own pattern
+        and leaves the copies where they were. There is no reading of that
+        anyone wants: the copies are drawn on the source's own node and under
+        its own id, so what a drag holds is the whole pattern. Going in before
+        the step is what makes the gesture mean what it looks like.
+
+        A Collection holding the object counts. Patterning a magnet into a row
+        and the row into a grid is two steps, and an edit to the magnet
+        belongs before the first of them or only part of the grid follows.
+
+        Two cases go to the end instead, and both are edits that would
+        otherwise be silently undone:
+
+        * A rolled-back history. The bar is an explicit answer to this very
+          question, and an explicit answer beats an inferred one.
+        * A log that already *pins* this object after the step. An absolute
+          pose recorded later replaces whatever this one says rather than
+          carrying it, so there is nothing to solve for: better the old
+          behaviour, visibly, than an edit with no effect at all.
+
+        A step that merely carries the object — a rotation of a Collection it
+        sits in, a move of an ancestor — is not in the way. It replays over
+        whatever is recorded here, and `_replay_frame` measures exactly that,
+        so the pose can be written in the frame it will be replayed from.
+        """
+        if self._rollback is not None:
+            return None
+        family = set()
+        walk = object_id
+        while walk is not None and walk not in family:
+            family.add(walk)
+            walk = self._parent_id(walk)
+        events = self.doc.get("events") or []
+        at = next(
+            (
+                index
+                for index, event in enumerate(events)
+                if event.get("op") in _PATTERN_OPS and event.get("target") in family
+            ),
+            None,
+        )
+        if at is None:
+            return None
+        pinned = any(
+            event.get("target") == object_id and event.get("op") in _ABSOLUTE_OPS
+            for event in events[at:]
+        )
+        return None if pinned else at
+
+    def _log(self, object_id, ops, at=None):
+        """Add transform ops to the event log: at the end, or inserted at `at`
+        when a later step copies the object — see `_pattern_step_at`."""
         events = self.doc.setdefault("events", [])
-        for op in expressions.normalized(_plain(ops)):
-            events.append({"id": _next_event_id(events), "target": object_id, **op})
+        for offset, op in enumerate(expressions.normalized(_plain(ops))):
+            event = {"id": _next_event_id(events), "target": object_id, **op}
+            if at is None:
+                events.append(event)
+            else:
+                events.insert(at + offset, event)
 
     def _append_ops(self, object_id, ops, label):
         """Record magpylib transform calls in the event log and rebuild."""
         self._spec(object_id)  # raise early on unknown id
+        # A pattern step is not an edit the existing copies should have been
+        # made from — it is another way of making copies — so it goes at the
+        # end even when the object is already patterned. Everything else is
+        # an edit to the object the copies come from, and belongs where they
+        # can see it.
+        at = (
+            None
+            if any(op.get("op") in _PATTERN_OPS for op in ops)
+            else self._pattern_step_at(object_id)
+        )
 
         def mutate(doc):
-            self._log(object_id, ops)
+            self._log(object_id, ops, at=at)
 
         return self._mutate_doc(mutate, label)
 
@@ -3567,7 +3753,12 @@ class MagpylibStudioSession:
                     ops.append({"op": "orientation", "rotvec": orientation})
                 self._log(object_id, ops)
             else:
-                self._set_world_pose(object_id, target_pos, target_rot)
+                # What was asked for, and nothing else: see `_set_world_pose`.
+                self._set_world_pose(
+                    object_id,
+                    None if position is None else target_pos,
+                    None if orientation is None else target_rot,
+                )
 
         return self._mutate_doc(mutate, f"set transform {object_id}")
 
@@ -3757,6 +3948,7 @@ class MagpylibStudioSession:
         """
         self._interaction = False
         self._interaction_redo = list(self._redo)
+        self._replay_frames = {}
         return {"ok": True}
 
     def end_interaction(self):
@@ -3774,6 +3966,7 @@ class MagpylibStudioSession:
             self._redo = self._interaction_redo
         self._interaction = None
         self._interaction_redo = []
+        self._replay_frames = {}
         return {"ok": True}
 
     def set_visible(self, object_id, visible=True):
@@ -3835,7 +4028,10 @@ class MagpylibStudioSession:
             # group transforms carried it depends on when it joined, and that
             # is exactly what the position in the log records.
             self._append({"op": "reparent", "target": object_id, "parent": parent})
-            self._set_world_pose(object_id, world_pos, world_rot)
+            # At the end, with the reparent it belongs to: this is not an edit
+            # to what the object is, it is what keeps it where it was while
+            # its group changed underneath it.
+            self._set_world_pose(object_id, world_pos, world_rot, insert=False)
 
         return self._mutate_doc(mutate, f"reparent {object_id}")
 
@@ -4248,10 +4444,124 @@ class MagpylibStudioSession:
         }
 
     # --- variables ---------------------------------------------------------
+    def _spent_sources(self, sources):
+        """`sources` from the first one nothing later overrules.
+
+        Everything up to the last outright write in numbers is answered by it:
+        it replays, and is then overwritten. Shared by everything that has to
+        tell what a variable still decides from what it merely still says.
+        """
+        spent = [
+            index
+            for index, source in enumerate(sources)
+            if isinstance(source, dict)
+            and source.get("op") in _ABSOLUTE_OPS
+            and not expressions.contains_expression(source)
+        ]
+        return sources[spent[-1] + 1 :] if spent else sources
+
+    def _object_sources(self, spec):
+        """One object's values, grouped by the field they decide, with what a
+        later step overrules already dropped."""
+        events = self.doc.get("events") or []
+        mine = [e for e in events if e.get("target") == spec["id"]]
+        params = dict(spec.get("params") or {})
+        out = {}
+        for field, (keys, ops) in _DRAG_WRITES.items():
+            out[field] = self._spent_sources(
+                [params.pop(key, None) for key in keys]
+                + [e for e in mine if e.get("op") in ops]
+            )
+        # Everything else an object is made of is never overruled by a step:
+        # it *is* the object, and editing it edits the create.
+        out[None] = list(params.values())
+        return out
+
+    def _live_variable_names(self):
+        """Every variable that still reaches something the scene is built from.
+
+        A name can be written all over a document and decide nothing. The
+        create step holding `=gap / 2` is still there after a drag pins the
+        position outright — replayed, then overwritten — so counting the text
+        would call that variable live for ever, which is the one thing a view
+        must not say about a slider that no longer moves anything.
+        """
+        live = set()
+        for spec, _ in self._iter_specs():
+            for sources in self._object_sources(spec).values():
+                live |= set(expressions.referenced_names(sources))
+        # The steps themselves: counts, pitches, angles. A create's parameters
+        # are the object's own and were read above; the ops that write a pose
+        # were read with the field they write, overruling and all.
+        written = {op for _, ops in _DRAG_WRITES.values() for op in ops}
+        live |= set(
+            expressions.referenced_names(
+                [
+                    event
+                    for event in (self.doc.get("events") or [])
+                    if event.get("op") not in written and event.get("op") != "create"
+                ]
+            )
+        )
+        # A variable written in terms of another keeps that one alive — but
+        # only while it is alive itself, so this runs to a fixed point rather
+        # than in one pass.
+        variables = self.doc.get("variables") or {}
+        while True:
+            grown = live | {
+                referenced
+                for name in live
+                for referenced in expressions.referenced_names([variables.get(name)])
+            }
+            if grown == live:
+                return live
+            live = grown
+
+    def _shadowed_variable_sources(self):
+        """Per variable, where its expression is being overruled and by what.
+
+        This is the answer to "why does my slider do nothing": not that the
+        variable is gone — it is still written in the create step — but that a
+        later step states the same field outright and wins on replay.
+        """
+        events = self.doc.get("events") or []
+        out = {}
+        for spec, _ in self._iter_specs():
+            params = spec.get("params") or {}
+            mine = [e for e in events if e.get("target") == spec["id"]]
+            for field, (keys, ops) in _DRAG_WRITES.items():
+                names = expressions.referenced_names([params.get(key) for key in keys])
+                shadows = [
+                    e
+                    for e in mine
+                    if e.get("op") in ops
+                    and e.get("op") in _ABSOLUTE_OPS
+                    and not expressions.contains_expression(e)
+                ]
+                if not names or not shadows:
+                    continue
+                for name in names:
+                    out.setdefault(name, []).append(
+                        {
+                            "object_id": spec["id"],
+                            "field": field,
+                            "events": [e["id"] for e in shadows],
+                        }
+                    )
+        return out
+
     def get_variables(self):
-        """The document's variables, as written and as resolved."""
+        """The document's variables, as written, as resolved, and as heeded.
+
+        `inert` marks one nothing in the scene follows any more, and
+        `shadowed` says where it is being overruled and by which steps —
+        enough for a view to explain a slider that moves nothing, and to offer
+        the way back. See `restore_variable`.
+        """
         variables = self.doc.get("variables") or {}
         bounds = self.doc.get("variable_bounds") or {}
+        live = self._live_variable_names()
+        shadowed = self._shadowed_variable_sources()
         return {
             "variables": [
                 {
@@ -4259,10 +4569,37 @@ class MagpylibStudioSession:
                     "expression": value,
                     "value": self._vars.get(name),
                     **({"bounds": bounds[name]} if name in bounds else {}),
+                    **({"inert": True} if name not in live else {}),
+                    **({"shadowed": shadowed[name]} if name in shadowed else {}),
                 }
                 for name, value in variables.items()
             ]
         }
+
+    def restore_variable(self, name):
+        """Drop the steps standing in front of a variable, so it decides again.
+
+        A drag states a pose outright, and the expression that used to decide
+        it stays in the create step, replayed and then overwritten. Nothing
+        was lost and nothing is wrong — but a slider that moves and changes
+        nothing is a poor way to find that out, and hunting the step down in
+        the history is a poor way to undo it.
+        """
+        shadowed = self._shadowed_variable_sources().get(name)
+        if not shadowed:
+            return {
+                "ok": False,
+                "error": f"nothing is standing in front of {name!r}",
+            }
+        dropped = {i for entry in shadowed for i in entry["events"]}
+
+        def mutate(doc):
+            doc["events"] = [e for e in doc["events"] if e["id"] not in dropped]
+
+        result = self._edit_log(mutate, f"restore {name}")
+        if result.get("ok"):
+            result["removed"] = sorted(dropped)
+        return result
 
     def expression_help(self):
         """What an expression may contain — for a UI to show while one is
