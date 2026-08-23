@@ -53,7 +53,6 @@ _PUBLIC = {
     "reset_style",
     "load_scene",
     "load_script",
-    "apply_script",
     "load_captured",
     "load_example",
     "list_examples",
