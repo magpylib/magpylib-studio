@@ -890,12 +890,20 @@ window.addEventListener("message", (event) => {
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
   } else if (message.type === "previewDone") {
-    redrawAroundDrag()
-      .catch(() => {}) // a failed redraw must not end the drag
-      .finally(() => {
-        poseInFlight = false;
-        sendPose(); // whatever the pointer reached while that one was away
-      });
+    // On the next frame, not on the reply: a small scene answers in under two
+    // milliseconds, and rebuilding it several hundred times a second to show
+    // it sixty is work the screen throws away. Whichever is slower decides,
+    // which is the rule a variable slider drag already runs by -- and the
+    // object under the pointer is not waiting on any of it, since the handles
+    // move its node locally.
+    requestAnimationFrame(() => {
+      redrawAroundDrag()
+        .catch(() => {}) // a failed redraw must not end the drag
+        .finally(() => {
+          poseInFlight = false;
+          sendPose(); // whatever the pointer reached while that one was away
+        });
+    });
   } else if (message.type === "select") {
     // a plain pick, or the Scene tree: one object, and the set restarts
     selectedIds = message.objectId ? [message.objectId] : [];
