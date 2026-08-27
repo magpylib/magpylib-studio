@@ -7,6 +7,7 @@
     "strict": true,
     "sourceMap": true,
     "lib": ["ES2022", "DOM"],
+    "types": ["node", "mocha"],
     "moduleResolution": "Node16",
     "skipLibCheck": true,
     "resolveJsonModule": true

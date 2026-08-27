@@ -4,6 +4,14 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+## [0.4.1]
+
+### Fixed
+
+- TypeScript now loads the Node and Mocha declarations explicitly, so the
+  extension integration tests compile in a fresh checkout without unresolved
+  `suite`, `suiteSetup` or `test` globals.
+
 ## [0.4.0]
 
 ### Added
