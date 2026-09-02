@@ -13,6 +13,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 
 const scene = new THREE.Scene();
+let host = null; // the element the view is hung in; whose theme it wears
+let sizing = null; // watches the host for a size change, wherever it is now
 let camera = null;
 let controls = null;
 let renderer = null;
@@ -59,13 +61,31 @@ let patterned = new Set();
 // they cannot be attached to it: this stands in, and only its rotation is read.
 const proxy = new THREE.Object3D();
 
-/** A VS Code theme colour, so the view wears whatever the editor is wearing. */
+/** A VS Code theme colour, so the view wears whatever the editor is wearing.
+ *
+ * Read off the host element rather than the document. Custom properties
+ * inherit, so in the webview -- where VS Code sets them on the root -- this is
+ * the same value it always was; and it lets a host that is not VS Code, the
+ * notebook widget, dress the view by styling its own element instead of
+ * writing the editor's variable names onto somebody else's page.
+ */
 function cssColor(name, fallback) {
-  const css = getComputedStyle(document.body).getPropertyValue(name).trim();
+  const css = getComputedStyle(host || document.body)
+    .getPropertyValue(name)
+    .trim();
   return css || fallback;
 }
 
 function ensureRenderer(canvasEl) {
+  // Before the early return: a re-hung canvas is a new host, and everything
+  // aimed at the old one has to follow it. Only the events and the size do --
+  // the listeners are on the canvas, which moves with the renderer.
+  if (host !== canvasEl) {
+    host = canvasEl;
+    sizing ??= new ResizeObserver(() => resize(host));
+    sizing.disconnect();
+    sizing.observe(canvasEl);
+  }
   if (renderer) {
     // switching back from plotly empties the host element, and a WebGL context
     // is far too expensive to rebuild for that: re-hang the canvas instead
@@ -88,9 +108,8 @@ function ensureRenderer(canvasEl) {
   scene.add(key);
 
   renderer.setAnimationLoop(() => renderer.render(scene, camera));
-  new ResizeObserver(() => resize(canvasEl)).observe(canvasEl);
-  watchPicks(canvasEl);
-  makeGizmo(canvasEl);
+  watchPicks();
+  makeGizmo();
 }
 
 /** A rotation as magpylib writes one: an axis scaled by its angle in degrees. */
@@ -174,7 +193,7 @@ function resized(scale, shape, centre) {
  * Only the part that moved is sent. A drag that moves an object should not
  * overwrite an orientation the user wrote as an expression, and vice versa.
  */
-function makeGizmo(canvasEl) {
+function makeGizmo() {
   let from = null;
   gizmo = new TransformControls(camera, renderer.domElement);
   gizmo.setSpace(spaceOf()); // the axes the user reads off the model
@@ -202,7 +221,7 @@ function makeGizmo(canvasEl) {
         .applyQuaternion(turned)
         .applyQuaternion(from.orientations[primary].clone().invert())
         .toArray();
-      canvasEl.dispatchEvent(
+      host.dispatchEvent(
         new CustomEvent("objecttransform", {
           detail: {
             preview,
@@ -255,7 +274,7 @@ function makeGizmo(canvasEl) {
     }
     if (edits.length) {
       for (const box of outlines) box.update(); // boxes track objects, not the reverse
-      canvasEl.dispatchEvent(
+      host.dispatchEvent(
         new CustomEvent("objecttransform", { detail: { preview, edits } }),
       );
     }
@@ -312,7 +331,7 @@ function makeGizmo(canvasEl) {
                 .applyQuaternion(orientation) // stored local, turned in world
             : null,
       };
-      canvasEl.dispatchEvent(
+      host.dispatchEvent(
         new CustomEvent("dragstart", {
           detail: { objectIds: from.objectIds, mode: gizmoMode },
         }),
@@ -445,8 +464,13 @@ function axisView(x, y, z) {
  * A DOM event rather than a callback: the panel owns what selection *means*
  * -- it belongs to the studio's sidebar, not to this view -- and this module
  * stays a component that can be dropped in without wiring.
+ *
+ * Reported on `host` rather than on an element captured when the listeners
+ * were bound: the renderer outlives the element it hangs in, and a host that
+ * re-hangs it -- a notebook cell being re-run -- would otherwise go on
+ * receiving picks at the element it had thrown away.
  */
-function watchPicks(canvasEl) {
+function watchPicks() {
   const down = new THREE.Vector2();
   const element = renderer.domElement;
   element.addEventListener("pointerdown", (event) =>
@@ -462,7 +486,7 @@ function watchPicks(canvasEl) {
     if (gizmo?.axis) return;
     const objectId = pick(event);
     if (objectId) {
-      canvasEl.dispatchEvent(
+      host.dispatchEvent(
         new CustomEvent("objectpick", {
           // cmd on a mac, ctrl elsewhere: the modifier every editor uses to
           // add to a selection rather than replace it
@@ -1125,7 +1149,14 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   if (!held.size) highlight(selectedIds);
 }
 
-window.scene3d = {
+/** Everything a host may drive the view with.
+ *
+ * Exported *and* on `window`: the panel's classic script reads the global,
+ * while a host that imports this module -- the notebook widget, which loads
+ * it once per view so that two scenes on a page are two scenes -- takes the
+ * export and so gets the instance it just made rather than the last one made.
+ */
+export const scene3d = {
   render,
   fitView,
   highlight,
@@ -1146,3 +1177,5 @@ window.scene3d = {
   canAim: (objectId) => Boolean(polarizations[objectId]),
   byObjectId,
 };
+
+window.scene3d = scene3d;

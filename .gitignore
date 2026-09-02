@@ -9,3 +9,7 @@ __pycache__/
 .ruff_cache/
 *.pyc
 magpylib_studio/_version.py
+# The widget bundle's intermediate; the product itself is committed.
+build/
+# marimo's per-notebook session cache, written beside the notebook it ran.
+__marimo__/

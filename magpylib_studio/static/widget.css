@@ -1,0 +1,82 @@
+/* The notebook widget's own chrome. The view inside it is three.js and styles
+   nothing; what it does read are three colours, by the names VS Code gives
+   them -- which is where the renderer came from. They are declared here, on
+   this element, so the same file dresses a notebook without writing the
+   editor's variables onto the page. `widget.mjs` overrides the background
+   with the page's own when the page has one. */
+.magpy-scene {
+  --vscode-editor-background: #ffffff;
+  --vscode-editorLineNumber-foreground: #6e7681;
+  --vscode-focusBorder: #2e7bd6;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+@media (prefers-color-scheme: dark) {
+  .magpy-scene {
+    --vscode-editor-background: #1e1e1e;
+    --vscode-editorLineNumber-foreground: #8b949e;
+    --vscode-focusBorder: #4b8fe2;
+  }
+}
+
+.magpy-scene-view {
+  min-height: 0;
+  width: 100%;
+  /* The colour the scene is about to be. The renderer hangs its canvas here
+     once the module has loaded, and an unpainted box in between reads as a
+     flash of the page showing through. */
+  background: var(--vscode-editor-background);
+}
+
+.magpy-scene-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  opacity: 0.85;
+  border-top: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.magpy-scene-bar > * {
+  flex: 0 0 auto;
+}
+
+.magpy-scene-bar button {
+  font: inherit;
+  color: inherit;
+  padding: 1px 8px;
+  cursor: pointer;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 3px;
+}
+
+.magpy-scene-bar button:hover {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.magpy-scene-scrub {
+  flex: 1 1 6em;
+  min-width: 4em;
+  max-width: 20em;
+  accent-color: var(--vscode-focusBorder);
+}
+
+/* The message gives up its width before the controls do: a scene's name can
+   be any length, and a control that has wrapped out of sight is gone. */
+.magpy-scene-status {
+  flex: 1 1 6em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}

@@ -39,6 +39,59 @@ extension rather than use it, see [Development](#development).
 
 [uv]: https://docs.astral.sh/uv/
 
+## The 3D view in a notebook
+
+The same view, in a Jupyter, marimo, VS Code or Colab cell — the panel's
+three.js renderer wrapped as an [anywidget][aw]:
+
+```sh
+pip install "magpylib-studio[widget]"
+```
+
+```python
+import magpylib as magpy
+from magpylib_studio.widget import view
+
+view(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
+```
+
+`magpy.show(objects, backend="widget")` is the same thing said magpylib's way,
+and `magpy.defaults.display.backend = "widget"` makes every `show()` in the
+notebook draw one. Orbit, zoom, **Fit**, an orthographic toggle;
+`animation=True` captures the paths and the view plays and scrubs them, asking
+python for one frame at a time.
+
+It is read only, like the panel — what a view can offer to edit is what its host
+can put back, and a cell has already run. Selection is the exception, because it
+is a value rather than an edit:
+
+```python
+scene = mo.ui.anywidget(SceneWidget(height=460))   # one cell: the view
+...
+scene.widget.update(ring, probe)                   # another: what it draws
+scene.widget.picked                                # a third: what was clicked
+```
+
+**Make the view once and re-point it.** A slider re-runs every cell that reads
+it, so a `view(...)` call in one of them builds a _new widget per drag_: a new
+element, a bar rebuilt from nothing, and the camera back at its opening framing
+— you lose the zoom you were working in. `update()` replaces the drawn objects
+and leaves the view alone, which is what makes a slider smooth.
+
+Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
+binding_ — with the notebook's own reactivity in place of a protocol: a slider
+rebuilds the objects, the view redraws them, and a click is an input to the next
+cell. `sandbox/marimo_demo.py` is that loop in twenty lines
+(`marimo edit sandbox/marimo_demo.py`).
+
+The widget's JavaScript is `vscode-extension/media/scene3d.mjs` — the panel's
+own renderer, which being used from a second host cost two lines — bundled with
+three.js by `tools/build-widget.sh` into `magpylib_studio/static/widget.js`,
+which is committed so that installing the package needs no node.
+`npm run check:widget` fails the build when the two have drifted.
+
+[aw]: https://anywidget.dev
+
 ## Install the engine on its own
 
 ```sh
@@ -206,7 +259,7 @@ printf '%s\n' \
 
 ## Status
 
-The engine is covered by 254 tests against both magpylib versions
+The engine is covered by 278 tests against both magpylib versions
 (`.venv/bin/python -m pytest -q`).
 
 The extension is checked at three levels, all wired into `npm run compile` so

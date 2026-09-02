@@ -401,7 +401,7 @@ def _keyed(traces, live, derived):
     return payload
 
 
-def view_payload(scene):
+def view_payload(scene, index=None):
     """Everything a three.js view needs for a scene nobody is editing.
 
     `scene_payload` below is for the studio, where the engine owns the objects:
@@ -419,9 +419,15 @@ def view_payload(scene):
     Takes the `Scene` a display backend is handed, rather than the objects,
     because that is all a backend gets. The poses `scene_payload` reads off the
     objects are the ones a read-only view has no use for.
+
+    `index` picks one frame of an animated scene. Without it every frame is
+    drawn at once, which is right for the static case -- one frame -- and a
+    smear of two hundred poses for a run. `view_frame_payload` carries the
+    others, once the view asks for them.
     """
     panel = scene.panel(1, 1)
-    traces = [t for frame in scene.frames for t in frame.traces]
+    frames = scene.frames if index is None else [_frame_at(scene, index)]
+    traces = [t for frame in frames for t in frame.traces]
     payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
     payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
     for item in payload:
@@ -441,6 +447,37 @@ def view_payload(scene):
         "shapes": {},
         "polarizations": {},
         "patterned": [],
+    }
+
+
+def _frame_at(scene, index):
+    """The frame `index` names, clamped to the ones there are."""
+    return scene.frames[max(0, min(int(index), len(scene.frames) - 1))]
+
+
+def view_frame_payload(scene, index):
+    """One frame of a read-only scene, in the shape `renderFrame` takes.
+
+    The counterpart of `frame_payload` for a view that has no studio ids to
+    key to -- see `view_payload` -- and carrying only what changes from frame
+    to frame: the ranges, the labels and the axes are the same throughout, and
+    the view already has them from the payload it was built with.
+    """
+    frames = scene.frames
+    index = max(0, min(int(index), len(frames) - 1))
+    payload = [_mesh_payload(t) for t in frames[index].traces if t["type"] == "mesh3d"]
+    payload += [
+        _scatter_payload(t) for t in frames[index].traces if t["type"] == "scatter3d"
+    ]
+    for item in payload:
+        item["object_id"] = str(item["object_id"])
+    return {
+        "frame": index,
+        "frames": len(frames),
+        # how long the whole run should take, which is what the view paces to
+        "duration": scene.animation.time,
+        "meshes": [p for p in payload if p["kind"] == "mesh"],
+        "scatters": [p for p in payload if p["kind"] == "scatter"],
     }
 
 
