@@ -299,6 +299,37 @@ def available():
     return DisplayBackend is not None and hasattr(magpy.defaults.display, "units")
 
 
+def _backend_base():
+    """The display-backend class, or the refusal `available()` is the bool of.
+
+    Anything that wants the class rather than the answer would otherwise have
+    to take `available()` on trust: nothing connects the two, for a reader or
+    for a type checker, and `DisplayBackend` reads as a maybe at every use.
+    Re-testing it here costs one comparison and is what makes this a class.
+    """
+    if DisplayBackend is None or not available():
+        raise RuntimeError(UNAVAILABLE)
+    return DisplayBackend
+
+
+#: Where the private backend below leaves the scene it was handed. Module
+#: level, because that is what lets the backend be registered once: a closure
+#: over a per-call dict has to be put back on every call, and the only way to
+#: do that is to reassign the registered backend's `show` -- swapping a method
+#: on a live object, on a path the studio takes for every edit.
+_captured = {}
+
+
+def _hold(scene):
+    """Keep the scene, and hand it back as a figure would be.
+
+    `setdefault`, so that a backend called more than once for one figure
+    yields the first scene rather than the last -- which is what it was
+    before, and cheaper than establishing that it cannot happen.
+    """
+    return _captured.setdefault("scene", scene)
+
+
 def _capture(objects, animation=False, **kwargs):
     """The `Scene` magpylib would hand a display backend, for `objects`.
 
@@ -308,27 +339,21 @@ def _capture(objects, animation=False, **kwargs):
     read from the field, so they turn as the magnet that makes them turns,
     and no amount of moving meshes about will show it.
     """
-    if not available():
-        raise RuntimeError(UNAVAILABLE)
-    captured = {}
-    if _BACKEND not in DisplayBackend.backends:
+    if _BACKEND not in _backend_base().backends:
         magpy.register_backend(
             _BACKEND,
-            lambda scene: captured.setdefault("scene", scene),
+            _hold,
             supports_colorgradient=True,  # three.js interpolates vertex colours
             merge_traces=False,  # one mesh per object, so each is addressable
             handles_traces=frozenset({"mesh3d", "scatter3d"}),
             accepts_options=frozenset(),
             supports_animation=True,
         )
-    else:  # re-registering would replace the closure each call
-        DisplayBackend.backends[_BACKEND].show = lambda scene: captured.setdefault(
-            "scene", scene
-        )
+    _captured.clear()
     magpy.show(
         objects, backend=_BACKEND, return_fig=True, animation=animation, **kwargs
     )
-    return captured["scene"]
+    return _captured["scene"]
 
 
 def capture_frames(objects, steps):
