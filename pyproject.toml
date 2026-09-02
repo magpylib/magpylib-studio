@@ -37,6 +37,7 @@ dependencies = ["magpylib>=5.2", "plotly>=5"]
 # resolves this group while it is importing, so `backend.py` keeps its imports
 # to magpylib and numpy -- see the note there.
 studio = "magpylib_studio.backend:StudioBackend"
+widget = "magpylib_studio.backend:WidgetBackend"
 
 # Where uv gets magpylib for *development*. `magpylib>=5.2` above is the true
 # floor for anyone installing this package, and it resolves to the released
@@ -52,7 +53,11 @@ studio = "magpylib_studio.backend:StudioBackend"
 magpylib = { git = "https://github.com/magpylib/magpylib", branch = "main" }
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "jsonschema>=4"]
+# `magpy.show(backend="widget")`: the 3D view in a notebook cell. An extra
+# rather than a dependency, because installing the engine for the VS Code
+# extension should not pull ipywidgets in behind it.
+widget = ["anywidget>=0.9"]
+dev = ["pytest>=8", "jsonschema>=4", "anywidget>=0.9"]
 
 [project.urls]
 Homepage = "https://github.com/magpylib/magpylib-studio"
@@ -105,3 +110,6 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # A test asserts; that is the whole job.
 "tests/*" = ["S101"]
+# A marimo cell's output *is* its last expression, so a bare name on the last
+# line is the notebook displaying something, not a statement that does nothing.
+"sandbox/marimo_demo.py" = ["B018"]

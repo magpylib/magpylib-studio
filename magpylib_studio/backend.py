@@ -1,4 +1,4 @@
-"""The studio as a magpylib display backend: `magpy.show(backend="studio")`.
+"""The studio's magpylib display backends.
 
 Advertised through the `magpylib.backends` entry-point group, so installing
 this package is enough for the name to work. Being an entry point is also the
@@ -8,10 +8,17 @@ is still importing, so whatever is reachable from here is paid for by every
 plotly half of the viewer lives in `plotly_view.py` and is imported by scripts
 that want it.
 
-Read only, and honestly declared as such. What it draws is a picture of a
-scene whose objects live in someone else's process — one that has usually
-exited by the time the panel appears. The studio's own panel is the editable
-one, and getting there means handing the studio the script, not the picture.
+Two of them, and the constraint is why they share a module:
+
+* ``studio`` draws in the VS Code window the script was run from.
+* ``widget`` draws in a notebook cell, as an `anywidget`. Everything that
+  needs is in `widget.py`, which this imports from inside `show` -- so
+  ipywidgets is loaded by drawing one, not by installing this package.
+
+Both are read only, and honestly declared as such. What they draw is a picture
+of a scene whose objects live in someone else's process, or in a cell that has
+already run. The studio's own panel is the editable one, and getting there
+means handing the studio the script, not the picture.
 """
 
 from __future__ import annotations
@@ -33,11 +40,15 @@ CLAIM_VAR = "MAGPYLIB_STUDIO_BACKEND"
 #: script needs no import of its own for this one.
 BACKEND_NAME = "studio"
 
+#: The same view, drawn in a notebook cell instead. See `widget.py`.
+WIDGET_BACKEND_NAME = "widget"
+
 if threejs.DisplayBackend is None:  # pragma: no cover - depends on magpylib
     # 5.2.3 and earlier have no display-backend API to subclass. They also have
-    # no entry-point discovery, so nothing ever asks for this name there, and
+    # no entry-point discovery, so nothing ever asks for these names there, and
     # the plotly half of the viewer still works.
     StudioBackend = None
+    WidgetBackend = None
 else:
 
     class StudioBackend(threejs.DisplayBackend):
@@ -70,6 +81,43 @@ else:
             if write_view("scene", payload, title=scene.title, claimed=CLAIMED) is None:
                 raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
             return payload
+
+    class WidgetBackend(threejs.DisplayBackend):
+        """Draws a magpylib scene in the notebook cell that asked for it."""
+
+        name = WIDGET_BACKEND_NAME
+        description = "Magpylib Studio — 3D scene as a notebook widget"
+
+        # The same view as the panel's, so the same capabilities. See
+        # `StudioBackend` above for what each of them is about.
+        supports_colorgradient = True
+        merge_traces = False
+        handles_traces = frozenset({"mesh3d", "scatter3d"})
+        api_version = 1
+        supports_subplots = False
+        #: Unlike the panel's, this view can play a run: the widget holds the
+        #: captured frames and serves them to the browser one at a time, which
+        #: is the job the session does in the studio.
+        supports_animation = True
+        #: How tall to draw, in pixels. A figure keyword rather than a widget
+        #: one so that `magpy.show(..., backend="widget", height=600)` says it
+        #: the way every other backend option is said.
+        accepts_options = frozenset({"height"})
+
+        def show(self, scene):
+            # Imported here, not at module scope: this module is loaded while
+            # magpylib is importing, and the widget brings ipywidgets with it.
+            from magpylib_studio.widget import (
+                SceneWidget,
+                display,
+            )
+
+            widget = SceneWidget(scene)
+            if scene.options.get("height") is not None:
+                widget.height = int(scene.options["height"])
+            if not scene.return_fig:
+                display(widget)
+            return widget
 
 
 def _under_a_test_runner() -> bool:
