@@ -68,6 +68,11 @@ function pageBackground() {
   return null;
 }
 
+function pressed(el, on) {
+  el.classList.toggle("on", on);
+  el.setAttribute("aria-pressed", String(on));
+}
+
 function button(label, title, onClick) {
   const el = document.createElement("button");
   el.type = "button";
@@ -120,17 +125,15 @@ function render({ model, el }) {
     "Switch between perspective and orthographic (5)",
     () => showProjection(api?.toggleProjection()),
   );
-  const objectsButton = button(
-    "Objects",
-    "Show or hide the list of objects — double-click a name to frame it; " +
+  pressed(projectionButton, false); // perspective, until it is switched
+  const legendButton = button(
+    "Legend",
+    "Show or hide the legend — double-click a name to frame it; " +
       "H hides the selection, shift-H shows only it",
-    () => {
-      legendOpen = !legendOpen;
-      legendEl.hidden = !legendOpen;
-    },
+    () => showLegend(!legendOpen),
   );
   bar.append(
-    objectsButton,
+    legendButton,
     button(
       "Fit",
       "Frame everything (Home) — F frames the selection; 1, 3, 7 look " +
@@ -165,15 +168,14 @@ function render({ model, el }) {
     const tree = model.get("tree") || [];
     const payload = model.get("payload") || {};
     labels = labelsOf(tree);
-    objectsButton.hidden = labels.size === 0;
+    legendButton.hidden = labels.size === 0;
     if (!payload.meshes || labels.size === 0) {
       legendEl.hidden = true;
       return;
     }
     // Open when it has something to say: one object needs no list. After the
     // first time, it is the user's to open and close.
-    legendOpen ??= labels.size > 1;
-    legendEl.hidden = !legendOpen;
+    showLegend(legendOpen ?? labels.size > 1);
     legend.update({ tree, payload });
     legend.sync(stateOf());
   }
@@ -183,10 +185,19 @@ function render({ model, el }) {
     hidden: model.get("hidden") || [],
   });
 
-  /** The renderer answers with the projection now in force, so the button
-   *  offers the other one. */
+  // The bar's toggles say what is in force, the way the panel's do: pressed
+  // when on, never a label that flips to name the other state.
+
+  /** Open or close the legend, and let its button say which. */
+  function showLegend(open) {
+    legendOpen = open;
+    legendEl.hidden = !open;
+    pressed(legendButton, open);
+  }
+
+  /** The renderer answers with the projection now in force. */
   function showProjection(kind) {
-    projectionButton.textContent = kind === "parallel" ? "Persp" : "Ortho";
+    pressed(projectionButton, kind === "parallel");
   }
 
   /** What the view keys ask of this host -- see `VIEW_KEYS` in scene3d.mjs,
@@ -385,21 +396,49 @@ function render({ model, el }) {
     model.save_changes();
   });
 
-  model.on("change:selected", () => {
-    api?.highlight(model.get("selected") || []);
-    legend.sync(stateOf());
+  // --- keeping up with the model -------------------------------------------
+  // One update from python is several traits -- a re-pointed scene is its
+  // payload, its tree, and the selection and hiding carried over to it -- and
+  // they have to be read together. Jupyter sets them all and then says so;
+  // marimo sets one, says so, and only then sets the next. A handler for the
+  // first would see the rest as they were: a new payload against the old
+  // tree, a selection naming objects the tree does not have yet, a hidden
+  // ring drawn for a frame before its hiding arrives. So changes are
+  // gathered, and the view catches up once, after the last of them.
+  const changed = new Set();
+  for (const name of ["payload", "tree", "selected", "hidden"]) {
+    model.on(`change:${name}`, () => {
+      if (!changed.size) queueMicrotask(catchUp);
+      changed.add(name);
+    });
+  }
+
+  function catchUp() {
+    const now = new Set(changed);
+    changed.clear(); // first, so a change made while catching up is kept
+    const scene = now.has("payload");
+    if (scene) {
+      // A re-pointed view is a different run. Anything asked for belonged to
+      // the last one -- and a request python drops, which is what happens
+      // when the new scene has no frames to serve, would leave `inFlight`
+      // latched and playback dead for the life of the widget.
+      if (playing) setPlaying(false);
+      inFlight = false;
+      wanted = null;
+      shown = 0;
+    }
+    // The legend first: the bar names the selection, from the legend's tree.
+    if (scene || now.has("tree")) dressLegend();
+    else legend.sync(stateOf());
+    if (scene) {
+      dressBar();
+      draw(); // which applies the hiding and the selection itself
+      return;
+    }
+    if (now.has("hidden")) api?.setHidden(model.get("hidden") || []);
+    if (now.has("selected")) api?.highlight(model.get("selected") || []);
     sayWhatIsSelected();
-  });
-
-  model.on("change:hidden", () => {
-    api?.setHidden(model.get("hidden") || []);
-    legend.sync(stateOf());
-  });
-
-  model.on("change:tree", () => {
-    dressLegend();
-    sayWhatIsSelected(); // the names may be new
-  });
+  }
 
   // --- drawing ----------------------------------------------------------
   async function draw() {
@@ -427,19 +466,6 @@ function render({ model, el }) {
     }
   }
 
-  model.on("change:payload", () => {
-    // A re-pointed view is a different run. Anything asked for belonged to the
-    // last one -- and a request python drops, which is what happens when the
-    // new scene has no frames to serve, would leave `inFlight` latched and
-    // playback dead for the life of the widget.
-    if (playing) setPlaying(false);
-    inFlight = false;
-    wanted = null;
-    shown = 0;
-    dressLegend(); // first: the bar names the selection, from the tree
-    dressBar();
-    draw();
-  });
   model.on("change:height", () => {
     view.style.height = `${model.get("height")}px`;
   });

@@ -80,6 +80,13 @@
   background: color-mix(in srgb, currentColor 18%, transparent);
 }
 
+/* A toggle that is on looks pressed, in the colour the view outlines a
+   selection with. After :hover, so it stays pressed under the pointer. */
+.magpy-scene-bar button.on {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 24%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-focusBorder) 60%, transparent);
+}
+
 .magpy-scene-scrub {
   flex: 1 1 6em;
   min-width: 4em;
@@ -140,6 +147,12 @@
 
 .magpy-legend-row.selected {
   background: color-mix(in srgb, var(--vscode-focusBorder) 24%, transparent);
+}
+
+/* Some of what is under it is selected: the trail down to a selection, and on
+   a folded collection the only sign the selection is in there. */
+.magpy-legend-row.partial {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 9%, transparent);
 }
 
 /* Nesting drawn as a guide line, not left to indentation alone: a top-level
@@ -220,6 +233,26 @@
 
 .magpy-legend-row.off > .magpy-legend-eye {
   opacity: 0.25;
+}
+
+/* Some of what is under it is hidden: the eye half drawn. The mask shapes
+   whatever is painted beneath it, so a gradient is enough. */
+.magpy-legend-row.mixed > .magpy-legend-eye {
+  background: linear-gradient(
+    90deg,
+    currentColor 50%,
+    color-mix(in srgb, currentColor 25%, transparent) 50%
+  );
+}
+
+/* How many things a collection holds -- what folding it hides -- kept to the
+   right edge so the counts line up. */
+.magpy-legend-count {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Nothing drawn under it -- an empty collection -- so nothing to hide. */

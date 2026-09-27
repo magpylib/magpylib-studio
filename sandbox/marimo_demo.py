@@ -46,7 +46,7 @@ def _(mo):
         The list over the view is the scene as it is nested — the stack, its
         rings, their magnets. Fold a ring with its caret, hide it with its eye,
         or click a name to select everything under it (⌘/ctrl-click adds,
-        shift-click takes a range); double-click to frame it. **Objects** puts
+        shift-click takes a range); double-click to frame it. **Legend** puts
         it away.
 
         Click the view and it takes the keys, as the studio's panel does:
