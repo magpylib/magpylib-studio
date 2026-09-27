@@ -26,15 +26,14 @@ whatever interpreter runs there, but the package has to be importable in _that_
 interpreter for a script to draw. Reaching the window is necessary, not
 sufficient.
 
-## Three files that are not scenes
+## Two scripts that are not scenes
 
 - `env_probe.py` — what a script inherits, launched each of the ways VS Code can
   launch one. It is how design decision 8 was settled, and how to re-check it
   when a VS Code release moves a launch path.
 - `view_from_script.py` — two figures from one script, drawn in this window. Run
-  it twice: the panels update in place.
-- `marimo_demo.py` — the same 3D view in a reactive notebook, where the sliders
-  rebuild the scene and a click in the view is a value the next cell reads.
-  `marimo edit sandbox/marimo_demo.py`, having installed the widget extra
-  (`uv pip install -e ".[widget]" marimo`). Nothing to do with the extension: it
-  is here because this is where scenes to try things on live.
+  it twice: the panels update in place. Those, this README and `.vscode/` are
+  all that is tracked here. Anything else saved in this folder is ignored by
+  git, which is what makes it a place to try things: a scene saved while testing
+  is not something to commit by accident. The notebook widget's demos, which are
+  meant to be read, are in `examples/`.

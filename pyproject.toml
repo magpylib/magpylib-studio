@@ -112,4 +112,4 @@ ignore = [
 "tests/*" = ["S101"]
 # A marimo cell's output *is* its last expression, so a bare name on the last
 # line is the notebook displaying something, not a statement that does nothing.
-"sandbox/marimo_demo.py" = ["B018"]
+"examples/marimo_demo.py" = ["B018"]

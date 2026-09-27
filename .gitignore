@@ -13,3 +13,14 @@ magpylib_studio/_version.py
 build/
 # marimo's per-notebook session cache, written beside the notebook it ran.
 __marimo__/
+
+
+# sandbox/ is the Extension Development Host's workspace (see its README). Its
+# fixtures are tracked; whatever is saved there while trying things is not.
+sandbox/*
+!sandbox/README.md
+!sandbox/.vscode/
+!sandbox/env_probe.py
+!sandbox/view_from_script.py
+
+.ipynb_checkpoints/
