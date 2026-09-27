@@ -43,38 +43,26 @@ BACKEND_NAME = "studio"
 #: The same view, drawn in a notebook cell instead. See `widget.py`.
 WIDGET_BACKEND_NAME = "widget"
 
-if threejs.DisplayBackend is None:  # pragma: no cover - depends on magpylib
+if threejs.SceneGraphBackend is None:  # pragma: no cover - depends on magpylib
     # 5.2.3 and earlier have no display-backend API to subclass. They also have
     # no entry-point discovery, so nothing ever asks for these names there, and
     # the plotly half of the viewer still works.
     StudioBackend = None
     WidgetBackend = None
 else:
+    # What the scene graph can draw is `SceneGraphBackend`'s to declare; what
+    # differs between the two is where it goes, and so what a host can play.
 
-    class StudioBackend(threejs.DisplayBackend):
+    class StudioBackend(threejs.SceneGraphBackend):
         """Draws a magpylib scene in the studio window the script ran from."""
 
         name = BACKEND_NAME
         description = "Magpylib Studio (VS Code) — read-only scene view"
-
-        #: three.js interpolates vertex colours, so the gradient arrives whole
-        #: rather than sliced into one mesh per colour band.
-        supports_colorgradient = True
-        #: One mesh per object, so each object's traces hang on one node and
-        #: highlight together.
-        merge_traces = False
-        handles_traces = frozenset({"mesh3d", "scatter3d"})
-        #: Pinned, not inherited. Inheriting takes whatever the installed
-        #: magpylib emits, so the two can never disagree and the mismatch
-        #: warning this exists for could never fire. This is the version the
-        #: payload was written against; raise it when it has been checked.
-        api_version = 1
         accepts_options = frozenset()
         #: Not yet: playback needs every step of the path captured and served a
         #: frame at a time, which is the session's job in the studio and has no
         #: equivalent here while the script that owns the objects has exited.
         supports_animation = False
-        supports_subplots = False
 
         def show(self, scene):
             payload = threejs.view_payload(scene)
@@ -82,19 +70,11 @@ else:
                 raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
             return payload
 
-    class WidgetBackend(threejs.DisplayBackend):
+    class WidgetBackend(threejs.SceneGraphBackend):
         """Draws a magpylib scene in the notebook cell that asked for it."""
 
         name = WIDGET_BACKEND_NAME
         description = "Magpylib Studio — 3D scene as a notebook widget"
-
-        # The same view as the panel's, so the same capabilities. See
-        # `StudioBackend` above for what each of them is about.
-        supports_colorgradient = True
-        merge_traces = False
-        handles_traces = frozenset({"mesh3d", "scatter3d"})
-        api_version = 1
-        supports_subplots = False
         #: Unlike the panel's, this view can play a run: the widget holds the
         #: captured frames and serves them to the browser one at a time, which
         #: is the job the session does in the studio.

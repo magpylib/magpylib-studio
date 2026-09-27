@@ -299,35 +299,51 @@ def available():
     return DisplayBackend is not None and hasattr(magpy.defaults.display, "units")
 
 
-def _backend_base():
-    """The display-backend class, or the refusal `available()` is the bool of.
-
-    Anything that wants the class rather than the answer would otherwise have
-    to take `available()` on trust: nothing connects the two, for a reader or
-    for a type checker, and `DisplayBackend` reads as a maybe at every use.
-    Re-testing it here costs one comparison and is what makes this a class.
-    """
-    if DisplayBackend is None or not available():
-        raise RuntimeError(UNAVAILABLE)
-    return DisplayBackend
-
-
-#: Where the private backend below leaves the scene it was handed. Module
-#: level, because that is what lets the backend be registered once: a closure
-#: over a per-call dict has to be put back on every call, and the only way to
-#: do that is to reassign the registered backend's `show` -- swapping a method
-#: on a live object, on a path the studio takes for every edit.
+#: Where the capture backend below leaves the scene it was handed, for
+#: `_capture` to read back. Module level so that the backend can be an
+#: ordinary registered class: a closure over a per-call dict would have to be
+#: swapped into it on every call.
 _captured = {}
 
+if DisplayBackend is None:  # pragma: no cover - depends on magpylib
+    SceneGraphBackend = None
+else:
 
-def _hold(scene):
-    """Keep the scene, and hand it back as a figure would be.
+    class SceneGraphBackend(DisplayBackend):
+        """What a three.js view of a magpylib scene can draw, declared once.
 
-    `setdefault`, so that a backend called more than once for one figure
-    yields the first scene rather than the last -- which is what it was
-    before, and cheaper than establishing that it cannot happen.
-    """
-    return _captured.setdefault("scene", scene)
+        The panel, the notebook widget and the capture below are all the one
+        renderer, so they can all draw the same things. Nameless, so it
+        registers nothing itself: magpylib registers the subclasses that
+        name themselves.
+        """
+
+        #: three.js interpolates vertex colours, so the gradient arrives whole
+        #: rather than sliced into one mesh per colour band.
+        supports_colorgradient = True
+        #: One mesh per object, so each object's traces hang on one node and
+        #: highlight together -- and a click lands on an object, not a band.
+        merge_traces = False
+        handles_traces = frozenset({"mesh3d", "scatter3d"})
+        #: Pinned, not inherited. Inheriting takes whatever the installed
+        #: magpylib emits, so the two can never disagree and the mismatch
+        #: warning this exists for could never fire. This is the version the
+        #: payload was written against; raise it when it has been checked.
+        api_version = 1
+        supports_subplots = False
+
+    class _CaptureBackend(SceneGraphBackend):
+        """Hands the scene back instead of drawing it. See `_capture`."""
+
+        name = _BACKEND
+        description = "Magpylib Studio — captures a scene for its own views"
+        supports_animation = True
+        accepts_options = frozenset()
+
+        def show(self, scene):
+            # `setdefault`: a backend called twice for one figure yields the
+            # first scene rather than the last.
+            return _captured.setdefault("scene", scene)
 
 
 def _capture(objects, animation=False, **kwargs):
@@ -339,16 +355,8 @@ def _capture(objects, animation=False, **kwargs):
     read from the field, so they turn as the magnet that makes them turns,
     and no amount of moving meshes about will show it.
     """
-    if _BACKEND not in _backend_base().backends:
-        magpy.register_backend(
-            _BACKEND,
-            _hold,
-            supports_colorgradient=True,  # three.js interpolates vertex colours
-            merge_traces=False,  # one mesh per object, so each is addressable
-            handles_traces=frozenset({"mesh3d", "scatter3d"}),
-            accepts_options=frozenset(),
-            supports_animation=True,
-        )
+    if not available():
+        raise RuntimeError(UNAVAILABLE)
     _captured.clear()
     magpy.show(
         objects, backend=_BACKEND, return_fig=True, animation=animation, **kwargs
@@ -388,26 +396,52 @@ def capture_frames(objects, steps):
 
 
 def frame_payload(scene, index, live=None, derived=None):
-    """One frame of a captured run, in the shape `scene_payload` returns.
+    """One frame of a captured run, in the shape `renderFrame` takes.
 
-    Only what is drawn: the poses, shapes and paths a view needs are the same
-    from frame to frame, and it already has them.
+    Only what is drawn: the poses, shapes, paths, ranges and axes a view needs
+    are the same from frame to frame, and it already has them. `live` and
+    `derived` key the traces as `scene_payload` does; without them they keep
+    magpylib's own addresses, as `view_payload` does -- see `_keyed`.
     """
-    frames = scene.frames
-    frame = frames[max(0, min(int(index), len(frames) - 1))]
-    payload = _keyed(list(frame.traces), live or {}, derived or {})
+    index = _clamp(scene, index)
     return {
-        "frame": max(0, min(int(index), len(frames) - 1)),
-        "frames": len(frames),
+        "frame": index,
+        "frames": len(scene.frames),
         # how long the whole run should take, which is what the view paces to
-        "duration": magpy.defaults.display.animation.time,
+        "duration": scene.animation.time,
+        **_by_kind(_keyed(scene.frames[index].traces, live, derived)),
+    }
+
+
+def _clamp(scene, index):
+    """`index` as a frame the scene has."""
+    return max(0, min(int(index), len(scene.frames) - 1))
+
+
+def _by_kind(payload):
+    """Converted traces, sorted into the two lists every payload carries."""
+    return {
         "meshes": [p for p in payload if p["kind"] == "mesh"],
         "scatters": [p for p in payload if p["kind"] == "scatter"],
     }
 
 
-def _keyed(traces, live, derived):
-    """Traces converted and re-keyed from magpylib's ids to studio's."""
+def _keyed(traces, live=None, derived=None):
+    """Traces converted, each under the id the view will address it by.
+
+    With `live` -- the session's ``{studio id: object}`` map -- that is the
+    studio id, for the reasons `scene_payload` gives. Without it there is
+    nothing to key to, and magpylib's own ``id(obj)`` is kept, as a string:
+    enough to hang one object's traces on one node, and no more. See
+    `view_payload`.
+    """
+    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
+    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
+    if live is None:
+        for item in payload:
+            item["object_id"] = str(item["object_id"])
+        return payload
+    derived = derived or {}
     studio_id = {id(obj): key for key, obj in live.items()}
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
     holding = {
@@ -417,8 +451,6 @@ def _keyed(traces, live, derived):
         )
         for child in getattr(obj, "children_all", ())
     }
-    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
-    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
     for item in payload:
         raw = item["object_id"]
         key = studio_id.get(raw) or holding.get(raw)
@@ -447,19 +479,13 @@ def view_payload(scene, index=None):
 
     `index` picks one frame of an animated scene. Without it every frame is
     drawn at once, which is right for the static case -- one frame -- and a
-    smear of two hundred poses for a run. `view_frame_payload` carries the
-    others, once the view asks for them.
+    smear of two hundred poses for a run. `frame_payload` carries the others,
+    once the view asks for them.
     """
     panel = scene.panel(1, 1)
-    frames = scene.frames if index is None else [_frame_at(scene, index)]
-    traces = [t for frame in frames for t in frame.traces]
-    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
-    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
-    for item in payload:
-        item["object_id"] = str(item["object_id"])
+    frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
     return {
-        "meshes": [p for p in payload if p["kind"] == "mesh"],
-        "scatters": [p for p in payload if p["kind"] == "scatter"],
+        **_by_kind(_keyed([t for frame in frames for t in frame.traces])),
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no
@@ -472,37 +498,6 @@ def view_payload(scene, index=None):
         "shapes": {},
         "polarizations": {},
         "patterned": [],
-    }
-
-
-def _frame_at(scene, index):
-    """The frame `index` names, clamped to the ones there are."""
-    return scene.frames[max(0, min(int(index), len(scene.frames) - 1))]
-
-
-def view_frame_payload(scene, index):
-    """One frame of a read-only scene, in the shape `renderFrame` takes.
-
-    The counterpart of `frame_payload` for a view that has no studio ids to
-    key to -- see `view_payload` -- and carrying only what changes from frame
-    to frame: the ranges, the labels and the axes are the same throughout, and
-    the view already has them from the payload it was built with.
-    """
-    frames = scene.frames
-    index = max(0, min(int(index), len(frames) - 1))
-    payload = [_mesh_payload(t) for t in frames[index].traces if t["type"] == "mesh3d"]
-    payload += [
-        _scatter_payload(t) for t in frames[index].traces if t["type"] == "scatter3d"
-    ]
-    for item in payload:
-        item["object_id"] = str(item["object_id"])
-    return {
-        "frame": index,
-        "frames": len(frames),
-        # how long the whole run should take, which is what the view paces to
-        "duration": scene.animation.time,
-        "meshes": [p for p in payload if p["kind"] == "mesh"],
-        "scatters": [p for p in payload if p["kind"] == "scatter"],
     }
 
 
@@ -591,11 +586,8 @@ def scene_payload(objects, live=None, derived=None):
         if polarization is not None:
             polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
-    payload = _keyed(traces, live, derived)
-
     return {
-        "meshes": [p for p in payload if p["kind"] == "mesh"],
-        "scatters": [p for p in payload if p["kind"] == "scatter"],
+        **_by_kind(_keyed(traces, live, derived)),
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         "anchors": anchors,

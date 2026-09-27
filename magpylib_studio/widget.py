@@ -187,7 +187,7 @@ class SceneWidget(anywidget.AnyWidget):
             return
         if self._scene is None:
             return
-        frame = threejs.view_frame_payload(self._scene, content.get("index", 0))
+        frame = threejs.frame_payload(self._scene, content.get("index", 0))
         self.send({"kind": "frame", **frame})
 
 
