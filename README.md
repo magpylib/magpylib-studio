@@ -108,7 +108,7 @@ notebook it moves between cells.
 **Full screen** gives the view the screen, legend and controls with it.
 **Export** saves it as one HTML file that opens anywhere with no notebook behind
 it — the widget itself, not a picture: orbit, legend, keys, and a captured run
-that still plays, because its frames travel in the file. `save_html(path)` does
+that still plays, because its frames travel in the file. `write_html(path)` does
 the same from a cell. The camera is not kept; the page opens framed on the
 scene.
 

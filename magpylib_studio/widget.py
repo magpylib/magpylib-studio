@@ -82,7 +82,7 @@ $css
 <script type="text/plain" id="magpy-widget">$bundle</script>
 <script type="text/plain" id="magpy-scene">$data</script>
 <script type="module">
-// Saved by magpylib-studio (SceneWidget.save_html): the notebook widget and
+// Saved by magpylib-studio (SceneWidget.write_html): the notebook widget and
 // the scene it was showing, with nothing to fetch and no notebook behind it.
 async function unpack(id) {
   const text = document.getElementById(id).textContent.trim();
@@ -375,11 +375,17 @@ class SceneWidget(anywidget.AnyWidget):
             data=_packed(json.dumps({"state": state, "run": run}, allow_nan=False)),
         )
 
-    def save_html(self, path, title="magpylib scene"):
-        """Write `to_html` to `path`, and return where it went."""
-        path = pathlib.Path(path)
-        path.write_text(self.to_html(title), encoding="utf-8")
-        return path
+    def write_html(self, file, title="magpylib scene"):
+        """Write `to_html` to `file`: a path, or anything open for writing.
+
+        Named and shaped as Plotly's `Figure.write_html` is, and like it
+        returns nothing -- so, as the last line of a cell, it shows nothing.
+        """
+        page = self.to_html(title)
+        if hasattr(file, "write"):
+            file.write(page)
+        else:
+            pathlib.Path(file).write_text(page, encoding="utf-8")
 
     def _on_message(self, _widget, content, _buffers):
         """Answer the view: one frame of the run, or the view as a file.
