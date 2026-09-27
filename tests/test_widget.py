@@ -71,7 +71,7 @@ def test_height_is_said_the_way_every_other_backend_option_is(scene_objects):
 def test_a_click_resolves_to_the_object_that_was_clicked(scene_objects):
     """The payload keys traces by `id(obj)`; `identify` makes that an identity."""
     magnet, sensor = scene_objects
-    view = widget.view(magnet, sensor)
+    view = widget.SceneWidget(magnet, sensor)
     assert [node["label"] for node in view.tree] == ["M1", "S1"]
 
     view.selected = [str(id(sensor))]
@@ -85,7 +85,7 @@ def test_a_click_resolves_to_the_object_that_was_clicked(scene_objects):
 def test_a_collections_children_are_what_a_click_lands_on():
     """A collection is drawn as its children, and they carry the trace ids."""
     child = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1)
-    view = widget.view(magpy.Collection(child, style_label="pack"))
+    view = widget.SceneWidget(magpy.Collection(child, style_label="pack"))
     assert view.picked == []
     view.selected = [str(id(child))]
     assert view.picked == [child]
@@ -103,7 +103,7 @@ def test_ids_alone_are_left_alone_when_nobody_said_what_they_are(scene_objects):
 @needs_scene_graph
 def test_a_static_scene_keeps_no_run(scene_objects):
     """One frame is not a run: nothing to hold, and nothing to play."""
-    view = widget.view(*scene_objects)
+    view = widget.SceneWidget(*scene_objects)
     assert view.frames == 1
     assert view._scene is None
 
@@ -130,10 +130,40 @@ def test_a_view_is_re_pointed_rather_than_remade(scene_objects, swept):
 
 
 @needs_scene_graph
+def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch):
+    """One call for both: how to draw, for magpylib, and how to show it."""
+    given = {}
+    capture = threejs._capture
+
+    def spy(objects, animation=False, **kwargs):
+        given.update(kwargs)
+        return capture(objects, animation=animation, **kwargs)
+
+    monkeypatch.setattr(threejs, "_capture", spy)
+    view = widget.SceneWidget(
+        *scene_objects, height=600, theme="dark", axes=False, zoom=2
+    )
+    assert (view.height, view.theme, view.axes) == (600, "dark", False)
+    assert given == {"zoom": 2}
+
+    given.clear()
+    view.update(*scene_objects, height=300)
+    assert view.height == 300
+    assert given == {}
+
+
+def test_options_for_magpylib_need_something_to_draw():
+    """Dropped quietly, they would seem ignored once the objects came."""
+    assert widget.SceneWidget(theme="dark").payload == {}
+    with pytest.raises(TypeError, match="zoom"):
+        widget.SceneWidget(zoom=2)
+
+
+@needs_scene_graph
 def test_a_selection_goes_with_the_objects_it_named(scene_objects):
     """An object passed again keeps its place; one gone takes its entry."""
     magnet, sensor = scene_objects
-    view = widget.view(magnet, sensor)
+    view = widget.SceneWidget(magnet, sensor)
     view.selected = [str(id(magnet)), str(id(sensor))]
 
     view.update(magnet)  # the sensor is no longer in the scene
@@ -183,7 +213,7 @@ def test_an_object_passed_again_keeps_its_selection_wherever_it_moved(
 ):
     """The same object is followed, not the place it used to be."""
     magnet, sensor = scene_objects
-    view = widget.view(magnet, sensor)
+    view = widget.SceneWidget(magnet, sensor)
     view.selected = [str(id(magnet))]
     view.update(sensor, magnet)  # swapped round
     assert view.picked == [magnet]
@@ -218,7 +248,7 @@ def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
     """Every trace under a Collection carries the outermost one's legendgroup,
     so the tree has to come from the objects -- and it does."""
     outer, _, _ = nested
-    view = widget.view(outer, magpy.Sensor(style_label="probe"))
+    view = widget.SceneWidget(outer, magpy.Sensor(style_label="probe"))
     assert _outline(view.tree) == [
         ("outer", [("inner", [("deep", [])]), ("ball", [])]),
         ("probe", []),
@@ -234,7 +264,7 @@ def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
 def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     """Passing a collection and something inside it names the thing once."""
     outer, _, deep = nested
-    view = widget.view(deep, outer)  # the inner one first, to be sure
+    view = widget.SceneWidget(deep, outer)  # the inner one first, to be sure
     assert _outline(view.tree) == [("outer", [("inner", [("deep", [])]), ("ball", [])])]
 
 
@@ -242,7 +272,7 @@ def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
 def test_hiding_is_a_value_like_selecting(scene_objects):
     """Kept by id, resolved by the view, and dropped with its objects."""
     magnet, sensor = scene_objects
-    view = widget.view(magnet, sensor)
+    view = widget.SceneWidget(magnet, sensor)
     view.hidden = [str(id(sensor))]
 
     view.update(magnet, sensor)
@@ -282,7 +312,7 @@ def test_updating_a_view_is_not_itself_a_view(scene_objects):
 @needs_scene_graph
 def test_frames_are_served_one_at_a_time(swept):
     """The whole run is megabytes; the payload carries one frame of it."""
-    view = widget.view(*swept, animation=True)
+    view = widget.SceneWidget(*swept, animation=True)
     assert view.frames > 1
     assert view.payload["ranges"] is not None  # the envelope, once
 
@@ -325,7 +355,7 @@ def _unpacked(page, name):
 def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_path):
     """The widget and its scene, with nothing to fetch and no kernel to ask."""
     magnet, sensor = scene_objects
-    view = widget.view(magnet, sensor)
+    view = widget.SceneWidget(magnet, sensor)
     view.hidden = [str(id(sensor))]
     view.axes = False
     view.theme = "dark"
@@ -351,7 +381,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
 @needs_scene_graph
 def test_a_view_writes_to_an_open_file_as_well(scene_objects):
     """A path or anything with `write`, as Plotly's `write_html` takes."""
-    view = widget.view(*scene_objects)
+    view = widget.SceneWidget(*scene_objects)
     out = io.StringIO()
     view.write_html(out)
     assert out.getvalue() == view.to_html()
@@ -360,7 +390,7 @@ def test_a_view_writes_to_an_open_file_as_well(scene_objects):
 @needs_scene_graph
 def test_a_saved_run_plays_without_python(swept):
     """Every frame travels with the file, so the page answers for them."""
-    view = widget.view(*swept, animation=True)
+    view = widget.SceneWidget(*swept, animation=True)
     saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))
     assert len(saved["run"]) == view.frames
     assert saved["run"][3] == threejs.frame_payload(view._scene, 3)
@@ -368,7 +398,7 @@ def test_a_saved_run_plays_without_python(swept):
 
 @needs_scene_graph
 def test_the_export_button_is_answered_with_the_file(scene_objects):
-    view = widget.view(*scene_objects)
+    view = widget.SceneWidget(*scene_objects)
     sent = []
     view.send = lambda content, buffers=None: sent.append(content)
     view._on_message(view, {"kind": "export"}, None)

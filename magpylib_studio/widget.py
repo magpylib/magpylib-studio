@@ -4,9 +4,9 @@ The same three.js scene graph the VS Code panel draws, wrapped as an
 `anywidget` so that a notebook can hold it::
 
     import magpylib as magpy
-    from magpylib_studio.widget import view
+    from magpylib_studio.widget import SceneWidget
 
-    view(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
+    SceneWidget(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
 
 `anywidget` is the widget protocol rather than a frontend, so the same object
 draws in marimo, Jupyter, VS Code's notebooks and Colab. What marimo adds is
@@ -36,14 +36,13 @@ import pathlib
 import string
 
 import anywidget
-import magpylib as magpy
 import traitlets
 
 from magpylib_studio import threejs
 
 STATIC = pathlib.Path(__file__).parent / "static"
 
-#: What `view()` gives the scene when nobody says. Tall enough for a scene to
+#: How tall the scene is drawn when nobody says. Tall enough for a scene to
 #: be legible in a notebook column, short enough to leave the next cell on
 #: screen.
 DEFAULT_HEIGHT = 420
@@ -238,17 +237,52 @@ class SceneWidget(anywidget.AnyWidget):
     duration = traitlets.Float(5.0).tag(sync=True)
     repeat = traitlets.Bool(False).tag(sync=True)
 
-    def __init__(self, scene=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, *objects, animation=False, **kwargs):
+        """A view of `objects` -- or of nothing yet, to `update` later.
+
+        Takes what `magpylib.show` takes: ``animation=True`` captures the
+        paths so the view can play them, and anything else is passed through.
+        And, as any widget does, the starting value of its traits --
+        ``height``, ``theme``, ``axes``. A keyword that names a trait is the
+        widget's; the rest are magpylib's, and the two share no names.
+
+        Returned rather than displayed, which is what a notebook wants from
+        the last line of a cell. In marimo, wrap it in ``mo.ui.anywidget(...)``
+        to have the cell's value follow the selection.
+        """
+        traits, kwargs = self._split(kwargs)
+        super().__init__(**traits)
         #: The captured run, kept only when there is one: every frame holds
         #: every trace of the scene as computed at that step, so this is the
         #: megabytes the payload deliberately does not carry. Frames are
         #: served from here one at a time, as the panel serves them.
         self._scene = None
         self._objects = {}
-        if scene is not None:
-            self._adopt(scene)
         self.on_msg(self._on_message)
+        if objects:
+            self.update(*objects, animation=animation, **kwargs)
+        elif kwargs:
+            # Nothing to draw them with, and dropped quietly they would look
+            # like they had been ignored when the objects came.
+            raise TypeError(f"no objects to draw with {', '.join(kwargs)}")
+
+    @classmethod
+    def _split(cls, kwargs):
+        """`kwargs` as the widget's traits, and the rest: magpylib's."""
+        names = cls.class_trait_names()
+        own = {key: value for key, value in kwargs.items() if key in names}
+        return own, {key: value for key, value in kwargs.items() if key not in own}
+
+    @classmethod
+    def _from_scene(cls, scene):
+        """A view of `scene`: what ``magpy.show(..., backend="widget")`` is.
+
+        The backend is handed the scene magpylib composed and never the
+        objects, so a widget made this way has none to name -- see `identify`.
+        """
+        widget = cls()
+        widget._adopt(scene)
+        return widget
 
     def _adopt(self, scene):
         """Draw `scene`, in one update.
@@ -270,14 +304,14 @@ class SceneWidget(anywidget.AnyWidget):
 
         The alternative to making a new widget, and the reason to prefer it in
         a reactive notebook: a slider re-runs the cell it is read in, so a
-        `view()` call there is a *new* widget on every drag -- a new element,
+        widget made there is a *new* one on every drag -- a new element,
         a bar rebuilt from nothing, and a camera that goes back to the framing
         it started with, losing whatever the user had zoomed in on. Updating
         one that is already on the page replaces the drawn objects and leaves
         the view alone.
 
-        Takes what `view` takes; a scene is re-captured whole, because that is
-        what magpylib composes.
+        Takes what the constructor takes, traits too; a scene is re-captured
+        whole, because that is what magpylib composes.
 
         Returns nothing, deliberately. This is the last line of a cell, and a
         cell's value is its last expression: returning `self` -- which is a
@@ -291,9 +325,13 @@ class SceneWidget(anywidget.AnyWidget):
         # One message, not two: sent apart, the browser would draw the new
         # scene against the old tree, and the legend would list objects that
         # are no longer there beside ones it cannot name.
+        traits, kwargs = self._split(kwargs)
         with self.hold_sync():
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
             self.identify(*objects)
+            # after `identify`, so that a selection given here is not carried
+            for name, value in traits.items():
+                setattr(self, name, value)
 
     def identify(self, *objects):
         """Name the objects the scene was drawn from, and return self.
@@ -436,24 +474,3 @@ def display(widget):
     except ImportError:
         pass
     return False
-
-
-def view(*objects, height=DEFAULT_HEIGHT, animation=False, **kwargs):
-    """`objects` as a scene widget, ready to be a cell's value.
-
-    Takes what `magpylib.show` takes -- ``animation=True`` captures the paths
-    so the view can play them, and anything else is passed through.
-
-    The widget is returned rather than displayed, which is what a notebook
-    wants from the last line of a cell. In marimo, wrap it in
-    ``mo.ui.anywidget(...)`` to have the cell's value follow the selection.
-    """
-    widget = magpy.show(
-        *objects,
-        backend="widget",
-        return_fig=True,
-        animation=animation,
-        **kwargs,
-    )
-    widget.height = int(height)
-    return widget.identify(*objects)

@@ -23,9 +23,9 @@ def _():
     import marimo as mo
     import numpy as np
 
-    from magpylib_studio.widget import SceneWidget, view
+    from magpylib_studio.widget import SceneWidget
 
-    return SceneWidget, magpy, mo, np, view
+    return SceneWidget, magpy, mo, np
 
 
 @app.cell(hide_code=True)
@@ -120,7 +120,7 @@ def _(SceneWidget, mo):
 @app.cell
 def _(probe, scene, stack):
     # Re-pointed, not remade. A slider re-runs every cell that reads it, so a
-    # `view(...)` call in one of them would build a new widget per drag: a new
+    # `SceneWidget(...)` in one of them would be a new widget per drag: a new
     # element, controls rebuilt from nothing, and the camera back at its opening
     # framing -- losing whatever you had just zoomed in on. This cell reads the
     # sliders; the one above, which owns the view, does not.
@@ -161,7 +161,7 @@ def _(mo):
 
 
 @app.cell
-def _(magpy, np, view):
+def _(SceneWidget, magpy, np):
     _rotor = magpy.magnet.Cylinder(
         polarization=(1, 0, 0),
         dimension=(4, 1),
@@ -174,7 +174,7 @@ def _(magpy, np, view):
     _sweep.style.arrows.x.show = True
     _sweep.style.arrows.y.show = True
 
-    view(_rotor, _sweep, animation=True, height=380)
+    SceneWidget(_rotor, _sweep, animation=True, height=380)
     return
 
 

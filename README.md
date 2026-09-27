@@ -55,9 +55,9 @@ display-backend API, which is on main and in no release: on 5.2.3,
 
 ```python
 import magpylib as magpy
-from magpylib_studio.widget import view
+from magpylib_studio.widget import SceneWidget
 
-view(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
+SceneWidget(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
 ```
 
 `magpy.show(objects, backend="widget")` is the same thing said magpylib's way,
@@ -80,7 +80,7 @@ scene.widget.picked                                # a third: what was clicked
 ```
 
 **Make the view once and re-point it.** A slider re-runs every cell that reads
-it, so a `view(...)` call in one of them builds a _new widget per drag_: a new
+it, so a `SceneWidget(...)` in one of them is a _new widget per drag_: a new
 element, controls rebuilt from nothing, and the camera back at its opening
 framing — you lose the zoom you were working in. `update()` replaces the drawn
 objects and leaves the view alone, which is what makes a slider smooth.
@@ -92,7 +92,7 @@ colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
 range in tree order, a double click frames it. It writes `selected` and
 `hidden`, the traitlets a click in the view and a notebook cell write too. It
 needs the objects, because the payload cannot say how they nest, so it comes
-with `view()` and `update()` and not with a bare `magpy.show()`.
+with `SceneWidget(...)` and `update()` and not with a bare `magpy.show()`.
 
 What is selected, hidden or folded survives `update()`: an object passed again
 keeps it, and a rebuilt one inherits it from whatever sat in its place in the
