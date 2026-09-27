@@ -86,12 +86,13 @@ framing — you lose the zoom you were working in. `update()` replaces the drawn
 objects and leaves the view alone, which is what makes a slider smooth.
 
 **The legend** floats over the view: the objects as they are nested, with a
-caret to fold a collection, an eye to hide it and everything in it, a swatch in
-the colour it is drawn, and a name to click — ⌘/ctrl adds, shift takes a range
-in tree order. It writes `selected` and `hidden`, the traitlets a click in the
-view and a notebook cell write too. It needs the objects, because the payload
-cannot say how they nest, so it comes with `view()` and `update()` and not with
-a bare `magpy.show()`.
+caret to fold a collection, an eye to hide it and everything in it — shown on
+the row under the pointer, and always on one that is hidden — a swatch in the
+colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
+range in tree order, a double click frames it. It writes `selected` and
+`hidden`, the traitlets a click in the view and a notebook cell write too. It
+needs the objects, because the payload cannot say how they nest, so it comes
+with `view()` and `update()` and not with a bare `magpy.show()`.
 
 What is selected, hidden or folded survives `update()`: an object passed again
 keeps it, and a rebuilt one inherits it from whatever sat in its place in the
