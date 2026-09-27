@@ -44,16 +44,25 @@ function loadRenderer() {
  *
  * `isConnected` as well as the cleanup below, because a cell removed while
  * the widget was never destroyed -- marimo re-running the cell that made it --
- * frees the element without freeing the slot.
+ * frees the element without freeing the slot. But only an element that was
+ * on the page can have left it: Jupyter renders a widget before attaching it,
+ * and a view not yet attached is not a view that has gone. Taken as one, two
+ * widgets rendered together shared a renderer, and the first lost its canvas.
  */
 function acquire(el) {
-  const free = pool.find((slot) => !slot.host || !slot.host.isConnected);
+  // Whatever is on the page now has been seen there, whether or not it was
+  // drawn after it arrived.
+  for (const slot of pool) if (slot.host?.isConnected) slot.shown = true;
+  const free = pool.find(
+    (slot) => !slot.host || (slot.shown && !slot.host.isConnected),
+  );
   const slot = free || { host: null, api: null };
   if (!free) {
     slot.api = loadRenderer();
     pool.push(slot);
   }
   slot.host = el;
+  slot.shown = false; // until its element is seen on the page
   return slot;
 }
 
@@ -334,9 +343,10 @@ function render({ model, el }) {
   // The whole widget, legend and controls with it, so nothing that works in
   // the cell stops working at full size. Asked of the root the widget sits in,
   // which in marimo is a shadow root: there, the document would name the
-  // shadow's host as what is full screen, never this element.
-  const root = el.getRootNode();
-  const isFullscreen = () => root.fullscreenElement === el;
+  // shadow's host as what is full screen, never this element. Asked when it
+  // is needed, not once here: Jupyter renders a widget before attaching it,
+  // and the root of an element not yet on the page is the element itself.
+  const isFullscreen = () => el.getRootNode().fullscreenElement === el;
   function toggleFullscreen() {
     if (isFullscreen()) document.exitFullscreen();
     else {
@@ -729,6 +739,7 @@ function render({ model, el }) {
   async function draw() {
     api = await slot.api;
     if (slot.host !== view) return; // the slot was taken while we were away
+    if (view.isConnected) slot.shown = true;
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
     // Again here, not only at mount: a notebook may hand over the element
