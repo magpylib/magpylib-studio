@@ -25,6 +25,7 @@
  * the extension depends on, and this is a small one that does not touch it.
  */
 import rendererSource from "../../build/renderer.txt";
+import { createLegend, labelsOf } from "./legend.mjs";
 
 /** Live views: `{ host, api }`, where `api` is a promise of one scene3d. */
 const pool = [];
@@ -82,9 +83,17 @@ function render({ model, el }) {
   if (background)
     el.style.setProperty("--vscode-editor-background", background);
 
+  // The renderer owns `view` -- it hangs its canvas there and watches its
+  // size -- so the legend floats beside it, in a stage they share, rather
+  // than inside something that is not the widget's to fill.
+  const stage = document.createElement("div");
+  stage.className = "magpy-scene-stage";
   const view = document.createElement("div");
   view.className = "magpy-scene-view";
   view.style.height = `${model.get("height")}px`;
+  const legendEl = document.createElement("div");
+  legendEl.className = "magpy-scene-legend";
+  stage.append(view, legendEl);
 
   const bar = document.createElement("div");
   bar.className = "magpy-scene-bar";
@@ -98,7 +107,16 @@ function render({ model, el }) {
   scrub.value = "0";
   scrub.hidden = true; // until a payload says how many steps there are
   scrub.className = "magpy-scene-scrub";
+  const objectsButton = button(
+    "Objects",
+    "Show or hide the list of objects",
+    () => {
+      legendOpen = !legendOpen;
+      legendEl.hidden = !legendOpen;
+    },
+  );
   bar.append(
+    objectsButton,
     button("Fit", "Frame the whole scene", () => api?.fitView()),
     button("Ortho", "Switch between perspective and orthographic", (event) => {
       // The renderer answers with the projection now in force, so the
@@ -110,7 +128,45 @@ function render({ model, el }) {
     scrub,
     status,
   );
-  el.append(view, bar);
+  el.append(stage, bar);
+
+  // What selection and visibility *mean* is the widget's: they are traitlets.
+  // The legend reports what a click would make them, as the view does.
+  const legend = createLegend(legendEl, {
+    onSelect: (ids) => commit("selected", ids),
+    onHide: (ids) => commit("hidden", ids),
+  });
+  let labels = new Map(); // id -> label, from the tree
+  let legendOpen = null; // undecided until there is a tree to decide by
+
+  function commit(name, value) {
+    model.set(name, value);
+    model.save_changes();
+  }
+
+  /** The legend, drawn from the model. Like the bar, before anything is
+   *  awaited, and for the same reason. */
+  function dressLegend() {
+    const tree = model.get("tree") || [];
+    const payload = model.get("payload") || {};
+    labels = labelsOf(tree);
+    objectsButton.hidden = labels.size === 0;
+    if (!payload.meshes || labels.size === 0) {
+      legendEl.hidden = true;
+      return;
+    }
+    // Open when it has something to say: one object needs no list. After the
+    // first time, it is the user's to open and close.
+    legendOpen ??= labels.size > 1;
+    legendEl.hidden = !legendOpen;
+    legend.update({ tree, payload });
+    legend.sync(stateOf());
+  }
+
+  const stateOf = () => ({
+    selected: model.get("selected") || [],
+    hidden: model.get("hidden") || [],
+  });
 
   const slot = acquire(view);
   let api = null;
@@ -158,15 +214,13 @@ function render({ model, el }) {
   }
 
   /** The selection in the words the notebook uses for it, when it was told
-   *  them -- `SceneWidget.identify` -- and by id when it was not. */
+   *  them -- `SceneWidget.identify` -- and by id when it was not. A whole
+   *  collection picked from the legend is counted rather than listed. */
   function sayWhatIsSelected() {
     const ids = model.get("selected") || [];
-    const labels = model.get("labels") || {};
-    say(
-      ids.length
-        ? `Selected: ${ids.map((id) => labels[id] || id).join(", ")}`
-        : summary,
-    );
+    if (!ids.length) say(summary);
+    else if (ids.length > 3) say(`Selected: ${ids.length} objects`);
+    else say(`Selected: ${ids.map((id) => labels.get(id) || id).join(", ")}`);
   }
 
   /** Ask for a frame; the newest ask wins.
@@ -265,7 +319,18 @@ function render({ model, el }) {
 
   model.on("change:selected", () => {
     api?.highlight(model.get("selected") || []);
+    legend.sync(stateOf());
     sayWhatIsSelected();
+  });
+
+  model.on("change:hidden", () => {
+    api?.setHidden(model.get("hidden") || []);
+    legend.sync(stateOf());
+  });
+
+  model.on("change:tree", () => {
+    dressLegend();
+    sayWhatIsSelected(); // the names may be new
   });
 
   // --- drawing ----------------------------------------------------------
@@ -275,6 +340,9 @@ function render({ model, el }) {
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
     api.setGizmoMode("none"); // read only: nothing here can be dragged
+    // Before the render, so nodes are built hidden rather than drawn and then
+    // taken away -- and so a pooled renderer drops the last widget's.
+    api.setHidden(model.get("hidden") || []);
     api.render(view, payload, { keepCamera: framed });
     framed = true;
     api.highlight(model.get("selected") || []);
@@ -300,13 +368,17 @@ function render({ model, el }) {
     inFlight = false;
     wanted = null;
     shown = 0;
+    dressLegend(); // first: the bar names the selection, from the tree
     dressBar();
     draw();
   });
   model.on("change:height", () => {
     view.style.height = `${model.get("height")}px`;
   });
-  dressBar(); // before the first await, so the bar arrives with the element
+  // Before the first await, so the bar and the legend arrive with the element;
+  // the legend first, because the bar names the selection from its tree.
+  dressLegend();
+  dressBar();
   draw();
 
   return () => {

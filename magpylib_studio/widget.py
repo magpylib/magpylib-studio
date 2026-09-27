@@ -44,18 +44,57 @@ STATIC = pathlib.Path(__file__).parent / "static"
 DEFAULT_HEIGHT = 420
 
 
-def _flatten(objects):
-    """Every magpylib object in `objects`, collections opened up.
-
-    The view draws a collection's children, and it is the children that its
-    traces are stamped with, so those are what a click has to resolve to.
-    """
+def _given(objects):
+    """The objects as passed, lists opened up and collections left whole."""
     for obj in objects:
         if isinstance(obj, list | tuple | set):
-            yield from _flatten(obj)
-            continue
-        yield obj
-        yield from getattr(obj, "children_all", ())
+            yield from _given(obj)
+        else:
+            yield obj
+
+
+def _tree(objects):
+    """The Collection hierarchy under `objects`, and every object in it by id.
+
+    It has to come from the objects. The payload cannot carry it: every trace
+    under a Collection is stamped with the *outermost* one's legendgroup, so
+    three levels of nesting arrive looking like one.
+
+    Each object appears once, where it sits in its collection. One that was
+    passed and is also inside another that was passed is shown in its
+    collection rather than a second time at the top.
+    """
+    given = list(_given(objects))
+    inside = {id(child) for obj in given for child in getattr(obj, "children_all", ())}
+    found = {}
+
+    def node(obj):
+        key = str(id(obj))
+        found[key] = obj
+        return {
+            "id": key,
+            "label": getattr(obj.style, "label", None) or type(obj).__name__,
+            "kind": type(obj).__name__,
+            "children": [node(child) for child in getattr(obj, "children", ())],
+        }
+
+    roots = [
+        node(obj)
+        for obj in given
+        if id(obj) not in inside and str(id(obj)) not in found
+    ]
+    return roots, found
+
+
+def _positions(tree, at=""):
+    """Each node's id, and where it sits: ``"0"``, ``"0/1"``, ``"0/1/3"``.
+
+    The same addressing the legend folds by.
+    """
+    for i, node in enumerate(tree):
+        path = f"{at}/{i}" if at else str(i)
+        yield node["id"], path
+        yield from _positions(node["children"], path)
 
 
 class SceneWidget(anywidget.AnyWidget):
@@ -72,11 +111,17 @@ class SceneWidget(anywidget.AnyWidget):
     #: The scene as buffers. Replacing it redraws, keeping the camera.
     payload = traitlets.Dict().tag(sync=True)
     #: Which objects are outlined, by the ids `payload` uses. Written by a
-    #: click in the view and readable from the notebook -- and the other way
-    #: about: assigning to it moves the outline.
+    #: click in the view or the legend and readable from the notebook -- and
+    #: the other way about: assigning to it moves the outline.
     selected = traitlets.List(traitlets.Unicode()).tag(sync=True)
-    #: id -> what to call it, for the objects `identify` was given.
-    labels = traitlets.Dict().tag(sync=True)
+    #: Which objects are not drawn, by the same ids. Written by the legend's
+    #: eye, and assignable from the notebook like `selected`.
+    hidden = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The objects `identify` was given, as their Collection hierarchy: nodes
+    #: of ``{id, label, kind, children}``. What the legend draws. Empty for a
+    #: bare ``magpy.show(..., backend="widget")``, which has no objects to
+    #: take it from.
+    tree = traitlets.List().tag(sync=True)
     height = traitlets.Int(DEFAULT_HEIGHT).tag(sync=True)
     #: Steps in the run, how long it should take, and whether it starts over
     #: at the end -- magpylib's own animation settings. One frame means there
@@ -135,8 +180,12 @@ class SceneWidget(anywidget.AnyWidget):
         # the one path that hands back the `Scene` a display backend is given,
         # with the capabilities this view declares, without a second widget
         # (and a second comm) being made to throw away.
-        self._adopt(threejs._capture(objects, animation=animation, **kwargs))
-        self.identify(*objects)
+        # One message, not two: sent apart, the browser would draw the new
+        # scene against the old tree, and the legend would list objects that
+        # are no longer there beside ones it cannot name.
+        with self.hold_sync():
+            self._adopt(threejs._capture(objects, animation=animation, **kwargs))
+            self.identify(*objects)
 
     def identify(self, *objects):
         """Name the objects the scene was drawn from, and return self.
@@ -147,23 +196,36 @@ class SceneWidget(anywidget.AnyWidget):
         magpylib object, and the view can say what it is called -- and holding
         them here is also what keeps the address meaning what it meant.
 
-        Anything selected that these objects do not account for is dropped.
-        Which is most of the time in a reactive notebook: a slider rebuilds
-        the objects, so the new ones are at new addresses and a selection
-        cannot survive the rebuild. Better deselected than pointing at a
-        number that means nothing.
+        What was selected or hidden carries over to these objects: an object
+        passed again keeps its place in both, and one that is not moves to
+        whatever now sits where it sat in the tree. That second case is the
+        usual one in a reactive notebook -- a slider rebuilds the objects, so
+        they are new ones at new addresses -- and "the lower ring" means the
+        ring in that place, not the address it happened to be at. It is how
+        the legend keeps what is folded, for the same reason. Whatever has
+        nowhere to go is dropped.
         """
-        self._objects = {str(id(obj)): obj for obj in _flatten(objects)}
+        before = dict(_positions(self.tree))
+        tree, objects = _tree(objects)
+        after = {path: key for key, path in _positions(tree)}
+
+        def carried(ids):
+            out = []
+            for key in ids:
+                # An id among the new objects is the same object: the old ones
+                # are still held in `_objects`, so no new one can have been
+                # given an old one's address.
+                if key not in objects:
+                    key = after.get(before.get(key))
+                if key is not None and key not in out:
+                    out.append(key)
+            return out
+
         with self.hold_sync():
-            self.labels = {
-                key: getattr(obj.style, "label", None) or type(obj).__name__
-                for key, obj in self._objects.items()
-            }
-            # What was selected was selected in the scene being replaced. Its
-            # ids name nothing now -- the view has no such object to outline
-            # and `picked` cannot resolve them -- and an address is reused, so
-            # left alone they can start resolving to something never clicked.
-            self.selected = [key for key in self.selected if key in self._objects]
+            self.tree = tree
+            self.selected = carried(self.selected)
+            self.hidden = carried(self.hidden)
+        self._objects = objects
         return self
 
     @property

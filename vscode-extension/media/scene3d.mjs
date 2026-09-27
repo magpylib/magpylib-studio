@@ -20,6 +20,10 @@ let controls = null;
 let renderer = null;
 const raycaster = new THREE.Raycaster();
 const byObjectId = new Map();
+// What the host has hidden. By id, and held here rather than on the nodes:
+// every redraw and every frame of a run rebuilds those, and a visibility set
+// on one from outside would last only until the next.
+let hiddenIds = new Set();
 let framed = false;
 let outlines = [];
 let axes = null; // the box, ticks and names that give the scene a scale
@@ -507,7 +511,11 @@ function pick(event) {
     ),
     camera,
   );
-  const hits = raycaster.intersectObjects([...byObjectId.values()], true);
+  // Only what is drawn. three.js raycasts invisible objects as readily as
+  // visible ones, and a hidden object would take the click meant for
+  // whatever is behind it.
+  const drawn = [...byObjectId.values()].filter((node) => node.visible);
+  const hits = raycaster.intersectObjects(drawn, true);
   for (const hit of hits) {
     for (let node = hit.object; node; node = node.parent) {
       if (node.userData.objectId) return node.userData.objectId;
@@ -567,9 +575,19 @@ function nodeFor(objectId, centroid) {
   // rotation back out of each trace, so nothing moves on screen.
   node.quaternion.copy(quaternionOf(orientations[objectId]));
   node.userData.objectId = objectId;
+  node.visible = !hiddenIds.has(objectId);
   scene.add(node);
   byObjectId.set(objectId, node);
   return node;
+}
+
+/** Hide these objects, and show every other. */
+function setHidden(objectIds) {
+  hiddenIds = new Set(objectIds);
+  for (const [objectId, node] of byObjectId) {
+    node.visible = !hiddenIds.has(objectId);
+  }
+  highlight(selectedIds); // an outline round nothing reads as a bug
 }
 
 function buildMesh(item) {
@@ -736,7 +754,7 @@ function highlight(objectIds) {
   const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
   for (const objectId of selectedIds) {
     const node = byObjectId.get(objectId);
-    if (!node) continue;
+    if (!node?.visible) continue;
     const box = new THREE.BoxHelper(node, accent);
     box.raycast = () => {}; // an indicator, not a target
     scene.add(box);
@@ -1160,6 +1178,7 @@ export const scene3d = {
   render,
   fitView,
   highlight,
+  setHidden,
   setGizmoMode,
   constrainAxis,
   setSnapping,
