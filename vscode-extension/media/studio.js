@@ -802,8 +802,8 @@ function toggleSnap() {
     : "Snap to round steps (S)";
 }
 
-function toggleProjection() {
-  const kind = window.scene3d?.toggleProjection();
+/** Say which projection is in force, on the button that switches it. */
+function showProjection(kind) {
   projectionEl.textContent = kind === "parallel" ? "Parallel" : "Persp";
   projectionEl.classList.toggle("on", kind === "parallel");
 }
@@ -818,7 +818,9 @@ animateEl.addEventListener("click", () => {
 
 axisEl.addEventListener("click", () => constrain(null));
 snapEl.addEventListener("click", toggleSnap);
-projectionEl.addEventListener("click", toggleProjection);
+projectionEl.addEventListener("click", () =>
+  showProjection(window.scene3d?.toggleProjection()),
+);
 
 axesEl.addEventListener("change", () => {
   window.scene3d?.setSpace(axesEl.value);
@@ -834,7 +836,26 @@ const GIZMO_KEYS = {
   p: "polarization",
   q: "none",
 };
-const AXIS_VIEWS = { 1: [0, -1, 0], 3: [1, 0, 0], 7: [0, 0, 1] }; // front, right, top
+/** What the view keys ask of the panel -- see `VIEW_KEYS` in scene3d.mjs,
+ *  which holds the keys and does the camera's share itself. Selection and
+ *  visibility are the extension's, the Scene tree's, so asking for either is a
+ *  message rather than a change made here. */
+const VIEW_ACTIONS = {
+  play: playPause,
+  projection: showProjection,
+  next: (objectId) => {
+    if (objectId) vscodeApi.postMessage({ type: "selectObject", objectId });
+  },
+  hide: ({ isolate }) => {
+    // hidden objects are not drawn, so showing one again is the Scene tree's
+    // job; there is nothing here to click on
+    if (!selectedIds[0]) return false;
+    vscodeApi.postMessage({
+      type: isolate ? "isolateObject" : "toggleVisible",
+      objectId: selectedIds[0],
+    });
+  },
+};
 
 window.addEventListener("keydown", (event) => {
   if (!drawingScene() || event.target !== document.body) return;
@@ -850,34 +871,13 @@ window.addEventListener("keydown", (event) => {
   } else if (key === "l") {
     scene3d?.toggleSpace();
     showAxes();
-  } else if (key === "h") {
-    // the host owns visibility and knows the current state; hidden objects
-    // are not drawn, so showing one again is the Scene tree's job
-    if (selectedIds[0]) {
-      vscodeApi.postMessage({
-        type: event.shiftKey ? "isolateObject" : "toggleVisible",
-        objectId: selectedIds[0],
-      });
-    }
-  } else if (event.key === " ") {
-    event.preventDefault(); // space would otherwise scroll or press a button
-    playPause();
   } else if (key === "s") {
     toggleSnap();
-  } else if (event.key === "5") {
-    toggleProjection();
-  } else if (event.key === "Tab") {
-    // the panel has nothing else worth tabbing through, and walking the
-    // scene is worth more here than moving focus between two dropdowns
+  } else if (scene3d?.viewKey(event, VIEW_ACTIONS)) {
+    // Taken: space would otherwise scroll or press a button, and Tab move
+    // focus -- the panel has nothing else worth tabbing through, and walking
+    // the scene is worth more here than moving between two dropdowns.
     event.preventDefault();
-    const next = scene3d?.nextObject(selectedIds[0]);
-    if (next) vscodeApi.postMessage({ type: "selectObject", objectId: next });
-  } else if (key === "f") {
-    scene3d?.fitView(selectedIds[0]); // undefined when nothing is selected: fits all
-  } else if (event.key === "Home") {
-    scene3d?.fitView();
-  } else if (AXIS_VIEWS[event.key]) {
-    scene3d?.axisView(...AXIS_VIEWS[event.key]);
   }
 });
 

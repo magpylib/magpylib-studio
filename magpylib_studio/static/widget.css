@@ -30,6 +30,17 @@
   position: relative;
 }
 
+/* It takes focus so its keys are its own. A click is not a reason to draw a
+   ring round the scene; arriving by keyboard is. */
+.magpy-scene-stage:focus {
+  outline: none;
+}
+
+.magpy-scene-stage:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+
 .magpy-scene-view {
   min-height: 0;
   width: 100%;

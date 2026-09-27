@@ -5,12 +5,13 @@
  * it was: a caret folds a collection, an eye hides it and everything beneath
  * it, a swatch says what it is drawn in, and the label selects -- a plain click
  * replaces, cmd/ctrl toggles, shift takes the range from the last row clicked,
- * in tree order, which is the only order a scene has.
+ * in tree order, which is the only order a scene has. A double click frames
+ * what the row holds.
  *
  * A component, not a panel with opinions: it holds nothing a notebook can see.
  * What is selected and what is hidden are the widget's traitlets. The legend
  * is told them (`sync`) and says what a click would make them (`onSelect`,
- * `onHide`); the widget decides.
+ * `onHide`), or what it would look at (`onFrame`); the widget decides.
  */
 
 /** Every node, parents before their children. */
@@ -20,6 +21,13 @@ function inTreeOrder(nodes, out = []) {
     inTreeOrder(node.children, out);
   }
   return out;
+}
+
+/** The ids a payload draws something for. */
+export function drawnIn(payload) {
+  return new Set(
+    [...payload.meshes, ...payload.scatters].map((item) => item.object_id),
+  );
 }
 
 /** What to call each object in `tree`, by id. */
@@ -84,7 +92,7 @@ function part(className, title) {
   return el;
 }
 
-export function createLegend(container, { onSelect, onHide }) {
+export function createLegend(container, { onSelect, onHide, onFrame }) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
   let swatches = new Map();
@@ -168,7 +176,12 @@ export function createLegend(container, { onSelect, onHide }) {
     rows.set(node.id, row);
 
     eye.addEventListener("click", () => toggleHidden(node));
-    label.addEventListener("click", (event) => select(node, modeOf(event)));
+    label.addEventListener("click", (event) => {
+      // The second click of a double click is the double click's: counted
+      // on its own, it would clear the selection the first one just made.
+      if (event.detail < 2) select(node, modeOf(event));
+    });
+    label.addEventListener("dblclick", () => onFrame?.(leaves.get(node.id)));
 
     if (!node.children.length) {
       caret.classList.add("leaf");
@@ -193,9 +206,7 @@ export function createLegend(container, { onSelect, onHide }) {
 
   /** Draw `tree`, for a view drawing `payload`. */
   function update({ tree, payload }) {
-    const drawn = new Set(
-      [...payload.meshes, ...payload.scatters].map((item) => item.object_id),
-    );
+    const drawn = drawnIn(payload);
     order = inTreeOrder(tree);
     leaves = new Map();
     for (const node of tree) collectLeaves(node, drawn);

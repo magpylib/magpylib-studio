@@ -718,12 +718,21 @@ function buildScatter(item) {
 
 /** One object, or everything drawn, as a sphere -- null if there is nothing
  *  to look at. */
-function sceneSphere(objectId) {
+/** The sphere round `objectIds` -- one id or several -- or, when none of them
+ *  is drawn, round everything that is showing. */
+function sceneSphere(objectIds) {
   const box = new THREE.Box3();
-  if (byObjectId.has(objectId)) {
-    box.expandByObject(byObjectId.get(objectId));
+  const chosen = []
+    .concat(objectIds ?? [])
+    .map((objectId) => byObjectId.get(objectId))
+    .filter(Boolean);
+  if (chosen.length) {
+    for (const node of chosen) box.expandByObject(node);
   } else {
-    for (const node of byObjectId.values()) box.expandByObject(node);
+    // A hidden object is not part of what is being looked at.
+    for (const node of byObjectId.values()) {
+      if (node.visible) box.expandByObject(node);
+    }
     // the graduated box sits a little outside the objects, and framing the
     // scene without its scale showing would cut the numbers off
     if (axes) box.expandByObject(axes);
@@ -786,8 +795,8 @@ function selectionCentre() {
  * The panel is usually wider than tall, which makes the *vertical* angle the
  * limiting one, so guessing from the horizontal was wrong twice over.
  */
-function fitView(objectId) {
-  const sphere = sceneSphere(objectId);
+function fitView(objectIds) {
+  const sphere = sceneSphere(objectIds);
   if (!sphere) return;
 
   // Framing should not also spin the view: keep the angle the camera is
@@ -1098,10 +1107,79 @@ function poseEdit(objectId, field, numbers) {
 }
 
 /** The object after this one, so a keystroke can walk the scene. */
-function nextObject(objectId) {
-  const drawn = [...byObjectId.keys()].filter(Boolean);
+function nextObject(objectId, step = 1) {
+  const drawn = [...byObjectId]
+    .filter(([id, node]) => id && node.visible)
+    .map(([id]) => id);
   if (!drawn.length) return undefined;
-  return drawn[(drawn.indexOf(objectId) + 1) % drawn.length];
+  const at = drawn.indexOf(objectId);
+  // from nothing, forward starts at the first object and back at the last
+  if (at === -1) return step > 0 ? drawn[0] : drawn.at(-1);
+  return drawn[(at + step + drawn.length) % drawn.length];
+}
+
+/** What each key does to a view, in every host that draws one.
+ *
+ * Framing, the axis views and the projection move the camera, which is this
+ * module's, so `viewKey` does them. The rest name something the host owns --
+ * the selection, the run, what is hidden -- and the host is asked, by calling
+ * its function of the same name. A host without one, or whose one answers
+ * false, has declined, and the key goes on to whatever else wants it: the
+ * notebook widget declines Tab, because in a notebook Tab moves between
+ * cells. The panel adds its handles' keys around these.
+ */
+const VIEW_KEYS = {
+  f: "frame", // the selection, or everything when nothing is selected
+  Home: "frameAll",
+  1: "front",
+  3: "right",
+  7: "top",
+  5: "projection",
+  Tab: "next", // shift: the one before
+  " ": "play",
+  h: "hide", // shift: show only the selection, or everything again
+  Escape: "deselect",
+};
+
+// Where the camera stands, from what it looks at, for each axis view.
+const AXIS_VIEWS = { front: [0, -1, 0], right: [1, 0, 0], top: [0, 0, 1] };
+
+/** Do what `event` asks of the view, asking `host` for its part. Answers
+ *  whether the key was taken, so the host knows to stop it going further. */
+function viewKey(event, host = {}) {
+  // A chord is the application's, not the view's: cmd-F finds, ctrl-H is not H.
+  if (event.metaKey || event.ctrlKey || event.altKey || !camera) return false;
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  const action = VIEW_KEYS[key];
+  const ask = (answer, argument) =>
+    typeof answer === "function" && answer(argument) !== false;
+  switch (action) {
+    case undefined:
+      return false;
+    case "frame":
+      fitView(selectedIds);
+      return true;
+    case "frameAll":
+      fitView();
+      return true;
+    case "front":
+    case "right":
+    case "top":
+      axisView(...AXIS_VIEWS[action]);
+      return true;
+    case "projection":
+      host.projection?.(toggleProjection());
+      return true;
+    case "next":
+      return ask(
+        host.next,
+        nextObject(selectedIds[0], event.shiftKey ? -1 : 1),
+      );
+    case "hide":
+      return ask(host.hide, { isolate: event.shiftKey });
+    default: // play, deselect
+      return ask(host[action]);
+  }
 }
 
 /** Replace the drawn objects with `payload`, keeping the camera where it is.
@@ -1191,6 +1269,7 @@ export const scene3d = {
   spaceOf,
   toggleSpace,
   axisView,
+  viewKey,
   poseEdit,
   canResize: (objectId) => Boolean(shapes[objectId]),
   canAim: (objectId) => Boolean(polarizations[objectId]),

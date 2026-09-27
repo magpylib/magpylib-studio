@@ -25,7 +25,7 @@
  * the extension depends on, and this is a small one that does not touch it.
  */
 import rendererSource from "../../build/renderer.txt";
-import { createLegend, labelsOf } from "./legend.mjs";
+import { createLegend, drawnIn, labelsOf } from "./legend.mjs";
 
 /** Live views: `{ host, api }`, where `api` is a promise of one scene3d. */
 const pool = [];
@@ -88,6 +88,12 @@ function render({ model, el }) {
   // than inside something that is not the widget's to fill.
   const stage = document.createElement("div");
   stage.className = "magpy-scene-stage";
+  // Focusable, so the view's keys can be the view's alone: they act only
+  // while it has focus, and a notebook's own shortcuts are left alone the
+  // rest of the time. JupyterLab reads this attribute as "not while focus is
+  // in here"; marimo and the rest are kept out by stopping the event.
+  stage.tabIndex = 0;
+  stage.setAttribute("data-lm-suppress-shortcuts", "true");
   const view = document.createElement("div");
   view.className = "magpy-scene-view";
   view.style.height = `${model.get("height")}px`;
@@ -99,7 +105,9 @@ function render({ model, el }) {
   bar.className = "magpy-scene-bar";
   const status = document.createElement("span");
   status.className = "magpy-scene-status";
-  const play = button("▶", "Play the paths", () => setPlaying(!playing));
+  const play = button("▶", "Play the paths (space)", () =>
+    setPlaying(!playing),
+  );
   play.hidden = true;
   const scrub = document.createElement("input");
   scrub.type = "range";
@@ -107,9 +115,15 @@ function render({ model, el }) {
   scrub.value = "0";
   scrub.hidden = true; // until a payload says how many steps there are
   scrub.className = "magpy-scene-scrub";
+  const projectionButton = button(
+    "Ortho",
+    "Switch between perspective and orthographic (5)",
+    () => showProjection(api?.toggleProjection()),
+  );
   const objectsButton = button(
     "Objects",
-    "Show or hide the list of objects",
+    "Show or hide the list of objects — double-click a name to frame it; " +
+      "H hides the selection, shift-H shows only it",
     () => {
       legendOpen = !legendOpen;
       legendEl.hidden = !legendOpen;
@@ -117,13 +131,13 @@ function render({ model, el }) {
   );
   bar.append(
     objectsButton,
-    button("Fit", "Frame the whole scene", () => api?.fitView()),
-    button("Ortho", "Switch between perspective and orthographic", (event) => {
-      // The renderer answers with the projection now in force, so the
-      // button offers the other one.
-      event.target.textContent =
-        api?.toggleProjection() === "parallel" ? "Persp" : "Ortho";
-    }),
+    button(
+      "Fit",
+      "Frame everything (Home) — F frames the selection; 1, 3, 7 look " +
+        "from the front, the right and the top",
+      () => api?.fitView(),
+    ),
+    projectionButton,
     play,
     scrub,
     status,
@@ -135,6 +149,7 @@ function render({ model, el }) {
   const legend = createLegend(legendEl, {
     onSelect: (ids) => commit("selected", ids),
     onHide: (ids) => commit("hidden", ids),
+    onFrame: (ids) => api?.fitView(ids),
   });
   let labels = new Map(); // id -> label, from the tree
   let legendOpen = null; // undecided until there is a tree to decide by
@@ -167,6 +182,59 @@ function render({ model, el }) {
     selected: model.get("selected") || [],
     hidden: model.get("hidden") || [],
   });
+
+  /** The renderer answers with the projection now in force, so the button
+   *  offers the other one. */
+  function showProjection(kind) {
+    projectionButton.textContent = kind === "parallel" ? "Persp" : "Ortho";
+  }
+
+  /** What the view keys ask of this host -- see `VIEW_KEYS` in scene3d.mjs,
+   *  which holds the keys and moves the camera itself. Tab is not answered:
+   *  in a notebook it moves between cells, and a view that kept it would be
+   *  a trap. Each declines, with false, when it has nothing to do, so the
+   *  key is left to the page. */
+  const viewActions = {
+    projection: showProjection,
+    play() {
+      if (frames() < 2) return false;
+      setPlaying(!playing);
+    },
+    deselect() {
+      if (!(model.get("selected") || []).length) return false;
+      commit("selected", []);
+    },
+    hide({ isolate }) {
+      const chosen = model.get("selected") || [];
+      const hidden = new Set(model.get("hidden") || []);
+      if (isolate) {
+        // Show only the selection -- or, with something already hidden,
+        // everything again: the one key narrows the view and restores it.
+        if (!hidden.size && !chosen.length) return false;
+        const drawn = drawnIn(model.get("payload"));
+        commit(
+          "hidden",
+          hidden.size ? [] : [...drawn].filter((id) => !chosen.includes(id)),
+        );
+        return;
+      }
+      if (!chosen.length) return false;
+      const showing = chosen.some((id) => !hidden.has(id));
+      for (const id of chosen) showing ? hidden.add(id) : hidden.delete(id);
+      commit("hidden", [...hidden]);
+    },
+  };
+
+  stage.addEventListener("keydown", (event) => {
+    if (!api?.viewKey(event, viewActions)) return;
+    event.preventDefault();
+    event.stopPropagation(); // the notebook listens further up
+  });
+  // A canvas cannot take focus, and the controls may keep it from moving
+  // there on a press: give it to the stage outright.
+  stage.addEventListener("pointerdown", () =>
+    stage.focus({ preventScroll: true }),
+  );
 
   const slot = acquire(view);
   let api = null;
