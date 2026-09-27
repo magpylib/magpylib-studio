@@ -25,7 +25,7 @@
  * the extension depends on, and this is a small one that does not touch it.
  */
 import rendererSource from "../../build/renderer.txt";
-import { createLegend, drawnIn, labelsOf } from "./legend.mjs";
+import { createLegend, drawnIn } from "./legend.mjs";
 
 /** Live views: `{ host, api }`, where `api` is a promise of one scene3d. */
 const pool = [];
@@ -73,14 +73,52 @@ function pressed(el, on) {
   el.setAttribute("aria-pressed", String(on));
 }
 
-function button(label, title, onClick) {
+/** Line icons on a 16-unit grid, stroked in the text's colour so they follow
+ *  the notebook's theme. */
+const ICONS = {
+  legend: '<path d="M2.5 3.5h7M4.5 3.5V12M4.5 8h2M4.5 12h2M8.5 8h5M8.5 12h5"/>',
+  fit:
+    '<path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/>' +
+    '<rect x="5.5" y="5.5" width="5" height="5" rx="1"/>',
+  projection:
+    '<path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z"/>' +
+    '<path d="M2.5 4.75 8 7.75l5.5-3M8 7.75v6.5"/>',
+  expand: '<path d="M9.5 2H14v4.5M14 2 9.5 6.5M6.5 14H2V9.5M2 14l4.5-4.5"/>',
+  shrink: '<path d="M13.5 6.5h-4v-4M9.5 6.5 14 2M2.5 9.5h4v4M6.5 9.5 2 14"/>',
+  download: '<path d="M8 2v8M4.75 6.75 8 10l3.25-3.25M2.5 11.5V14h11v-2.5"/>',
+  play: '<path d="M5 3.25v9.5L12.5 8z" fill="currentColor" stroke="none"/>',
+  pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
+};
+
+function setIcon(button, icon) {
+  button.innerHTML =
+    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' +
+    ICONS[icon] +
+    "</svg>";
+}
+
+/** With no text on it, a button's name is its tooltip and what a screen
+ *  reader says -- which is where the key that does the same goes, too. */
+function name(button, text) {
+  button.title = text;
+  button.setAttribute("aria-label", text);
+}
+
+function iconButton(icon, text, onClick) {
   const el = document.createElement("button");
   el.type = "button";
-  el.textContent = label;
-  el.title = title;
+  el.className = "magpy-icon";
+  setIcon(el, icon);
+  name(el, text);
   el.addEventListener("click", onClick);
   return el;
 }
+
+/** How many rows a tree makes. */
+const rowsIn = (nodes) =>
+  nodes.reduce((count, node) => count + 1 + rowsIn(node.children), 0);
 
 function render({ model, el }) {
   el.classList.add("magpy-scene");
@@ -106,46 +144,111 @@ function render({ model, el }) {
   legendEl.className = "magpy-scene-legend";
   stage.append(view, legendEl);
 
-  const bar = document.createElement("div");
-  bar.className = "magpy-scene-bar";
-  const status = document.createElement("span");
-  status.className = "magpy-scene-status";
-  const play = button("▶", "Play the paths (space)", () =>
+  // --- controls ---------------------------------------------------------
+  // Over the view, as Plotly's are, rather than in a bar beneath it: the
+  // tools in the top corner, out of sight until the pointer is on the view,
+  // and a run's transport along the foot, in sight whenever there is a run --
+  // where in the run the picture is being not a tool but the state.
+  const tools = document.createElement("div");
+  tools.className = "magpy-scene-tools";
+  const legendButton = iconButton(
+    "legend",
+    "Legend — double-click a name to frame it; H hides the selection, " +
+      "shift-H shows only it",
+    () => showLegend(!legendOpen),
+  );
+  const fitButton = iconButton(
+    "fit",
+    "Frame everything (Home) — F frames the selection; 1, 3, 7 look from " +
+      "the front, the right and the top",
+    () => api?.fitView(),
+  );
+  const projectionButton = iconButton(
+    "projection",
+    "Orthographic projection (5)",
+    () => showProjection(api?.toggleProjection()),
+  );
+  pressed(projectionButton, false); // perspective, until it is switched
+  // Python writes the file -- it has every piece of it on disk -- and hands
+  // it back to be saved. A page that is itself an export has no python
+  // behind it to ask, and no button.
+  const exportButton = iconButton(
+    "download",
+    "Save as one HTML file that works anywhere — orbit, legend, keys and " +
+      "playback, no notebook needed",
+    () => {
+      notify("Writing the file…");
+      model.send({ kind: "export" });
+    },
+  );
+  exportButton.hidden = Boolean(model.get("standalone"));
+  // Some hosts cannot give an element the screen -- VS Code's notebook
+  // outputs, for one, are frames that do not allow it -- and a button that
+  // can only fail is worse than none.
+  const fullscreenButton = iconButton("expand", "Full screen", () =>
+    toggleFullscreen(),
+  );
+  fullscreenButton.hidden = !document.fullscreenEnabled;
+  pressed(fullscreenButton, false);
+  tools.append(
+    legendButton,
+    fitButton,
+    projectionButton,
+    exportButton,
+    fullscreenButton,
+  );
+
+  const transport = document.createElement("div");
+  transport.className = "magpy-scene-transport";
+  transport.hidden = true; // until a payload says there is a run
+  const play = iconButton("play", "Play the path (space)", () =>
     setPlaying(!playing),
   );
-  play.hidden = true;
   const scrub = document.createElement("input");
   scrub.type = "range";
   scrub.min = "0";
   scrub.value = "0";
-  scrub.hidden = true; // until a payload says how many steps there are
   scrub.className = "magpy-scene-scrub";
-  const projectionButton = button(
-    "Ortho",
-    "Switch between perspective and orthographic (5)",
-    () => showProjection(api?.toggleProjection()),
-  );
-  pressed(projectionButton, false); // perspective, until it is switched
-  const legendButton = button(
-    "Legend",
-    "Show or hide the legend — double-click a name to frame it; " +
-      "H hides the selection, shift-H shows only it",
-    () => showLegend(!legendOpen),
-  );
-  bar.append(
-    legendButton,
-    button(
-      "Fit",
-      "Frame everything (Home) — F frames the selection; 1, 3, 7 look " +
-        "from the front, the right and the top",
-      () => api?.fitView(),
-    ),
-    projectionButton,
-    play,
-    scrub,
-    status,
-  );
-  el.append(stage, bar);
+  scrub.setAttribute("aria-label", "Step of the run");
+  const counter = document.createElement("span");
+  counter.className = "magpy-scene-counter";
+  transport.append(play, scrub, counter);
+
+  // What the view has to say -- a file saved, full screen refused -- said
+  // for a moment, and gone.
+  const notice = document.createElement("div");
+  notice.className = "magpy-scene-notice";
+  notice.setAttribute("role", "status");
+
+  stage.append(tools, transport, notice);
+  el.append(stage);
+
+  // --- full screen ------------------------------------------------------
+  // The whole widget, legend and controls with it, so nothing that works in
+  // the cell stops working at full size. Asked of the root the widget sits in,
+  // which in marimo is a shadow root: there, the document would name the
+  // shadow's host as what is full screen, never this element.
+  const root = el.getRootNode();
+  const isFullscreen = () => root.fullscreenElement === el;
+  function toggleFullscreen() {
+    if (isFullscreen()) document.exitFullscreen();
+    else {
+      el.requestFullscreen().catch(() =>
+        notify("This page does not allow full screen"),
+      );
+    }
+  }
+  function onFullscreenChange() {
+    const on = isFullscreen();
+    pressed(fullscreenButton, on);
+    setIcon(fullscreenButton, on ? "shrink" : "expand");
+    name(fullscreenButton, on ? "Leave full screen (Esc)" : "Full screen");
+    // The view's height is the cell's while in the cell, and the screen's
+    // otherwise; the renderer watches its element and follows either way.
+    view.style.height = on ? "" : `${model.get("height")}px`;
+    el.classList.toggle("magpy-fullscreen", on);
+  }
+  document.addEventListener("fullscreenchange", onFullscreenChange);
 
   // What selection and visibility *mean* is the widget's: they are traitlets.
   // The legend reports what a click would make them, as the view does.
@@ -155,7 +258,6 @@ function render({ model, el }) {
     onFrame: (ids) => api?.fitView(ids),
     onHint: (ids) => api?.hint(ids),
   });
-  let labels = new Map(); // id -> label, from the tree
   let legendOpen = null; // undecided until there is a tree to decide by
 
   function commit(name, value) {
@@ -163,20 +265,20 @@ function render({ model, el }) {
     model.save_changes();
   }
 
-  /** The legend, drawn from the model. Like the bar, before anything is
-   *  awaited, and for the same reason. */
+  /** The legend, drawn from the model. Like the transport, before anything
+   *  is awaited, and for the same reason. */
   function dressLegend() {
     const tree = model.get("tree") || [];
     const payload = model.get("payload") || {};
-    labels = labelsOf(tree);
-    legendButton.hidden = labels.size === 0;
-    if (!payload.meshes || labels.size === 0) {
+    const rows = rowsIn(tree);
+    legendButton.hidden = rows === 0;
+    if (!payload.meshes || rows === 0) {
       legendEl.hidden = true;
       return;
     }
     // Open when it has something to say: one object needs no list. After the
     // first time, it is the user's to open and close.
-    showLegend(legendOpen ?? labels.size > 1);
+    showLegend(legendOpen ?? rows > 1);
     legend.update({ tree, payload });
     legend.sync(stateOf());
   }
@@ -186,8 +288,8 @@ function render({ model, el }) {
     hidden: model.get("hidden") || [],
   });
 
-  // The bar's toggles say what is in force, the way the panel's do: pressed
-  // when on, never a label that flips to name the other state.
+  // The toggles say what is in force, the way the panel's do: pressed when
+  // on, never an icon that flips to name the other state.
 
   /** Open or close the legend, and let its button say which. */
   function showLegend(open) {
@@ -261,46 +363,39 @@ function render({ model, el }) {
   let wanted = null; // the frame last asked for, which may not be the one shown
   let shown = 0;
   let startedAt = 0;
+  let early = null; // a frame to be asked for when the clock reaches it
 
   const frames = () => model.get("frames");
   const duration = () => model.get("duration") || 5;
 
-  //: What the bar says when nothing is selected and nothing is playing.
-  let summary = "";
-
-  /** Everything the bar shows, read straight off the model.
+  /** The transport, read straight off the model.
    *
-   * Synchronous, and called before anything is awaited: the payload, the
-   * frame count and the labels are all in hand the moment the widget mounts,
-   * so a bar that waited for the renderer would appear a frame later than the
-   * view and lay itself out again when it did -- which is the flicker on
-   * every re-run of the cell that made the widget.
+   * Synchronous, and called before anything is awaited: the frame count is
+   * in hand the moment the widget mounts, and controls that waited for the
+   * renderer would appear a frame later than the view and lay themselves out
+   * again when they did -- the flicker on every re-run of the cell that made
+   * the widget.
    */
-  function dressBar() {
-    const payload = model.get("payload") || {};
+  function dressTransport() {
     const animated = frames() > 1;
-    play.hidden = !animated;
-    scrub.hidden = !animated;
+    transport.hidden = !animated;
+    el.classList.toggle("magpy-animated", animated);
     scrub.max = String(Math.max(1, frames() - 1));
-    summary = payload.meshes
-      ? `${payload.meshes.length} meshes, ${payload.scatters.length} lines` +
-        (animated ? ` · ${frames()} steps` : "")
-      : "";
-    sayWhatIsSelected();
+    scrub.value = String(shown);
+    showStep();
   }
 
-  function say(text) {
-    status.textContent = text;
+  /** Where in the run the picture is. */
+  function showStep() {
+    counter.textContent = `${shown + 1} / ${frames()}`;
   }
 
-  /** The selection in the words the notebook uses for it, when it was told
-   *  them -- `SceneWidget.identify` -- and by id when it was not. A whole
-   *  collection picked from the legend is counted rather than listed. */
-  function sayWhatIsSelected() {
-    const ids = model.get("selected") || [];
-    if (!ids.length) say(summary);
-    else if (ids.length > 3) say(`Selected: ${ids.length} objects`);
-    else say(`Selected: ${ids.map((id) => labels.get(id) || id).join(", ")}`);
+  let noticeTimer = null;
+  function notify(text) {
+    notice.textContent = text;
+    notice.classList.add("shown");
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => notice.classList.remove("shown"), 2500);
   }
 
   /** Ask for a frame; the newest ask wins.
@@ -319,13 +414,11 @@ function render({ model, el }) {
   }
 
   function setPlaying(on) {
+    clearTimeout(early);
     playing = api ? api.setPlaying(on) : false;
-    play.textContent = playing ? "⏸" : "▶";
-    play.title = playing ? "Pause" : "Play the paths";
-    if (!playing) {
-      if (frames() > 1) say(`Frame ${shown + 1} of ${frames()}`);
-      return;
-    }
+    setIcon(play, playing ? "pause" : "play");
+    name(play, playing ? "Pause (space)" : "Play the path (space)");
+    if (!playing) return;
     // Restart from the top when play is pressed at the end of the run, rather
     // than finishing immediately.
     if (shown >= frames() - 1) shown = 0;
@@ -354,7 +447,14 @@ function render({ model, el }) {
       next = 0;
       startedAt = performance.now();
     }
-    askFor(next);
+    // Ahead of the clock -- frames coming back faster than the run moves,
+    // from a quick kernel or from a saved page that answers at once -- waits
+    // for it. Asking straight away played a five-second run in however long
+    // the round trips took.
+    const wait =
+      startedAt + (next / frames()) * duration() * 1000 - performance.now();
+    if (wait > 0) early = setTimeout(() => askFor(next), wait);
+    else askFor(next);
   }
 
   scrub.addEventListener("input", () => {
@@ -363,6 +463,10 @@ function render({ model, el }) {
   });
 
   model.on("msg:custom", (message) => {
+    if (message.kind === "export") {
+      download(message);
+      return;
+    }
     if (message.kind !== "frame" || !api) return;
     inFlight = false;
     if (slot.host !== view) return; // this view has gone; its renderer is elsewhere
@@ -370,9 +474,7 @@ function render({ model, el }) {
     shown = message.frame;
     scrub.max = String(message.frames - 1);
     scrub.value = String(message.frame);
-    say(
-      `${playing ? "Playing" : "Frame"} ${message.frame + 1} of ${message.frames}`,
-    );
+    showStep();
     if (playing) afterFrame();
     else if (wanted !== null && wanted !== shown) askFor(wanted);
   });
@@ -428,17 +530,15 @@ function render({ model, el }) {
       wanted = null;
       shown = 0;
     }
-    // The legend first: the bar names the selection, from the legend's tree.
     if (scene || now.has("tree")) dressLegend();
     else legend.sync(stateOf());
     if (scene) {
-      dressBar();
+      dressTransport();
       draw(); // which applies the hiding and the selection itself
       return;
     }
     if (now.has("hidden")) api?.setHidden(model.get("hidden") || []);
     if (now.has("selected")) api?.highlight(model.get("selected") || []);
-    sayWhatIsSelected();
   }
 
   // --- drawing ----------------------------------------------------------
@@ -468,15 +568,33 @@ function render({ model, el }) {
   }
 
   model.on("change:height", () => {
-    view.style.height = `${model.get("height")}px`;
+    if (!isFullscreen()) view.style.height = `${model.get("height")}px`;
   });
-  // Before the first await, so the bar and the legend arrive with the element;
-  // the legend first, because the bar names the selection from its tree.
+  // Before the first await, so the controls and the legend arrive with the
+  // element rather than a frame after it.
   dressLegend();
-  dressBar();
+  dressTransport();
   draw();
 
+  /** Hand the browser the file python wrote, as a download. */
+  function download({ html, filename }) {
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    link.download = filename;
+    // In the page, not detached: some browsers ignore a click on a link that
+    // is not in a document.
+    link.hidden = true;
+    el.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+    notify(`Saved ${filename}`);
+  }
+
   return () => {
+    clearTimeout(early);
+    clearTimeout(noticeTimer);
+    document.removeEventListener("fullscreenchange", onFullscreenChange);
     // Only if it is still ours. A view whose element left the page has already
     // had its slot taken by the next cell that asked, and freeing it here --
     // late, on a teardown that comes after -- would hand that cell's renderer

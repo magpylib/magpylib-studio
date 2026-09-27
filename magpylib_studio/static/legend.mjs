@@ -31,11 +31,6 @@ export function drawnIn(payload) {
   );
 }
 
-/** What to call each object in `tree`, by id. */
-export function labelsOf(tree) {
-  return new Map(inTreeOrder(tree).map((node) => [node.id, node.label]));
-}
-
 /** What each drawn object is drawn in, as CSS -- decided the way the renderer
  *  decides it, and by the first trace the object has. */
 function swatchesOf(payload) {

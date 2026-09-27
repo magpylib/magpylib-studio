@@ -6,6 +6,11 @@ half that is python: the payload the widget is built from, the identity that
 turns a click back into a magpylib object, and the frames it serves.
 """
 
+import base64
+import gzip
+import json
+import re
+
 import magpylib as magpy
 import numpy as np
 import pytest
@@ -305,6 +310,55 @@ def test_one_frame_is_drawn_rather_than_all_of_them(swept):
     one = threejs.view_payload(scene, index=0)
     assert len(everything["meshes"]) > len(one["meshes"])
     assert len(one["meshes"]) == len(threejs.frame_payload(scene, 0)["meshes"])
+
+
+def _unpacked(page, name):
+    """What a saved page carries under `name`: gzipped, then base64."""
+    found = re.search(rf'id="{name}">([^<]*)<', page)
+    assert found, f"the page carries no {name}"
+    return gzip.decompress(base64.b64decode(found.group(1))).decode("utf-8")
+
+
+@needs_scene_graph
+def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_path):
+    """The widget and its scene, with nothing to fetch and no kernel to ask."""
+    magnet, sensor = scene_objects
+    view = widget.view(magnet, sensor)
+    view.hidden = [str(id(sensor))]
+    path = view.save_html(tmp_path / "scene.html", title="two <objects>")
+    page = path.read_text(encoding="utf-8")
+
+    # The bundle is the one that ships, byte for byte.
+    assert _unpacked(page, "magpy-widget") == (widget.STATIC / "widget.js").read_text()
+    saved = json.loads(_unpacked(page, "magpy-scene"))
+    assert saved["state"]["payload"] == view.payload
+    assert saved["state"]["tree"] == view.tree
+    assert saved["state"]["hidden"] == [str(id(sensor))]
+    # A page with no python behind it offers no export of its own.
+    assert saved["state"]["standalone"] is True
+    assert saved["run"] == []
+    assert "<title>two &lt;objects&gt;</title>" in page
+    assert "$" not in page.split("<script", 1)[0]  # every placeholder filled
+
+
+@needs_scene_graph
+def test_a_saved_run_plays_without_python(swept):
+    """Every frame travels with the file, so the page answers for them."""
+    view = widget.view(*swept, animation=True)
+    saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))
+    assert len(saved["run"]) == view.frames
+    assert saved["run"][3] == threejs.frame_payload(view._scene, 3)
+
+
+@needs_scene_graph
+def test_the_export_button_is_answered_with_the_file(scene_objects):
+    view = widget.view(*scene_objects)
+    sent = []
+    view.send = lambda content, buffers=None: sent.append(content)
+    view._on_message(view, {"kind": "export"}, None)
+    assert sent[-1]["kind"] == "export"
+    assert sent[-1]["filename"] == widget.EXPORT_NAME
+    assert sent[-1]["html"] == view.to_html()
 
 
 def test_the_view_is_shipped_with_the_package():
