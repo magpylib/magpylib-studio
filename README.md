@@ -95,6 +95,13 @@ What is selected, hidden or folded survives `update()`: an object passed again
 keeps it, and a rebuilt one inherits it from whatever sat in its place in the
 tree — "the lower ring" is still the one below after a slider has remade both.
 
+**Keys**, once the view has focus, are the panel's: **F** frames the selection
+and **Home** everything, **1**/**3**/**7** look from the front, right and top,
+**5** switches the projection, **H** hides the selection and **shift-H** shows
+only it, **Esc** lets go, **space** plays. They come from one table in
+`scene3d.mjs` that both hosts use. Tab is the one the widget does not take: in a
+notebook it moves between cells.
+
 Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
 rebuilds the objects, the view redraws them, and a click is an input to the next
