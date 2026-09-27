@@ -28,7 +28,12 @@ never draws a widget pays for ipywidgets.
 
 from __future__ import annotations
 
+import base64
+import gzip
+import html
+import json
 import pathlib
+import string
 
 import anywidget
 import magpylib as magpy
@@ -42,6 +47,100 @@ STATIC = pathlib.Path(__file__).parent / "static"
 #: be legible in a notebook column, short enough to leave the next cell on
 #: screen.
 DEFAULT_HEIGHT = 420
+
+#: What the export button saves the file as, before the browser asks.
+EXPORT_NAME = "magpylib-scene.html"
+
+#: A saved view: the widget itself, run against a model this page holds. The
+#: bundle and the scene travel gzipped and in base64 -- a third of the size,
+#: and nothing in them can close the script element they sit in -- and are
+#: unpacked with what every current browser has. Written without `$`, which
+#: is `string.Template`'s.
+_PAGE = string.Template("""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>$title</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    padding: 12px;
+    font: 13px/1.4 system-ui, sans-serif;
+    background: #ffffff;
+    color: #1f2328;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1e1e1e; color: #d4d4d4; }
+  }
+$css
+</style>
+</head>
+<body>
+<div id="magpy-root"></div>
+<script type="text/plain" id="magpy-widget">$bundle</script>
+<script type="text/plain" id="magpy-scene">$data</script>
+<script type="module">
+// Saved by magpylib-studio (SceneWidget.save_html): the notebook widget and
+// the scene it was showing, with nothing to fetch and no notebook behind it.
+async function unpack(id) {
+  const text = document.getElementById(id).textContent.trim();
+  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes])
+    .stream()
+    .pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).text();
+}
+const [source, scene] = await Promise.all([
+  unpack("magpy-widget"),
+  unpack("magpy-scene"),
+]);
+const { state, run } = JSON.parse(scene);
+
+// The model the widget is written against, held here. A frame of the run --
+// what the widget would ask python for -- is answered from the run this file
+// carries, so a saved path still plays.
+const listeners = {};
+function emit(event, value) {
+  for (const listener of listeners[event] || []) listener(value);
+}
+const model = {
+  get: (key) => state[key],
+  set(key, value) {
+    state[key] = value;
+    emit("change:" + key, value);
+  },
+  save_changes() {},
+  on(event, listener) {
+    (listeners[event] ||= []).push(listener);
+  },
+  off() {},
+  send(message) {
+    if (message.kind !== "frame" || !run.length) return;
+    const at = Math.max(0, Math.min(message.index, run.length - 1));
+    setTimeout(() => emit("msg:custom", { kind: "frame", ...run[at] }));
+  },
+};
+
+// As tall as the window, less the margins.
+const fit = () => model.set("height", Math.max(240, innerHeight - 26));
+fit();
+addEventListener("resize", fit);
+
+const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+const widget = (await import(url)).default;
+widget.render({ model, el: document.getElementById("magpy-root") });
+</script>
+</body>
+</html>
+""")
+
+
+def _packed(text):
+    """`text`, gzipped and in base64. `mtime=0`, so one scene is one file."""
+    raw = gzip.compress(text.encode("utf-8"), mtime=0)
+    return base64.b64encode(raw).decode("ascii")
 
 
 def _given(objects):
@@ -238,19 +337,60 @@ class SceneWidget(anywidget.AnyWidget):
         """
         return [self._objects[key] for key in self.selected if key in self._objects]
 
-    def _on_message(self, _widget, content, _buffers):
-        """Serve one frame of the run.
+    def to_html(self, title="magpylib scene"):
+        """This view as one HTML file that needs nothing else.
 
-        The view asks per frame rather than being handed the lot, for the
-        reason the panel does: the whole run is every trace of every step, and
-        one frame is all anyone is looking at.
+        The widget itself, not a picture of it: orbit, legend, keys and the
+        selection and hiding as they are now, running against a model the
+        page holds. A captured run travels with it, every frame, so a path
+        still plays -- the one thing the view would otherwise ask python for.
+
+        The camera is not kept: the page opens framed on the scene.
         """
-        if not isinstance(content, dict) or content.get("kind") != "frame":
-            return
-        if self._scene is None:
-            return
-        frame = threejs.frame_payload(self._scene, content.get("index", 0))
-        self.send({"kind": "frame", **frame})
+        state = {
+            "payload": self.payload,
+            "tree": self.tree,
+            "selected": list(self.selected),
+            "hidden": list(self.hidden),
+            "height": self.height,
+            "frames": self.frames,
+            "duration": self.duration,
+            "repeat": self.repeat,
+            # no python behind the page, so nothing to ask for another export
+            "standalone": True,
+        }
+        run = (
+            []
+            if self._scene is None
+            else [threejs.frame_payload(self._scene, i) for i in range(self.frames)]
+        )
+        return _PAGE.substitute(
+            title=html.escape(title),
+            css=(STATIC / "widget.css").read_text(encoding="utf-8"),
+            bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
+            data=_packed(json.dumps({"state": state, "run": run}, allow_nan=False)),
+        )
+
+    def save_html(self, path, title="magpylib scene"):
+        """Write `to_html` to `path`, and return where it went."""
+        path = pathlib.Path(path)
+        path.write_text(self.to_html(title), encoding="utf-8")
+        return path
+
+    def _on_message(self, _widget, content, _buffers):
+        """Answer the view: one frame of the run, or the view as a file.
+
+        Frames are asked for one at a time rather than handed over in one go,
+        for the reason the panel does: the whole run is every trace of every
+        step, and one frame is all anyone is looking at.
+        """
+        kind = content.get("kind") if isinstance(content, dict) else None
+        if kind == "frame" and self._scene is not None:
+            frame = threejs.frame_payload(self._scene, content.get("index", 0))
+            self.send({"kind": "frame", **frame})
+        elif kind == "export":
+            page = self.to_html()
+            self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
 
 
 def display(widget):

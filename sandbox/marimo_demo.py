@@ -46,14 +46,18 @@ def _(mo):
         The list over the view is the scene as it is nested — the stack, its
         rings, their magnets. Fold a ring with its caret, hide it with its eye,
         or click a name to select everything under it (⌘/ctrl-click adds,
-        shift-click takes a range); double-click to frame it. **Legend** puts
-        it away.
+        shift-click takes a range); double-click to frame it.
 
         Click the view and it takes the keys, as the studio's panel does:
         **F** frames the selection and **Home** everything, **1** **3** **7**
         look from the front, the right and the top, **5** switches the
         projection, **H** hides the selection and **shift-H** shows only it,
         **Esc** lets go, and **space** plays a run.
+
+        Put the pointer on the view and its tools show in the top-right
+        corner: the legend, framing, the projection, **export** — the view as
+        a single HTML file that works without this notebook, in which the run
+        below still plays — and full screen.
         """
     )
     return
@@ -115,7 +119,7 @@ def _(SceneWidget, mo):
 def _(probe, scene, stack):
     # Re-pointed, not remade. A slider re-runs every cell that reads it, so a
     # `view(...)` call in one of them would build a new widget per drag: a new
-    # element, a bar rebuilt from nothing, and the camera back at its opening
+    # element, controls rebuilt from nothing, and the camera back at its opening
     # framing -- losing whatever you had just zoomed in on. This cell reads the
     # sliders; the one above, which owns the view, does not.
     scene.widget.update(stack, probe)
