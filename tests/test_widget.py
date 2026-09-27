@@ -8,6 +8,7 @@ turns a click back into a magpylib object, and the frames it serves.
 
 import base64
 import gzip
+import io
 import json
 import re
 
@@ -326,7 +327,8 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     view = widget.view(magnet, sensor)
     view.hidden = [str(id(sensor))]
     view.axes = False
-    path = view.save_html(tmp_path / "scene.html", title="two <objects>")
+    path = tmp_path / "scene.html"
+    assert view.write_html(path, title="two <objects>") is None  # as Plotly's
     page = path.read_text(encoding="utf-8")
 
     # The bundle is the one that ships, byte for byte.
@@ -341,6 +343,15 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["run"] == []
     assert "<title>two &lt;objects&gt;</title>" in page
     assert "$" not in page.split("<script", 1)[0]  # every placeholder filled
+
+
+@needs_scene_graph
+def test_a_view_writes_to_an_open_file_as_well(scene_objects):
+    """A path or anything with `write`, as Plotly's `write_html` takes."""
+    view = widget.view(*scene_objects)
+    out = io.StringIO()
+    view.write_html(out)
+    assert out.getvalue() == view.to_html()
 
 
 @needs_scene_graph
