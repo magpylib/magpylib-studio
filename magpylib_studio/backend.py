@@ -92,7 +92,7 @@ else:
                 display,
             )
 
-            widget = SceneWidget(scene)
+            widget = SceneWidget._from_scene(scene)
             if scene.options.get("height") is not None:
                 widget.height = int(scene.options["height"])
             if not scene.return_fig:
