@@ -219,6 +219,12 @@ class SceneWidget(anywidget.AnyWidget):
     #: Whether the graduated box -- the scene's scale -- is drawn. A cell can
     #: put it away for a clean picture, and an export keeps it that way.
     axes = traitlets.Bool(True).tag(sync=True)
+    #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
+    #: notebook's output area, which is not always the page's theme -- and
+    #: the system's setting when nothing behind it says.
+    theme = traitlets.Enum(("auto", "light", "dark"), default_value="auto").tag(
+        sync=True
+    )
     #: The objects `identify` was given, as their Collection hierarchy: nodes
     #: of ``{id, label, kind, children}``. What the legend draws. Empty for a
     #: bare ``magpy.show(..., backend="widget")``, which has no objects to
@@ -356,6 +362,7 @@ class SceneWidget(anywidget.AnyWidget):
             "selected": list(self.selected),
             "hidden": list(self.hidden),
             "axes": self.axes,
+            "theme": self.theme,
             "height": self.height,
             "frames": self.frames,
             "duration": self.duration,

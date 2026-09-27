@@ -57,13 +57,93 @@ function acquire(el) {
   return slot;
 }
 
-/** The page's own background, so the view is not a light rectangle in a dark
- *  notebook. Only when it is opaque: `rgba(0, 0, 0, 0)` is the default, and
- *  means nothing was said. */
-function pageBackground() {
-  for (const node of [document.body, document.documentElement]) {
-    const color = getComputedStyle(node).backgroundColor;
-    if (color && !/^(transparent$|rgba\(.*,\s*0\))/.test(color)) return color;
+/** A colour, as the bytes it paints: red, green, blue and alpha. A canvas does
+ *  the reading, so `rgb(…)`, `color(srgb …)`, `oklch(…)` -- whatever a
+ *  stylesheet's colour computes to -- all come out the same way. */
+let probe = null;
+function paint(color) {
+  probe ??= document
+    .createElement("canvas")
+    .getContext("2d", { willReadFrequently: true });
+  probe.clearRect(0, 0, 1, 1);
+  probe.fillStyle = color;
+  probe.fillRect(0, 0, 1, 1);
+  return probe.getImageData(0, 0, 1, 1).data;
+}
+
+/** Backdrops a host paints behind every widget output whatever its theme.
+ *  VS Code's Jupyter renderer puts each output on `background: #fff
+ *  !important`, in a dark editor as much as a light one, because ipywidgets'
+ *  own controls take their colours from JupyterLab's theme variables, which
+ *  VS Code does not supply: on white they are legible, on dark they are not.
+ *
+ *  So it is looked past only when the view is alone on it, and then the
+ *  view wears VS Code's theme and paints the backdrop to match. Shared with
+ *  other widgets -- sliders in the same box -- the view wears the white, as
+ *  they must, rather than sitting dark among light controls. */
+const BACKDROPS = ".cell-output-ipywidget-background";
+
+/** A colour as `rgb(…)`, which three.js reads, or null when it is not
+ *  opaque. */
+function opaque(color) {
+  const [r, g, b, a] = paint(color);
+  return a > 200 ? { css: `rgb(${r}, ${g}, ${b})`, r, g, b } : null;
+}
+
+/** The theme a host declares outright, for a page that paints nothing behind
+ *  the view to read. VS Code's webviews -- a notebook's outputs among them --
+ *  are transparent (`body { background-color: transparent }`, in its own
+ *  webview host), and say which theme is in force on the body instead, with
+ *  the editor's colours as variables on the root. The system's setting is no
+ *  substitute: VS Code's theme need not be the system's. */
+function declaredTheme() {
+  const kind = document.body?.dataset.vscodeThemeKind; // vscode-dark, …
+  if (!kind) return null;
+  const root = getComputedStyle(document.documentElement);
+  const colour =
+    root.getPropertyValue("--vscode-notebook-editorBackground").trim() ||
+    root.getPropertyValue("--vscode-editor-background").trim();
+  return {
+    css: colour ? (opaque(colour)?.css ?? null) : null,
+    // vscode-high-contrast is dark, vscode-high-contrast-light is not
+    dark: !kind.includes("light"),
+  };
+}
+
+/** The host's backdrop, when this widget is all it holds -- and so may wear
+ *  the view's colour instead of leaving a white rim round a dark view. Not
+ *  when it holds anything else: sliders in the same box were drawn for the
+ *  white, and would be unreadable on anything darker. */
+function soleBackdrop(el) {
+  for (let node = el; ;) {
+    const root = node.getRootNode();
+    const parent =
+      node.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    if (!parent || parent.children.length !== 1) return null;
+    if (parent.matches(BACKDROPS)) return parent;
+    node = parent;
+  }
+}
+
+/** What the view sits on: the first opaque background among the elements
+ *  holding it, followed out of shadow roots, since marimo renders into one.
+ *
+ * Not the page's body. In VS Code's notebooks the body wears the editor's
+ * theme while widget outputs sit on a white panel of their own, and a view
+ * dressed from the body was a dark box on white -- with the panel's dark
+ * text inherited onto it, which left the legend and the tools unreadable.
+ */
+function surroundings(el) {
+  const alone = soleBackdrop(el) !== null;
+  for (let node = el.parentNode; node; node = node.parentNode) {
+    if (node instanceof ShadowRoot) node = node.host;
+    if (!(node instanceof Element)) break; // the document: nothing opaque
+    if (alone && node.matches(BACKDROPS)) continue;
+    const found = opaque(getComputedStyle(node).backgroundColor);
+    if (found) {
+      const { css, r, g, b } = found;
+      return { css, dark: 0.299 * r + 0.587 * g + 0.114 * b < 128 };
+    }
   }
   return null;
 }
@@ -89,6 +169,14 @@ const ICONS = {
   expand: '<path d="M9.5 2H14v4.5M14 2 9.5 6.5M6.5 14H2V9.5M2 14l4.5-4.5"/>',
   shrink: '<path d="M13.5 6.5h-4v-4M9.5 6.5 14 2M2.5 9.5h4v4M6.5 9.5 2 14"/>',
   download: '<path d="M8 2v8M4.75 6.75 8 10l3.25-3.25M2.5 11.5V14h11v-2.5"/>',
+  auto:
+    '<circle cx="8" cy="8" r="5.5"/>' +
+    '<path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" stroke="none"/>',
+  light:
+    '<circle cx="8" cy="8" r="2.75"/>' +
+    '<path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.06 1.06' +
+    'M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06"/>',
+  dark: '<path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z"/>',
   play: '<path d="M5 3.25v9.5L12.5 8z" fill="currentColor" stroke="none"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
 };
@@ -119,15 +207,19 @@ function iconButton(icon, text, onClick) {
   return el;
 }
 
+/** The theme button's round: each choice, what it is called, and the next. */
+const THEMES = {
+  auto: { says: "Theme: as the notebook is", next: "light" },
+  light: { says: "Theme: light", next: "dark" },
+  dark: { says: "Theme: dark", next: "auto" },
+};
+
 /** How many rows a tree makes. */
 const rowsIn = (nodes) =>
   nodes.reduce((count, node) => count + 1 + rowsIn(node.children), 0);
 
 function render({ model, el }) {
   el.classList.add("magpy-scene");
-  const background = pageBackground();
-  if (background)
-    el.style.setProperty("--vscode-editor-background", background);
 
   // The renderer owns `view` -- it hangs its canvas there and watches its
   // size -- so the legend floats beside it, in a stage they share, rather
@@ -190,6 +282,11 @@ function render({ model, el }) {
     },
   );
   exportButton.hidden = Boolean(model.get("standalone"));
+  // A round rather than a toggle: auto, then light, then dark. The icon is
+  // what is in force now; its name says what a click moves to.
+  const themeButton = iconButton("auto", "", () =>
+    commit("theme", THEMES[themeChoice()].next),
+  );
   // Some hosts cannot give an element the screen -- VS Code's notebook
   // outputs, for one, are frames that do not allow it -- and a button that
   // can only fail is worse than none.
@@ -203,6 +300,7 @@ function render({ model, el }) {
     axesButton,
     fitButton,
     projectionButton,
+    themeButton,
     exportButton,
     fullscreenButton,
   );
@@ -291,6 +389,66 @@ function render({ model, el }) {
     legend.update({ tree, payload });
     legend.sync(stateOf());
   }
+
+  // --- theme ------------------------------------------------------------
+  // The view takes its background from what it sits on, and its ink from
+  // how light that background is, rather than inheriting a text colour that
+  // was chosen for something else. Asked again whenever a theme may have
+  // changed -- attributes on the page's root and body, which is where VS
+  // Code, JupyterLab and marimo each record theirs, and the system's own
+  // preference -- and the scene repainted when the answer differs.
+  let theme = "";
+  const themeChoice = () =>
+    THEMES[model.get("theme")] ? model.get("theme") : "auto";
+  function dressTheme() {
+    const choice = themeChoice();
+    setIcon(themeButton, choice);
+    name(
+      themeButton,
+      `${THEMES[choice].says} — click for ${THEMES[choice].next}`,
+    );
+    // Chosen outright, light or dark wears the widget's own colours; left to
+    // itself, it wears what it sits on, or else the theme the host declares.
+    const behind =
+      choice === "auto" ? (surroundings(el) ?? declaredTheme()) : null;
+    const dark =
+      choice === "dark" ||
+      (choice === "auto" &&
+        (behind
+          ? behind.dark
+          : matchMedia("(prefers-color-scheme: dark)").matches));
+    const next = `${behind?.css}|${dark}`;
+    if (next === theme) return false;
+    theme = next;
+    if (behind?.css) {
+      el.style.setProperty("--vscode-editor-background", behind.css);
+    } else el.style.removeProperty("--vscode-editor-background");
+    el.classList.toggle("magpy-dark", dark);
+    el.style.colorScheme = dark ? "dark" : "light"; // the scrubber's too
+    wearBackdrop();
+    return true;
+  }
+
+  // The backdrop painted to match, and given back as it was when the widget
+  // goes. An inline `!important` is the one thing that outranks the host's.
+  let backdrop = null;
+  function wearBackdrop() {
+    backdrop?.style.removeProperty("background");
+    backdrop = soleBackdrop(el);
+    const colour = getComputedStyle(el)
+      .getPropertyValue("--vscode-editor-background")
+      .trim();
+    backdrop?.style.setProperty("background", colour, "important");
+  }
+  function retheme() {
+    if (dressTheme() && api) draw();
+  }
+  const themeWatch = new MutationObserver(retheme);
+  for (const node of [document.documentElement, document.body]) {
+    themeWatch.observe(node, { attributes: true });
+  }
+  const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+  darkQuery.addEventListener("change", retheme);
 
   const stateOf = () => ({
     selected: model.get("selected") || [],
@@ -526,7 +684,14 @@ function render({ model, el }) {
   // ring drawn for a frame before its hiding arrives. So changes are
   // gathered, and the view catches up once, after the last of them.
   const changed = new Set();
-  for (const name of ["payload", "tree", "selected", "hidden", "axes"]) {
+  for (const name of [
+    "payload",
+    "tree",
+    "selected",
+    "hidden",
+    "axes",
+    "theme",
+  ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
       changed.add(name);
@@ -537,6 +702,7 @@ function render({ model, el }) {
     const now = new Set(changed);
     changed.clear(); // first, so a change made while catching up is kept
     if (now.has("axes")) showAxes();
+    if (now.has("theme")) retheme();
     const scene = now.has("payload");
     if (scene) {
       // A re-pointed view is a different run. Anything asked for belonged to
@@ -565,6 +731,11 @@ function render({ model, el }) {
     if (slot.host !== view) return; // the slot was taken while we were away
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
+    // Again here, not only at mount: a notebook may hand over the element
+    // before it is on the page, when there is nothing behind it to read --
+    // nor a backdrop to find.
+    dressTheme();
+    wearBackdrop();
     api.setGizmoMode("none"); // read only: nothing here can be dragged
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away -- and so a pooled renderer drops the last widget's.
@@ -590,7 +761,8 @@ function render({ model, el }) {
     if (!isFullscreen()) view.style.height = `${model.get("height")}px`;
   });
   // Before the first await, so the controls and the legend arrive with the
-  // element rather than a frame after it.
+  // element rather than a frame after it, and dressed for where they are.
+  dressTheme();
   dressLegend();
   dressTransport();
   showAxes();
@@ -612,6 +784,9 @@ function render({ model, el }) {
   }
 
   return () => {
+    backdrop?.style.removeProperty("background");
+    themeWatch.disconnect();
+    darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);
     clearTimeout(noticeTimer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
