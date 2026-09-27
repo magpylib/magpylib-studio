@@ -15,6 +15,7 @@ import re
 import magpylib as magpy
 import numpy as np
 import pytest
+import traitlets
 
 from magpylib_studio import threejs
 
@@ -327,6 +328,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     view = widget.view(magnet, sensor)
     view.hidden = [str(id(sensor))]
     view.axes = False
+    view.theme = "dark"
     path = tmp_path / "scene.html"
     assert view.write_html(path, title="two <objects>") is None  # as Plotly's
     page = path.read_text(encoding="utf-8")
@@ -338,6 +340,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
     assert saved["state"]["axes"] is False  # on by default; put away here
+    assert saved["state"]["theme"] == "dark"
     # A page with no python behind it offers no export of its own.
     assert saved["state"]["standalone"] is True
     assert saved["run"] == []
@@ -372,6 +375,15 @@ def test_the_export_button_is_answered_with_the_file(scene_objects):
     assert sent[-1]["kind"] == "export"
     assert sent[-1]["filename"] == widget.EXPORT_NAME
     assert sent[-1]["html"] == view.to_html()
+
+
+def test_a_theme_is_one_of_three():
+    """Auto unless chosen, and nothing a view could not wear."""
+    view = widget.SceneWidget()
+    assert view.theme == "auto"
+    view.theme = "light"
+    with pytest.raises(traitlets.TraitError):
+        view.theme = "sepia"
 
 
 def test_the_view_is_shipped_with_the_package():

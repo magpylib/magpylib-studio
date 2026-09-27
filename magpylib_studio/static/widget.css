@@ -2,12 +2,17 @@
    nothing; what it does read are three colours, by the names VS Code gives
    them -- which is where the renderer came from. They are declared here, on
    this element, so the same file dresses a notebook without writing the
-   editor's variables onto the page. `widget.mjs` overrides the background
-   with the page's own when the page has one. */
+   editor's variables onto the page.
+
+   Light or dark is not the page's to say but what the widget sits on:
+   `widget.mjs` finds that background, lays it under the view, and adds
+   `magpy-dark` when it is dark. The ink follows, rather than being inherited
+   from a page whose text colour was chosen for another background. */
 .magpy-scene {
   --vscode-editor-background: #ffffff;
   --vscode-editorLineNumber-foreground: #6e7681;
   --vscode-focusBorder: #2e7bd6;
+  color: #1f2328;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -16,12 +21,11 @@
   overflow: hidden;
 }
 
-@media (prefers-color-scheme: dark) {
-  .magpy-scene {
-    --vscode-editor-background: #1e1e1e;
-    --vscode-editorLineNumber-foreground: #8b949e;
-    --vscode-focusBorder: #4b8fe2;
-  }
+.magpy-scene.magpy-dark {
+  --vscode-editor-background: #1e1e1e;
+  --vscode-editorLineNumber-foreground: #8b949e;
+  --vscode-focusBorder: #4b8fe2;
+  color: #d4d4d4;
 }
 
 /* What the view and the legend share. Positioned, so the legend can float over

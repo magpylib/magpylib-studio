@@ -64,9 +64,9 @@ view(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
 and `magpy.defaults.display.backend = "widget"` makes every `show()` in the
 notebook draw one. The tools sit in the view's top-right corner and show when
 the pointer is on it, as Plotly's modebar does: the legend, framing, the
-projection, export and full screen. `animation=True` captures the paths, and a
-transport along the foot of the view plays and scrubs them, asking python for
-one frame at a time.
+projection, the theme, export and full screen. `animation=True` captures the
+paths, and a transport along the foot of the view plays and scrubs them, asking
+python for one frame at a time.
 
 It is read only, like the panel — what a view can offer to edit is what its host
 can put back, and a cell has already run. Selecting and hiding are the
