@@ -71,6 +71,16 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
+  # A notebook is committed as its cells, not as the last run of them: the
+  # outputs are the widget's state and every scene it drew, change on every
+  # run, and carry whatever the machine that ran it had. The hook strips the
+  # file it commits -- the working copy too, so a run's outputs are gone once
+  # the notebook is committed; run it again to see them.
+  - repo: https://github.com/kynan/nbstripout
+    rev: "0.9.1"
+    hooks:
+      - id: nbstripout
+
   - repo: https://github.com/codespell-project/codespell
     rev: "v2.4.3"
     hooks:
