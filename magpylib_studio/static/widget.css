@@ -224,6 +224,7 @@
 }
 
 .magpy-legend-row {
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -279,23 +280,33 @@
   cursor: default;
 }
 
-/* A mask rather than an image, so the eye is drawn in the text's colour and
-   stays visible on a dark notebook. */
+/* The eye: a mask rather than an image, so it is drawn in the text's colour
+   and stays visible on a dark notebook. Shown on the row under the pointer,
+   and otherwise only where it has something to say -- a hidden row, or one
+   partly hidden -- as Figma's layers and Blender's outliner do: sixteen open
+   eyes are sixteen ways of saying nothing. */
 .magpy-legend-eye {
   flex: none;
   width: 12px;
   height: 12px;
   cursor: pointer;
-  opacity: 0.55;
+  opacity: 0;
   background-color: currentColor;
   -webkit-mask: no-repeat center / 12px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.5 3 1.7 5.4 1 8c.7 2.6 3.5 5 7 5s6.3-2.4 7-5c-.7-2.6-3.5-5-7-5zm0 8.3A3.3 3.3 0 1 1 8 4.7a3.3 3.3 0 0 1 0 6.6zm0-5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E");
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E");
   mask: no-repeat center / 12px
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.5 3 1.7 5.4 1 8c.7 2.6 3.5 5 7 5s6.3-2.4 7-5c-.7-2.6-3.5-5-7-5zm0 8.3A3.3 3.3 0 1 1 8 4.7a3.3 3.3 0 0 1 0 6.6zm0-5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E");
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E");
 }
 
-.magpy-legend-eye:hover {
-  opacity: 1;
+.magpy-legend-row:hover > .magpy-legend-eye {
+  opacity: 0.55;
+}
+
+/* No hover to reveal it on a touch screen, so it is simply there. */
+@media (hover: none) {
+  .magpy-legend-eye {
+    opacity: 0.55;
+  }
 }
 
 .magpy-legend-swatch {
@@ -311,10 +322,22 @@
   box-shadow: none;
 }
 
+/* A collection's slot, which has no colour to show: what it is, instead --
+   layers, which read as a group where two squares read as "copy". */
+.magpy-legend-swatch.collection {
+  box-shadow: none;
+  border-radius: 0;
+  opacity: 0.5;
+  background-color: currentColor;
+  -webkit-mask: no-repeat center / 10px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2 14.5 5.5 8 9 1.5 5.5z'/%3E%3Cpath d='M1.5 9 8 12.5 14.5 9'/%3E%3C/svg%3E");
+  mask: no-repeat center / 10px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2 14.5 5.5 8 9 1.5 5.5z'/%3E%3Cpath d='M1.5 9 8 12.5 14.5 9'/%3E%3C/svg%3E");
+}
+
 .magpy-legend-label {
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
 }
 
 .magpy-legend-row.off > .magpy-legend-label,
@@ -322,18 +345,28 @@
   opacity: 0.38;
 }
 
+/* Hidden: the eye struck through, and there without a pointer. */
 .magpy-legend-row.off > .magpy-legend-eye {
-  opacity: 0.25;
+  opacity: 0.6;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3Cpath d='M2.5 13.5 13.5 2.5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3Cpath d='M2.5 13.5 13.5 2.5'/%3E%3C/svg%3E");
 }
 
 /* Some of what is under it is hidden: the eye half drawn. The mask shapes
    whatever is painted beneath it, so a gradient is enough. */
 .magpy-legend-row.mixed > .magpy-legend-eye {
+  opacity: 0.55;
   background: linear-gradient(
     90deg,
     currentColor 50%,
     color-mix(in srgb, currentColor 25%, transparent) 50%
   );
+}
+
+/* Under the pointer, whatever it is showing. Last, so it outranks the
+   hidden and partly hidden eyes above as well as the plain one. */
+.magpy-legend-row > .magpy-legend-eye:hover {
+  opacity: 1;
 }
 
 /* How many things a collection holds -- what folding it hides -- kept to the

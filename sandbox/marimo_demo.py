@@ -44,9 +44,10 @@ def _(mo):
         below react to.
 
         The list over the view is the scene as it is nested — the stack, its
-        rings, their magnets. Fold a ring with its caret, hide it with its eye,
-        or click a name to select everything under it (⌘/ctrl-click adds,
-        shift-click takes a range); double-click to frame it.
+        rings, their magnets. Fold a ring with its caret, hide it with the eye
+        that shows when the pointer is on its row, or click the row to select
+        everything under it (⌘/ctrl-click adds, shift-click takes a range);
+        double-click to frame it.
 
         Click the view and it takes the keys, as the studio's panel does:
         **F** frames the selection and **Home** everything, **1** **3** **7**

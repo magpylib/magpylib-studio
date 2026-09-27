@@ -183,11 +183,14 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     const caret = part("magpy-legend-caret");
     const eye = part("magpy-legend-eye", "Show / hide");
     const swatch = part("magpy-legend-swatch");
-    const label = part("magpy-legend-label", `${node.label} (${node.kind})`);
+    const label = part("magpy-legend-label");
     label.textContent = node.label;
+    row.title = `${node.label} (${node.kind})`;
     const colour = swatches.get(node.id);
     if (colour) swatch.style.background = colour;
-    else swatch.classList.add("none");
+    // A collection is drawn only as its contents, so it has no colour of its
+    // own: its slot says what it is instead, and the names stay in line.
+    else swatch.classList.add(node.children.length ? "collection" : "none");
     row.append(caret, eye, swatch, label);
     if (node.children.length) {
       // What a folded row would otherwise hide: how much is in it.
@@ -199,12 +202,19 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     rows.set(node.id, row);
 
     eye.addEventListener("click", () => toggleHidden(node));
-    label.addEventListener("click", (event) => {
+    // The whole row selects, as a row in any tree view does -- all of it but
+    // the caret and the eye, which have their own work.
+    const own = (event) =>
+      event.target.closest(".magpy-legend-eye, .magpy-legend-caret:not(.leaf)");
+    row.addEventListener("click", (event) => {
       // The second click of a double click is the double click's: counted
       // on its own, it would clear the selection the first one just made.
-      if (event.detail < 2) select(node, modeOf(event));
+      if (own(event) || event.detail > 1) return;
+      select(node, modeOf(event));
     });
-    label.addEventListener("dblclick", () => onFrame?.(leaves.get(node.id)));
+    row.addEventListener("dblclick", (event) => {
+      if (!own(event)) onFrame?.(leaves.get(node.id));
+    });
     // Which of twelve cubes "upper 3" is, without choosing it.
     row.addEventListener("mouseenter", () => onHint?.(leaves.get(node.id)));
 
