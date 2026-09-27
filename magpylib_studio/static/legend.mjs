@@ -79,6 +79,12 @@ function mostCommon(values) {
   return best;
 }
 
+/** How many things a collection can hold and still be shown open when it is
+ *  first seen. Past this it starts folded: a ring of sixty-four would
+ *  otherwise be the whole list, and its row still says what is inside -- how
+ *  many, and whether any of them is selected or hidden. */
+const FOLD_ABOVE = 12;
+
 function modeOf(event) {
   if (event.shiftKey) return "range";
   // cmd on a mac, ctrl elsewhere, as for a click in the view
@@ -99,11 +105,18 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
   let selected = [];
   let hidden = new Set();
   let anchor = null; // the row a shift-click ranges from
+  let proposed = null; // the selection a click here last asked for
+  let parents = new Map(); // id -> the id of the collection holding it
+  let pathOf = new Map(); // id -> where it sits, as the folds address it
+  let primaryAt; // where the first selected object sits
   const rows = new Map(); // id -> row element
   // Folded collections, by where they sit rather than by id: a re-pointed view
   // is new objects at new ids, and a slider drag should not unfold what the
   // user had folded.
   const folded = new Set();
+  // Collections already seen, by the same addressing. Only the first sight of
+  // one decides whether it starts folded; after that, it is the user's.
+  const seen = new Set();
 
   container.classList.add("magpy-legend");
   // A shift-click extends whatever text selection the page already has, and
@@ -115,6 +128,7 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
   /** Ids a click on `node` acts on: its own traces, if it has any, and those
    *  of everything beneath it. A collection is drawn only as its contents. */
   function collectLeaves(node, drawn) {
+    for (const child of node.children) parents.set(child.id, node.id);
     const own = drawn.has(node.id) ? [node.id] : [];
     const under = own.concat(
       node.children.flatMap((child) => collectLeaves(child, drawn)),
@@ -123,13 +137,18 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     return under;
   }
 
+  function propose(ids) {
+    proposed = ids;
+    onSelect(ids);
+  }
+
   function select(node, mode) {
     const mine = leaves.get(node.id);
     if (mode === "range" && anchor !== null) {
       const from = order.findIndex((n) => n.id === anchor);
       const to = order.indexOf(node);
       const [lo, hi] = from <= to ? [from, to] : [to, from];
-      onSelect([
+      propose([
         ...new Set(order.slice(lo, hi + 1).flatMap((n) => leaves.get(n.id))),
       ]);
       return; // the anchor stays where the range started
@@ -139,7 +158,7 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
       const chosen = new Set(selected);
       const all = mine.length > 0 && mine.every((id) => chosen.has(id));
       for (const id of mine) all ? chosen.delete(id) : chosen.add(id);
-      onSelect([...chosen]);
+      propose([...chosen]);
       return;
     }
     // Clicking the row that is already exactly the selection clears it, as a
@@ -147,7 +166,7 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     const same =
       mine.length === selected.length &&
       mine.every((id) => selected.includes(id));
-    onSelect(same ? [] : mine);
+    propose(same ? [] : mine);
   }
 
   /** The eye cascades: anything showing, and the lot goes; none, and it all
@@ -161,6 +180,7 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
   }
 
   function addRow(node, path, into) {
+    pathOf.set(node.id, path);
     const row = document.createElement("div");
     row.className = "magpy-legend-row";
     const caret = part("magpy-legend-caret");
@@ -172,6 +192,12 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     if (colour) swatch.style.background = colour;
     else swatch.classList.add("none");
     row.append(caret, eye, swatch, label);
+    if (node.children.length) {
+      // What a folded row would otherwise hide: how much is in it.
+      const count = part("magpy-legend-count");
+      count.textContent = String(node.children.length);
+      row.append(count);
+    }
     into.append(row);
     rows.set(node.id, row);
 
@@ -192,6 +218,10 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     branch.className = "magpy-legend-branch";
     into.append(branch);
     node.children.forEach((child, i) => addRow(child, `${path}/${i}`, branch));
+    if (!seen.has(path)) {
+      seen.add(path);
+      if (node.children.length > FOLD_ABOVE) folded.add(path);
+    }
     const fold = (on) => {
       row.classList.toggle("folded", on);
       branch.hidden = on;
@@ -209,6 +239,8 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     const drawn = drawnIn(payload);
     order = inTreeOrder(tree);
     leaves = new Map();
+    parents = new Map();
+    pathOf = new Map();
     for (const node of tree) collectLeaves(node, drawn);
     swatches = swatchesOf(payload);
     if (!order.some((node) => node.id === anchor)) anchor = null;
@@ -218,27 +250,61 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
     paint();
   }
 
-  /** Mirror what is selected and what is hidden onto the rows. A row counts
-   *  as either only when everything under it does. */
+  /** Mirror what is selected and what is hidden onto the rows. */
   function sync(state) {
     selected = state.selected;
     hidden = new Set(state.hidden);
     paint();
+    // A selection made here is already in view; one made in the view or in
+    // a cell may be off the bottom of the list. Compared by place, not by
+    // id: a rebuild carries the selection to new ids in the same places, and
+    // following it there on every slider drag would fight whoever scrolled.
+    const was = primaryAt;
+    primaryAt = pathOf.get(selected[0]);
+    const echo =
+      proposed !== null &&
+      proposed.length === selected.length &&
+      proposed.every((id, i) => id === selected[i]);
+    proposed = null;
+    if (!echo && primaryAt !== undefined && primaryAt !== was) {
+      reveal(selected[0]);
+    }
   }
 
+  /** Scroll the list to `id`'s row -- or, when that is folded away, to the
+   *  collection it is in, whose mark says it is there. The list only: the
+   *  browser's own scrollIntoView would scroll the notebook as well. */
+  function reveal(id) {
+    let at = id;
+    while (rows.get(at)?.closest(".magpy-legend-branch[hidden]")) {
+      at = parents.get(at);
+    }
+    const row = rows.get(at);
+    if (!row) return;
+    const list = container.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    if (box.top < list.top) container.scrollTop -= list.top - box.top;
+    else if (box.bottom > list.bottom) {
+      container.scrollTop += box.bottom - list.bottom;
+    }
+  }
+
+  /** A row is selected, or hidden, when everything under it is; partly so
+   *  when some of it is -- which is how a folded collection says that what
+   *  was picked in the view, or hidden, is inside it. */
   function paint() {
     const chosen = new Set(selected);
     for (const node of order) {
       const mine = leaves.get(node.id);
       const row = rows.get(node.id);
-      row.classList.toggle(
-        "selected",
-        mine.length > 0 && mine.every((id) => chosen.has(id)),
-      );
-      row.classList.toggle(
-        "off",
-        mine.length > 0 && mine.every((id) => hidden.has(id)),
-      );
+      const picked = mine.filter((id) => chosen.has(id)).length;
+      const gone = mine.filter((id) => hidden.has(id)).length;
+      const all = (n) => mine.length > 0 && n === mine.length;
+      const some = (n) => n > 0 && n < mine.length;
+      row.classList.toggle("selected", all(picked));
+      row.classList.toggle("partial", some(picked));
+      row.classList.toggle("off", all(gone));
+      row.classList.toggle("mixed", some(gone));
       row.classList.toggle("empty", mine.length === 0);
     }
   }
