@@ -191,13 +191,17 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.
     else swatch.classList.add(node.children.length ? "collection" : "none");
-    row.append(caret, eye, swatch, label);
+    row.append(caret, swatch, label);
     if (node.children.length) {
       // What a folded row would otherwise hide: how much is in it.
       const count = part("magpy-legend-count");
       count.textContent = String(node.children.length);
       row.append(count);
     }
+    // At the end of the row, as Figma's layers and VS Code's trees put a
+    // row's actions: most of the time it is not showing, and a column kept
+    // for it at the start pushed every name away from its caret.
+    row.append(eye);
     into.append(row);
     rows.set(node.id, row);
 
