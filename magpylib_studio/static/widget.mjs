@@ -153,6 +153,7 @@ function render({ model, el }) {
     onSelect: (ids) => commit("selected", ids),
     onHide: (ids) => commit("hidden", ids),
     onFrame: (ids) => api?.fitView(ids),
+    onHint: (ids) => api?.hint(ids),
   });
   let labels = new Map(); // id -> label, from the tree
   let legendOpen = null; // undecided until there is a tree to decide by
