@@ -77,6 +77,9 @@ function pressed(el, on) {
  *  the notebook's theme. */
 const ICONS = {
   legend: '<path d="M2.5 3.5h7M4.5 3.5V12M4.5 8h2M4.5 12h2M8.5 8h5M8.5 12h5"/>',
+  axes:
+    '<path d="M4 13.5V2.5M2.5 4 4 2.5 5.5 4"/>' +
+    '<path d="M4 13.5h9.5M12 12l1.5 1.5-1.5 1.5"/><path d="M4 13.5 8.5 9"/>',
   fit:
     '<path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/>' +
     '<rect x="5.5" y="5.5" width="5" height="5" rx="1"/>',
@@ -157,6 +160,11 @@ function render({ model, el }) {
       "shift-H shows only it",
     () => showLegend(!legendOpen),
   );
+  const axesButton = iconButton(
+    "axes",
+    "Axes — the box that gives the scene its scale",
+    () => commit("axes", !model.get("axes")),
+  );
   const fitButton = iconButton(
     "fit",
     "Frame everything (Home) — F frames the selection; 1, 3, 7 look from " +
@@ -192,6 +200,7 @@ function render({ model, el }) {
   pressed(fullscreenButton, false);
   tools.append(
     legendButton,
+    axesButton,
     fitButton,
     projectionButton,
     exportButton,
@@ -296,6 +305,14 @@ function render({ model, el }) {
     legendOpen = open;
     legendEl.hidden = !open;
     pressed(legendButton, open);
+  }
+
+  /** The graduated box, as the model has it: a trait, like hiding, so a
+   *  cell can put it away for a clean picture and an export keeps it so. */
+  function showAxes() {
+    const on = Boolean(model.get("axes"));
+    pressed(axesButton, on);
+    api?.setAxes(on);
   }
 
   /** The renderer answers with the projection now in force. */
@@ -509,7 +526,7 @@ function render({ model, el }) {
   // ring drawn for a frame before its hiding arrives. So changes are
   // gathered, and the view catches up once, after the last of them.
   const changed = new Set();
-  for (const name of ["payload", "tree", "selected", "hidden"]) {
+  for (const name of ["payload", "tree", "selected", "hidden", "axes"]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
       changed.add(name);
@@ -519,6 +536,7 @@ function render({ model, el }) {
   function catchUp() {
     const now = new Set(changed);
     changed.clear(); // first, so a change made while catching up is kept
+    if (now.has("axes")) showAxes();
     const scene = now.has("payload");
     if (scene) {
       // A re-pointed view is a different run. Anything asked for belonged to
@@ -551,6 +569,7 @@ function render({ model, el }) {
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
+    api.setAxes(Boolean(model.get("axes")));
     api.render(view, payload, { keepCamera: framed });
     framed = true;
     api.highlight(model.get("selected") || []);
@@ -574,6 +593,7 @@ function render({ model, el }) {
   // element rather than a frame after it.
   dressLegend();
   dressTransport();
+  showAxes();
   draw();
 
   /** Hand the browser the file python wrote, as a download. */
