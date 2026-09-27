@@ -180,7 +180,7 @@ def test_one_frame_is_drawn_rather_than_all_of_them(swept):
     everything = threejs.view_payload(scene)
     one = threejs.view_payload(scene, index=0)
     assert len(everything["meshes"]) > len(one["meshes"])
-    assert len(one["meshes"]) == len(threejs.view_frame_payload(scene, 0)["meshes"])
+    assert len(one["meshes"]) == len(threejs.frame_payload(scene, 0)["meshes"])
 
 
 def test_the_view_is_shipped_with_the_package():
