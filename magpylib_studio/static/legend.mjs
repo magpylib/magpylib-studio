@@ -6,12 +6,13 @@
  * it, a swatch says what it is drawn in, and the label selects -- a plain click
  * replaces, cmd/ctrl toggles, shift takes the range from the last row clicked,
  * in tree order, which is the only order a scene has. A double click frames
- * what the row holds.
+ * what the row holds, and the pointer resting on a row shows where it is.
  *
  * A component, not a panel with opinions: it holds nothing a notebook can see.
  * What is selected and what is hidden are the widget's traitlets. The legend
  * is told them (`sync`) and says what a click would make them (`onSelect`,
- * `onHide`), or what it would look at (`onFrame`); the widget decides.
+ * `onHide`), what it would look at (`onFrame`), or what the pointer is on
+ * (`onHint`); the widget decides.
  */
 
 /** Every node, parents before their children. */
@@ -98,7 +99,7 @@ function part(className, title) {
   return el;
 }
 
-export function createLegend(container, { onSelect, onHide, onFrame }) {
+export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
   let swatches = new Map();
@@ -124,6 +125,7 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
   container.addEventListener("mousedown", (event) => {
     if (event.shiftKey) event.preventDefault();
   });
+  container.addEventListener("mouseleave", () => onHint?.([]));
 
   /** Ids a click on `node` acts on: its own traces, if it has any, and those
    *  of everything beneath it. A collection is drawn only as its contents. */
@@ -208,6 +210,8 @@ export function createLegend(container, { onSelect, onHide, onFrame }) {
       if (event.detail < 2) select(node, modeOf(event));
     });
     label.addEventListener("dblclick", () => onFrame?.(leaves.get(node.id)));
+    // Which of twelve cubes "upper 3" is, without choosing it.
+    row.addEventListener("mouseenter", () => onHint?.(leaves.get(node.id)));
 
     if (!node.children.length) {
       caret.classList.add("leaf");

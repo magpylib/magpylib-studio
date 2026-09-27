@@ -26,6 +26,11 @@ const byObjectId = new Map();
 let hiddenIds = new Set();
 let framed = false;
 let outlines = [];
+// A fainter outline, for what the host is pointing at rather than what is
+// selected: a legend row under the pointer. By id, so it can be drawn again
+// round whatever a redraw builds for them.
+let hintIds = [];
+let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
 let selectedIds = []; // the primary is first: what the sidebar is showing
 // What a drag of several objects turns. It stands at the middle of the
@@ -588,6 +593,33 @@ function setHidden(objectIds) {
     node.visible = !hiddenIds.has(objectId);
   }
   highlight(selectedIds); // an outline round nothing reads as a bug
+  drawHints();
+}
+
+/** Outline these objects faintly -- what a click would select -- or, given
+ *  none, stop. For a host showing where something is without choosing it. */
+function hint(objectIds) {
+  hintIds = [].concat(objectIds ?? []);
+  drawHints();
+}
+
+function drawHints() {
+  for (const box of hints) {
+    scene.remove(box);
+    box.dispose();
+  }
+  hints = [];
+  const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
+  for (const objectId of hintIds) {
+    const node = byObjectId.get(objectId);
+    if (!node?.visible) continue;
+    const box = new THREE.BoxHelper(node, accent);
+    box.material.transparent = true;
+    box.material.opacity = 0.4;
+    box.raycast = () => {}; // an indicator, not a target
+    scene.add(box);
+    hints.push(box);
+  }
 }
 
 function buildMesh(item) {
@@ -1052,6 +1084,7 @@ function renderFrame(payload) {
     node.add(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
   for (const box of outlines) box.update();
+  drawHints(); // round the nodes just built, not the ones discarded
 }
 
 /** Handles have no place on something moving of its own accord: a drag would
@@ -1243,6 +1276,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // Mid-drag the selected object is the one that was *not* rebuilt, and
   // re-attaching the gizmo to it would interrupt the drag in progress.
   if (!held.size) highlight(selectedIds);
+  drawHints();
 }
 
 /** Everything a host may drive the view with.
@@ -1256,6 +1290,7 @@ export const scene3d = {
   render,
   fitView,
   highlight,
+  hint,
   setHidden,
   setGizmoMode,
   constrainAxis,
