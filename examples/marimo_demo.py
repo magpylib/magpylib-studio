@@ -1,4 +1,4 @@
-"""The 3D view in a reactive notebook: `marimo edit sandbox/marimo_demo.py`.
+"""The 3D view in a reactive notebook: `marimo edit examples/marimo_demo.py`.
 
 Needs the widget extra and marimo:
 

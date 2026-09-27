@@ -115,8 +115,9 @@ scene.
 Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
 rebuilds the objects, the view redraws them, and a click is an input to the next
-cell. `sandbox/marimo_demo.py` is that loop
-(`marimo edit sandbox/marimo_demo.py`).
+cell. `examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb`
+the same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
+reactivity.
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`
