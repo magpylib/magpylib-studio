@@ -21,11 +21,17 @@ const path = require("path");
 const EXT = path.join(__dirname, "..");
 const REPO = path.join(EXT, "..");
 
-const BUNDLE = path.join(REPO, "magpylib_studio", "static", "widget.js");
+const STATIC = path.join(REPO, "magpylib_studio", "static");
+const BUNDLE = path.join(STATIC, "widget.js");
+// The set the build hashes, the way it takes them: every module of the
+// widget's own and the renderer, by path from the repo root, sorted.
 const SOURCES = [
-  path.join(REPO, "magpylib_studio", "static", "widget.mjs"),
-  path.join(EXT, "media", "scene3d.mjs"),
-];
+  ...fs
+    .readdirSync(STATIC)
+    .filter((name) => name.endsWith(".mjs"))
+    .map((name) => `magpylib_studio/static/${name}`),
+  "vscode-extension/media/scene3d.mjs",
+].sort();
 const REBUILD =
   "Run tools/build-widget.sh (needs npm install in vscode-extension/).";
 
@@ -44,13 +50,13 @@ if (!stamped) {
 }
 
 const hash = crypto.createHash("sha256");
-for (const file of SOURCES) hash.update(fs.readFileSync(file));
+for (const file of SOURCES) hash.update(fs.readFileSync(path.join(REPO, file)));
 const actual = hash.digest("hex");
 
 if (actual !== stamped[1]) {
   console.error(
     "check-widget: the notebook widget was built from different sources than " +
-      `the ones in the tree (${SOURCES.map((f) => path.relative(REPO, f)).join(", ")}). ` +
+      `the ones in the tree (${SOURCES.join(", ")}). ` +
       REBUILD,
   );
   process.exit(1);

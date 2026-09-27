@@ -65,7 +65,7 @@ def test_a_click_resolves_to_the_object_that_was_clicked(scene_objects):
     """The payload keys traces by `id(obj)`; `identify` makes that an identity."""
     magnet, sensor = scene_objects
     view = widget.view(magnet, sensor)
-    assert set(view.labels.values()) == {"M1", "S1"}
+    assert [node["label"] for node in view.tree] == ["M1", "S1"]
 
     view.selected = [str(id(sensor))]
     assert view.picked == [sensor]
@@ -89,7 +89,7 @@ def test_ids_alone_are_left_alone_when_nobody_said_what_they_are(scene_objects):
     """`magpy.show` has no objects to hand over, so a click stays an id."""
     drawn = magpy.show(*scene_objects, backend="widget", return_fig=True)
     drawn.selected = [str(id(scene_objects[0]))]
-    assert drawn.labels == {}
+    assert drawn.tree == []
     assert drawn.picked == []
 
 
@@ -123,8 +123,8 @@ def test_a_view_is_re_pointed_rather_than_remade(scene_objects, swept):
 
 
 @needs_scene_graph
-def test_a_selection_does_not_survive_the_objects_it_named(scene_objects):
-    """Ids are addresses: kept, they name nothing -- or someone else."""
+def test_a_selection_goes_with_the_objects_it_named(scene_objects):
+    """An object passed again keeps its place; one gone takes its entry."""
     magnet, sensor = scene_objects
     view = widget.view(magnet, sensor)
     view.selected = [str(id(magnet)), str(id(sensor))]
@@ -133,8 +133,132 @@ def test_a_selection_does_not_survive_the_objects_it_named(scene_objects):
     assert view.selected == [str(id(magnet))]
     assert view.picked == [magnet]
 
-    view.update(magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1))
-    assert view.selected == []
+
+@needs_scene_graph
+def test_a_rebuild_keeps_what_was_chosen_where_it_was(nested):
+    """A slider rebuilds the objects; "the lower ring" is still the one below."""
+
+    def build():
+        rings = [
+            magpy.Collection(
+                *(
+                    magpy.magnet.Cuboid(
+                        polarization=(0, 0, 1),
+                        dimension=(1, 1, 1),
+                        position=(i, 0, z),
+                        style_label=f"{name} {i}",
+                    )
+                    for i in range(3)
+                ),
+                style_label=f"{name} ring",
+            )
+            for name, z in (("upper", 1), ("lower", -1))
+        ]
+        return magpy.Collection(*rings, style_label="stack")
+
+    view = widget.SceneWidget()
+    stack = build()
+    view.update(stack)
+    lower = stack.children[1]
+    view.hidden = [str(id(child)) for child in lower.children]
+    view.selected = [str(id(stack.children[0].children[2]))]
+
+    rebuilt = build()
+    view.update(rebuilt)
+    assert view.hidden == [str(id(child)) for child in rebuilt.children[1].children]
+    assert [obj.style.label for obj in view.picked] == ["upper 2"]
+    assert view.picked[0] is rebuilt.children[0].children[2]
+
+
+@needs_scene_graph
+def test_an_object_passed_again_keeps_its_selection_wherever_it_moved(
+    scene_objects,
+):
+    """The same object is followed, not the place it used to be."""
+    magnet, sensor = scene_objects
+    view = widget.view(magnet, sensor)
+    view.selected = [str(id(magnet))]
+    view.update(sensor, magnet)  # swapped round
+    assert view.picked == [magnet]
+
+
+@pytest.fixture
+def nested():
+    """Three levels, which is two more than the payload can say."""
+    deep = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(1, 1, 1), style_label="deep"
+    )
+    inner = magpy.Collection(deep, style_label="inner")
+    ball = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1, style_label="ball")
+    outer = magpy.Collection(inner, ball, style_label="outer")
+    return outer, inner, deep
+
+
+def _outline(nodes):
+    """A tree as nested ``(label, [children])``, for comparing."""
+    return [(node["label"], _outline(node["children"])) for node in nodes]
+
+
+def _walk(nodes):
+    """Every node of a tree."""
+    for node in nodes:
+        yield node
+        yield from _walk(node["children"])
+
+
+@needs_scene_graph
+def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
+    """Every trace under a Collection carries the outermost one's legendgroup,
+    so the tree has to come from the objects -- and it does."""
+    outer, _, _ = nested
+    view = widget.view(outer, magpy.Sensor(style_label="probe"))
+    assert _outline(view.tree) == [
+        ("outer", [("inner", [("deep", [])]), ("ball", [])]),
+        ("probe", []),
+    ]
+    assert view.tree[0]["kind"] == "Collection"
+    # Every object the view draws is one the tree names.
+    drawn = {item["object_id"] for item in view.payload["meshes"]}
+    named = {node["id"] for node in _walk(view.tree)}
+    assert drawn <= named
+
+
+@needs_scene_graph
+def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
+    """Passing a collection and something inside it names the thing once."""
+    outer, _, deep = nested
+    view = widget.view(deep, outer)  # the inner one first, to be sure
+    assert _outline(view.tree) == [("outer", [("inner", [("deep", [])]), ("ball", [])])]
+
+
+@needs_scene_graph
+def test_hiding_is_a_value_like_selecting(scene_objects):
+    """Kept by id, resolved by the view, and dropped with its objects."""
+    magnet, sensor = scene_objects
+    view = widget.view(magnet, sensor)
+    view.hidden = [str(id(sensor))]
+
+    view.update(magnet, sensor)
+    assert view.hidden == [str(id(sensor))]
+    view.update(magnet)  # nothing where the sensor was
+    assert view.hidden == []
+
+
+@needs_scene_graph
+def test_a_scene_and_its_tree_arrive_together(scene_objects, monkeypatch):
+    """Sent apart, the browser draws the new scene against the old tree."""
+    view = widget.SceneWidget()
+    sent = []
+
+    def record(key=None):
+        # A copy: `hold_sync` sends its set of keys and then clears it in
+        # place. `None` is ipywidgets for every key, and is kept as that.
+        sent.append(None if key is None else set(key))
+
+    monkeypatch.setattr(view, "send_state", record)
+    view.update(*scene_objects)
+    assert len(sent) == 1
+    assert {"payload", "tree"} <= sent[0]
 
 
 @needs_scene_graph

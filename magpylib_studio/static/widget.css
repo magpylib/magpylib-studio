@@ -24,6 +24,12 @@
   }
 }
 
+/* What the view and the legend share. Positioned, so the legend can float over
+   the view without the renderer's element having to hold it. */
+.magpy-scene-stage {
+  position: relative;
+}
+
 .magpy-scene-view {
   min-height: 0;
   width: 100%;
@@ -79,4 +85,133 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   opacity: 0.75;
+}
+
+/* ---- legend ---------------------------------------------------------------
+   The prototype's tree view, over the top-left of the scene. It floats rather
+   than taking a column: a notebook cell is narrow, and the view is the thing
+   being looked at. */
+.magpy-scene-legend {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  max-width: min(46%, 22em);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 6px 6px 6px 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 88%,
+    transparent
+  );
+  backdrop-filter: blur(6px);
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 6px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.magpy-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px 0 2px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.magpy-legend-row:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.magpy-legend-row.selected {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 24%, transparent);
+}
+
+/* Nesting drawn as a guide line, not left to indentation alone: a top-level
+   row after a deeply nested one otherwise reads as part of the same group. */
+.magpy-legend-branch {
+  margin-left: 6px;
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-legend-row.group > .magpy-legend-label {
+  font-weight: 600;
+}
+
+.magpy-legend-caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left-color: currentColor;
+  transform: rotate(90deg) translateX(2px);
+  transition: transform 0.12s;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.magpy-legend-row.folded > .magpy-legend-caret {
+  transform: translateX(2px);
+}
+
+.magpy-legend-caret.leaf {
+  border-left-color: transparent;
+  cursor: default;
+}
+
+/* A mask rather than an image, so the eye is drawn in the text's colour and
+   stays visible on a dark notebook. */
+.magpy-legend-eye {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  opacity: 0.55;
+  background-color: currentColor;
+  -webkit-mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.5 3 1.7 5.4 1 8c.7 2.6 3.5 5 7 5s6.3-2.4 7-5c-.7-2.6-3.5-5-7-5zm0 8.3A3.3 3.3 0 1 1 8 4.7a3.3 3.3 0 0 1 0 6.6zm0-5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E");
+  mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.5 3 1.7 5.4 1 8c.7 2.6 3.5 5 7 5s6.3-2.4 7-5c-.7-2.6-3.5-5-7-5zm0 8.3A3.3 3.3 0 1 1 8 4.7a3.3 3.3 0 0 1 0 6.6zm0-5.3a2 2 0 1 0 0 4 2 2 0 0 0 0-4z'/%3E%3C/svg%3E");
+}
+
+.magpy-legend-eye:hover {
+  opacity: 1;
+}
+
+.magpy-legend-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* A collection has no colour of its own; the space stays so labels line up. */
+.magpy-legend-swatch.none {
+  box-shadow: none;
+}
+
+.magpy-legend-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.magpy-legend-row.off > .magpy-legend-label,
+.magpy-legend-row.off > .magpy-legend-swatch {
+  opacity: 0.38;
+}
+
+.magpy-legend-row.off > .magpy-legend-eye {
+  opacity: 0.25;
+}
+
+/* Nothing drawn under it -- an empty collection -- so nothing to hide. */
+.magpy-legend-row.empty > .magpy-legend-eye {
+  visibility: hidden;
 }

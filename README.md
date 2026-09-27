@@ -46,7 +46,12 @@ three.js renderer wrapped as an [anywidget][aw]:
 
 ```sh
 pip install "magpylib-studio[widget]"
+pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
 ```
+
+The second line is not optional yet. The widget draws through magpylib's
+display-backend API, which is on main and in no release: on 5.2.3,
+`backend="widget"` does not exist.
 
 ```python
 import magpylib as magpy
@@ -62,8 +67,8 @@ notebook draw one. Orbit, zoom, **Fit**, an orthographic toggle;
 python for one frame at a time.
 
 It is read only, like the panel — what a view can offer to edit is what its host
-can put back, and a cell has already run. Selection is the exception, because it
-is a value rather than an edit:
+can put back, and a cell has already run. Selecting and hiding are the
+exceptions, because they are values rather than edits:
 
 ```python
 scene = mo.ui.anywidget(SceneWidget(height=460))   # one cell: the view
@@ -78,17 +83,29 @@ element, a bar rebuilt from nothing, and the camera back at its opening framing
 — you lose the zoom you were working in. `update()` replaces the drawn objects
 and leaves the view alone, which is what makes a slider smooth.
 
+**The legend** floats over the view: the objects as they are nested, with a
+caret to fold a collection, an eye to hide it and everything in it, a swatch in
+the colour it is drawn, and a name to click — ⌘/ctrl adds, shift takes a range
+in tree order. It writes `selected` and `hidden`, the traitlets a click in the
+view and a notebook cell write too. It needs the objects, because the payload
+cannot say how they nest, so it comes with `view()` and `update()` and not with
+a bare `magpy.show()`.
+
+What is selected, hidden or folded survives `update()`: an object passed again
+keeps it, and a rebuilt one inherits it from whatever sat in its place in the
+tree — "the lower ring" is still the one below after a slider has remade both.
+
 Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
 rebuilds the objects, the view redraws them, and a click is an input to the next
-cell. `sandbox/marimo_demo.py` is that loop in twenty lines
+cell. `sandbox/marimo_demo.py` is that loop
 (`marimo edit sandbox/marimo_demo.py`).
 
-The widget's JavaScript is `vscode-extension/media/scene3d.mjs` — the panel's
-own renderer, which being used from a second host cost two lines — bundled with
-three.js by `tools/build-widget.sh` into `magpylib_studio/static/widget.js`,
-which is committed so that installing the package needs no node.
-`npm run check:widget` fails the build when the two have drifted.
+The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
+and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`
+bundles them with three.js into `magpylib_studio/static/widget.js`, which is
+committed so that installing the package needs no node; `npm run check:widget`
+fails the build when it no longer matches its sources.
 
 [aw]: https://anywidget.dev
 

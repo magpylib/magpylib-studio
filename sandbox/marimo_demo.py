@@ -37,12 +37,16 @@ def _(mo):
         The 3D view is the one the VS Code studio draws — the same three.js
         renderer, handed the same payload — wrapped as an `anywidget`.
 
-        Drag the sliders: the ring is rebuilt in python and the view is
-        re-pointed at it, keeping your camera — zoom in and drag one, the zoom
-        stays. **Tilt** turns every polarization together, from an axial ring
-        at 0° through a radial one at 90°. Click a magnet: the selection is a
-        value the cells below react to. Drag to orbit, scroll to zoom, **Fit**
-        to reframe.
+        Drag the sliders: the rings are rebuilt in python and the view is
+        re-pointed at them, keeping your camera — zoom in and drag one, the
+        zoom stays. **Tilt** turns every polarization together, from axial at
+        0° to radial at 90°. Click a magnet: the selection is a value the cells
+        below react to.
+
+        The list over the view is the scene as it is nested — the stack, its
+        rings, their magnets. Fold a ring with its caret, hide it with its eye,
+        or click a name to select everything under it (⌘/ctrl-click adds,
+        shift-click takes a range). **Objects** puts it away.
         """
     )
     return
@@ -59,29 +63,38 @@ def _(mo):
 
 @app.cell
 def _(magpy, n, radius, tilt):
-    ring = magpy.Collection(style_label="ring")
-    # `mo.ui.slider` values are int | float whatever its bounds are, and a
-    # count has to be a whole number for `range` -- and for the angle below,
-    # so that the last magnet lands beside the first rather than on it.
-    _count = int(n.value)
-    for _i in range(_count):
-        _magnet = magpy.magnet.Cuboid(
-            dimension=(1, 1, 1),
-            polarization=(0, 0, 1),
-            position=(radius.value, 0, 0),
-            style_label=f"magnet {_i + 1}",
-        )
-        # Turned in place first, by the same angle for every magnet -- the
-        # tilt is what the ring *is*, not a pattern across it: 0° is an axial
-        # ring, 90° a radial one, 180° axial the other way. (Multiplying the
-        # angle by `_i` would make it a Halbach-ish pattern, and would leave
-        # this magnet, at index zero, the one the slider never moves.)
-        _magnet.rotate_from_angax(tilt.value, "y", anchor=_magnet.position)
-        _magnet.rotate_from_angax(360 * _i / _count, "z", anchor=(0, 0, 0))
-        ring.add(_magnet)
+    def _ring(name, z, turn):
+        ring = magpy.Collection(style_label=f"{name} ring")
+        # `mo.ui.slider` values are int | float whatever its bounds are, and a
+        # count has to be a whole number for `range` -- and for the angle
+        # below, so that the last magnet lands beside the first, not on it.
+        count = int(n.value)
+        for i in range(count):
+            magnet = magpy.magnet.Cuboid(
+                dimension=(1, 1, 1),
+                polarization=(0, 0, 1),
+                position=(radius.value, 0, z),
+                style_label=f"{name} {i + 1}",
+            )
+            # Turned in place first, by the same angle for every magnet: the
+            # tilt is what the ring *is*, not a pattern across it -- 0° is an
+            # axial ring, 90° a radial one. (Multiplying it by `i` would make
+            # a Halbach-ish pattern, and leave the magnet at index zero the
+            # one the slider never moves.)
+            magnet.rotate_from_angax(turn, "y", anchor=magnet.position)
+            magnet.rotate_from_angax(360 * i / count, "z", anchor=(0, 0, 0))
+            ring.add(magnet)
+        return ring
 
+    # Two rings turned opposite ways, so the legend has something to fold:
+    # the stack, each ring in it, each magnet in those.
+    stack = magpy.Collection(
+        _ring("upper", 1.0, tilt.value),
+        _ring("lower", -1.0, -tilt.value),
+        style_label="stack",
+    )
     probe = magpy.Sensor(style_label="centre probe")
-    return probe, ring
+    return probe, stack
 
 
 @app.cell
@@ -92,22 +105,22 @@ def _(SceneWidget, mo):
 
 
 @app.cell
-def _(probe, ring, scene):
+def _(probe, scene, stack):
     # Re-pointed, not remade. A slider re-runs every cell that reads it, so a
     # `view(...)` call in one of them would build a new widget per drag: a new
     # element, a bar rebuilt from nothing, and the camera back at its opening
     # framing -- losing whatever you had just zoomed in on. This cell reads the
     # sliders; the one above, which owns the view, does not.
-    scene.widget.update(ring, probe)
+    scene.widget.update(stack, probe)
     return
 
 
 @app.cell
-def _(magpy, mo, np, probe, ring, scene):
+def _(magpy, mo, np, probe, scene, stack):
     # `scene.value` is what makes this cell re-run on a click; the widget it
     # wraps is what turns the ids in it back into magpylib objects.
     _clicked = scene.value["selected"] and scene.widget.picked
-    _field = np.round(magpy.getB(ring, probe) * 1000, 3)
+    _field = np.round(magpy.getB(stack, probe) * 1000, 3)
 
     mo.md(
         f"""
