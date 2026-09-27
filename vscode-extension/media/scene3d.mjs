@@ -32,6 +32,9 @@ let outlines = [];
 let hintIds = [];
 let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
+// Whether the host wants that box. Held here, like hiding, because the box is
+// drawn again on every redraw; the panel never says, and always has it.
+let axesShown = true;
 let selectedIds = []; // the primary is first: what the sidebar is showing
 // What a drag of several objects turns. It stands at the middle of the
 // selection and is never drawn -- only the motion it makes is read off it.
@@ -596,6 +599,13 @@ function setHidden(objectIds) {
   drawHints();
 }
 
+/** Show the graduated box -- the scene's scale -- or put it away. Framing
+ *  leaves room for its numbers only while it is there. */
+function setAxes(on) {
+  axesShown = on;
+  if (axes) axes.visible = on;
+}
+
 /** Outline these objects faintly -- what a click would select -- or, given
  *  none, stop. For a host showing where something is without choosing it. */
 function hint(objectIds) {
@@ -767,7 +777,7 @@ function sceneSphere(objectIds) {
     }
     // the graduated box sits a little outside the objects, and framing the
     // scene without its scale showing would cut the numbers off
-    if (axes) box.expandByObject(axes);
+    if (axes?.visible) box.expandByObject(axes);
   }
   if (box.isEmpty()) return null;
   const sphere = box.getBoundingSphere(new THREE.Sphere());
@@ -1042,6 +1052,7 @@ function drawAxes(ranges, labels) {
       .add(outward.clone().multiplyScalar(2.4));
     axes.add(name);
   }
+  axes.visible = axesShown;
   scene.add(axes);
 }
 
@@ -1291,6 +1302,7 @@ export const scene3d = {
   fitView,
   highlight,
   hint,
+  setAxes,
   setHidden,
   setGizmoMode,
   constrainAxis,

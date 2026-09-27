@@ -325,6 +325,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     magnet, sensor = scene_objects
     view = widget.view(magnet, sensor)
     view.hidden = [str(id(sensor))]
+    view.axes = False
     path = view.save_html(tmp_path / "scene.html", title="two <objects>")
     page = path.read_text(encoding="utf-8")
 
@@ -334,6 +335,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["state"]["payload"] == view.payload
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
+    assert saved["state"]["axes"] is False  # on by default; put away here
     # A page with no python behind it offers no export of its own.
     assert saved["state"]["standalone"] is True
     assert saved["run"] == []

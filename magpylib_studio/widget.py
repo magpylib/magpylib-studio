@@ -216,6 +216,9 @@ class SceneWidget(anywidget.AnyWidget):
     #: Which objects are not drawn, by the same ids. Written by the legend's
     #: eye, and assignable from the notebook like `selected`.
     hidden = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: Whether the graduated box -- the scene's scale -- is drawn. A cell can
+    #: put it away for a clean picture, and an export keeps it that way.
+    axes = traitlets.Bool(True).tag(sync=True)
     #: The objects `identify` was given, as their Collection hierarchy: nodes
     #: of ``{id, label, kind, children}``. What the legend draws. Empty for a
     #: bare ``magpy.show(..., backend="widget")``, which has no objects to
@@ -352,6 +355,7 @@ class SceneWidget(anywidget.AnyWidget):
             "tree": self.tree,
             "selected": list(self.selected),
             "hidden": list(self.hidden),
+            "axes": self.axes,
             "height": self.height,
             "frames": self.frames,
             "duration": self.duration,
