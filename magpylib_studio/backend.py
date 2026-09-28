@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import webbrowser
+from pathlib import Path
 
 import magpylib as magpy
 
@@ -111,9 +114,43 @@ else:
             widget = SceneWidget._from_scene(scene)
             if scene.options.get("height") is not None:
                 widget.height = int(scene.options["height"])
-            if not scene.return_fig:
-                display(widget)
+            if not scene.return_fig and not display(widget):
+                _outside_a_notebook(widget, scene.title)
             return widget
+
+
+def _outside_a_notebook(widget, title):
+    """Show `widget` where a script can: there is no cell to put it in.
+
+    It used to go nowhere, without a word -- a script asking for a widget got
+    none, and nothing said why. Now it goes where the script can see it, and
+    says where. In a terminal of a studio window, that is the panel, which
+    draws this same widget. Anywhere else it is a page of its own, opened in
+    the browser, as Plotly opens a figure a script shows: the widget saved
+    with `write_html`, which plays a run with no python behind it.
+    """
+    if drop_dir() is not None:
+        write_view("widget", widget._saved(), title=title, claimed=CLAIMED)
+        print(
+            "magpylib-studio: not in a notebook, so the view is in the "
+            "Magpylib Studio panel.",
+            file=sys.stderr,
+        )
+        return
+    folder = Path(tempfile.gettempdir()) / "magpylib-studio"
+    folder.mkdir(exist_ok=True)
+    handle, name = tempfile.mkstemp(suffix=".html", prefix="scene-", dir=folder)
+    os.close(handle)
+    page = Path(name)
+    widget.write_html(page, title=title or "magpylib scene")
+    # Not from a test suite, which would open a tab per test.
+    opened = not _under_a_test_runner() and webbrowser.open(page.as_uri())
+    print(
+        "magpylib-studio: not in a notebook, so the view "
+        + ("opened in your browser" if opened else "was saved")
+        + f": {page}",
+        file=sys.stderr,
+    )
 
 
 def _under_a_test_runner() -> bool:
