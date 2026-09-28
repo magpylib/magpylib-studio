@@ -62,12 +62,15 @@ SceneWidget(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
 
 `magpy.show(objects, backend="widget")` is the same thing said magpylib's way,
 and `magpy.defaults.display.backend = "widget"` makes every `show()` in the
-notebook draw one. The tools sit in the view's top-right corner and show when
-the pointer is on it, as Plotly's modebar does: the legend, the axes, framing,
-the projection, the theme, a picture, export and full screen. `animation=True`
-captures the paths, and a transport along the foot of the view plays and scrubs
-them: in the browser, from the motion, when every step is the first one moved —
-and a frame at a time from python when the run changes shape as it goes.
+notebook draw one. A script has no cell to draw in: run from a terminal of a
+studio window, it draws in the Magpylib Studio panel, and anywhere else it opens
+the view in your browser as a saved page, saying where. The tools sit in the
+view's top-right corner and show when the pointer is on it, as Plotly's modebar
+does: the legend, the axes, framing, the projection, the theme, a picture,
+export and full screen. `animation=True` captures the paths, and a transport
+along the foot of the view plays and scrubs them: in the browser, from the
+motion, when every step is the first one moved — and a frame at a time from
+python when the run changes shape as it goes.
 
 It is read only, like the panel — what a view can offer to edit is what its host
 can put back, and a cell has already run. Selecting and hiding are the

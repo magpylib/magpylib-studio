@@ -12,13 +12,14 @@ import gzip
 import io
 import json
 import re
+import tempfile
 
 import magpylib as magpy
 import numpy as np
 import pytest
 import traitlets
 
-from magpylib_studio import threejs
+from magpylib_studio import backend, threejs
 
 widget = pytest.importorskip("magpylib_studio.widget")
 
@@ -72,9 +73,44 @@ def test_the_backend_draws_a_widget(scene_objects):
 
 
 @needs_scene_graph
-def test_nothing_is_displayed_where_there_is_no_notebook(scene_objects):
-    """A script drawing with this backend gets no output and no error."""
+def test_a_script_gets_the_view_in_a_page_of_its_own(
+    scene_objects, tmp_path, monkeypatch, capsys
+):
+    """No notebook to draw in: the widget is saved as a page, opened in the
+    browser -- not under a test runner -- and the script is told where."""
+    monkeypatch.delenv("MAGPYLIB_STUDIO_DROP", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    opened = []
+    # says whether a browser took it, as webbrowser.open does
+    monkeypatch.setattr(
+        backend.webbrowser, "open", lambda url: opened.append(url) or True
+    )
     assert magpy.show(*scene_objects, backend="widget") is None
+    (page,) = (tmp_path / "magpylib-studio").glob("scene-*.html")
+    assert "magpy-widget" in page.read_text(encoding="utf-8")
+    assert str(page) in capsys.readouterr().err
+    assert opened == []  # a test suite opens no tabs
+
+    monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
+    magpy.show(*scene_objects, backend="widget")
+    assert len(opened) == 1
+    assert opened[0].startswith("file://")
+    assert "opened in your browser" in capsys.readouterr().err
+
+
+@needs_scene_graph
+def test_a_script_in_a_studio_terminal_gets_the_view_in_the_panel(
+    scene_objects, tmp_path, monkeypatch, capsys
+):
+    """Run from a studio window's terminal, the widget goes to the panel,
+    which draws the same widget."""
+    monkeypatch.setenv("MAGPYLIB_STUDIO_DROP", str(tmp_path))
+    magpy.show(*scene_objects, backend="widget")
+    (written,) = list((tmp_path / "views").iterdir())
+    figure = json.loads(written.read_text(encoding="utf-8"))
+    assert figure["kind"] == "widget"
+    assert figure["body"]["state"]["payload"]["meshes"]
+    assert "panel" in capsys.readouterr().err
 
 
 @needs_scene_graph
