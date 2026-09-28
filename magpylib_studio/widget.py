@@ -258,6 +258,10 @@ class SceneWidget(anywidget.AnyWidget):
         #: served from here one at a time, as the panel serves them.
         self._scene = None
         self._objects = {}
+        #: Where the view was last looking, as it reported: a message, not a
+        #: trait, for the reason given where the view sends it. Kept for
+        #: `to_html`, so a file saved from a cell opens on the same view.
+        self._camera = None
         self.on_msg(self._on_message)
         if objects:
             self.update(*objects, animation=animation, **kwargs)
@@ -392,7 +396,9 @@ class SceneWidget(anywidget.AnyWidget):
         page holds. A captured run travels with it, every frame, so a path
         still plays -- the one thing the view would otherwise ask python for.
 
-        The camera is not kept: the page opens framed on the scene.
+        It opens where the view was looking, as the view last said -- which a
+        view says once it stops moving. One never drawn has not said, and the
+        page frames the scene.
         """
         state = {
             "payload": self.payload,
@@ -405,6 +411,7 @@ class SceneWidget(anywidget.AnyWidget):
             "frames": self.frames,
             "duration": self.duration,
             "repeat": self.repeat,
+            "camera": self._camera,
             # no python behind the page, so nothing to ask for another export
             "standalone": True,
         }
@@ -433,7 +440,8 @@ class SceneWidget(anywidget.AnyWidget):
             pathlib.Path(file).write_text(page, encoding="utf-8")
 
     def _on_message(self, _widget, content, _buffers):
-        """Answer the view: one frame of the run, or the view as a file.
+        """Answer the view: one frame of the run, or the view as a file --
+        or keep where it says it is looking.
 
         Frames are asked for one at a time rather than handed over in one go,
         for the reason the panel does: the whole run is every trace of every
@@ -443,7 +451,10 @@ class SceneWidget(anywidget.AnyWidget):
         if kind == "frame" and self._scene is not None:
             frame = threejs.frame_payload(self._scene, content.get("index", 0))
             self.send({"kind": "frame", **frame})
+        elif kind == "camera":
+            self._camera = content.get("camera")
         elif kind == "export":
+            self._camera = content.get("camera") or self._camera
             page = self.to_html()
             self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
 

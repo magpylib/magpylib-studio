@@ -46,6 +46,7 @@ let playing = false;
 let pivots = {}; // studio id -> its handle point, in its own frame
 
 let frustumHeight = 1; // what an orthographic camera shows, top to bottom
+let cameraMoved = null; // a host's, told whenever the camera has moved
 /** Which axes each kind of drag runs along, in three's vocabulary.
  *
  * Per mode rather than one setting for all of them, because the right answer
@@ -112,7 +113,7 @@ function ensureRenderer(canvasEl) {
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
   camera.up.set(0, 0, 1); // magpylib scenes are z-up
-  controls = new OrbitControls(camera, renderer.domElement);
+  controls = orbit();
 
   scene.add(new THREE.AmbientLight(0xffffff, 1.6));
   const key = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -917,13 +918,62 @@ function toggleProjection() {
   // dozen places and were handed it once, and a stale reference in any of
   // them is a view that half moves.
   controls.dispose();
-  controls = new OrbitControls(camera, renderer.domElement);
+  controls = orbit();
   controls.target.copy(target);
   gizmo.camera = camera; // this one has a setter that passes it on
   applyProjection();
   camera.lookAt(target);
   controls.update();
   return wasOrthographic ? "perspective" : "parallel";
+}
+
+/** Orbit controls for the camera now in use, reporting every move of it. */
+function orbit() {
+  const made = new OrbitControls(camera, renderer.domElement);
+  made.addEventListener("change", () => cameraMoved?.());
+  return made;
+}
+
+/** Where the view is looking from, as a host can keep it and hand it back to
+ *  `setCamera` -- in another page, even, which is what an export does. */
+function cameraState() {
+  if (!camera) return null;
+  return {
+    projection: camera.isOrthographicCamera ? "parallel" : "perspective",
+    position: camera.position.toArray(),
+    target: controls.target.toArray(),
+    up: camera.up.toArray(),
+    zoom: camera.zoom,
+    height: frustumHeight,
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
+/** Look from where `cameraState` said. Returns the projection now in use. */
+function setCamera(state) {
+  if (!camera || !state) return;
+  if ((state.projection === "parallel") !== camera.isOrthographicCamera) {
+    toggleProjection();
+  }
+  frustumHeight = state.height;
+  camera.up.fromArray(state.up);
+  camera.position.fromArray(state.position);
+  camera.zoom = state.zoom;
+  camera.near = state.near;
+  camera.far = state.far;
+  controls.target.copy(new THREE.Vector3().fromArray(state.target));
+  applyProjection();
+  camera.lookAt(controls.target);
+  controls.update();
+  framed = true; // a view that was looked at, not one to frame
+  return state.projection;
+}
+
+/** Tell `listener` whenever the camera moves: a drag, a zoom, a key, a fit.
+ *  One at a time -- the host this renderer is drawing for. */
+function watchCamera(listener) {
+  cameraMoved = listener;
 }
 
 /** Drag in round numbers, or freely. Returns the step now in force.
@@ -1308,6 +1358,9 @@ export const scene3d = {
   constrainAxis,
   setSnapping,
   toggleProjection,
+  cameraState,
+  setCamera,
+  watchCamera,
   setPlaying,
   renderFrame,
   frameCount,
