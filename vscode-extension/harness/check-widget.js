@@ -10,9 +10,11 @@
  * panel loads directly and so shows an edit to immediately, while the widget
  * keeps whatever renderer it was last built with. Nothing would say so.
  *
- * `tools/build-widget.sh` stamps a hash of its sources into the banner. This
- * recomputes it. Cheap enough to run on every compile, which is where an edit
- * to the renderer is made.
+ * `tools/build-widget.sh` stamps a hash of its sources into the banner --
+ * and of the three.js and esbuild it built them with, since upgrading three
+ * changes the panel at once and the widget not at all. This recomputes it.
+ * Cheap enough to run on every compile, which is where an edit to the
+ * renderer is made.
  */
 const crypto = require("crypto");
 const fs = require("fs");
@@ -49,14 +51,30 @@ if (!stamped) {
   process.exit(1);
 }
 
+// What it was built with: the three.js the panel loads, and the esbuild the
+// build pins.
+const THREE_PACKAGE = path.join(EXT, "node_modules", "three", "package.json");
+if (!fs.existsSync(THREE_PACKAGE)) {
+  console.error(
+    "check-widget: three.js is not installed; run npm install in vscode-extension/.",
+  );
+  process.exit(1);
+}
+const three = JSON.parse(fs.readFileSync(THREE_PACKAGE, "utf8")).version;
+const esbuild = /^ESBUILD=(\S+)$/m.exec(
+  fs.readFileSync(path.join(REPO, "tools", "build-widget.sh"), "utf8"),
+)?.[1];
+
 const hash = crypto.createHash("sha256");
 for (const file of SOURCES) hash.update(fs.readFileSync(path.join(REPO, file)));
+hash.update(`three@${three} ${esbuild}`);
 const actual = hash.digest("hex");
 
 if (actual !== stamped[1]) {
   console.error(
     "check-widget: the notebook widget was built from different sources than " +
-      `the ones in the tree (${SOURCES.join(", ")}). ` +
+      `the ones in the tree (${SOURCES.join(", ")}), or with another three.js ` +
+      `or esbuild than three@${three} and ${esbuild}. ` +
       REBUILD,
   );
   process.exit(1);

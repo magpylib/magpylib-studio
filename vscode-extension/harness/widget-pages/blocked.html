@@ -1,0 +1,32 @@
+<!doctype html>
+<!--
+  A page whose security policy refuses scripts made from a blob -- which is
+  how the widget loads its renderer. The widget cannot draw here; it has to
+  say so, in the view, rather than show an empty stage.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self' 'unsafe-inline'"
+    />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="widget"></div>
+    <script type="module">
+      import { widget, localModel, wait } from "./host.mjs";
+
+      widget.render({
+        model: localModel(),
+        el: document.getElementById("widget"),
+      });
+      await wait(1500);
+      const notice = document.querySelector(".magpy-scene-notice");
+      window.result = {
+        said: notice?.classList.contains("shown") ? notice.textContent : null,
+      };
+    </script>
+  </body>
+</html>

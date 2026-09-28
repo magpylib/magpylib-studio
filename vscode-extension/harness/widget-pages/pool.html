@@ -8,6 +8,10 @@
     first lost its canvas.
   reused: marimo re-running a cell takes a drawn view off the page without
     tearing it down. The next view must still get a renderer.
+  stale: and the view taken off the page still has a model python can set.
+    Setting it must not reach the renderer the next view now holds.
+  projection: a renderer handed on keeps its state. The next view must
+    start in perspective, with its button saying so.
 -->
 <html>
   <head>
@@ -44,6 +48,47 @@
           widget.render({ model: localModel(), el: b });
           await wait(1500);
           return { next: drawn(b) };
+        },
+        async stale() {
+          const a = view();
+          page.append(a);
+          const old = localModel();
+          widget.render({ model: old, el: a });
+          await wait(1500);
+          a.remove();
+          const b = view();
+          page.append(b);
+          widget.render({ model: localModel(), el: b });
+          await wait(1500);
+          // one renderer between them, so this is the one b draws with
+          const nodes = window.scene3d.byObjectId;
+          old.set("hidden", [...nodes.keys()]);
+          old.set("axes", false);
+          await wait(300);
+          return { visible: [...nodes.values()].every((node) => node.visible) };
+        },
+        async projection() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          [...a.querySelectorAll(".magpy-icon")]
+            .find((b) => b.title.startsWith("Orthographic"))
+            .click();
+          const was = window.scene3d.cameraState().projection;
+          a.remove();
+          const b = view();
+          page.append(b);
+          widget.render({ model: localModel(), el: b });
+          await wait(1500);
+          const button = [...b.querySelectorAll(".magpy-icon")].find((x) =>
+            x.title.startsWith("Orthographic"),
+          );
+          return {
+            was,
+            now: window.scene3d.cameraState().projection,
+            pressed: button.getAttribute("aria-pressed"),
+          };
         },
       };
 

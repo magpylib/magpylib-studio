@@ -620,6 +620,9 @@ function drawHints() {
     box.dispose();
   }
   hints = [];
+  // Called on every redraw and every frame of a run, and nearly always with
+  // nothing to point at: no style lookup for a colour no box will wear.
+  if (!hintIds.length) return;
   const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
   for (const objectId of hintIds) {
     const node = byObjectId.get(objectId);

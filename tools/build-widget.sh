@@ -36,11 +36,16 @@ mkdir -p build
 # Every module of the widget's own by glob, not by name: a list is what a new
 # module gets left out of, and then the hash vouches for a bundle it does not
 # cover. Hashed in sorted order, which is the order the check takes them in.
+#
+# And what they were built with: a new three.js -- which the panel picks up
+# from node_modules as soon as it is installed -- or a new esbuild is a new
+# bundle as surely as an edit is.
 sources=(magpylib_studio/static/*.mjs vscode-extension/media/scene3d.mjs)
-digest="$(node -e '
+digest="$(THREE="$version" ESBUILD="$ESBUILD" node -e '
 const fs = require("fs");
 const hash = require("crypto").createHash("sha256");
 for (const file of process.argv.slice(1).sort()) hash.update(fs.readFileSync(file));
+hash.update(`three@${process.env.THREE} ${process.env.ESBUILD}`);
 console.log(hash.digest("hex"));
 ' "${sources[@]}")"
 

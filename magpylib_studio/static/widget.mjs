@@ -448,11 +448,14 @@ function render({ model, el }) {
     }
     legend.update({ tree, payload });
     legend.sync(stateOf());
-    // After the first time, it is the user's to open and close; and one
-    // object needs no list.
+    // After the first time, it is the user's to open and close. One object
+    // needs no list -- which is not a decision: a scene that grows later,
+    // a slider making a ring of what was one magnet, still gets its look.
     if (legendOpen !== null) showLegend(legendOpen);
-    else if (rows === 1) showLegend(false);
-    else settleLegend();
+    else if (rows === 1) {
+      legendEl.hidden = true;
+      pressed(legendButton, false);
+    } else settleLegend();
   }
 
   /** The legend's first look, in the room the view has: open in full if
@@ -603,7 +606,7 @@ function render({ model, el }) {
   function showAxes() {
     const on = Boolean(model.get("axes"));
     pressed(axesButton, on);
-    api?.setAxes(on);
+    if (drawing()) api.setAxes(on);
   }
 
   /** The renderer answers with the projection now in force. */
@@ -660,6 +663,8 @@ function render({ model, el }) {
 
   const slot = acquire(view);
   let api = null;
+  // Whether the renderer is loaded and still this view's to drive.
+  const drawing = () => api !== null && slot.host === view;
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // waits for a first size, when the view was laid out late
 
@@ -713,10 +718,11 @@ function render({ model, el }) {
   }
 
   let noticeTimer = null;
-  function notify(text) {
+  function notify(text, { stay = false } = {}) {
     notice.textContent = text;
     notice.classList.add("shown");
     clearTimeout(noticeTimer);
+    if (stay) return; // until something replaces it
     noticeTimer = setTimeout(() => notice.classList.remove("shown"), 2500);
   }
 
@@ -868,13 +874,32 @@ function render({ model, el }) {
       draw(); // which applies the hiding and the selection itself
       return;
     }
-    if (now.has("hidden")) api?.setHidden(model.get("hidden") || []);
-    if (now.has("selected")) api?.highlight(model.get("selected") || []);
+    // Only while the renderer is this view's: one whose element has left the
+    // page may have handed it to another widget, and a selection set from
+    // python for the old view would land on the new one's scene.
+    if (!drawing()) return;
+    if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
+    if (now.has("selected")) api.highlight(model.get("selected") || []);
   }
 
   // --- drawing ----------------------------------------------------------
   async function draw() {
-    api = await slot.api;
+    try {
+      api = await slot.api;
+    } catch (error) {
+      // The renderer would not load -- a page whose security policy refuses
+      // scripts made from a blob, for one. Said where the scene would be,
+      // and not kept: the next draw, by this widget or another taking the
+      // slot, tries again rather than failing on the same rejected promise.
+      api = null;
+      if (slot.host !== view) return;
+      notify(`The 3D view could not load here: ${error.message}`, {
+        stay: true,
+      });
+      slot.api = loadRenderer();
+      slot.api.catch(() => {}); // the next draw's to report, not the page's
+      return;
+    }
     if (slot.host !== view) return; // the slot was taken while we were away
     if (view.isConnected) slot.shown = true;
     const payload = model.get("payload") || {};
@@ -890,6 +915,14 @@ function render({ model, el }) {
     api.setHidden(model.get("hidden") || []);
     api.setAxes(Boolean(model.get("axes")));
     api.watchCamera(tellCamera);
+    if (!framed) {
+      // A pooled renderer comes with the last widget's projection and the
+      // legend row it was pointing at. A new view starts from neither --
+      // or its projection button would say the opposite of what it shows.
+      if (api.cameraState()?.projection === "parallel") api.toggleProjection();
+      showProjection("perspective");
+      api.hint([]);
+    }
     api.render(view, payload, { keepCamera: framed });
     // A saved view opens where it was looking when it was saved. A live one
     // has no camera to start from, and frames the scene.
@@ -897,6 +930,10 @@ function render({ model, el }) {
     if (saved) showProjection(api.setCamera(saved));
     framed = true;
     api.highlight(model.get("selected") || []);
+    // The payload is the run's first frame, so a redraw of the same run --
+    // a theme that changed -- would leave the picture at the start while the
+    // counter says otherwise. Back to the step that was on screen.
+    if (shown > 0) askFor(shown);
     // The element may still have been unsized when the view framed itself --
     // a cell that is laid out after its output is made. One refit, once it
     // has a size, and only if the camera has not been touched since.

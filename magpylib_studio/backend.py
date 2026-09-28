@@ -43,6 +43,9 @@ BACKEND_NAME = "studio"
 #: The same view, drawn in a notebook cell instead. See `widget.py`.
 WIDGET_BACKEND_NAME = "widget"
 
+#: What that needs beyond the engine: the `widget` extra, and what it brings.
+WIDGET_REQUIRES = frozenset({"anywidget", "ipywidgets", "traitlets"})
+
 if threejs.SceneGraphBackend is None:  # pragma: no cover - depends on magpylib
     # 5.2.3 and earlier have no display-backend API to subclass. They also have
     # no entry-point discovery, so nothing ever asks for these names there, and
@@ -87,10 +90,19 @@ else:
         def show(self, scene):
             # Imported here, not at module scope: this module is loaded while
             # magpylib is importing, and the widget brings ipywidgets with it.
-            from magpylib_studio.widget import (
-                SceneWidget,
-                display,
-            )
+            # Which it may not have: the name is advertised by installing the
+            # package, and anywidget comes only with its `widget` extra.
+            try:
+                from magpylib_studio.widget import SceneWidget, display
+            except ModuleNotFoundError as error:
+                if error.name not in WIDGET_REQUIRES:
+                    raise
+                raise ModuleNotFoundError(
+                    f"the {WIDGET_BACKEND_NAME!r} backend needs {error.name}, "
+                    "which comes with the widget extra: "
+                    'pip install "magpylib-studio[widget]"',
+                    name=error.name,
+                ) from error
 
             widget = SceneWidget._from_scene(scene)
             if scene.options.get("height") is not None:

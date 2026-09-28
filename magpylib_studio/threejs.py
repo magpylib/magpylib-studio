@@ -26,6 +26,7 @@ and 10):
 from __future__ import annotations
 
 import math
+import warnings
 
 import magpylib as magpy
 import numpy as np
@@ -345,8 +346,13 @@ else:
             # first scene rather than the last.
             return _captured.setdefault("scene", scene)
 
+    # Out of magpylib's registry until a capture needs it. Registered, its
+    # internal name was offered to users as a backend to choose -- in the
+    # list magpylib gives when one cannot animate -- which it is not.
+    _CAPTURE = DisplayBackend.backends.pop(_BACKEND)
 
-def _capture(objects, animation=False, **kwargs):
+
+def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
     """The `Scene` magpylib would hand a display backend, for `objects`.
 
     With `animation`, that scene carries one frame per step of the longest
@@ -358,13 +364,35 @@ def _capture(objects, animation=False, **kwargs):
     every trace of every frame, and -- where magpylib hands its backends the
     objects -- the objects themselves, which a module-level reference would
     keep alive until the next capture.
+
+    What magpylib warns about along the way -- an unexpected keyword, say --
+    is said again in the name of the backend the capture is `on_behalf_of`:
+    the user asked for a widget, and has never heard of this one.
     """
-    if not available():
+    # `available()` says as much; saying it again is what tells a type checker
+    # that the display-backend API is there to register with.
+    if not available() or DisplayBackend is None:
         raise RuntimeError(UNAVAILABLE)
     _captured.clear()
-    magpy.show(
-        objects, backend=_BACKEND, return_fig=True, animation=animation, **kwargs
-    )
+    DisplayBackend.backends[_BACKEND] = _CAPTURE
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            magpy.show(
+                objects,
+                backend=_BACKEND,
+                return_fig=True,
+                animation=animation,
+                **kwargs,
+            )
+    finally:
+        DisplayBackend.backends.pop(_BACKEND, None)
+    for warning in caught:
+        warnings.warn(
+            str(warning.message).replace(_BACKEND, on_behalf_of),
+            warning.category,
+            stacklevel=3,
+        )
     return _captured.pop("scene")
 
 
@@ -392,6 +420,7 @@ def capture_frames(objects, steps):
     return _capture(
         objects,
         animation=True,
+        on_behalf_of="studio",
         # the budget is min(time x fps, maxframes); both have to clear the path
         animation_fps=math.ceil(steps / magpy.defaults.display.animation.time),
         animation_maxfps=math.ceil(steps / magpy.defaults.display.animation.time),
@@ -541,7 +570,7 @@ def scene_payload(objects, live=None, derived=None):
     copies, so the source moves and the copies stay where they were. A view
     that offers drag handles has to know not to offer them there.
     """
-    scene = _capture(objects)
+    scene = _capture(objects, on_behalf_of="studio")
     panel = scene.panel(1, 1)
     traces = [t for frame in scene.frames for t in frame.traces]
 

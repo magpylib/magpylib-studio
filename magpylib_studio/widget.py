@@ -264,7 +264,10 @@ class SceneWidget(anywidget.AnyWidget):
         self._camera = None
         self.on_msg(self._on_message)
         if objects:
-            self.update(*objects, animation=animation, **kwargs)
+            # The traits again, after the scene: drawing one sets the run's
+            # length, pace and repeat from what magpylib says, and a `repeat`
+            # given here is the caller's word, not magpylib's.
+            self.update(*objects, animation=animation, **kwargs, **traits)
         elif kwargs:
             # Nothing to draw them with, and dropped quietly they would look
             # like they had been ignored when the objects came.

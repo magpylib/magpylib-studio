@@ -182,6 +182,41 @@ def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch
     assert given == {}
 
 
+@needs_scene_graph
+def test_a_trait_given_to_the_constructor_outlives_the_scene(swept):
+    """Drawing a run sets its pace from magpylib; a `repeat` given is kept."""
+    view = widget.SceneWidget(*swept, animation=True, repeat=True, duration=2.5)
+    assert view.frames > 1
+    assert (view.repeat, view.duration) == (True, 2.5)
+
+
+@needs_scene_graph
+def test_the_capture_is_no_backend_to_choose(scene_objects):
+    """Studio's internal capture stays out of magpylib's registry, and what
+    magpylib warns about during one is said in the widget's name."""
+    from magpylib.graphics.backend import DisplayBackend
+
+    assert threejs._BACKEND not in DisplayBackend.backends
+    with pytest.warns(UserWarning) as caught:
+        widget.SceneWidget(*scene_objects, typo=1)
+    said = " ".join(str(w.message) for w in caught)
+    assert "typo" in said
+    assert "'widget'" in said or "widget backend" in said
+    assert threejs._BACKEND not in said
+    assert threejs._BACKEND not in DisplayBackend.backends
+
+
+@needs_scene_graph
+def test_a_missing_extra_is_named(scene_objects, monkeypatch):
+    """The name is advertised by installing the package; anywidget is not."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "anywidget", None)
+    monkeypatch.delitem(sys.modules, "magpylib_studio.widget")
+    with pytest.raises(ModuleNotFoundError, match=r"magpylib-studio\[widget\]"):
+        magpy.show(*scene_objects, backend="widget", return_fig=True)
+
+
 def test_options_for_magpylib_need_something_to_draw():
     """Dropped quietly, they would seem ignored once the objects came."""
     assert widget.SceneWidget(theme="dark").payload == {}
