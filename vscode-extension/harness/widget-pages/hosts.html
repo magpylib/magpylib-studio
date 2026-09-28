@@ -1,0 +1,115 @@
+<!doctype html>
+<!--
+  The widget in each notebook and docs theme it is meant to follow, dressed
+  the way that host dresses itself and flipped the way it flips: `?host=`
+  names one, and `window.flip(dark)` turns it. The widget is told nothing; it
+  has to notice.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <style id="host"></style>
+  </head>
+  <body>
+    <div id="frame"><div id="widget"></div></div>
+    <script type="module">
+      import { widget, localModel } from "./host.mjs";
+
+      const HOSTS = {
+        // As VS Code's webview host dresses the page: body transparent, the
+        // theme's colours as variables on the root, its kind on the body --
+        // and the Jupyter extension's output area forced white behind it.
+        vscode: {
+          css: `
+            body { margin: 0; padding: 12px; background-color: transparent;
+                   color: var(--vscode-editor-foreground); }
+            .cell-output-ipywidget-background { background: #fff !important; padding: 6px; }`,
+          wrap(el) {
+            const backdrop = document.createElement("div");
+            backdrop.className = "cell-output-ipywidget-background";
+            const output = document.createElement("div");
+            output.className = "cell-output";
+            el.replaceWith(backdrop);
+            backdrop.append(output);
+            output.append(el);
+            // Another output in the same white panel -- ipywidgets' sliders,
+            // drawn for white whatever VS Code's theme.
+            if (new URLSearchParams(location.search).has("shared")) {
+              const slider = document.createElement("div");
+              slider.textContent = "a slider, drawn for white";
+              output.prepend(slider);
+            }
+          },
+          flip(dark) {
+            const style = document.documentElement.style;
+            for (const [name, light, night] of [
+              ["--vscode-editor-background", "#ffffff", "#1f1f1f"],
+              ["--vscode-notebook-editorBackground", "#ffffff", "#1f1f1f"],
+              ["--vscode-editor-foreground", "#3b3b3b", "#cccccc"],
+            ]) {
+              style.setProperty(name, dark ? night : light);
+            }
+            const kind = dark ? "vscode-dark" : "vscode-light";
+            document.body.classList.remove("vscode-dark", "vscode-light");
+            document.body.classList.add(kind);
+            document.body.dataset.vscodeThemeKind = kind;
+          },
+        },
+        pydata: {
+          css: `
+            html[data-theme="light"] body { background: #ffffff; color: #222832; }
+            html[data-theme="dark"] body { background: #14181e; color: #ced6dd; }
+            body { margin: 0; padding: 12px; }`,
+          flip(dark) {
+            document.documentElement.dataset.theme = dark ? "dark" : "light";
+          },
+        },
+        furo: {
+          css: `
+            body { background: #ffffff; margin: 0; padding: 12px; }
+            body[data-theme="dark"] { background: #131416; color: #cfd0d0; }`,
+          flip(dark) {
+            document.body.dataset.theme = dark ? "dark" : "light";
+          },
+        },
+        jupyterbook: {
+          css: `
+            body { background: #ffffff; margin: 0; padding: 12px; }
+            html.dark body { background: #1c1917; color: #e7e5e4; }`,
+          flip(dark) {
+            document.documentElement.classList.toggle("dark", dark);
+          },
+        },
+        // Nothing to flip: the system's own setting, turned from outside.
+        sphinx: {
+          css: `
+            body { background: #ffffff; margin: 0; padding: 12px; }
+            @media (prefers-color-scheme: dark) {
+              body { background: #202020; color: #dddddd; }
+            }`,
+        },
+        jupyterlab: {
+          css: `
+            body { margin: 0; }
+            body[data-jp-theme-light="true"] #frame { background: #ffffff; padding: 12px; }
+            body[data-jp-theme-light="false"] #frame { background: #111111; color: #eeeeee; padding: 12px; }`,
+          flip(dark) {
+            document.body.dataset.jpThemeLight = String(!dark);
+          },
+        },
+      };
+
+      const host = HOSTS[new URLSearchParams(location.search).get("host")];
+      document.getElementById("host").textContent = host.css;
+      host.wrap?.(document.getElementById("widget"));
+      host.flip?.(false);
+      window.flip = host.flip;
+      widget.render({
+        model: localModel(),
+        el: document.getElementById("widget"),
+      });
+      window.ready = true;
+    </script>
+  </body>
+</html>

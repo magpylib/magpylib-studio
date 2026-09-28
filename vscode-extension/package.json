@@ -1666,6 +1666,7 @@
     "check:drag": "node harness/check-variable-drag.js",
     "check:messages": "node harness/check-messages.js",
     "check:widget": "node harness/check-widget.js",
+    "check:widget-browser": "node harness/check-widget-browser.mjs",
     "check:version": "node harness/check-version.js",
     "inspect": "node harness/webview-harness.js inspector",
     "test": "vscode-test",
