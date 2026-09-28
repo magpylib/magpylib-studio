@@ -970,6 +970,16 @@ function setCamera(state) {
   return state.projection;
 }
 
+/** The view as a PNG data URL, as it is on screen. Drawn again for it rather
+ *  than read off the canvas: WebGL lets go of what it drew once that is
+ *  shown, so what is on screen is no longer there to read. The view alone --
+ *  nothing a host floats over it, legend or controls, is in the picture. */
+function snapshot() {
+  if (!renderer) return null;
+  renderer.render(scene, camera);
+  return renderer.domElement.toDataURL("image/png");
+}
+
 /** Tell `listener` whenever the camera moves: a drag, a zoom, a key, a fit.
  *  One at a time -- the host this renderer is drawing for. */
 function watchCamera(listener) {
@@ -1361,6 +1371,7 @@ export const scene3d = {
   cameraState,
   setCamera,
   watchCamera,
+  snapshot,
   setPlaying,
   renderFrame,
   frameCount,

@@ -57,9 +57,9 @@ def _(mo):
 
         Put the pointer on the view and its tools show in the top-right
         corner: the legend, the axes, framing, the projection, the theme
-        (auto, light, dark), **export** — the view as a single HTML file that
-        works without this notebook, in which the run below still plays — and
-        full screen.
+        (auto, light, dark), a PNG picture, **export** — the view as a single
+        HTML file that works without this notebook, in which the run below
+        still plays — and full screen.
         """
     )
     return
