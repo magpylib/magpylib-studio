@@ -414,6 +414,11 @@ async function room(port, base, expected) {
       "width=220&height=110",
       null,
     ],
+    [
+      "a scene that grows from one object still gets its first look",
+      "width=1000&height=420&grow",
+      all,
+    ],
   ];
   for (const [label, query, want] of cases) {
     await check(label, async () => {
@@ -439,6 +444,86 @@ async function room(port, base, expected) {
   }
 }
 
+/** A page that refuses the renderer: said in the view, not an empty stage. */
+async function blocked(port, base) {
+  await check(
+    "a page that refuses the renderer says so in the view",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/blocked.html`);
+        const result = await tab.until("return window.result");
+        if (!result) return "never finished";
+        if (!result.said?.includes("could not load")) {
+          return `said ${JSON.stringify(result.said)}`;
+        }
+        return thrown(tab); // an unhandled rejection would show here
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** Page code: where the drawn things are, as one number -- which moves as a
+ *  run goes from step to step, whether the step was drawn afresh or posed. */
+const WHERE = `
+  let sum = 0;
+  for (const node of window.scene3d.byObjectId.values()) {
+    node.traverse((o) => {
+      if (!o.geometry) return;
+      const a = o.geometry.attributes.position.array;
+      let total = 0, n = 0;
+      for (let i = 0; i < a.length; i += 3) {
+        if (Number.isFinite(a[i])) { total += a[i]; n++; }
+      }
+      sum += (n ? total / n : 0) + o.position.x;
+    });
+  }
+  return Math.round(sum * 1e6) / 1e6;`;
+
+/** A redraw -- a theme that changed -- must not take a paused run back to
+ *  its first step while the counter still names the one it was on. */
+async function themeMidRun(port, base) {
+  await check("a theme switch keeps the step a run is on", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/run.html`);
+      const ready = await tab.until(
+        `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && ${VIEW}.querySelector("canvas")`,
+        20_000,
+      );
+      if (!ready) return "no transport";
+      const scrubTo = async (step) => {
+        await tab.evaluate(
+          `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+        );
+        await tab.until(
+          `return document.querySelector(".magpy-scene-counter").textContent.startsWith("${step + 1} /")`,
+          5000,
+        );
+        await wait(300);
+        return tab.evaluate(WHERE);
+      };
+      const first = await scrubTo(0);
+      const before = await scrubTo(10);
+      if (before === first) return "scrubbing did not move the scene";
+      await tab.evaluate(`${tool("Theme")}.click()`);
+      await wait(800);
+      const after = await tab.evaluate(WHERE);
+      const counter = await tab.evaluate(
+        `return document.querySelector(".magpy-scene-counter").textContent`,
+      );
+      if (!counter.startsWith("11 /")) return `the counter says ${counter}`;
+      if (after === first) return "the picture went back to the first step";
+      if (after !== before) return "the picture moved";
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -448,6 +533,17 @@ async function pool(port, base) {
     reused: [
       "a view taken off the page untorn leaves a renderer for the next",
       (r) => r.next,
+    ],
+    stale: [
+      "a view taken off the page does not steer the renderer it gave up",
+      (r) => r.visible,
+    ],
+    projection: [
+      "a renderer handed on starts the next view in perspective",
+      (r) =>
+        r.was === "parallel" &&
+        r.now === "perspective" &&
+        r.pressed === "false",
     ],
   };
   for (const [name, [label, holds]] of Object.entries(cases)) {
@@ -660,6 +756,8 @@ try {
   await lateCompany(browser.port, base);
   await pool(browser.port, base);
   await room(browser.port, base, expected);
+  await blocked(browser.port, base);
+  await themeMidRun(browser.port, base);
   await savedView(browser.port, base, out, expected);
 } finally {
   browser.proc.kill();

@@ -2,7 +2,7 @@
 <!--
   The legend's first look in views of different sizes. `?width=` and
   `?height=` size the view; `&detached` renders it before it is on the page,
-  as Jupyter does. `window.result` says which rows showed, and whether the
+  as Jupyter does, and `&grow` starts it with one object. `window.result` says which rows showed, and whether the
   legend was open at all.
 -->
 <html>
@@ -20,11 +20,19 @@
       el.style.width = `${params.get("width")}px`;
       const model = localModel();
       model.set("height", Number(params.get("height")));
+      // `&grow`: the first scene is one object, and the stack arrives later,
+      // as a slider growing a ring out of one magnet would bring it.
+      const whole = model.get("tree");
+      if (params.has("grow")) model.set("tree", [whole.at(-1)]);
       if (!params.has("detached")) document.getElementById("page").append(el);
       widget.render({ model, el });
       if (params.has("detached")) {
         await wait(300);
         document.getElementById("page").append(el);
+      }
+      if (params.has("grow")) {
+        await wait(1200);
+        model.set("tree", whole);
       }
       await wait(1200);
       const legend = el.querySelector(".magpy-scene-legend");
