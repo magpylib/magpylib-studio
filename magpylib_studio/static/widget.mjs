@@ -287,7 +287,9 @@ function render({ model, el }) {
       "playback, no notebook needed",
     () => {
       notify("Writing the file…");
-      model.send({ kind: "export" });
+      // The camera with it, so the file opens on what is on screen now
+      // rather than on what was last reported.
+      model.send({ kind: "export", camera: api?.cameraState() });
     },
   );
   exportButton.hidden = Boolean(model.get("standalone"));
@@ -540,6 +542,20 @@ function render({ model, el }) {
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // waits for a first size, when the view was laid out late
 
+  // Where the camera is, told to python once it stops moving, so that a
+  // `write_html` from a cell saves the view as it is seen. A message and not
+  // a trait: marimo re-runs every cell that reads a widget when one of its
+  // traits changes, and orbiting is not something to recompute a notebook for.
+  let cameraTimer = null;
+  function tellCamera() {
+    clearTimeout(cameraTimer);
+    cameraTimer = setTimeout(() => {
+      if (slot.host === view) {
+        model.send({ kind: "camera", camera: api.cameraState() });
+      }
+    }, 300);
+  }
+
   // --- playback ---------------------------------------------------------
   // Frames are asked for one at a time, as in the panel: the whole run is
   // every trace of every step, and one frame is all anyone is looking at.
@@ -752,13 +768,18 @@ function render({ model, el }) {
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
     api.setAxes(Boolean(model.get("axes")));
+    api.watchCamera(tellCamera);
     api.render(view, payload, { keepCamera: framed });
+    // A saved view opens where it was looking when it was saved. A live one
+    // has no camera to start from, and frames the scene.
+    const saved = framed ? null : model.get("camera");
+    if (saved) showProjection(api.setCamera(saved));
     framed = true;
     api.highlight(model.get("selected") || []);
     // The element may still have been unsized when the view framed itself --
     // a cell that is laid out after its output is made. One refit, once it
     // has a size, and only if the camera has not been touched since.
-    if (!view.clientHeight && !refit) {
+    if (!view.clientHeight && !refit && !saved) {
       refit = new ResizeObserver(() => {
         if (!view.clientHeight) return;
         refit.disconnect();
@@ -800,12 +821,16 @@ function render({ model, el }) {
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);
     clearTimeout(noticeTimer);
+    clearTimeout(cameraTimer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     // Only if it is still ours. A view whose element left the page has already
     // had its slot taken by the next cell that asked, and freeing it here --
     // late, on a teardown that comes after -- would hand that cell's renderer
     // to a third.
-    if (slot.host === view) slot.host = null; // back to the pool
+    if (slot.host === view) {
+      slot.host = null; // back to the pool
+      api?.watchCamera(null);
+    }
   };
 }
 

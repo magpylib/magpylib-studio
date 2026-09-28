@@ -407,6 +407,25 @@ def test_the_export_button_is_answered_with_the_file(scene_objects):
     assert sent[-1]["html"] == view.to_html()
 
 
+@needs_scene_graph
+def test_a_saved_view_opens_where_the_view_was_looking(scene_objects):
+    """As the view last said, and as the export button says it is now."""
+    view = widget.SceneWidget(*scene_objects)
+    saved = lambda: json.loads(_unpacked(view.to_html(), "magpy-scene"))  # noqa: E731
+    assert saved()["state"]["camera"] is None  # never drawn: the page frames it
+
+    orbited = {"projection": "perspective", "position": [4, -5, 3], "zoom": 1}
+    view._on_message(view, {"kind": "camera", "camera": orbited}, None)
+    assert saved()["state"]["camera"] == orbited
+
+    sent = []
+    view.send = lambda content, buffers=None: sent.append(content)
+    now = {**orbited, "projection": "parallel"}
+    view._on_message(view, {"kind": "export", "camera": now}, None)
+    exported = json.loads(_unpacked(sent[-1]["html"], "magpy-scene"))
+    assert exported["state"]["camera"] == now
+
+
 def test_a_theme_is_one_of_three():
     """Auto unless chosen, and nothing a view could not wear."""
     view = widget.SceneWidget()
