@@ -278,11 +278,15 @@ const thrown = (tab) =>
  *  instead of VS Code would show. Sharing VS Code's forced-white output
  *  panel with other outputs, the widget matches the panel, not the theme. */
 const HOSTS = [
-  ["vscode", "VS Code notebook", { system: "opposite" }],
   [
-    "vscode&shared",
+    "vscode&layout=alone",
+    "VS Code notebook",
+    { system: "opposite", backdrops: "painted" },
+  ],
+  [
+    "vscode&layout=shared",
     "VS Code notebook, sharing its output",
-    { alwaysLight: true, system: "opposite" },
+    { alwaysLight: true, system: "opposite", backdrops: "white" },
   ],
   ["pydata", "pydata-sphinx-theme"],
   ["furo", "furo"],
@@ -322,6 +326,10 @@ async function themes(port, base) {
           await wait(300);
           const wore = await tab.until(`return (${WEARS}) === "${want}"`, 3000);
           seen.push(wore ? want : `${await tab.evaluate(`return ${WEARS}`)}`);
+          if (how.backdrops) {
+            const wrong = await tab.evaluate(backdropsNot(how.backdrops));
+            if (wrong) return `${want}: ${wrong}`;
+          }
         }
         const expected = how.alwaysLight
           ? "light light light"
@@ -333,6 +341,58 @@ async function themes(port, base) {
       }
     });
   }
+}
+
+/** Page code: what is wrong with VS Code's white panels, if anything. Alone
+ *  on them, the view paints every one to match itself -- one left white is
+ *  a white rim round a dark view. Sharing them, it leaves them white for the
+ *  controls that were drawn for white. */
+const backdropsNot = (want) => `
+  const view = getComputedStyle(${VIEW}).backgroundColor;
+  const panels = [...document.querySelectorAll(".cell-output-ipywidget-background")];
+  const off = panels
+    .map((panel) => getComputedStyle(panel).backgroundColor)
+    .filter((colour) => colour !== (${JSON.stringify(want)} === "painted" ? view : "rgb(255, 255, 255)"));
+  return off.length ? "panels " + off.join(", ") + " where the view is " + view : null;`;
+
+/** Sliders that arrive in the view's box after it has drawn -- Jupyter
+ *  renders a box's children one by one -- make it company it could not have
+ *  seen: it has to notice, go back to white, and give the panels back. */
+async function lateCompany(port, base) {
+  await check("VS Code notebook, sliders arriving after the view", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-color-scheme", value: "light" }],
+      });
+      await tab.navigate(`${base}/pages/hosts.html?host=vscode&layout=late`);
+      if (
+        !(await tab.until(
+          `return window.ready && ${VIEW}?.querySelector("canvas")`,
+        ))
+      ) {
+        return "the widget never drew";
+      }
+      await tab.evaluate("window.flip(true)");
+      if (!(await tab.until(`return (${WEARS}) === "dark"`, 3000))) {
+        return "alone in a dark VS Code, it never went dark";
+      }
+      const painted = await tab.evaluate(backdropsNot("painted"));
+      if (painted) return `alone: ${painted}`;
+      await tab.evaluate("window.arrive()");
+      if (!(await tab.until(`return (${WEARS}) === "light"`, 3000))) {
+        return "with sliders beside it, it stayed dark";
+      }
+      const white = await tab.until(
+        `return !(${`(() => {${backdropsNot("white")}})()`})`,
+        3000,
+      );
+      if (!white) return `shared: ${await tab.evaluate(backdropsNot("white"))}`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 async function pool(port, base) {
@@ -553,6 +613,7 @@ const browser = await launch(chrome, profile).catch((error) =>
 );
 try {
   await themes(browser.port, base);
+  await lateCompany(browser.port, base);
   await pool(browser.port, base);
   await savedView(browser.port, base, out, expected);
 } finally {
