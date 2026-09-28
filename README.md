@@ -166,6 +166,7 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[dev]"
 npm install
 npm run compile     # tsc + eslint + webview, contribution and version checks
 npm test            # nineteen tests in a real Extension Development Host
+npm run check:widget-browser  # the notebook widget, driven in headless Chrome
 ```
 
 Then open **the repo root** in VS Code and press `F5` — not the

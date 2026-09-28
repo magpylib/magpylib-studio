@@ -1,9 +1,10 @@
 # Everything green on a machine that is not the one it was written on.
 #
-# Two jobs because they fail for different reasons: the engine against both
+# Three jobs because they fail for different reasons: the engine against both
 # magpylib versions (the README claims it works with either, and that claim
-# was only ever checked by hand), and the extension end to end in a real VS
-# Code — which needs the engine installed, since that is what it drives.
+# was only ever checked by hand), the extension end to end in a real VS
+# Code — which needs the engine installed, since that is what it drives — and
+# the notebook widget in a real browser, which is where it has broken before.
 name: CI
 
 on:
@@ -76,3 +77,26 @@ jobs:
       - name: Integration tests
         working-directory: vscode-extension
         run: xvfb-run -a npm test
+
+  widget:
+    name: widget in a browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # 22 for its WebSocket: the check talks to Chrome itself, and needs
+      # nothing from npm. Chrome is already on GitHub's Ubuntu runners.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -e ".[widget]"
+      # The widget draws through magpylib's display-backend API, which is
+      # not in a release yet.
+      - name: Use magpylib main, which the widget needs
+        run:
+          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+      - name: Drive the widget in headless Chrome
+        working-directory: vscode-extension
+        run: node harness/check-widget-browser.mjs

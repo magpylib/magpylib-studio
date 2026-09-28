@@ -1,0 +1,54 @@
+<!doctype html>
+<!--
+  How notebooks hand the widget its element, and what the renderer pool has
+  to survive. `?case=` names one; `window.result` is what happened.
+
+  detached: Jupyter renders a widget before attaching it. Two rendered
+    together must be two views -- once, they shared a renderer and the
+    first lost its canvas.
+  reused: marimo re-running a cell takes a drawn view off the page without
+    tearing it down. The next view must still get a renderer.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="page"></div>
+    <script type="module">
+      import { widget, localModel, wait } from "./host.mjs";
+
+      const page = document.getElementById("page");
+      const view = () => document.createElement("div");
+      const drawn = (el) => Boolean(el.querySelector("canvas"));
+
+      const CASES = {
+        async detached() {
+          const [a, b] = [view(), view()];
+          widget.render({ model: localModel(), el: a });
+          widget.render({ model: localModel(), el: b });
+          await wait(0);
+          page.append(a, b);
+          await wait(1500);
+          return { first: drawn(a), second: drawn(b) };
+        },
+        async reused() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          a.remove(); // and never torn down
+          const b = view();
+          page.append(b);
+          widget.render({ model: localModel(), el: b });
+          await wait(1500);
+          return { next: drawn(b) };
+        },
+      };
+
+      const name = new URLSearchParams(location.search).get("case");
+      window.result = await CASES[name]();
+    </script>
+  </body>
+</html>

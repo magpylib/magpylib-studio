@@ -400,6 +400,16 @@ class SceneWidget(anywidget.AnyWidget):
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
+        return _PAGE.substitute(
+            title=html.escape(title),
+            css=(STATIC / "widget.css").read_text(encoding="utf-8"),
+            bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
+            data=_packed(json.dumps(self._saved(), allow_nan=False)),
+        )
+
+    def _saved(self):
+        """What a saved page holds: the model's state as it is now, and the
+        run, every frame of it -- the page answers for them itself."""
         state = {
             "payload": self.payload,
             "tree": self.tree,
@@ -420,12 +430,7 @@ class SceneWidget(anywidget.AnyWidget):
             if self._scene is None
             else [threejs.frame_payload(self._scene, i) for i in range(self.frames)]
         )
-        return _PAGE.substitute(
-            title=html.escape(title),
-            css=(STATIC / "widget.css").read_text(encoding="utf-8"),
-            bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
-            data=_packed(json.dumps({"state": state, "run": run}, allow_nan=False)),
-        )
+        return {"state": state, "run": run}
 
     def write_html(self, file, title="magpylib scene"):
         """Write `to_html` to `file`: a path, or anything open for writing.
