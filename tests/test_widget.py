@@ -547,6 +547,22 @@ def test_only_what_changes_is_carried():
 
 
 @needs_scene_graph
+def test_a_moving_collection_does_not_stop_the_studio_drawing():
+    """magpylib's `Collection.centroid` raises when the members move along a
+    path; the studio's Edit view is still drawn, handles at its position."""
+    ring = magpy.Collection(
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+        ),
+        style_label="ring",
+    )
+    ring.rotate_from_angax(np.linspace(0, 90, 5), "z", anchor=0, start=0)
+    payload = threejs.scene_payload([ring], live={"ring": ring})
+    assert payload["meshes"]
+    assert payload["centroids"]["ring"] == payload["anchors"]["ring"]
+
+
+@needs_scene_graph
 def test_a_colour_table_is_carried_once():
     """Eight magnets coloured by their polarization share one colour table,
     named by index -- not copied into each, in each frame."""

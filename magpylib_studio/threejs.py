@@ -935,7 +935,15 @@ def scene_payload(objects, live=None, derived=None):
         # is: a Tetrahedron's position is the origin its vertices are written
         # against, and handles drawn there float off the corner of the shape.
         # The two agree for everything that is centred on its own position.
-        centroid = getattr(obj, "centroid", None)
+        try:
+            centroid = getattr(obj, "centroid", None)
+        except ValueError:
+            # magpylib cannot say, for a Collection whose members move along
+            # a path: it adds each member's centroid, one per step, into a
+            # single point, and raises. Its position is the next best place
+            # for the handles -- and failing here left the whole scene, and
+            # the studio's Edit view with it, undrawn.
+            centroid = None
         centroids[key] = (
             anchors[key]
             if centroid is None
