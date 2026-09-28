@@ -16,7 +16,7 @@
       import { widget, wait } from "./host.mjs";
 
       const [morph, run] = await Promise.all(
-        ["morph", "run"].map(async (name) =>
+        ["served", "run"].map(async (name) =>
           (await fetch(`/out/${name}.json`)).json(),
         ),
       );

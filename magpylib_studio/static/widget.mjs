@@ -255,6 +255,11 @@ function iconButton(icon, text, onClick) {
 /** What the picture button saves the view as, before the browser asks. */
 const PICTURE_NAME = "magpylib-scene.png";
 
+/** What a view says when python does not send the step it asked for. */
+const NO_ANSWER =
+  "No answer from Python for this step: the kernel may be busy or not " +
+  "running. Run the cell again to play this run.";
+
 /** The theme button's round: each choice, what it is called, and the next. */
 const THEMES = {
   auto: { says: "Theme: as the notebook is", next: "light" },
@@ -692,6 +697,7 @@ function render({ model, el }) {
   let wanted = null; // the frame last asked for, which may not be the one shown
   let shown = 0;
   let runId = 0; // which scene a frame was asked for; the model's, per payload
+  let silence = null; // how long a frame has gone unanswered
   let startedAt = 0;
   let early = null; // a frame to be asked for when the clock reaches it
 
@@ -750,6 +756,25 @@ function render({ model, el }) {
     }
     inFlight = true;
     model.send({ kind: "frame", index: wanted, runId });
+    clearTimeout(silence);
+    silence = setTimeout(unanswered, 4000);
+  }
+
+  /** A frame asked for and not answered. Said, rather than leaving a slider
+   *  that moves over a picture that does not: most often a notebook read
+   *  without its kernel, where nothing will ever answer. A kernel that is
+   *  only busy answers late, and the answer is still taken. */
+  function unanswered() {
+    if (!inFlight) return;
+    setPlaying(false);
+    scrub.value = String(shown); // the step on screen, not the one asked for
+    notify(NO_ANSWER, { stay: true });
+  }
+
+  /** Put away what `unanswered` said, once there is an answer after all. */
+  function answered() {
+    clearTimeout(silence);
+    if (notice.textContent === NO_ANSWER) notice.classList.remove("shown");
   }
 
   /** The picture is at step `index`: say so, and go on to the next. */
@@ -822,6 +847,7 @@ function render({ model, el }) {
     // re-pointed: drawn, it would put the old scene over the new.
     if (message.runId !== runId) return;
     inFlight = false;
+    answered();
     if (slot.host !== view) return; // this view has gone; its renderer is elsewhere
     api.renderFrame(message);
     scrub.max = String(message.frames - 1);
@@ -886,6 +912,7 @@ function render({ model, el }) {
       if (playing) setPlaying(false);
       runId += 1; // what is still on its way belongs to the last one
       inFlight = false;
+      answered(); // nothing is owed any more
       wanted = null;
       shown = 0;
     }
@@ -1008,6 +1035,7 @@ function render({ model, el }) {
     themeWatch.disconnect();
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);
+    clearTimeout(silence);
     clearTimeout(noticeTimer);
     clearTimeout(cameraTimer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);

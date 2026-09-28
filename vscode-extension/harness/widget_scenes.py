@@ -10,11 +10,15 @@ Writes into OUT:
 * ``run.html`` -- a sensor on a path past a turning magnet: a run that only
   moves, which the page plays from poses, over and over;
 * ``morph.html`` -- a magnet that grows along its path: a run no motion can
-  play, saved with every frame for the page to answer from;
+  play, which carries its changes and plays them;
+* ``mix.html`` -- magnets turning past a probe coloured by the field: posed
+  magnets, and only the probe carried as it changes;
 * ``ramp.html`` -- a coil whose current ramps: a run in which nothing drawn
   moves, which plays all the same;
-* ``run.json``, ``morph.json`` -- those two runs as a model holds them, for
-  a page that plays the notebook itself;
+* ``served.html`` -- the growing magnet again, with nothing carried: served a
+  frame at a time, as a run past the carry limit is;
+* ``run.json``, ``served.json`` -- a run that moves and a served one as a
+  model holds them, for pages that play the notebook themselves;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -26,6 +30,7 @@ import sys
 import magpylib as magpy
 import numpy as np
 
+from magpylib_studio import threejs
 from magpylib_studio.widget import SceneWidget
 
 #: A parallel view from the front and a little above -- nothing the page
@@ -87,10 +92,41 @@ def main(out):
         style_label="grow",
     )
     morph = SceneWidget(grow, animation=True)
-    if morph.payload.get("tracks"):
-        raise SystemExit("morph.html: a growing magnet is not motion")
+    if not morph.payload.get("changes"):
+        raise SystemExit("morph.html: a growing magnet carries its changes")
     morph.write_html(out / "morph.html")
-    (out / "morph.json").write_text(json.dumps(morph._saved()))
+
+    # the same run with nothing carried, as one past the limit is served
+    limit, threejs._CARRY_LIMIT = threejs._CARRY_LIMIT, 0
+    try:
+        served = SceneWidget(grow, animation=True)
+    finally:
+        threejs._CARRY_LIMIT = limit
+    if served._scene is None:
+        raise SystemExit("served.html: nothing carried, so frames are served")
+    served.write_html(out / "served.html")
+    (out / "served.json").write_text(json.dumps(served._saved()))
+
+    turning = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+            ).rotate_from_angax(angle, "z", anchor=0)
+            for angle in range(0, 360, 30)
+        ],
+        style_label="ring",
+    )
+    turning.rotate_from_angax(np.linspace(0, 180, 30), "z", anchor=0, start=0)
+    passing = magpy.Sensor(
+        pixel=np.linspace((-1, 0, 0), (1, 0, 0), 5),
+        position=np.linspace((-3, 0, 1), (3, 0, 1), 30),
+        style_label="probe",
+    )
+    passing.style.pixel.field.source = "B"
+    mix = SceneWidget(turning, passing, animation=True)
+    if not (mix.payload.get("tracks") and mix.payload.get("changes")):
+        raise SystemExit("mix.html: posed magnets and a carried probe")
+    mix.write_html(out / "mix.html")
 
     coil = magpy.current.Circle(
         current=np.linspace(1, 100, 30), diameter=3, style_label="coil"

@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  A notebook read without its kernel: a run served a frame at a time, and
+  nothing to serve it. Asked to play, the view must say that nothing is
+  answering -- not leave a slider moving over a picture that does not.
+  `window.result` is what it said, and where its controls ended up.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="widget"></div>
+    <script type="module">
+      import { widget, wait } from "./host.mjs";
+
+      const served = await (await fetch("/out/served.json")).json();
+      const values = structuredClone(served.state);
+      const listeners = {};
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          (listeners[`change:${key}`] || []).forEach((f) => f(value));
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send() {}, // no kernel: nothing ever answers
+      };
+      const el = document.getElementById("widget");
+      widget.render({ model, el });
+      await wait(1500);
+      const play = [...el.querySelectorAll(".magpy-icon")].find((b) =>
+        b.title.startsWith("Play the path"),
+      );
+      play.click();
+      await wait(5000); // longer than the view waits for an answer
+      const notice = el.querySelector(".magpy-scene-notice");
+      window.result = {
+        said: notice.classList.contains("shown") ? notice.textContent : null,
+        playing: play.title.startsWith("Pause"),
+        step: el.querySelector(".magpy-scene-scrub").value,
+      };
+    </script>
+  </body>
+</html>
