@@ -427,7 +427,8 @@ function render({ model, el }) {
     onFrame: (ids) => api?.fitView(ids),
     onHint: (ids) => api?.hint(ids),
   });
-  let legendOpen = null; // undecided until there is a tree to decide by
+  let legendOpen = null; // undecided until there is a tree, and room, to decide by
+  let legendRoom = null; // waits for the view to have a size to decide in
 
   function commit(name, value) {
     model.set(name, value);
@@ -445,11 +446,56 @@ function render({ model, el }) {
       legendEl.hidden = true;
       return;
     }
-    // Open when it has something to say: one object needs no list. After the
-    // first time, it is the user's to open and close.
-    showLegend(legendOpen ?? rows > 1);
     legend.update({ tree, payload });
     legend.sync(stateOf());
+    // After the first time, it is the user's to open and close; and one
+    // object needs no list.
+    if (legendOpen !== null) showLegend(legendOpen);
+    else if (rows === 1) showLegend(false);
+    else settleLegend();
+  }
+
+  /** The legend's first look, in the room the view has: open in full if
+   *  that leaves the scene room, else with nested collections folded, else
+   *  with every collection folded -- and closed, its button there to open
+   *  it, in a view too small even for that. Room means scrolling nothing and
+   *  covering at most an eighth of the view: open in full in a narrow cell,
+   *  a stack of rings hid a third of the scene.
+   *
+   *  Decided once; after that, open or closed is the user's, and so is what
+   *  is folded. A view not yet on the page -- Jupyter renders before it
+   *  attaches -- has no size to measure, and the legend waits for one. */
+  function settleLegend() {
+    const room = stage.getBoundingClientRect();
+    if (!room.width || !room.height) {
+      legendEl.hidden = true;
+      if (!legendRoom) {
+        legendRoom = new ResizeObserver(() => {
+          if (!stage.clientWidth || !stage.clientHeight) return;
+          legendRoom.disconnect();
+          legendRoom = null;
+          if (legendOpen === null) settleLegend();
+        });
+        legendRoom.observe(stage);
+      }
+      return;
+    }
+    legendEl.hidden = false; // to be measured
+    const fits = () => {
+      const box = legendEl.getBoundingClientRect();
+      const scrolls = legendEl.scrollHeight > legendEl.clientHeight + 1;
+      return (
+        !scrolls && box.width * box.height <= (room.width * room.height) / 8
+      );
+    };
+    for (const depth of [null, 1, 0]) {
+      if (depth !== null) legend.foldFrom(depth);
+      if (fits()) {
+        showLegend(true);
+        return;
+      }
+    }
+    showLegend(false);
   }
 
   // --- theme ------------------------------------------------------------
@@ -899,6 +945,7 @@ function render({ model, el }) {
   return () => {
     unwearBackdrop();
     backdropWatch.disconnect();
+    legendRoom?.disconnect();
     themeWatch.disconnect();
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);

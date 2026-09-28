@@ -208,7 +208,8 @@
   position: absolute;
   top: 8px;
   left: 8px;
-  max-width: min(46%, 22em);
+  /* A third at most, so a narrow view keeps most of its scene. */
+  max-width: min(33%, 22em);
   max-height: calc(100% - 16px);
   overflow: auto;
   box-sizing: border-box;
