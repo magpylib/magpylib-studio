@@ -30,6 +30,7 @@ import warnings
 
 import magpylib as magpy
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 try:
     from magpylib.graphics.backend import DisplayBackend
@@ -191,6 +192,11 @@ def _colorscale_lut(colorscale):
     return np.round(lut * 255).astype(int).ravel().tolist()
 
 
+def _points(trace):
+    """A trace's vertices as rows of x, y, z -- NaN where a line lifts its pen."""
+    return np.stack([np.asarray(trace[a], dtype=float) for a in "xyz"], axis=1)
+
+
 def _mesh_payload(trace):
     """One `mesh3d` trace as buffers.
 
@@ -205,7 +211,7 @@ def _mesh_payload(trace):
       ``color = None``**, so reading only ``color`` draws it as a uniform blob
       without erroring. Rendering it means giving up the index buffer.
     """
-    position = np.stack([np.asarray(trace[a], dtype=float) for a in "xyz"], axis=1)
+    position = _points(trace)
     index = np.stack([np.asarray(trace[a], dtype=int) for a in ("i", "j", "k")], axis=1)
     intensity = trace.get("intensity")
     colorscale = trace.get("colorscale")
@@ -260,7 +266,7 @@ def _scatter_payload(trace):
     ``mode`` is a combination rather than an enum -- "markers+text+lines"
     occurs -- so it is split into tokens.
     """
-    position = np.stack([np.asarray(trace[a], dtype=float) for a in "xyz"], axis=1)
+    position = _points(trace)
     modes = set(str(trace.get("mode") or "lines").split("+"))
     return {
         "kind": "scatter",
@@ -451,14 +457,22 @@ def _clamp(scene, index):
     return max(0, min(int(index), len(scene.frames) - 1))
 
 
-#: The trace types a view draws -- what `_keyed` converts, in its order.
-_DRAWN = ("mesh3d", "scatter3d")
+#: What a view draws, and what converts each kind -- in the order `_keyed`
+#: lists them, meshes then scatters.
+_CONVERT = {"mesh3d": _mesh_payload, "scatter3d": _scatter_payload}
+_DRAWN = tuple(_CONVERT)
 
-#: How far a vertex may sit from where a rigid motion puts it, as a fraction
-#: of the scene's size, and still be that motion. Frames are computed afresh
-#: from rotated vertices, so they agree with a motion to rounding -- 1e-15,
-#: measured -- and anything that changes shape misses by a visible amount.
+#: How far a vertex may sit from where a rigid motion puts it, and still be
+#: that motion: a fraction of its own trace's size -- not the scene's, or a
+#: millimetre magnet a kilometre out would be allowed to change by its own
+#: size -- plus, for where it is, what rounding at that distance can do.
+#: Frames are computed afresh from rotated vertices, so they agree with a
+#: motion to rounding; anything that changes shape misses by a visible amount.
 _RIGID_TOLERANCE = 1e-6
+_ROUNDING = 1e-11
+
+#: The keys a trace moves by; everything else about it has to hold still.
+_WHERE = frozenset("xyz")
 
 
 def played_payload(scene):
@@ -477,7 +491,9 @@ def played_payload(scene):
     its first-frame self. A shape that changes along its path -- a dimension
     that sweeps -- fails the fit, and so does a trace whose colours change;
     either way the run is not motion, and this answers None. The view then
-    asks for frames, as before.
+    asks for frames, as before. A run in which nothing drawn moves at all --
+    a current that ramps -- is motion too, of nothing: ``tracks`` is empty,
+    and the view steps through it without asking for anything.
 
     Adds, to what `view_payload(scene, 0)` holds: ``tracks``, each a pose per
     frame as ``[x, y, z, qx, qy, qz, qw]`` -- the move from the first frame,
@@ -488,17 +504,14 @@ def played_payload(scene):
     if motion is None:
         return None
     tracks, track_of = motion
-    payload = view_payload(scene, index=0)
-    # Meshes then scatters, each in the order the frame holds them: the
-    # order `_keyed` converts them in, and the order `track_of` follows.
-    items = {"mesh3d": iter(payload["meshes"]), "scatter3d": iter(payload["scatters"])}
-    kinds = [t["type"] for t in scene.frames[0].traces if t["type"] in _DRAWN]
-    for kind, track in zip(kinds, track_of, strict=True):
-        item = next(items[kind])
-        if track is not None:
-            item["track"] = track
-    payload["tracks"] = tracks
-    return payload
+    drawn = [t for t in scene.frames[0].traces if t["type"] in _DRAWN]
+    # Tagged before they are converted, so each item carries its own track
+    # whatever order the conversion lists them in.
+    tagged = [
+        trace if track is None else {**trace, "track": track}
+        for trace, track in zip(drawn, track_of, strict=True)
+    ]
+    return {**view_payload(scene, traces=tagged), "tracks": tracks}
 
 
 def rigid_motion(scene):
@@ -509,6 +522,11 @@ def rigid_motion(scene):
     motion -- None for one that stays put. None altogether when any trace
     does something a motion cannot: changes shape, colour or anything else,
     or is not there in every frame.
+
+    Everything but the vertices is compared first, for every trace: that is
+    cheaper than fitting, and it is where a run that is not motion -- pixels
+    that change colour -- is usually found out. Each trace is then fitted in
+    one go, every frame at once.
     """
     frames = [[t for t in f.traces if t["type"] in _DRAWN] for f in scene.frames]
     first = frames[0]
@@ -516,126 +534,106 @@ def rigid_motion(scene):
     for traces in frames[1:]:
         if [(t["type"], t.get("object_id"), len(t["x"])) for t in traces] != layout:
             return None
-    points = [_points(t) for t in first]
-    finite = [p[np.isfinite(p).all(axis=1)] for p in points]
+    runs = [[traces[n] for traces in frames] for n in range(len(first))]
+    if not all(_unchanged(run) for run in runs):
+        return None
+    stacks = [np.stack([_points(trace) for trace in run]) for run in runs]
+    finite = [s[0][np.isfinite(s[0]).all(axis=1)] for s in stacks]
     size = max((float(np.abs(p).max()) for p in finite if len(p)), default=0.0)
-    size = size or 1.0
-    tolerance = _RIGID_TOLERANCE * size
     # Poses to a billionth of the scene, whatever its unit: far below what
     # can be seen, and exact enough that traces moving together agree on
     # their motion and share one track.
-    places = max(0, 9 - math.floor(math.log10(size)))
+    places = max(0, 9 - math.floor(math.log10(size or 1.0)))
 
     tracks, seen, track_of = [], {}, []
-    for n, trace in enumerate(first):
-        poses = []
-        for traces in frames:
-            if not _alike(trace, traces[n]):
-                return None
-            pose = _fit(points[n], _points(traces[n]), tolerance)
-            if pose is None:
-                return None
-            poses.append(pose)
-        if all(_still(pose, tolerance) for pose in poses):
+    for stack in stacks:
+        fitted = _fits(stack)
+        if fitted is None:
+            return None
+        turn, shift, tolerance = fitted
+        if np.abs(turn - np.eye(3)).max() <= 1e-9 and np.abs(shift).max() <= tolerance:
             track_of.append(None)
             continue
-        track = [_pose_list(pose, places) for pose in poses]
-        key = str(track)
+        # position, then quaternion x, y, z, w, as three.js composes one;
+        # adding zero turns -0.0 into 0.0, which would keep two traces that
+        # move as one from sharing a track
+        track = (
+            np.hstack(
+                [
+                    np.round(shift, places),
+                    np.round(Rotation.from_matrix(turn).as_quat(), 9),
+                ]
+            )
+            + 0.0
+        )
+        key = track.tobytes()
         if key not in seen:
             seen[key] = len(tracks)
-            tracks.append(track)
+            tracks.append(track.tolist())
         track_of.append(seen[key])
     return tracks, track_of
 
 
-def _points(trace):
-    return np.stack([np.asarray(trace[a], dtype=float) for a in "xyz"], axis=1)
-
-
-def _alike(a, b):
-    """Whether two traces differ in nothing but where their vertices are."""
-    if a.keys() != b.keys():
+def _unchanged(run):
+    """Whether a trace, through the run, changes nothing but where its
+    vertices are. Values are nearly always the very objects or exactly equal;
+    a float array that is neither is allowed rounding."""
+    first = run[0]
+    if any(trace.keys() != first.keys() for trace in run):
         return False
-    for key in a:
-        if key in ("x", "y", "z"):
+    for key, value in first.items():
+        if key in _WHERE:
             continue
-        x, y = a[key], b[key]
-        if isinstance(x, np.ndarray | list | tuple) or isinstance(
-            y, np.ndarray | list | tuple
+        values = [trace[key] for trace in run]
+        if all(v is value for v in values):
+            continue
+        arrays = [isinstance(v, np.ndarray) for v in values]
+        if not any(arrays):
+            if any(v != value for v in values):
+                return False
+            continue
+        if not all(arrays) or any(v.shape != value.shape for v in values):
+            return False
+        stacked = np.stack(values)
+        if np.array_equal(stacked, np.broadcast_to(value, stacked.shape)):
+            continue
+        if value.dtype.kind != "f" or not np.allclose(
+            stacked, value, rtol=0, atol=1e-9, equal_nan=True
         ):
-            x, y = np.asarray(x), np.asarray(y)
-            if x.shape != y.shape:
-                return False
-            if x.dtype.kind == "f" and y.dtype.kind == "f":
-                if not np.allclose(x, y, rtol=0, atol=1e-9, equal_nan=True):
-                    return False
-            elif not np.array_equal(x, y):
-                return False
-        elif x != y:
             return False
     return True
 
 
-def _fit(a, b, tolerance):
-    """The rigid motion taking points `a` to `b` -- Kabsch -- or None if no
-    rotation and shift puts every one of them within `tolerance`.
+def _fits(stack):
+    """The rigid motions taking a trace's first frame to each of its frames
+    -- `stack` is frames by vertices by xyz -- or None if, in any frame, no
+    rotation and shift puts every vertex where it is. Kabsch, every frame at
+    once. Returns the turns, the shifts, and the tolerance they met.
 
     NaN separates the segments of a line, and has to separate the same ones
-    in both. Fewer than three points in a line leave a turn about that line
-    free; any of them fits, and any is right for what is drawn.
+    in every frame. Fewer than three points in a line leave a turn about that
+    line free; any of them fits, and any is right for what is drawn.
     """
-    gaps = ~np.isfinite(a).all(axis=1)
-    if not np.array_equal(gaps, ~np.isfinite(b).all(axis=1)):
+    count = len(stack)
+    gaps = ~np.isfinite(stack[0]).all(axis=1)
+    if (~np.isfinite(stack).all(axis=2) != gaps).any():
         return None
-    a, b = a[~gaps], b[~gaps]
+    a, b = stack[0][~gaps], stack[:, ~gaps]
     if not len(a):
-        return np.eye(3), np.zeros(3)
-    ca, cb = a.mean(axis=0), b.mean(axis=0)
-    u, _, vt = np.linalg.svd((a - ca).T @ (b - cb))
-    flip = np.sign(np.linalg.det(vt.T @ u.T)) or 1.0
-    turn = vt.T @ np.diag([1.0, 1.0, flip]) @ u.T
+        return np.broadcast_to(np.eye(3), (count, 3, 3)), np.zeros((count, 3)), 0.0
+    tolerance = _RIGID_TOLERANCE * float(np.ptp(a, axis=0).max()) + _ROUNDING * float(
+        np.abs(a).max()
+    )
+    ca, cb = a.mean(axis=0), b.mean(axis=1)
+    u, _, vt = np.linalg.svd((a - ca).T @ (b - cb[:, None]))  # (frames, 3, 3)
+    v, ut = np.swapaxes(vt, 1, 2), np.swapaxes(u, 1, 2)
+    flip = np.where(np.linalg.det(v @ ut) < 0, -1.0, 1.0)
+    turn = (v * np.stack([np.ones(count), np.ones(count), flip], axis=1)[:, None]) @ ut
     shift = cb - turn @ ca
-    if np.abs(a @ turn.T + shift - b).max() > tolerance:
+    moved = a @ np.swapaxes(turn, 1, 2) + shift[:, None]
+    if np.abs(moved - b).max() > tolerance:
         return None
-    return turn, shift
-
-
-def _still(pose, tolerance):
-    turn, shift = pose
-    return np.allclose(turn, np.eye(3), atol=1e-9) and np.abs(shift).max() <= tolerance
-
-
-def _pose_list(pose, places):
-    """A pose as three.js composes one: position, then quaternion x, y, z, w.
-    The position to `places` decimals, the quaternion -- unit length -- to
-    nine. Adding zero turns -0.0 into 0.0, which would otherwise keep two
-    traces that move as one from sharing a track."""
-    turn, shift = pose
-    return [round(float(v), places) + 0.0 for v in shift] + [
-        round(float(v), 9) + 0.0 for v in _quaternion(turn)
-    ]
-
-
-def _quaternion(turn):
-    """A rotation matrix as a unit quaternion ``(x, y, z, w)``."""
-    trace = np.trace(turn)
-    if trace > 0:
-        s = 2.0 * math.sqrt(trace + 1.0)
-        w = 0.25 * s
-        x = (turn[2, 1] - turn[1, 2]) / s
-        y = (turn[0, 2] - turn[2, 0]) / s
-        z = (turn[1, 0] - turn[0, 1]) / s
-    else:
-        i = int(np.argmax(np.diag(turn)))
-        j, k = (i + 1) % 3, (i + 2) % 3
-        s = 2.0 * math.sqrt(1.0 + turn[i, i] - turn[j, j] - turn[k, k])
-        q = [0.0, 0.0, 0.0]
-        q[i] = 0.25 * s
-        q[j] = (turn[j, i] + turn[i, j]) / s
-        q[k] = (turn[k, i] + turn[i, k]) / s
-        w = (turn[k, j] - turn[j, k]) / s
-        x, y, z = q
-    return x, y, z, w
+    return turn, shift, tolerance
 
 
 def _by_kind(payload):
@@ -655,8 +653,12 @@ def _keyed(traces, live=None, derived=None):
     enough to hang one object's traces on one node, and no more. See
     `view_payload`.
     """
-    payload = [_mesh_payload(t) for t in traces if t["type"] == "mesh3d"]
-    payload += [_scatter_payload(t) for t in traces if t["type"] == "scatter3d"]
+    payload = [
+        _CONVERT[kind](t) | ({"track": t["track"]} if "track" in t else {})
+        for kind in _DRAWN
+        for t in traces
+        if t["type"] == kind
+    ]
     if live is None:
         for item in payload:
             item["object_id"] = str(item["object_id"])
@@ -678,7 +680,7 @@ def _keyed(traces, live=None, derived=None):
     return payload
 
 
-def view_payload(scene, index=None):
+def view_payload(scene, index=None, traces=None):
     """Everything a three.js view needs for a scene nobody is editing.
 
     `scene_payload` below is for the studio, where the engine owns the objects:
@@ -700,12 +702,16 @@ def view_payload(scene, index=None):
     `index` picks one frame of an animated scene. Without it every frame is
     drawn at once, which is right for the static case -- one frame -- and a
     smear of two hundred poses for a run. `frame_payload` carries the others,
-    once the view asks for them.
+    once the view asks for them. `traces`, when given, are drawn instead of
+    any frame's: the first frame's, tagged with their tracks, for
+    `played_payload`.
     """
     panel = scene.panel(1, 1)
-    frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
+    if traces is None:
+        frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
+        traces = [t for frame in frames for t in frame.traces]
     return {
-        **_by_kind(_keyed([t for frame in frames for t in frame.traces])),
+        **_by_kind(_keyed(traces)),
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no

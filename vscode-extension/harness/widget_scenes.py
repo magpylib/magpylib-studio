@@ -8,9 +8,13 @@ Writes into OUT:
   pages that play the notebook themselves;
 * ``still.html`` -- that scene saved, looking from `CAMERA`;
 * ``run.html`` -- a sensor on a path past a turning magnet: a run that only
-  moves, which the page plays from poses;
+  moves, which the page plays from poses, over and over;
 * ``morph.html`` -- a magnet that grows along its path: a run no motion can
   play, saved with every frame for the page to answer from;
+* ``ramp.html`` -- a coil whose current ramps: a run in which nothing drawn
+  moves, which plays all the same;
+* ``run.json``, ``morph.json`` -- those two runs as a model holds them, for
+  a page that plays the notebook itself;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -71,10 +75,11 @@ def main(out):
     sweep = magpy.Sensor(
         position=np.linspace((-6, 0, 1.5), (6, 0, 1.5), 30), style_label="sweep"
     )
-    run = SceneWidget(rotor, sweep, animation=True)
+    run = SceneWidget(rotor, sweep, animation=True, repeat=True)
     if not run.payload.get("tracks"):
         raise SystemExit("run.html: the sweep should play as motion")
     run.write_html(out / "run.html")
+    (out / "run.json").write_text(json.dumps(run._saved()))
 
     grow = magpy.magnet.Cuboid(
         polarization=(0, 0, 1),
@@ -85,6 +90,15 @@ def main(out):
     if morph.payload.get("tracks"):
         raise SystemExit("morph.html: a growing magnet is not motion")
     morph.write_html(out / "morph.html")
+    (out / "morph.json").write_text(json.dumps(morph._saved()))
+
+    coil = magpy.current.Circle(
+        current=np.linspace(1, 100, 30), diameter=3, style_label="coil"
+    )
+    ramp = SceneWidget(coil, animation=True)
+    if ramp.payload.get("tracks") != []:
+        raise SystemExit("ramp.html: nothing drawn moves, so no tracks")
+    ramp.write_html(out / "ramp.html")
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows}

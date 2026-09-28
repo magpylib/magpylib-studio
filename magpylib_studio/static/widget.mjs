@@ -691,6 +691,7 @@ function render({ model, el }) {
   let inFlight = false;
   let wanted = null; // the frame last asked for, which may not be the one shown
   let shown = 0;
+  let runId = 0; // which scene a frame was asked for; the model's, per payload
   let startedAt = 0;
   let early = null; // a frame to be asked for when the clock reaches it
 
@@ -748,7 +749,7 @@ function render({ model, el }) {
       return;
     }
     inFlight = true;
-    model.send({ kind: "frame", index: wanted });
+    model.send({ kind: "frame", index: wanted, runId });
   }
 
   /** The picture is at step `index`: say so, and go on to the next. */
@@ -797,11 +798,13 @@ function render({ model, el }) {
     // Ahead of the clock -- frames coming back faster than the run moves,
     // from a quick kernel or from a saved page that answers at once -- waits
     // for it. Asking straight away played a five-second run in however long
-    // the round trips took.
+    // the round trips took. And never asked for in the same breath, even
+    // behind the clock: a posed step answers at once, so a run whose steps
+    // take longer to pose than they last would otherwise never give the
+    // page a moment to paint -- and, repeating, never stop.
     const wait =
       startedAt + (next / frames()) * duration() * 1000 - performance.now();
-    if (wait > 0) early = setTimeout(() => askFor(next), wait);
-    else askFor(next);
+    early = setTimeout(() => askFor(next), Math.max(0, wait));
   }
 
   scrub.addEventListener("input", () => {
@@ -815,6 +818,9 @@ function render({ model, el }) {
       return;
     }
     if (message.kind !== "frame" || !api) return;
+    // A frame of the run before this one, answered after the view was
+    // re-pointed: drawn, it would put the old scene over the new.
+    if (message.runId !== runId) return;
     inFlight = false;
     if (slot.host !== view) return; // this view has gone; its renderer is elsewhere
     api.renderFrame(message);
@@ -878,6 +884,7 @@ function render({ model, el }) {
       // when the new scene has no frames to serve, would leave `inFlight`
       // latched and playback dead for the life of the widget.
       if (playing) setPlaying(false);
+      runId += 1; // what is still on its way belongs to the last one
       inFlight = false;
       wanted = null;
       shown = 0;

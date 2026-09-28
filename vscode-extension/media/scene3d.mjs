@@ -65,8 +65,9 @@ let anchors = {}; // studio id -> where the object is
 let paths = {}; // studio id -> every frame it passes through, when it has one
 // A run that is its first frame moved about: each motion, a pose per step,
 // and each trace that moves with the matrix it was hung with -- which is
-// where it stands at the first step.
-let tracks = [];
+// where it stands at the first step. Null when the run is not motion --
+// frames are asked for instead -- and empty when it is motion of nothing.
+let tracks = null;
 let tracked = [];
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
@@ -1157,7 +1158,10 @@ function frameCount() {
  */
 function renderFrame(payload) {
   discard(new Set());
-  tracked = []; // built again below, at this frame's pose
+  // Frames and poses are two ways of playing a run, never both: a frame is
+  // drawn afresh, so there is nothing of the first frame's left to move.
+  tracks = null;
+  tracked = [];
   for (const item of payload.meshes.concat(payload.scatters)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
@@ -1187,13 +1191,15 @@ function poseFrame(index) {
     built.matrix.copy(rest).multiply(pose);
     built.matrix.decompose(built.position, built.quaternion, built.scale);
   }
+  // Round what moved, not built again: this runs at every step of a run.
   for (const box of outlines) box.update();
-  drawHints();
+  for (const box of hints) box.update();
 }
 
 /** Whether the run can be played here, by `poseFrame`, with nothing to ask
- *  for. */
-const posed = () => tracks.length > 0;
+ *  for -- including a run in which nothing drawn moves, whose steps change
+ *  nothing on screen. */
+const posed = () => tracks !== null;
 
 /** Handles have no place on something moving of its own accord: a drag would
  *  fight the playback for the same object. */
@@ -1356,7 +1362,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   patterned = new Set(payload.patterned || []);
 
   discard(held);
-  tracks = payload.tracks || [];
+  tracks = payload.tracks ?? null;
   tracked = [];
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.

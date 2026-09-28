@@ -497,6 +497,46 @@ def test_a_run_whose_colours_change_is_not_played_as_motion():
 
 
 @needs_scene_graph
+def test_a_run_in_which_nothing_moves_is_motion_of_nothing():
+    """A current that ramps changes nothing drawn: no tracks, nothing kept to
+    serve -- and the view steps through it with nothing to ask for."""
+    coil = magpy.current.Circle(current=np.linspace(1, 2, 5), diameter=2)
+    view = widget.SceneWidget(coil, animation=True)
+    assert view.frames == 5
+    assert view.payload["tracks"] == []
+    assert view._scene is None
+
+
+@needs_scene_graph
+def test_a_small_change_far_from_the_origin_is_not_motion():
+    """The fit is held to each trace's own size, not to how far out it is: a
+    millimetre magnet a kilometre away may move, but not grow."""
+    far = (1000, 0, 0)
+    grows = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=np.linspace((1e-3,) * 3, (1.01e-3,) * 3, 10),
+        position=far,
+    )
+    moves = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=(1e-3,) * 3,
+        position=np.linspace(far, (1000, 0, 0.01), 10),
+    )
+    assert threejs.played_payload(threejs._capture((grows,), animation=True)) is None
+    assert threejs.played_payload(threejs._capture((moves,), animation=True))
+
+
+@needs_scene_graph
+def test_a_frame_says_which_run_it_was_asked_for(morphing):
+    """The view drops a frame of a run it has been re-pointed away from."""
+    view = widget.SceneWidget(*morphing, animation=True)
+    sent = []
+    view.send = lambda content, buffers=None: sent.append(content)
+    view._on_message(view, {"kind": "frame", "index": 2, "runId": 7}, None)
+    assert sent[-1]["runId"] == 7
+
+
+@needs_scene_graph
 def test_a_view_plays_a_moving_run_itself(swept):
     """Nothing kept to serve, and a saved page carries poses, not frames."""
     view = widget.SceneWidget(*swept, animation=True)
