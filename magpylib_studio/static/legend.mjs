@@ -81,6 +81,9 @@ function mostCommon(values) {
  *  many, and whether any of them is selected or hidden. */
 const FOLD_ABOVE = 12;
 
+/** How deep a row sits, by its address: "0" is at the top, "0/1" one down. */
+const depthOf = (path) => path.split("/").length - 1;
+
 function modeOf(event) {
   if (event.shiftKey) return "range";
   // cmd on a mac, ctrl elsewhere, as for a click in the view
@@ -113,6 +116,11 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   // Collections already seen, by the same addressing. Only the first sight of
   // one decides whether it starts folded; after that, it is the user's.
   const seen = new Set();
+  // How deep a collection may sit and still start open, once the widget has
+  // asked for less (`foldFrom`); a ring added by a later rebuild at that
+  // depth starts folded like the ones that were there.
+  let foldDepth = Infinity;
+  const folds = new Map(); // path -> what folds or opens that collection
 
   container.classList.add("magpy-legend");
   // A shift-click extends whatever text selection the page already has, and
@@ -233,13 +241,16 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     node.children.forEach((child, i) => addRow(child, `${path}/${i}`, branch));
     if (!seen.has(path)) {
       seen.add(path);
-      if (node.children.length > FOLD_ABOVE) folded.add(path);
+      if (node.children.length > FOLD_ABOVE || depthOf(path) >= foldDepth) {
+        folded.add(path);
+      }
     }
     const fold = (on) => {
       row.classList.toggle("folded", on);
       branch.hidden = on;
     };
     fold(folded.has(path));
+    folds.set(path, fold);
     caret.addEventListener("click", () => {
       const on = !folded.has(path);
       on ? folded.add(path) : folded.delete(path);
@@ -258,6 +269,7 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     swatches = swatchesOf(payload);
     if (!order.some((node) => node.id === anchor)) anchor = null;
     rows.clear();
+    folds.clear();
     container.replaceChildren();
     tree.forEach((node, i) => addRow(node, String(i), container));
     paint();
@@ -322,5 +334,17 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     }
   }
 
-  return { update, sync };
+  /** Fold every collection `depth` levels down or deeper -- 0 is the top --
+   *  and any that arrives there later. The widget's first look at a tree
+   *  that, open, would cover too much of the view. */
+  function foldFrom(depth) {
+    foldDepth = depth;
+    for (const [path, fold] of folds) {
+      if (depthOf(path) < depth) continue;
+      folded.add(path);
+      fold(true);
+    }
+  }
+
+  return { update, sync, foldFrom };
 }

@@ -395,6 +395,50 @@ async function lateCompany(port, base) {
   });
 }
 
+/** The legend's first look, by the room the view has. The scene is a stack
+ *  of two rings of four and a probe: twelve rows open in full, four with
+ *  the rings folded, two with everything folded. */
+async function room(port, base, expected) {
+  const all = expected.rows;
+  const rings = ["stack", "upper", "lower", "probe"];
+  const cases = [
+    ["a wide view shows the whole legend", "width=1000&height=420", all],
+    ["a narrow view folds the rings", "width=480&height=360", rings],
+    [
+      "a view drawn before it is on the page still decides",
+      "width=480&height=360&detached",
+      rings,
+    ],
+    [
+      "a view too small for any of it starts closed",
+      "width=220&height=110",
+      null,
+    ],
+  ];
+  for (const [label, query, want] of cases) {
+    await check(label, async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/room.html?${query}`);
+        const result = await tab.until("return window.result");
+        if (!result) return "never finished";
+        if (want === null) {
+          return result.open
+            ? `open, showing ${result.rows.join(", ")}`
+            : thrown(tab);
+        }
+        if (!result.open) return "closed";
+        if (rounded(result.rows) !== rounded(want)) {
+          return `showed ${result.rows.join(", ")}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    });
+  }
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -615,6 +659,7 @@ try {
   await themes(browser.port, base);
   await lateCompany(browser.port, base);
   await pool(browser.port, base);
+  await room(browser.port, base, expected);
   await savedView(browser.port, base, out, expected);
 } finally {
   browser.proc.kill();

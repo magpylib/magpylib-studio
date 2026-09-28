@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  The legend's first look in views of different sizes. `?width=` and
+  `?height=` size the view; `&detached` renders it before it is on the page,
+  as Jupyter does. `window.result` says which rows showed, and whether the
+  legend was open at all.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="page"></div>
+    <script type="module">
+      import { widget, localModel, wait } from "./host.mjs";
+
+      const params = new URLSearchParams(location.search);
+      const el = document.createElement("div");
+      el.style.width = `${params.get("width")}px`;
+      const model = localModel();
+      model.set("height", Number(params.get("height")));
+      if (!params.has("detached")) document.getElementById("page").append(el);
+      widget.render({ model, el });
+      if (params.has("detached")) {
+        await wait(300);
+        document.getElementById("page").append(el);
+      }
+      await wait(1200);
+      const legend = el.querySelector(".magpy-scene-legend");
+      window.result = {
+        open: !legend.hidden,
+        rows: [...legend.querySelectorAll(".magpy-legend-row")]
+          .filter((row) => row.getClientRects().length > 0)
+          .map((row) => row.querySelector(".magpy-legend-label").textContent),
+      };
+    </script>
+  </body>
+</html>
