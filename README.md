@@ -66,7 +66,8 @@ notebook draw one. The tools sit in the view's top-right corner and show when
 the pointer is on it, as Plotly's modebar does: the legend, the axes, framing,
 the projection, the theme, a picture, export and full screen. `animation=True`
 captures the paths, and a transport along the foot of the view plays and scrubs
-them, asking python for one frame at a time.
+them: in the browser, from the motion, when every step is the first one moved —
+and a frame at a time from python when the run changes shape as it goes.
 
 It is read only, like the panel — what a view can offer to edit is what its host
 can put back, and a cell has already run. Selecting and hiding are the
@@ -110,8 +111,9 @@ notebook it moves between cells.
 **camera** saves the view as a PNG, as it is on screen and without the legend.
 **Export** saves it as one HTML file that opens anywhere with no notebook behind
 it — the widget itself, not a picture: orbit, legend, keys, and a captured run
-that still plays, because its frames travel in the file. `write_html(path)` does
-the same from a cell. Either way the page opens where the view was looking.
+that still plays, because its motion — or, for a run that changes shape, its
+frames — travels in the file. `write_html(path)` does the same from a cell.
+Either way the page opens where the view was looking.
 
 Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider

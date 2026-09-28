@@ -683,8 +683,10 @@ function render({ model, el }) {
   }
 
   // --- playback ---------------------------------------------------------
-  // Frames are asked for one at a time, as in the panel: the whole run is
-  // every trace of every step, and one frame is all anyone is looking at.
+  // A run that only moves arrives as motion, and is played here. One that
+  // changes shape as it goes is asked for a frame at a time, as in the panel:
+  // the whole run is every trace of every step, and one frame is all anyone
+  // is looking at.
   let playing = false;
   let inFlight = false;
   let wanted = null; // the frame last asked for, which may not be the one shown
@@ -737,8 +739,25 @@ function render({ model, el }) {
   function askFor(index) {
     wanted = Math.max(0, Math.min(index, frames() - 1));
     if (inFlight || !api) return;
+    if (api.posed()) {
+      // Nothing to wait for, and no python needed: a notebook read without
+      // its kernel, or a docs page, plays this as well as a live one.
+      if (slot.host !== view) return; // the renderer is drawing another view
+      api.poseFrame(wanted);
+      reached(wanted);
+      return;
+    }
     inFlight = true;
     model.send({ kind: "frame", index: wanted });
+  }
+
+  /** The picture is at step `index`: say so, and go on to the next. */
+  function reached(index) {
+    shown = index;
+    scrub.value = String(index);
+    showStep();
+    if (playing) afterFrame();
+    else if (wanted !== null && wanted !== shown) askFor(wanted);
   }
 
   function setPlaying(on) {
@@ -799,12 +818,8 @@ function render({ model, el }) {
     inFlight = false;
     if (slot.host !== view) return; // this view has gone; its renderer is elsewhere
     api.renderFrame(message);
-    shown = message.frame;
     scrub.max = String(message.frames - 1);
-    scrub.value = String(message.frame);
-    showStep();
-    if (playing) afterFrame();
-    else if (wanted !== null && wanted !== shown) askFor(wanted);
+    reached(message.frame);
   });
 
   // --- selection --------------------------------------------------------

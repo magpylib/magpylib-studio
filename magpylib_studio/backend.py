@@ -78,9 +78,10 @@ else:
 
         name = WIDGET_BACKEND_NAME
         description = "Magpylib Studio — 3D scene as a notebook widget"
-        #: Unlike the panel's, this view can play a run: the widget holds the
-        #: captured frames and serves them to the browser one at a time, which
-        #: is the job the session does in the studio.
+        #: Unlike the panel's, this view can play a run: from its motion, in
+        #: the browser, when every step is the first one moved -- and
+        #: otherwise from frames the widget holds and serves one at a time,
+        #: which is the job the session does in the studio.
         supports_animation = True
         #: How tall to draw, in pixels. A figure keyword rather than a widget
         #: one so that `magpy.show(..., backend="widget", height=600)` says it

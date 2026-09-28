@@ -7,8 +7,10 @@ Writes into OUT:
 * ``state.json`` -- a nested scene as a widget's model holds it, for the
   pages that play the notebook themselves;
 * ``still.html`` -- that scene saved, looking from `CAMERA`;
-* ``run.html`` -- a sensor on a path, saved with its run, to play with no
-  python behind it;
+* ``run.html`` -- a sensor on a path past a turning magnet: a run that only
+  moves, which the page plays from poses;
+* ``morph.html`` -- a magnet that grows along its path: a run no motion can
+  play, saved with every frame for the page to answer from;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -65,10 +67,24 @@ def main(out):
     rotor = magpy.magnet.Cylinder(
         polarization=(1, 0, 0), dimension=(4, 1), style_label="rotor"
     )
+    rotor.rotate_from_angax(np.linspace(0, 180, 30), "z", start=0)
     sweep = magpy.Sensor(
         position=np.linspace((-6, 0, 1.5), (6, 0, 1.5), 30), style_label="sweep"
     )
-    SceneWidget(rotor, sweep, animation=True).write_html(out / "run.html")
+    run = SceneWidget(rotor, sweep, animation=True)
+    if not run.payload.get("tracks"):
+        raise SystemExit("run.html: the sweep should play as motion")
+    run.write_html(out / "run.html")
+
+    grow = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=np.linspace((1, 1, 1), (2, 2, 2), 30),
+        style_label="grow",
+    )
+    morph = SceneWidget(grow, animation=True)
+    if morph.payload.get("tracks"):
+        raise SystemExit("morph.html: a growing magnet is not motion")
+    morph.write_html(out / "morph.html")
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows}

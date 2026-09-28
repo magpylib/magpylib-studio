@@ -697,28 +697,34 @@ async function savedView(port, base, out, expected) {
   });
   await tab.close();
 
-  await check("a saved run plays with no python behind it", async () => {
-    const run = await openTab(port);
-    try {
-      await run.navigate(`${base}/out/run.html`);
-      const ready = await run.until(
-        `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && ${VIEW}.querySelector("canvas")`,
-        20_000,
-      );
-      if (!ready) return "no transport to play it with";
-      await run.evaluate(`${tool("Play the path")}.click()`);
-      const step = await run.until(
-        `const n = parseInt(document.querySelector(".magpy-scene-counter").textContent); return n >= 5 && n`,
-        10_000,
-      );
-      if (!step) {
-        return `stuck at ${await run.evaluate(`return document.querySelector(".magpy-scene-counter").textContent`)}`;
+  const RUNS = {
+    run: "a saved run that only moves plays from its poses",
+    morph: "a saved run that changes shape plays from its frames",
+  };
+  for (const [page, label] of Object.entries(RUNS)) {
+    await check(label, async () => {
+      const run = await openTab(port);
+      try {
+        await run.navigate(`${base}/out/${page}.html`);
+        const ready = await run.until(
+          `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && ${VIEW}.querySelector("canvas")`,
+          20_000,
+        );
+        if (!ready) return "no transport to play it with";
+        await run.evaluate(`${tool("Play the path")}.click()`);
+        const step = await run.until(
+          `const n = parseInt(document.querySelector(".magpy-scene-counter").textContent); return n >= 5 && n`,
+          10_000,
+        );
+        if (!step) {
+          return `stuck at ${await run.evaluate(`return document.querySelector(".magpy-scene-counter").textContent`)}`;
+        }
+        return thrown(run);
+      } finally {
+        await run.close();
       }
-      return thrown(run);
-    } finally {
-      await run.close();
-    }
-  });
+    });
+  }
 }
 
 // ------------------------------------------------------------------- main
