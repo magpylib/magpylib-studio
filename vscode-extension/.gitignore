@@ -2,3 +2,5 @@ node_modules/
 out/
 *.vsix
 .vscode-test/
+# the notebook widget, copied in by `npm run compile` for the script panel
+widget/

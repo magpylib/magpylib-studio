@@ -20,6 +20,12 @@ body {
 #canvas {
   flex: 1;
   min-height: 0;
+  /* A flex item will not shrink below its content unless told, and the
+     notebook widget sizes its view to this box: a view a pixel wider than
+     the box widened the box, the view followed, and the figure grew without
+     end, its play bar sliding off to the right. */
+  min-width: 0;
+  overflow: hidden;
 }
 #bar {
   display: flex;

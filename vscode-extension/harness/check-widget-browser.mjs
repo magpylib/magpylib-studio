@@ -39,6 +39,7 @@ const HARNESS = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HARNESS, "..", "..");
 const STATIC = path.join(REPO, "magpylib_studio", "static");
 const PAGES = path.join(HARNESS, "widget-pages");
+const MEDIA = path.join(HARNESS, "..", "media");
 
 function fail(message) {
   console.error(`check-widget-browser: ${message}`);
@@ -122,7 +123,7 @@ async function launch(chrome, profile) {
 
 /** This repo's files, over http: modules do not load from file://. */
 function serve(out) {
-  const roots = { static: STATIC, pages: PAGES, out };
+  const roots = { static: STATIC, pages: PAGES, media: MEDIA, out };
   const TYPES = {
     ".js": "text/javascript",
     ".mjs": "text/javascript",
@@ -646,6 +647,35 @@ async function silent(port, base) {
   });
 }
 
+/** The panel a script draws into, with its own script: the widget drawn
+ *  from the figure the `studio` backend wrote, legend and playback and all,
+ *  and re-pointed, not drawn again, when the script runs again. */
+async function panel(port, base, expected) {
+  await check(
+    "a script's figure in the panel is the widget, and plays",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/panel.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        if (result.rows.join() !== expected.rows.join()) {
+          return `the legend showed ${result.rows.join(", ")}`;
+        }
+        if (result.step < 3) return `stuck at step ${result.step}`;
+        if (result.views !== 1) return `${result.views} views after a re-run`;
+        const [before, after, room] = result.widths;
+        if (after !== before || after > room) {
+          return `the figure is ${before} then ${after} px wide in a ${room} px panel`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -912,6 +942,7 @@ try {
   await themeMidRun(browser.port, base);
   await staleFrame(browser.port, base);
   await silent(browser.port, base);
+  await panel(browser.port, base, expected);
   await savedView(browser.port, base, out, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

@@ -19,6 +19,8 @@ Writes into OUT:
   frame at a time, as a run past the carry limit is;
 * ``run.json``, ``served.json`` -- a run that moves and a served one as a
   model holds them, for pages that play the notebook themselves;
+* ``panel.json`` -- what the ``studio`` backend leaves for the panel: a stack
+  of turning rings and a probe, as the widget's state, with its legend;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -135,6 +137,18 @@ def main(out):
     if ramp.payload.get("tracks") != []:
         raise SystemExit("ramp.html: nothing drawn moves, so no tracks")
     ramp.write_html(out / "ramp.html")
+
+    # what the `studio` backend writes for the panel, the stack turning
+    spinning = magpy.Collection(
+        ring("upper", 1), ring("lower", -1), style_label="stack"
+    )
+    spinning.rotate_from_angax(np.linspace(0, 90, 20), "z", anchor=0, start=0)
+    panel = threejs.widget_state(
+        threejs._capture((spinning, probe), animation=True, on_behalf_of="studio")
+    )
+    if not panel["state"]["tree"] or not panel["state"]["payload"].get("tracks"):
+        raise SystemExit("panel.json: the legend and the motion should be there")
+    (out / "panel.json").write_text(json.dumps(panel))
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows}

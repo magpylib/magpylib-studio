@@ -62,16 +62,19 @@ else:
         name = BACKEND_NAME
         description = "Magpylib Studio (VS Code) — read-only scene view"
         accepts_options = frozenset()
-        #: Not yet: playback needs every step of the path captured and served a
-        #: frame at a time, which is the session's job in the studio and has no
-        #: equivalent here while the script that owns the objects has exited.
-        supports_animation = False
+        #: The script that owns the objects has usually exited by the time the
+        #: panel draws, so nothing could serve a run a frame at a time. The
+        #: figure carries it instead -- as motion and changes, or whole -- and
+        #: the panel plays it, as a page saved with `write_html` does.
+        supports_animation = True
 
         def show(self, scene):
-            payload = threejs.view_payload(scene)
-            if write_view("scene", payload, title=scene.title, claimed=CLAIMED) is None:
+            # The notebook widget's state, which the panel draws the widget
+            # from: the same legend, playback, tools and keys as a cell.
+            body = threejs.widget_state(scene)
+            if write_view("widget", body, title=scene.title, claimed=CLAIMED) is None:
                 raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
-            return payload
+            return body
 
     class WidgetBackend(threejs.SceneGraphBackend):
         """Draws a magpylib scene in the notebook cell that asked for it."""

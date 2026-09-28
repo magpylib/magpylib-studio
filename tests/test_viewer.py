@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 import magpylib as magpy
+import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
@@ -165,10 +166,11 @@ def test_a_scene_is_drawn_through_show(drop):
     magpy.show(magnet, sensor, backend=backend.BACKEND_NAME)
     (written,) = list(drop.iterdir())
     payload = json.loads(written.read_text(encoding="utf-8"))
-    assert payload["kind"] == "scene"
-    body = payload["body"]
-    assert body["meshes"], "the objects should arrive as meshes"
-    assert body["ranges"], "the view frames its camera from these"
+    # the notebook widget's state, which the panel draws the widget from
+    assert payload["kind"] == "widget"
+    scene = payload["body"]["state"]["payload"]
+    assert scene["meshes"], "the objects should arrive as meshes"
+    assert scene["ranges"], "the view frames its camera from these"
 
 
 @needs_scene_graph
@@ -184,10 +186,61 @@ def test_each_object_keeps_its_own_identity(drop):
         backend=backend.BACKEND_NAME,
     )
     (written,) = list(drop.iterdir())
-    body = json.loads(written.read_text(encoding="utf-8"))["body"]
+    body = json.loads(written.read_text(encoding="utf-8"))["body"]["state"]["payload"]
     ids = {item["object_id"] for item in body["meshes"] + body["scatters"]}
     assert len(ids) == 2
     assert all(isinstance(name, str) for name in ids)
+
+
+def _written(drop):
+    """The one figure a script left, as the panel reads it."""
+    (written,) = list(drop.iterdir())
+    return json.loads(written.read_text(encoding="utf-8"))["body"]
+
+
+@needs_scene_graph
+def test_a_scripts_figure_carries_the_legend(drop):
+    """The panel's legend nests as the objects do, from `Panel.objects`."""
+    inner = magpy.Collection(
+        magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)),
+        style_label="inner",
+    )
+    outer = magpy.Collection(inner, style_label="outer")
+    magpy.show(outer, magpy.Sensor(style_label="probe"), backend=backend.BACKEND_NAME)
+    tree = _written(drop)["state"]["tree"]
+    assert [node["label"] for node in tree] == ["outer", "probe"]
+    assert tree[0]["children"][0]["label"] == "inner"
+
+
+@needs_scene_graph
+def test_a_scripts_run_plays_in_the_panel(drop):
+    """No script is left to serve frames: a run that moves travels as its
+    motion, and the panel plays it."""
+    sensor = magpy.Sensor(position=np.linspace((-3, 0, 1), (3, 0, 1), 12))
+    magpy.show(
+        magpy.magnet.Cylinder(polarization=(1, 0, 0), dimension=(2, 1)),
+        sensor,
+        backend=backend.BACKEND_NAME,
+        animation=True,
+    )
+    body = _written(drop)
+    assert body["state"]["frames"] > 1
+    assert body["state"]["payload"]["tracks"]
+    assert body["run"] == []  # nothing to serve: the motion is enough
+
+
+@needs_scene_graph
+def test_a_run_too_big_to_carry_travels_whole(drop, monkeypatch):
+    """Past the carry limit a notebook serves frames from python; the panel
+    has none to ask, so the figure carries every frame, as a saved page does."""
+    monkeypatch.setattr(threejs, "_CARRY_LIMIT", 0)
+    grows = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=np.linspace((1, 1, 1), (2, 2, 2), 8)
+    )
+    magpy.show(grows, backend=backend.BACKEND_NAME, animation=True)
+    body = _written(drop)
+    assert "tracks" not in body["state"]["payload"]
+    assert len(body["run"]) == body["state"]["frames"] > 1
 
 
 @needs_scene_graph

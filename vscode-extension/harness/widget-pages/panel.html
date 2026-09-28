@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  The panel a script draws into -- its page as scriptViewer.ts builds it, and
+  its own media/scriptView.js -- handed the figure the `studio` backend
+  writes, then handed it again as a re-run would. `window.result` is what the
+  legend showed, how far the run played, and how many views there were.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- the padding VS Code's own stylesheet gives every webview's body:
+         with it, a figure that fed its own width grew without end -->
+    <style>
+      body {
+        padding: 0 20px;
+      }
+    </style>
+    <link rel="stylesheet" href="/media/scriptView.css" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <script>
+      // what VS Code gives a webview, which the page talks to its host with
+      window.acquireVsCodeApi = () => ({ postMessage() {} });
+    </script>
+  </head>
+  <body
+    data-widget="/static/widget.js"
+    class="vscode-dark"
+    data-vscode-theme-kind="vscode-dark"
+  >
+    <div id="bar">
+      <span id="status">Waiting for a figure…</span>
+      <button id="promote" hidden>Open in Magpylib Studio</button>
+    </div>
+    <div id="stage">
+      <div id="canvas"></div>
+      <div id="overlay" hidden>
+        <span id="stale">out of date</span>
+        <button id="rerun">Re-run</button>
+      </div>
+    </div>
+    <script src="/media/scriptView.js"></script>
+    <script type="module">
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const body = await (await fetch("/out/panel.json")).json();
+      const figure = { kind: "widget", script: "/tmp/rings.py", body };
+      postMessage({ type: "view", payload: figure, stale: false });
+      for (
+        let i = 0;
+        i < 60 && !document.querySelector(".magpy-legend-row");
+        i++
+      ) {
+        await wait(250);
+      }
+      await wait(800);
+      const rows = [...document.querySelectorAll(".magpy-legend-row")]
+        .filter((row) => row.getClientRects().length)
+        .map((row) => row.querySelector(".magpy-legend-label").textContent);
+      [...document.querySelectorAll(".magpy-icon")]
+        .find((b) => b.title.startsWith("Play the path"))
+        .click();
+      await wait(1500);
+      const step = parseInt(
+        document.querySelector(".magpy-scene-counter").textContent,
+      );
+      postMessage({ type: "view", payload: figure, stale: false }); // a re-run
+      await wait(1000);
+      const width = () =>
+        Math.round(
+          document.querySelector(".magpy-scene").getBoundingClientRect().width,
+        );
+      const before = width();
+      await wait(1500);
+      window.result = {
+        rows,
+        step,
+        views: document.querySelectorAll(".magpy-scene").length,
+        widths: [before, width(), innerWidth],
+      };
+    </script>
+  </body>
+</html>
