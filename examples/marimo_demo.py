@@ -13,7 +13,7 @@ is heading for.
 
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.25.0"
 app = marimo.App(width="medium")
 
 
@@ -30,38 +30,36 @@ def _():
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        """
-        # A magpylib scene in marimo
+    mo.md("""
+    # A magpylib scene in marimo
 
-        The 3D view is the one the VS Code studio draws — the same three.js
-        renderer, handed the same payload — wrapped as an `anywidget`.
+    The 3D view is the one the VS Code studio draws — the same three.js
+    renderer, handed the same payload — wrapped as an `anywidget`.
 
-        Drag the sliders: the rings are rebuilt in python and the view is
-        re-pointed at them, keeping your camera — zoom in and drag one, the
-        zoom stays. **Tilt** turns every polarization together, from axial at
-        0° to radial at 90°. Click a magnet: the selection is a value the cells
-        below react to.
+    Drag the sliders: the rings are rebuilt in python and the view is
+    re-pointed at them, keeping your camera — zoom in and drag one, the
+    zoom stays. **Tilt** turns every polarization together, from axial at
+    0° to radial at 90°. Click a magnet: the selection is a value the cells
+    below react to.
 
-        The list over the view is the scene as it is nested — the stack, its
-        rings, their magnets. Fold a ring with its caret, hide it with the eye
-        that shows when the pointer is on its row, or click the row to select
-        everything under it (⌘/ctrl-click adds, shift-click takes a range);
-        double-click to frame it.
+    The list over the view is the scene as it is nested — the stack, its
+    rings, their magnets. Fold a ring with its caret, hide it with the eye
+    that shows when the pointer is on its row, or click the row to select
+    everything under it (⌘/ctrl-click adds, shift-click takes a range);
+    double-click to frame it.
 
-        Click the view and it takes the keys, as the studio's panel does:
-        **F** frames the selection and **Home** everything, **1** **3** **7**
-        look from the front, the right and the top, **5** switches the
-        projection, **H** hides the selection and **shift-H** shows only it,
-        **Esc** lets go, and **space** plays a run.
+    Click the view and it takes the keys, as the studio's panel does:
+    **F** frames the selection and **Home** everything, **1** **3** **7**
+    look from the front, the right and the top, **5** switches the
+    projection, **H** hides the selection and **shift-H** shows only it,
+    **Esc** lets go, and **space** plays a run.
 
-        Put the pointer on the view and its tools show in the top-right
-        corner: the legend, the axes, framing, the projection, the theme
-        (auto, light, dark), a PNG picture, **export** — the view as a single
-        HTML file that works without this notebook, in which the run below
-        still plays — and full screen.
-        """
-    )
+    Put the pointer on the view and its tools show in the top-right
+    corner: the legend, the axes, framing, the projection, the theme
+    (auto, light, dark), a PNG picture, **export** — the view as a single
+    HTML file that works without this notebook, opens where you left the
+    camera, and in which the runs below still play — and full screen.
+    """)
     return
 
 
@@ -147,16 +145,13 @@ def _(magpy, mo, np, probe, scene, stack):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(
-        """
-        ## Paths, played in the browser
+    mo.md("""
+    ## Paths, played in the browser
 
-        `animation=True` captures every step of the run. The widget keeps the
-        frames and serves them to the view one at a time, so **▶** plays and
-        the slider scrubs — including what a pose cannot express: the probe's
-        field arrows are recomputed per frame, so they turn as it passes.
-        """
-    )
+    `animation=True` captures every step of the run. The widget keeps the
+    frames and serves them to the view one at a time, so **▶** plays and
+    the slider scrubs.
+    """)
     return
 
 
@@ -175,6 +170,90 @@ def _(SceneWidget, magpy, np):
     _sweep.style.arrows.y.show = True
 
     SceneWidget(_rotor, _sweep, animation=True, height=380)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Properties along a path
+
+    On magpylib main, more than position and orientation can vary along a
+    path — `polarization`, `dimension`, `diameter`, `current` and others;
+    `obj.path_properties` lists them for an object. Here a magnet's
+    polarization turns a full circle, a coil grows while its current ramps
+    up, and the probe's pixels show the field they sit in. None of that is
+    a magnet moving, so each step is drawn as magpylib computed it.
+    """)
+    return
+
+
+@app.cell
+def _(SceneWidget, magpy, np):
+    _steps = 40
+    _turn = np.linspace(0, 2 * np.pi, _steps)
+    _spinner = magpy.magnet.Cylinder(
+        polarization=np.column_stack([np.cos(_turn), np.sin(_turn), np.zeros(_steps)]),
+        dimension=(2, 1),
+        style_label="spinner",
+    )
+    _coil = magpy.current.Circle(
+        diameter=np.linspace(2, 5, _steps),
+        current=np.linspace(1, 100, _steps),
+        position=(0, 0, 1.5),
+        style_label="coil",
+    )
+    _probe = magpy.Sensor(
+        pixel=np.linspace((-3, 0, 0), (3, 0, 0), 13),
+        position=(0, 0, -1.5),
+        style_label="probe",
+    )
+    _probe.style.pixel.field.source = "B"  # each pixel an arrow of the field
+
+    SceneWidget(_spinner, _coil, _probe, animation=True, height=380)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## The magpylib way
+
+    `magpy.show(..., backend="widget")` draws the same view through
+    magpylib's own call, legend included: magpylib hands its display
+    backends the objects it draws (`Panel.objects`), so the nesting comes
+    with them, and with `return_fig=True` the widget's `picked` works too.
+    `magpy.defaults.display.backend = "widget"` makes every `show()` in
+    the notebook draw one.
+
+    Where a view is rebuilt by sliders, make it once with `SceneWidget`
+    and `update()` it, as above: a `show()` in a cell that re-runs draws a
+    new view on every drag. So this one draws a ring of its own.
+    """)
+    return
+
+
+@app.cell
+def _(magpy, np):
+    _angles = np.linspace(0, 2 * np.pi, 8, endpoint=False)
+    _ring = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                dimension=(1, 1, 1),
+                polarization=(0, 0, 1),
+                position=(3 * np.cos(_a), 3 * np.sin(_a), 0),
+                style_label=f"magnet {_i + 1}",
+            )
+            for _i, _a in enumerate(_angles)
+        ],
+        style_label="ring",
+    )
+    magpy.show(
+        magpy.Collection(_ring, style_label="assembly"),
+        magpy.Sensor(style_label="probe"),
+        backend="widget",
+        height=380,
+    )
     return
 
 
