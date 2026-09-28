@@ -118,7 +118,9 @@ const model = {
   send(message) {
     if (message.kind !== "frame" || !run.length) return;
     const at = Math.max(0, Math.min(message.index, run.length - 1));
-    setTimeout(() => emit("msg:custom", { kind: "frame", ...run[at] }));
+    setTimeout(() =>
+      emit("msg:custom", { kind: "frame", ...run[at], runId: message.runId }),
+    );
   },
 };
 
@@ -472,7 +474,9 @@ class SceneWidget(anywidget.AnyWidget):
         kind = content.get("kind") if isinstance(content, dict) else None
         if kind == "frame" and self._scene is not None:
             frame = threejs.frame_payload(self._scene, content.get("index", 0))
-            self.send({"kind": "frame", **frame})
+            # Said back as asked: the view drops a frame of a run it has
+            # since been re-pointed away from.
+            self.send({"kind": "frame", **frame, "runId": content.get("runId")})
         elif kind == "camera":
             self._camera = content.get("camera")
         elif kind == "export":

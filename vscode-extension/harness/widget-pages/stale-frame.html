@@ -1,0 +1,94 @@
+<!doctype html>
+<!--
+  A kernel slower than the user: a frame of one run, asked for and answered
+  after the view has been re-pointed at another -- one that only moves, and
+  plays from its poses. The old answer must not land on the new scene, nor
+  stop it playing. `window.result` says whether scrubbing still moves it.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="widget"></div>
+    <script type="module">
+      import { widget, wait } from "./host.mjs";
+
+      const [morph, run] = await Promise.all(
+        ["morph", "run"].map(async (name) =>
+          (await fetch(`/out/${name}.json`)).json(),
+        ),
+      );
+      const values = structuredClone(morph.state);
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "frame") return;
+          const at = Math.min(message.index, morph.run.length - 1);
+          setTimeout(
+            () =>
+              emit("msg:custom", {
+                kind: "frame",
+                ...morph.run[at],
+                runId: message.runId,
+              }),
+            600,
+          );
+        },
+      };
+      const el = document.getElementById("widget");
+      widget.render({ model, el });
+      await wait(1500);
+
+      const scrub = (step) => {
+        const input = el.querySelector(".magpy-scene-scrub");
+        input.value = String(step);
+        input.dispatchEvent(new Event("input"));
+      };
+      // Where the drawn things are, as one number.
+      const where = () => {
+        let sum = 0;
+        for (const node of window.scene3d.byObjectId.values()) {
+          node.traverse((o) => {
+            if (!o.geometry) return;
+            const a = o.geometry.attributes.position.array;
+            let total = 0;
+            let n = 0;
+            for (let i = 0; i < a.length; i += 3) {
+              if (Number.isFinite(a[i])) {
+                total += a[i];
+                n++;
+              }
+            }
+            sum += (n ? total / n : 0) + o.position.x;
+          });
+        }
+        return Math.round(sum * 1e6) / 1e6;
+      };
+
+      scrub(5); // asked of the kernel, answered in 600 ms
+      await wait(50);
+      for (const key of ["frames", "duration", "repeat", "payload"]) {
+        model.set(key, run.state[key]); // re-pointed before the answer
+      }
+      await wait(1200); // the old answer has arrived
+      scrub(0);
+      await wait(300);
+      const first = where();
+      scrub(10);
+      await wait(300);
+      window.result = { moved: where() !== first };
+    </script>
+  </body>
+</html>

@@ -152,6 +152,12 @@ function serve(out) {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** `promise`'s value, or `otherwise` if it has not settled within `ms`. A
+ *  page that locks up answers nothing -- the regression some of these checks
+ *  exist to catch -- and a check waiting on it must fail, not wait. */
+const within = (ms, promise, otherwise) =>
+  Promise.race([promise, wait(ms).then(() => otherwise)]);
+
 async function openTab(port) {
   const devtools = `http://127.0.0.1:${port}`;
   const target = await (
@@ -233,7 +239,10 @@ async function openTab(port) {
 
   async function close() {
     socket.close();
-    await fetch(`${devtools}/json/close/${target.id}`).catch(() => {});
+    await within(
+      5000,
+      fetch(`${devtools}/json/close/${target.id}`).catch(() => {}),
+    );
   }
 
   return { send, evaluate, until, navigate, click, hover, errors, close };
@@ -259,7 +268,11 @@ let failures = 0;
 async function check(name, body) {
   let problem;
   try {
-    problem = await body();
+    problem = await within(
+      120_000,
+      body(),
+      "did not finish within two minutes -- the page may have locked up",
+    );
   } catch (error) {
     problem = error.message.split("\n")[0];
   }
@@ -524,6 +537,75 @@ async function themeMidRun(port, base) {
   });
 }
 
+/** A frame of one run, answered after the view has moved to another, must
+ *  neither land on the new scene nor stop it playing. */
+async function staleFrame(port, base) {
+  await check(
+    "a late frame of the last run leaves the new one playing",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/stale-frame.html`);
+        const result = await tab.until("return window.result", 15_000);
+        if (!result) return "never finished";
+        if (!result.moved) return "scrubbing the new run moves nothing";
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** A run whose steps take longer to pose than they last -- a long path, a
+ *  big scene -- must still let the page paint, and a repeating one must not
+ *  lock it up. Posing is slowed here, by busy-waiting, to make it so. */
+async function slowPosing(port, base) {
+  await check(
+    "a run slower to pose than to play still lets the page paint",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/run.html`);
+        const ready = await tab.until(
+          `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && ${VIEW}.querySelector("canvas")`,
+          20_000,
+        );
+        if (!ready) return "no transport";
+        await tab.evaluate(`
+        const pose = window.scene3d.poseFrame;
+        window.scene3d.poseFrame = (i) => {
+          const until = performance.now() + 250; // longer than a step lasts
+          while (performance.now() < until) {}
+          pose(i);
+        };
+        window.painted = 0;
+        const count = () => { window.painted++; requestAnimationFrame(count); };
+        requestAnimationFrame(count);
+        // after this call has answered: a run that never yields would
+        // otherwise never let it, and the check could not say so itself
+        setTimeout(() => ${tool("Play the path")}.click(), 0);
+        return 1;`);
+        await wait(2500);
+        const verdict = await within(
+          7500,
+          tab.evaluate(
+            `return [window.painted, parseInt(document.querySelector(".magpy-scene-counter").textContent)]`,
+          ),
+          "froze",
+        );
+        if (verdict === "froze") return "the page stopped answering";
+        const [painted, step] = verdict;
+        if (painted < 3) return `painted ${painted} times in 2.5 s`;
+        if (step < 3) return `stuck at step ${step}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -700,6 +782,7 @@ async function savedView(port, base, out, expected) {
   const RUNS = {
     run: "a saved run that only moves plays from its poses",
     morph: "a saved run that changes shape plays from its frames",
+    ramp: "a saved run in which nothing drawn moves still plays",
   };
   for (const [page, label] of Object.entries(RUNS)) {
     await check(label, async () => {
@@ -757,6 +840,12 @@ const profile = path.join(out, "chrome");
 const browser = await launch(chrome, profile).catch((error) =>
   fail(error.message),
 );
+// However the checks go, the run ends: a locked-up page must not hold a CI
+// job until its own time limit.
+setTimeout(() => {
+  browser.proc.kill("SIGKILL");
+  fail("gave up after ten minutes; a page may have locked up.");
+}, 600_000).unref();
 try {
   await themes(browser.port, base);
   await lateCompany(browser.port, base);
@@ -764,9 +853,11 @@ try {
   await room(browser.port, base, expected);
   await blocked(browser.port, base);
   await themeMidRun(browser.port, base);
+  await staleFrame(browser.port, base);
   await savedView(browser.port, base, out, expected);
+  await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {
-  browser.proc.kill();
+  browser.proc.kill("SIGKILL"); // a renderer that is locked up ignores less
   server.close();
   await wait(300);
   fs.rmSync(out, { recursive: true, force: true, maxRetries: 3 });
