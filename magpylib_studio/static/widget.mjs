@@ -178,6 +178,10 @@ const ICONS = {
   expand: '<path d="M9.5 2H14v4.5M14 2 9.5 6.5M6.5 14H2V9.5M2 14l4.5-4.5"/>',
   shrink: '<path d="M13.5 6.5h-4v-4M9.5 6.5 14 2M2.5 9.5h4v4M6.5 9.5 2 14"/>',
   download: '<path d="M8 2v8M4.75 6.75 8 10l3.25-3.25M2.5 11.5V14h11v-2.5"/>',
+  picture:
+    '<path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h1.75l1.25-1.5h3L10.75 4h1.75' +
+    'A1.5 1.5 0 0 1 14 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"/>' +
+    '<circle cx="8" cy="8.25" r="2.5"/>',
   auto:
     '<circle cx="8" cy="8" r="5.5"/>' +
     '<path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" stroke="none"/>',
@@ -215,6 +219,9 @@ function iconButton(icon, text, onClick) {
   el.addEventListener("click", onClick);
   return el;
 }
+
+/** What the picture button saves the view as, before the browser asks. */
+const PICTURE_NAME = "magpylib-scene.png";
 
 /** The theme button's round: each choice, what it is called, and the next. */
 const THEMES = {
@@ -293,6 +300,16 @@ function render({ model, el }) {
     },
   );
   exportButton.hidden = Boolean(model.get("standalone"));
+  // Taken here, not by python: the picture is what the browser drew, and a
+  // page that is itself an export can take one as well.
+  const pictureButton = iconButton(
+    "picture",
+    "Save the view as a PNG picture",
+    () => {
+      const picture = api?.snapshot();
+      if (picture) save(picture, PICTURE_NAME);
+    },
+  );
   // A round rather than a toggle: auto, then light, then dark. The icon is
   // what is in force now; its name says what a click moves to.
   const themeButton = iconButton("auto", "", () =>
@@ -312,6 +329,7 @@ function render({ model, el }) {
     fitButton,
     projectionButton,
     themeButton,
+    pictureButton,
     exportButton,
     fullscreenButton,
   );
@@ -802,8 +820,15 @@ function render({ model, el }) {
 
   /** Hand the browser the file python wrote, as a download. */
   function download({ html, filename }) {
+    const href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    save(href, filename);
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  }
+
+  /** Have the browser save what `href` holds, as `filename`. */
+  function save(href, filename) {
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    link.href = href;
     link.download = filename;
     // In the page, not detached: some browsers ignore a click on a link that
     // is not in a document.
@@ -811,7 +836,6 @@ function render({ model, el }) {
     el.append(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
     notify(`Saved ${filename}`);
   }
 
