@@ -7,6 +7,7 @@ turns a click back into a magpylib object, and the frames it serves.
 """
 
 import base64
+import dataclasses
 import gzip
 import io
 import json
@@ -91,13 +92,42 @@ def test_a_collections_children_are_what_a_click_lands_on():
     assert view.picked == [child]
 
 
+def _hands_over_objects():
+    """Whether this magpylib gives a backend the objects (`Panel.objects`)."""
+    try:
+        from magpylib.graphics.backend import Panel
+    except ImportError:
+        return False
+    return "objects" in {f.name for f in dataclasses.fields(Panel)}
+
+
 @needs_scene_graph
+@pytest.mark.skipif(
+    _hands_over_objects(), reason="this magpylib hands its backends the objects"
+)
 def test_ids_alone_are_left_alone_when_nobody_said_what_they_are(scene_objects):
     """`magpy.show` has no objects to hand over, so a click stays an id."""
     drawn = magpy.show(*scene_objects, backend="widget", return_fig=True)
     drawn.selected = [str(id(scene_objects[0]))]
     assert drawn.tree == []
     assert drawn.picked == []
+
+
+@needs_scene_graph
+@pytest.mark.skipif(
+    not _hands_over_objects(), reason="this magpylib hands its backends no objects"
+)
+def test_a_bare_show_is_named_by_the_objects_magpylib_hands_over(nested):
+    """With `Panel.objects`, the backend's view has the legend and `picked`."""
+    outer, _, deep = nested
+    probe = magpy.Sensor(style_label="probe")
+    drawn = magpy.show(outer, probe, backend="widget", return_fig=True)
+    assert _outline(drawn.tree) == [
+        ("outer", [("inner", [("deep", [])]), ("ball", [])]),
+        ("probe", []),
+    ]
+    drawn.selected = [str(id(deep))]
+    assert drawn.picked == [deep]
 
 
 @needs_scene_graph
@@ -332,6 +362,14 @@ def test_frames_are_served_one_at_a_time(swept):
     view._on_message(view, {"kind": "something-else"}, None)
     view._on_message(view, "not a message at all", None)
     assert len(sent) == 2
+
+
+@needs_scene_graph
+def test_a_capture_keeps_nothing_behind(scene_objects):
+    """Read and let go: a module-level scene would keep its objects alive."""
+    scene = threejs._capture(scene_objects)
+    assert scene.frames
+    assert threejs._captured == {}
 
 
 @needs_scene_graph

@@ -226,8 +226,8 @@ class SceneWidget(anywidget.AnyWidget):
     )
     #: The objects `identify` was given, as their Collection hierarchy: nodes
     #: of ``{id, label, kind, children}``. What the legend draws. Empty for a
-    #: bare ``magpy.show(..., backend="widget")``, which has no objects to
-    #: take it from.
+    #: bare ``magpy.show(..., backend="widget")`` on a magpylib that does not
+    #: hand its backends the objects -- see `_from_scene`.
     tree = traitlets.List().tag(sync=True)
     height = traitlets.Int(DEFAULT_HEIGHT).tag(sync=True)
     #: Steps in the run, how long it should take, and whether it starts over
@@ -281,11 +281,17 @@ class SceneWidget(anywidget.AnyWidget):
     def _from_scene(cls, scene):
         """A view of `scene`: what ``magpy.show(..., backend="widget")`` is.
 
-        The backend is handed the scene magpylib composed and never the
-        objects, so a widget made this way has none to name -- see `identify`.
+        Named by the objects magpylib hands over with the scene, where it
+        does (`Panel.objects`): they are what the legend's nesting and a
+        click's object come from, which no trace can carry. A magpylib that
+        hands over only the scene leaves the widget with ids and nothing to
+        name them by -- see `identify`.
         """
         widget = cls()
         widget._adopt(scene)
+        objects = [obj for panel in scene.panels for obj in _objects_of(panel)]
+        if objects:
+            widget.identify(*objects)
         return widget
 
     def _adopt(self, scene):
@@ -383,8 +389,9 @@ class SceneWidget(anywidget.AnyWidget):
         """The objects that are selected, in the order they were clicked.
 
         Empty when the widget was not given the objects (`identify`), which is
-        the case for a bare ``magpy.show(..., backend="widget")``: the ids are
-        still there in `selected`, but there is nothing to resolve them to.
+        the case for a bare ``magpy.show(..., backend="widget")`` on a
+        magpylib that does not hand them to its backends: the ids are still
+        there in `selected`, but there is nothing to resolve them to.
         """
         return [self._objects[key] for key in self.selected if key in self._objects]
 
@@ -462,6 +469,12 @@ class SceneWidget(anywidget.AnyWidget):
             self._camera = content.get("camera") or self._camera
             page = self.to_html()
             self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
+
+
+def _objects_of(panel):
+    """The objects magpylib drew in `panel`, where it says (`Panel.objects`,
+    newer than the display-backend API itself) -- none where it does not."""
+    return getattr(panel, "objects", ())
 
 
 def display(widget):
