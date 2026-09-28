@@ -69,6 +69,12 @@ let paths = {}; // studio id -> every frame it passes through, when it has one
 // frames are asked for instead -- and empty when it is motion of nothing.
 let tracks = null;
 let tracked = [];
+// What poses cannot say: each changing trace's item at every step, and each
+// one drawn, with the node it hangs on -- swapped for the step's own.
+let changes = [];
+let changing = [];
+// The payload's colour tables, each once; a mesh names its own by index.
+let luts = [];
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
 //: Sources a later step copies. Their copies are drawn on their own node and
@@ -676,11 +682,12 @@ function buildMesh(item) {
       new THREE.Float32BufferAttribute(item.position, 3),
     );
     geometry.setIndex(item.index);
-    if (item.lut) {
+    const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
+    if (lut) {
       // interpolate the intensity across the face and look the colour up per
       // fragment: the scale is piecewise, so sampling it per vertex loses it
       geometry.setAttribute("uv", new THREE.Float32BufferAttribute(item.uv, 2));
-      options.map = lutTexture(item.lut);
+      options.map = lutTexture(lut);
     } else {
       options.color = new THREE.Color(item.color || "#2e91e5");
     }
@@ -1162,6 +1169,9 @@ function renderFrame(payload) {
   // drawn afresh, so there is nothing of the first frame's left to move.
   tracks = null;
   tracked = [];
+  changes = [];
+  changing = [];
+  luts = payload.luts ?? [];
   for (const item of payload.meshes.concat(payload.scatters)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
@@ -1190,6 +1200,19 @@ function poseFrame(index) {
     pose.compose(at.set(x, y, z), turn.set(qx, qy, qz, qw), one);
     built.matrix.copy(rest).multiply(pose);
     built.matrix.decompose(built.position, built.quaternion, built.scale);
+  }
+  // What changes is drawn as it is at this step, in place of the last.
+  for (const entry of changing) {
+    const steps = changes[entry.changes];
+    const item = steps[Math.min(index, steps.length - 1)];
+    entry.node.remove(entry.built);
+    entry.built.traverse((part) => {
+      part.geometry?.dispose();
+      part.material?.map?.dispose();
+      part.material?.dispose();
+    });
+    entry.built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
+    entry.node.attach(entry.built);
   }
   // Round what moved, not built again: this runs at every step of a run.
   for (const box of outlines) box.update();
@@ -1364,6 +1387,9 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   discard(held);
   tracks = payload.tracks ?? null;
   tracked = [];
+  changes = payload.changes ?? [];
+  changing = [];
+  luts = payload.luts ?? [];
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
@@ -1373,6 +1399,9 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
     node.attach(built);
     if (item.track != null) {
       tracked.push({ built, rest: built.matrix.clone(), track: item.track });
+    }
+    if (item.changes != null) {
+      changing.push({ node, built, changes: item.changes });
     }
   }
 

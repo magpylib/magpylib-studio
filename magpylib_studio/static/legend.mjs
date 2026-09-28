@@ -37,7 +37,7 @@ function swatchesOf(payload) {
   const swatches = new Map();
   for (const item of [...payload.meshes, ...payload.scatters]) {
     if (!swatches.has(item.object_id)) {
-      swatches.set(item.object_id, swatchOf(item));
+      swatches.set(item.object_id, swatchOf(item, payload.luts || []));
     }
   }
   return swatches;
@@ -46,12 +46,14 @@ function swatchesOf(payload) {
 /** One trace's colour, in `buildMesh`'s order of precedence: face colours
  *  over a colour scale over a flat colour. A magnet coloured by its
  *  polarization is its colour scale, drawn as the gradient it is. */
-function swatchOf(item) {
+function swatchOf(item, luts) {
   if (item.kind === "scatter") {
     return item.lines ? item.line_color : item.marker_color;
   }
   if (item.facecolor) return mostCommon(item.facecolor);
-  if (item.lut) return gradientOf(item.lut);
+  // a payload shares its colour tables, and a mesh names its own by index
+  const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
+  if (lut) return gradientOf(lut);
   return item.color || "#2e91e5";
 }
 

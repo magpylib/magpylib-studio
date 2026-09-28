@@ -25,6 +25,7 @@ and 10):
 
 from __future__ import annotations
 
+import json
 import math
 import warnings
 
@@ -474,82 +475,124 @@ _ROUNDING = 1e-11
 #: The keys a trace moves by; everything else about it has to hold still.
 _WHERE = frozenset("xyz")
 
+#: What `played_payload` tags a trace with before it is converted, and the
+#: conversion carries over: the motion it follows, or the changes it goes
+#: through.
+_ROLES = ("track", "changes")
+
+#: How much of a run's changing traces -- as JSON -- a view is handed along
+#: with the scene, so that it plays with nothing to ask for: in a notebook
+#: read without its kernel, a docs page, a saved view. Past this they are
+#: served a frame at a time instead, as every frame of every trace once was.
+#: Plotly carries its whole run in the figure; this carries only what poses
+#: cannot say, which is usually a small part of it.
+_CARRY_LIMIT: int = 5_000_000
+
 
 def played_payload(scene):
-    """`view_payload` for a run that is its first frame moved about -- with
-    the motion, so a view can play it with nothing to ask for -- or None.
+    """`view_payload` for a run a view can play on its own -- with the motion
+    and the changes it needs to -- or None when it cannot.
 
     Magpylib animates by drawing every frame again: every vertex of every
-    trace, at every step. For a magnet on a path, each of those frames is the
-    first one turned and shifted, to rounding. Sent as poses instead, a run is
-    a few kilobytes where the frames were megabytes, and it plays where there
-    is no python to serve frames: a docs page, a notebook read without its
-    kernel, a saved view.
+    trace, at every step. Most of that is repetition. A magnet on a path is,
+    in each frame, its first-frame self turned and shifted, to rounding; a
+    path line, the same line in every frame. Sent as poses, a run is a few
+    kilobytes where the frames were megabytes. What poses cannot say -- a
+    dimension that sweeps, pixels coloured by the field they pass through --
+    is carried as it is, frame by frame, but only for the traces it concerns:
+    a ring of magnets passing a field-coloured probe carries the probe.
 
-    Whether a run is that is not taken from what magpylib says about its
+    Which trace is which is not taken from what magpylib says about its
     objects but found in what it drew: each trace in each frame is fitted to
-    its first-frame self. A shape that changes along its path -- a dimension
-    that sweeps -- fails the fit, and so does a trace whose colours change;
-    either way the run is not motion, and this answers None. The view then
-    asks for frames, as before. A run in which nothing drawn moves at all --
-    a current that ramps -- is motion too, of nothing: ``tracks`` is empty,
-    and the view steps through it without asking for anything.
+    its first-frame self. None when the frames do not hold the same traces to
+    match up, or when what changes is more than `_CARRY_LIMIT`: the view then
+    asks python for frames, as before.
 
     Adds, to what `view_payload(scene, 0)` holds: ``tracks``, each a pose per
     frame as ``[x, y, z, qx, qy, qz, qw]`` -- the move from the first frame,
-    about the world's origin -- and on each item that moves, ``track``, the
-    index of its own. Traces that move together share one.
+    about the world's origin -- with, on each item that moves, ``track``, the
+    index of its own; traces that move together share one. And ``changes``,
+    each a changing trace's item at every frame, with, on the first frame's
+    item, ``changes``, the index of its own. A run in which nothing drawn
+    moves -- a current that ramps -- has empty ``tracks``, and still plays.
     """
-    motion = rigid_motion(scene)
+    motion = run_motion(scene)
     if motion is None:
         return None
-    tracks, track_of = motion
-    drawn = [t for t in scene.frames[0].traces if t["type"] in _DRAWN]
-    # Tagged before they are converted, so each item carries its own track
+    tracks, track_of, changing = motion
+    runs = _runs(scene)
+    if changing and _weight(runs[n] for n in changing) > 2 * _CARRY_LIMIT:
+        return None  # not worth converting to find out exactly
+    role = {n: {"changes": c} for c, n in enumerate(changing)}
+    role.update({n: {"track": t} for n, t in enumerate(track_of) if t is not None})
+    # Tagged before they are converted, so each item carries its own role
     # whatever order the conversion lists them in.
-    tagged = [
-        trace if track is None else {**trace, "track": track}
-        for trace, track in zip(drawn, track_of, strict=True)
-    ]
-    return {**view_payload(scene, traces=tagged), "tracks": tracks}
+    tagged = [trace | role.get(n, {}) for n, trace in enumerate(r[0] for r in runs)]
+    payload = view_payload(scene, traces=tagged)
+    payload["tracks"] = tracks
+    if changing:
+        payload["changes"] = [_keyed(runs[n]) for n in changing]
+        if len(json.dumps(payload["changes"], allow_nan=False)) > _CARRY_LIMIT:
+            return None
+        _shared(payload)
+    return payload
 
 
-def rigid_motion(scene):
-    """Each drawn trace of `scene`'s run as a rigid motion of its first frame.
+def _runs(scene):
+    """Each drawn trace through the run: its dict in every frame, in order."""
+    frames = [[t for t in f.traces if t["type"] in _DRAWN] for f in scene.frames]
+    return [[traces[n] for traces in frames] for n in range(len(frames[0]))]
 
-    Returns ``(tracks, track_of)``: the distinct motions, each a pose per
-    frame, and for each drawn trace of the first frame, the index of its
-    motion -- None for one that stays put. None altogether when any trace
-    does something a motion cannot: changes shape, colour or anything else,
-    or is not there in every frame.
+
+def _weight(runs):
+    """Roughly what `runs` come to as JSON: coordinates are most of it, at
+    about twenty characters a number, and a mesh's triangles the rest."""
+    size = 0
+    for run in runs:
+        for trace in run:
+            size += 60 * len(trace["x"]) + 15 * len(trace.get("i", ()))
+    return size
+
+
+def run_motion(scene):
+    """Each drawn trace of `scene`'s run: still, moved rigidly, or changing.
+
+    Returns ``(tracks, track_of, changing)``: the distinct motions, each a
+    pose per frame; for each drawn trace of the first frame, the index of
+    the motion it follows -- None for one that stays put, or that changes;
+    and the traces that change, which no motion can play. None altogether
+    when the frames do not hold the same traces, in the same order, to be
+    matched up.
 
     Everything but the vertices is compared first, for every trace: that is
-    cheaper than fitting, and it is where a run that is not motion -- pixels
-    that change colour -- is usually found out. Each trace is then fitted in
-    one go, every frame at once.
+    cheaper than fitting, and it is where a trace that changes -- pixels that
+    change colour -- is usually found out. The rest are fitted in one go,
+    every frame at once.
     """
     frames = [[t for t in f.traces if t["type"] in _DRAWN] for f in scene.frames]
-    first = frames[0]
-    layout = [(t["type"], t.get("object_id"), len(t["x"])) for t in first]
+    layout = [(t["type"], t.get("object_id")) for t in frames[0]]
     for traces in frames[1:]:
-        if [(t["type"], t.get("object_id"), len(t["x"])) for t in traces] != layout:
+        if [(t["type"], t.get("object_id")) for t in traces] != layout:
             return None
-    runs = [[traces[n] for traces in frames] for n in range(len(first))]
-    if not all(_unchanged(run) for run in runs):
-        return None
-    stacks = [np.stack([_points(trace) for trace in run]) for run in runs]
-    finite = [s[0][np.isfinite(s[0]).all(axis=1)] for s in stacks]
+    runs = _runs(scene)
+    firsts = [_points(run[0]) for run in runs]
+    finite = [p[np.isfinite(p).all(axis=1)] for p in firsts]
     size = max((float(np.abs(p).max()) for p in finite if len(p)), default=0.0)
     # Poses to a billionth of the scene, whatever its unit: far below what
     # can be seen, and exact enough that traces moving together agree on
     # their motion and share one track.
     places = max(0, 9 - math.floor(math.log10(size or 1.0)))
 
-    tracks, seen, track_of = [], {}, []
-    for stack in stacks:
-        fitted = _fits(stack)
+    tracks, seen, track_of, changing = [], {}, [], []
+    for n, run in enumerate(runs):
+        fitted = None
+        same_count = all(len(t["x"]) == len(run[0]["x"]) for t in run)
+        if same_count and _unchanged(run):
+            fitted = _fits(np.stack([_points(t) for t in run]))
         if fitted is None:
-            return None
+            track_of.append(None)
+            changing.append(n)
+            continue
         turn, shift, tolerance = fitted
         if np.abs(turn - np.eye(3)).max() <= 1e-9 and np.abs(shift).max() <= tolerance:
             track_of.append(None)
@@ -571,7 +614,7 @@ def rigid_motion(scene):
             seen[key] = len(tracks)
             tracks.append(track.tolist())
         track_of.append(seen[key])
-    return tracks, track_of
+    return tracks, track_of, changing
 
 
 def _unchanged(run):
@@ -637,11 +680,41 @@ def _fits(stack):
 
 
 def _by_kind(payload):
-    """Converted traces, sorted into the two lists every payload carries."""
-    return {
-        "meshes": [p for p in payload if p["kind"] == "mesh"],
-        "scatters": [p for p in payload if p["kind"] == "scatter"],
-    }
+    """Converted traces, sorted into the two lists every payload carries --
+    with their colour tables shared, see `_shared`."""
+    return _shared(
+        {
+            "meshes": [p for p in payload if p["kind"] == "mesh"],
+            "scatters": [p for p in payload if p["kind"] == "scatter"],
+        }
+    )
+
+
+def _shared(payload):
+    """`payload` with each distinct colour table once, in ``luts``, and each
+    mesh naming its own by index -- the meshes of a run's ``changes`` too.
+
+    A magnetization's colour table is the same for every magnet, and was
+    copied into each one, in every frame: a third of what a run weighed.
+    Tables already shared are left as they are, so this can be asked again
+    of a payload that has gained items.
+    """
+    luts = payload.setdefault("luts", [])
+    index = {tuple(lut): n for n, lut in enumerate(luts)}
+    items = [
+        *payload["meshes"],
+        *(i for steps in payload.get("changes", ()) for i in steps),
+    ]
+    for item in items:
+        lut = item.get("lut")
+        if lut is None or isinstance(lut, int):
+            continue
+        key = tuple(lut)
+        if key not in index:
+            index[key] = len(luts)
+            luts.append(lut)
+        item["lut"] = index[key]
+    return payload
 
 
 def _keyed(traces, live=None, derived=None):
@@ -654,7 +727,7 @@ def _keyed(traces, live=None, derived=None):
     `view_payload`.
     """
     payload = [
-        _CONVERT[kind](t) | ({"track": t["track"]} if "track" in t else {})
+        _CONVERT[kind](t) | {role: t[role] for role in _ROLES if role in t}
         for kind in _DRAWN
         for t in traces
         if t["type"] == kind

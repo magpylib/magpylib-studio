@@ -48,6 +48,13 @@ def swept():
 
 
 @pytest.fixture
+def served(monkeypatch):
+    """Nothing carried with the view: every changing run served a frame at a
+    time, as one past `_CARRY_LIMIT` is."""
+    monkeypatch.setattr(threejs, "_CARRY_LIMIT", 0)
+
+
+@pytest.fixture
 def morphing():
     """A magnet that grows along its path: a run no motion can play."""
     magnet = magpy.magnet.Cuboid(
@@ -149,7 +156,7 @@ def test_a_static_scene_keeps_no_run(scene_objects):
 
 
 @needs_scene_graph
-def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing):
+def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing, served):
     """What keeps a slider smooth: the element, and the camera, stay put."""
     view = widget.SceneWidget()
     assert view.payload == {}
@@ -385,7 +392,7 @@ def test_updating_a_view_is_not_itself_a_view(scene_objects):
 
 
 @needs_scene_graph
-def test_frames_are_served_one_at_a_time(morphing):
+def test_frames_are_served_one_at_a_time(morphing, served):
     """The whole run is megabytes; the payload carries one frame of it."""
     view = widget.SceneWidget(*morphing, animation=True)
     assert view.frames > 1
@@ -442,6 +449,24 @@ def _posed(points, pose):
     return points + 2 * qw * turned + 2 * np.cross(u, turned) + [x, y, z]
 
 
+def _replays(scene, played):
+    """Assert that `played` -- poses and carried changes -- draws every frame
+    of `scene` as magpylib drew it."""
+    items = played["meshes"] + played["scatters"]
+    for index in range(len(scene.frames)):
+        frame = threejs.frame_payload(scene, index)
+        for first, then in zip(items, frame["meshes"] + frame["scatters"], strict=True):
+            if "changes" in first:
+                shown = _positions(played["changes"][first["changes"]][index])
+            elif "track" in first:
+                shown = _posed(
+                    _positions(first), played["tracks"][first["track"]][index]
+                )
+            else:
+                shown = _positions(first)
+            np.testing.assert_allclose(shown, _positions(then), atol=1e-6)
+
+
 @needs_scene_graph
 def test_a_run_that_only_moves_travels_as_its_motion(swept):
     """Each frame is the first one moved: sent as poses, it is the same run."""
@@ -449,15 +474,9 @@ def test_a_run_that_only_moves_travels_as_its_motion(swept):
     played = threejs.played_payload(scene)
     assert played is not None
     assert played["tracks"]
-    items = played["meshes"] + played["scatters"]
-    assert {"track"} <= set().union(*items)  # something moves
-    for index in range(len(scene.frames)):
-        frame = threejs.frame_payload(scene, index)
-        for first, then in zip(items, frame["meshes"] + frame["scatters"], strict=True):
-            points = _positions(first)
-            if "track" in first:
-                points = _posed(points, played["tracks"][first["track"]][index])
-            np.testing.assert_allclose(points, _positions(then), atol=1e-6)
+    assert "changes" not in played
+    assert {"track"} <= set().union(*played["meshes"], *played["scatters"])
+    _replays(scene, played)
 
 
 @needs_scene_graph
@@ -478,22 +497,70 @@ def test_things_that_move_together_share_a_track():
 
 
 @needs_scene_graph
-def test_a_run_that_changes_shape_is_not_played_as_motion(morphing):
-    """A cube that grows is not a cube that moves, however it is fitted."""
-    assert threejs.played_payload(threejs._capture(morphing, animation=True)) is None
+def test_a_run_that_changes_shape_carries_the_change(morphing):
+    """A cube that grows is not a cube that moves, however it is fitted: its
+    trace is carried as it is at every step, and the run still plays."""
+    scene = threejs._capture(morphing, animation=True)
+    played = threejs.played_payload(scene)
+    assert played["tracks"] == []
+    assert len(played["changes"]) == 1
+    assert len(played["changes"][0]) == len(scene.frames)
+    _replays(scene, played)
 
 
 @needs_scene_graph
-def test_a_run_whose_colours_change_is_not_played_as_motion():
-    """Pixels coloured by the field they sit in change as the sensor passes."""
+def test_changes_past_the_limit_are_served_instead(morphing, served):
+    """Past `_CARRY_LIMIT` the run is served a frame at a time, as before."""
+    assert threejs.played_payload(threejs._capture(morphing, animation=True)) is None
+    view = widget.SceneWidget(*morphing, animation=True)
+    assert view._scene is not None
+
+
+@needs_scene_graph
+def test_only_what_changes_is_carried():
+    """Pixels coloured by the field they sit in change as the sensor passes;
+    the magnets turning past it only move. Carried as frames, the ring would
+    be most of the run: posed, only the probe's pixels are."""
+    ring = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+            ).rotate_from_angax(angle, "z", anchor=0)
+            for angle in range(0, 360, 45)
+        ]
+    )
+    ring.rotate_from_angax(np.linspace(0, 90, 12), "z", anchor=0, start=0)
     sensor = magpy.Sensor(
         pixel=np.linspace((-1, 0, 0), (1, 0, 0), 5),
         position=np.linspace((-3, 0, 1), (3, 0, 1), 12),
     )
     sensor.style.pixel.field.source = "B"
-    magnet = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1)
-    scene = threejs._capture((sensor, magnet), animation=True)
-    assert threejs.played_payload(scene) is None
+    scene = threejs._capture((ring, sensor), animation=True)
+    played = threejs.played_payload(scene)
+    assert played["changes"]
+    changing = [
+        item for item in played["meshes"] + played["scatters"] if "changes" in item
+    ]
+    assert {item["object_id"] for item in changing} == {str(id(sensor))}
+    assert sum("track" in item for item in played["meshes"]) == 8
+    _replays(scene, played)
+
+
+@needs_scene_graph
+def test_a_colour_table_is_carried_once():
+    """Eight magnets coloured by their polarization share one colour table,
+    named by index -- not copied into each, in each frame."""
+    ring = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+            ).rotate_from_angax(angle, "z", anchor=0)
+            for angle in range(0, 360, 45)
+        ]
+    )
+    payload = widget.SceneWidget(ring).payload
+    assert len(payload["luts"]) == 1
+    assert [mesh["lut"] for mesh in payload["meshes"]] == [0] * 8
 
 
 @needs_scene_graph
@@ -522,12 +589,19 @@ def test_a_small_change_far_from_the_origin_is_not_motion():
         dimension=(1e-3,) * 3,
         position=np.linspace(far, (1000, 0, 0.01), 10),
     )
-    assert threejs.played_payload(threejs._capture((grows,), animation=True)) is None
-    assert threejs.played_payload(threejs._capture((moves,), animation=True))
+    _, track_of, changing = threejs.run_motion(
+        threejs._capture((grows,), animation=True)
+    )
+    assert changing == [0]  # carried as it is, not posed
+    _, track_of, changing = threejs.run_motion(
+        threejs._capture((moves,), animation=True)
+    )
+    assert changing == []
+    assert track_of[0] is not None
 
 
 @needs_scene_graph
-def test_a_frame_says_which_run_it_was_asked_for(morphing):
+def test_a_frame_says_which_run_it_was_asked_for(morphing, served):
     """The view drops a frame of a run it has been re-pointed away from."""
     view = widget.SceneWidget(*morphing, animation=True)
     sent = []
@@ -592,7 +666,7 @@ def test_a_view_writes_to_an_open_file_as_well(scene_objects):
 
 
 @needs_scene_graph
-def test_a_saved_run_plays_without_python(morphing):
+def test_a_saved_run_plays_without_python(morphing, served):
     """Every frame travels with the file, so the page answers for them."""
     view = widget.SceneWidget(*morphing, animation=True)
     saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))

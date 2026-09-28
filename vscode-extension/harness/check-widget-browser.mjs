@@ -495,6 +495,25 @@ const WHERE = `
   }
   return Math.round(sum * 1e6) / 1e6;`;
 
+/** Page code: what the drawn things are like, as one number -- which any
+ *  change of a step shows in: a vertex that moves, a trace posed elsewhere
+ *  or turned. */
+const SHAPE = `
+  let sum = 0;
+  for (const node of window.scene3d.byObjectId.values()) {
+    node.traverse((o) => {
+      if (o.geometry) {
+        const a = o.geometry.attributes.position.array;
+        for (let i = 0; i < a.length; i++) {
+          if (Number.isFinite(a[i])) sum += Math.abs(a[i]);
+        }
+      }
+      sum += Math.abs(o.position.x) + Math.abs(o.position.y) + Math.abs(o.position.z);
+      sum += Math.abs(o.quaternion.x) + Math.abs(o.quaternion.y) + Math.abs(o.quaternion.z);
+    });
+  }
+  return Math.round(sum * 1e6) / 1e6;`;
+
 /** A redraw -- a theme that changed -- must not take a paused run back to
  *  its first step while the counter still names the one it was on. */
 async function themeMidRun(port, base) {
@@ -604,6 +623,27 @@ async function slowPosing(port, base) {
       }
     },
   );
+}
+
+/** No kernel to serve a run's frames: the view says so, stops, and shows
+ *  the step it is really on. */
+async function silent(port, base) {
+  await check("a run nobody serves says so, and stops", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/silent.html`);
+      const result = await tab.until("return window.result", 15_000);
+      if (!result) return "never finished";
+      if (!result.said?.includes("No answer from Python")) {
+        return `said ${JSON.stringify(result.said)}`;
+      }
+      if (result.playing) return "still says it is playing";
+      if (result.step !== "0") return `the slider says step ${result.step}`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 async function pool(port, base) {
@@ -781,8 +821,10 @@ async function savedView(port, base, out, expected) {
 
   const RUNS = {
     run: "a saved run that only moves plays from its poses",
-    morph: "a saved run that changes shape plays from its frames",
+    morph: "a saved run that changes shape plays from the changes it carries",
+    mix: "a saved run that moves and changes plays, posed and carried",
     ramp: "a saved run in which nothing drawn moves still plays",
+    served: "a saved run too big to carry plays from its frames",
   };
   for (const [page, label] of Object.entries(RUNS)) {
     await check(label, async () => {
@@ -801,6 +843,21 @@ async function savedView(port, base, out, expected) {
         );
         if (!step) {
           return `stuck at ${await run.evaluate(`return document.querySelector(".magpy-scene-counter").textContent`)}`;
+        }
+        // and what is drawn changes with the step -- posed, carried or
+        // served alike -- except where nothing drawn moves at all
+        if (page !== "ramp") {
+          await run.evaluate(`${tool("Pause")}?.click(); return 1`);
+          const at = async (step) => {
+            await run.evaluate(
+              `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+            );
+            await wait(700);
+            return run.evaluate(SHAPE);
+          };
+          if ((await at("0")) === (await at("s.max"))) {
+            return "the picture is the same at the first and last step";
+          }
         }
         return thrown(run);
       } finally {
@@ -854,6 +911,7 @@ try {
   await blocked(browser.port, base);
   await themeMidRun(browser.port, base);
   await staleFrame(browser.port, base);
+  await silent(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {
