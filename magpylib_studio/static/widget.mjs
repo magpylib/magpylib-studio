@@ -85,12 +85,26 @@ function paint(color) {
  *  !important`, in a dark editor as much as a light one, because ipywidgets'
  *  own controls take their colours from JupyterLab's theme variables, which
  *  VS Code does not supply: on white they are legible, on dark they are not.
+ *  Two of them, one in the other -- the output (padded 8px) and the box the
+ *  widget is put in (padded 0 8px) -- as a live VS Code page showed.
  *
- *  So it is looked past only when the view is alone on it, and then the
- *  view wears VS Code's theme and paints the backdrop to match. Shared with
- *  other widgets -- sliders in the same box -- the view wears the white, as
- *  they must, rather than sitting dark among light controls. */
+ *  So they are looked past only when the view is alone on them, and then the
+ *  view wears VS Code's theme and paints them to match. Shared with other
+ *  widgets -- sliders in the same box -- the view wears the white, as they
+ *  must, rather than sitting dark among light controls. */
 const BACKDROPS = ".cell-output-ipywidget-background";
+
+/** What counts as sharing a backdrop: another widget, whether or not it has
+ *  been drawn yet -- Jupyter renders a box's children one by one -- or
+ *  anything else that takes up room. VS Code puts an empty `div.cell-output`
+ *  beside every widget, where a plain-text output would go, and an empty
+ *  placeholder is no company. */
+const WIDGETS = ".lm-Widget, .jupyter-widgets";
+function company(node) {
+  if (node.matches(WIDGETS)) return true;
+  const box = node.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
 
 /** A colour as `rgb(…)`, which three.js reads, or null when it is not
  *  opaque. */
@@ -119,19 +133,37 @@ function declaredTheme() {
   };
 }
 
-/** The host's backdrop, when this widget is all it holds -- and so may wear
- *  the view's colour instead of leaving a white rim round a dark view. Not
- *  when it holds anything else: sliders in the same box were drawn for the
- *  white, and would be unreadable on anything darker. */
-function soleBackdrop(el) {
+/** The host's backdrops that hold this widget and nothing else, innermost
+ *  first -- and so may wear the view's colour instead of leaving a white rim
+ *  round a dark view. None when the first holds anything else: sliders in
+ *  the same box were drawn for the white, and would be unreadable on
+ *  anything darker. None, too, for a widget not yet on the page, whose
+ *  company may not have arrived. */
+function soleBackdrops(el) {
+  const found = [];
+  if (!el.isConnected) return found;
   for (let node = el; ;) {
     const root = node.getRootNode();
     const parent =
       node.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
-    if (!parent || parent.children.length !== 1) return null;
-    if (parent.matches(BACKDROPS)) return parent;
+    if (!parent) return found;
+    const siblings = [...parent.children].filter((child) => child !== node);
+    if (siblings.some(company)) return found;
+    if (parent.matches(BACKDROPS)) found.push(parent);
+    else if (found.length) return found; // past the outermost of them
     node = parent;
   }
+}
+
+/** The host's backdrop nearest the widget, alone on it or not: its size
+ *  changes when company arrives, which is when to look again. */
+function nearestBackdrop(el) {
+  for (let node = el.parentNode; node; node = node.parentNode) {
+    if (node instanceof ShadowRoot) node = node.host;
+    if (!(node instanceof Element)) return null;
+    if (node.matches(BACKDROPS)) return node;
+  }
+  return null;
 }
 
 /** What the view sits on: the first opaque background among the elements
@@ -143,11 +175,11 @@ function soleBackdrop(el) {
  * text inherited onto it, which left the legend and the tools unreadable.
  */
 function surroundings(el) {
-  const alone = soleBackdrop(el) !== null;
+  const alone = new Set(soleBackdrops(el));
   for (let node = el.parentNode; node; node = node.parentNode) {
     if (node instanceof ShadowRoot) node = node.host;
     if (!(node instanceof Element)) break; // the document: nothing opaque
-    if (alone && node.matches(BACKDROPS)) continue;
+    if (alone.has(node)) continue;
     const found = opaque(getComputedStyle(node).backgroundColor);
     if (found) {
       const { css, r, g, b } = found;
@@ -431,6 +463,10 @@ function render({ model, el }) {
   const themeChoice = () =>
     THEMES[model.get("theme")] ? model.get("theme") : "auto";
   function dressTheme() {
+    // What the host paints, not what this widget painted over it: read with
+    // its own colour on, a backdrop the view has just been given company on
+    // would still look dark, and keep it dark.
+    unwearBackdrop();
     const choice = themeChoice();
     setIcon(themeButton, choice);
     name(
@@ -448,7 +484,12 @@ function render({ model, el }) {
           ? behind.dark
           : matchMedia("(prefers-color-scheme: dark)").matches));
     const next = `${behind?.css}|${dark}`;
-    if (next === theme) return false;
+    if (next === theme) {
+      // The colours stand; who shares the backdrop may not -- forced dark,
+      // they never change, and sliders can still arrive after the view.
+      wearBackdrop();
+      return false;
+    }
     theme = next;
     if (behind?.css) {
       el.style.setProperty("--vscode-editor-background", behind.css);
@@ -459,16 +500,32 @@ function render({ model, el }) {
     return true;
   }
 
-  // The backdrop painted to match, and given back as it was when the widget
-  // goes. An inline `!important` is the one thing that outranks the host's.
-  let backdrop = null;
+  // The backdrops painted to match, and given back as they were when the
+  // widget goes. An inline `!important` is the one thing that outranks the
+  // host's. Looked at again when the nearest one changes size: sliders that
+  // arrive after the view are company it could not have seen.
+  let backdrops = [];
+  let watched = null;
+  const backdropWatch = new ResizeObserver(() => retheme());
+  function unwearBackdrop() {
+    for (const node of backdrops) node.style.removeProperty("background");
+    backdrops = [];
+  }
   function wearBackdrop() {
-    backdrop?.style.removeProperty("background");
-    backdrop = soleBackdrop(el);
+    unwearBackdrop();
+    backdrops = soleBackdrops(el);
     const colour = getComputedStyle(el)
       .getPropertyValue("--vscode-editor-background")
       .trim();
-    backdrop?.style.setProperty("background", colour, "important");
+    for (const node of backdrops) {
+      node.style.setProperty("background", colour, "important");
+    }
+    const nearest = nearestBackdrop(el);
+    if (nearest !== watched) {
+      if (watched) backdropWatch.unobserve(watched);
+      if (nearest) backdropWatch.observe(nearest);
+      watched = nearest;
+    }
   }
   function retheme() {
     if (dressTheme() && api) draw();
@@ -840,7 +897,8 @@ function render({ model, el }) {
   }
 
   return () => {
-    backdrop?.style.removeProperty("background");
+    unwearBackdrop();
+    backdropWatch.disconnect();
     themeWatch.disconnect();
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);

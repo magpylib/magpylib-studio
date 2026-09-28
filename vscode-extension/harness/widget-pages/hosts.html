@@ -20,33 +20,71 @@
         // As VS Code's webview host dresses the page: body transparent, the
         // theme's colours as variables on the root, its kind on the body --
         // and the Jupyter extension's output area forced white behind it.
+        // As a live VS Code notebook lays out a widget output -- recorded
+        // from one, not from reading its source, which got it wrong: the
+        // body transparent, the theme's kind on it and its colours as
+        // variables on the root; the output white and padded 8px, and the
+        // box inside it white again and padded 0 8px, holding an empty
+        // `div.cell-output` beside the widget. `?layout=` says what else the
+        // box holds: nothing (alone), sliders in the same VBox (shared), or
+        // sliders that arrive after the view has drawn (late).
         vscode: {
           css: `
-            body { margin: 0; padding: 12px; background-color: transparent;
+            body { margin: 0; background-color: transparent;
                    color: var(--vscode-editor-foreground); }
-            .cell-output-ipywidget-background { background: #fff !important; padding: 6px; }`,
+            .cell-output-ipywidget-background { background: rgb(255, 255, 255) !important; }
+            .output { padding: 8px; }
+            .output > .cell-output-ipywidget-background { padding: 0 8px; }
+            .slider { color: #333; padding: 4px; }`,
           wrap(el) {
-            const backdrop = document.createElement("div");
-            backdrop.className = "cell-output-ipywidget-background";
-            const output = document.createElement("div");
-            output.className = "cell-output";
-            el.replaceWith(backdrop);
-            backdrop.append(output);
-            output.append(el);
-            // Another output in the same white panel -- ipywidgets' sliders,
-            // drawn for white whatever VS Code's theme.
-            if (new URLSearchParams(location.search).has("shared")) {
-              const slider = document.createElement("div");
-              slider.textContent = "a slider, drawn for white";
-              output.prepend(slider);
+            const make = (className, ...children) => {
+              const node = document.createElement("div");
+              node.className = className;
+              node.append(...children);
+              return node;
+            };
+            const slider = () =>
+              make(
+                "lm-Widget widget-hbox",
+                make("lm-Widget slider", "a slider, drawn for white"),
+              );
+            const layout = new URLSearchParams(location.search).get("layout");
+            el.classList.add("lm-Widget");
+            const holder = document.createElement("div");
+            el.replaceWith(holder);
+            let content = el;
+            if (layout === "shared") {
+              content = make("lm-Widget widget-vbox", slider(), el);
+            } else if (layout === "late") {
+              content = make("lm-Widget widget-vbox", el);
+              window.arrive = () => content.prepend(slider());
             }
+            holder.append(
+              make(
+                "widgetarea",
+                make(
+                  "cell_container",
+                  make(
+                    "output_container",
+                    make(
+                      "output cell-output-ipywidget-background",
+                      make(
+                        "cell-output-ipywidget-background",
+                        make("cell-output cell-output"),
+                        content,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
           },
           flip(dark) {
             const style = document.documentElement.style;
             for (const [name, light, night] of [
-              ["--vscode-editor-background", "#ffffff", "#1f1f1f"],
-              ["--vscode-notebook-editorBackground", "#ffffff", "#1f1f1f"],
-              ["--vscode-editor-foreground", "#3b3b3b", "#cccccc"],
+              ["--vscode-editor-background", "#ffffff", "#121314"],
+              ["--vscode-notebook-editorBackground", "#ffffff", "#121314"],
+              ["--vscode-editor-foreground", "#3b3b3b", "#bbbebf"],
             ]) {
               style.setProperty(name, dark ? night : light);
             }
