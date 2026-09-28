@@ -148,9 +148,13 @@ def _(mo):
     mo.md("""
     ## Paths, played in the browser
 
-    `animation=True` captures every step of the run. The widget keeps the
-    frames and serves them to the view one at a time, so **▶** plays and
-    the slider scrubs.
+    `animation=True` captures every step of the run. Here every step is the
+    first one moved — a sensor sweeping past a magnet — so the view is handed
+    the motion rather than the frames: **▶** plays and the slider scrubs in
+    the browser with nothing to ask python, which is also why the run still
+    plays in a saved page, or in a notebook read without its kernel. A run
+    that changes shape as it goes is served a frame at a time instead, like
+    the next one.
     """)
     return
 
@@ -183,7 +187,8 @@ def _(mo):
     `obj.path_properties` lists them for an object. Here a magnet's
     polarization turns a full circle, a coil grows while its current ramps
     up, and the probe's pixels show the field they sit in. None of that is
-    a magnet moving, so each step is drawn as magpylib computed it.
+    a magnet moving, so no motion can play it: the widget keeps the frames
+    and serves them one at a time, each as magpylib computed it.
     """)
     return
 

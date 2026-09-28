@@ -40,10 +40,20 @@ def scene_objects():
 
 @pytest.fixture
 def swept():
-    """A sensor on a path, so there is a run to play."""
+    """A sensor on a path past a turning magnet: a run that only moves."""
     magnet = magpy.magnet.Cylinder(polarization=(1, 0, 0), dimension=(2, 1))
+    magnet.rotate_from_angax(np.linspace(0, 90, 8), "z", start=0)
     sensor = magpy.Sensor(position=np.linspace((-3, 0, 1), (3, 0, 1), 12))
     return magnet, sensor
+
+
+@pytest.fixture
+def morphing():
+    """A magnet that grows along its path: a run no motion can play."""
+    magnet = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=np.linspace((1, 1, 1), (2, 2, 2), 10)
+    )
+    return (magnet,)
 
 
 @needs_scene_graph
@@ -139,7 +149,7 @@ def test_a_static_scene_keeps_no_run(scene_objects):
 
 
 @needs_scene_graph
-def test_a_view_is_re_pointed_rather_than_remade(scene_objects, swept):
+def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing):
     """What keeps a slider smooth: the element, and the camera, stay put."""
     view = widget.SceneWidget()
     assert view.payload == {}
@@ -151,7 +161,7 @@ def test_a_view_is_re_pointed_rather_than_remade(scene_objects, swept):
     assert view.picked == [scene_objects[0]]
 
     # A run arrives and is kept; a scene without one lets it go again.
-    view.update(*swept, animation=True)
+    view.update(*morphing, animation=True)
     assert view.frames > 1
     assert view._scene is not None
     view.update(*scene_objects)
@@ -375,9 +385,9 @@ def test_updating_a_view_is_not_itself_a_view(scene_objects):
 
 
 @needs_scene_graph
-def test_frames_are_served_one_at_a_time(swept):
+def test_frames_are_served_one_at_a_time(morphing):
     """The whole run is megabytes; the payload carries one frame of it."""
-    view = widget.SceneWidget(*swept, animation=True)
+    view = widget.SceneWidget(*morphing, animation=True)
     assert view.frames > 1
     assert view.payload["ranges"] is not None  # the envelope, once
 
@@ -415,6 +425,87 @@ def test_one_frame_is_drawn_rather_than_all_of_them(swept):
     one = threejs.view_payload(scene, index=0)
     assert len(everything["meshes"]) > len(one["meshes"])
     assert len(one["meshes"]) == len(threejs.frame_payload(scene, 0)["meshes"])
+
+
+def _positions(item):
+    """A payload item's vertices, as rows -- NaN where a line lifts its pen."""
+    flat = np.array([np.nan if v is None else v for v in item["position"]])
+    return flat.reshape(-1, 3)
+
+
+def _posed(points, pose):
+    """`points` moved by one step of a track: position, then quaternion."""
+    x, y, z, qx, qy, qz, qw = pose
+    u = np.array([qx, qy, qz])
+    # v' = v + 2w(u x v) + 2u x (u x v), for a unit quaternion (u, w)
+    turned = np.cross(u, points)
+    return points + 2 * qw * turned + 2 * np.cross(u, turned) + [x, y, z]
+
+
+@needs_scene_graph
+def test_a_run_that_only_moves_travels_as_its_motion(swept):
+    """Each frame is the first one moved: sent as poses, it is the same run."""
+    scene = threejs._capture(swept, animation=True)
+    played = threejs.played_payload(scene)
+    assert played is not None
+    assert played["tracks"]
+    items = played["meshes"] + played["scatters"]
+    assert {"track"} <= set().union(*items)  # something moves
+    for index in range(len(scene.frames)):
+        frame = threejs.frame_payload(scene, index)
+        for first, then in zip(items, frame["meshes"] + frame["scatters"], strict=True):
+            points = _positions(first)
+            if "track" in first:
+                points = _posed(points, played["tracks"][first["track"]][index])
+            np.testing.assert_allclose(points, _positions(then), atol=1e-6)
+
+
+@needs_scene_graph
+def test_things_that_move_together_share_a_track():
+    """Eight magnets turned as one ring are one motion, not eight."""
+    ring = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+            ).rotate_from_angax(angle, "z", anchor=0)
+            for angle in range(0, 360, 45)
+        ]
+    )
+    ring.rotate_from_angax(np.linspace(0, 360, 40), "z", anchor=0, start=0)
+    played = threejs.played_payload(threejs._capture((ring,), animation=True))
+    assert len(played["tracks"]) == 1
+    assert [item["track"] for item in played["meshes"]] == [0] * 8
+
+
+@needs_scene_graph
+def test_a_run_that_changes_shape_is_not_played_as_motion(morphing):
+    """A cube that grows is not a cube that moves, however it is fitted."""
+    assert threejs.played_payload(threejs._capture(morphing, animation=True)) is None
+
+
+@needs_scene_graph
+def test_a_run_whose_colours_change_is_not_played_as_motion():
+    """Pixels coloured by the field they sit in change as the sensor passes."""
+    sensor = magpy.Sensor(
+        pixel=np.linspace((-1, 0, 0), (1, 0, 0), 5),
+        position=np.linspace((-3, 0, 1), (3, 0, 1), 12),
+    )
+    sensor.style.pixel.field.source = "B"
+    magnet = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1)
+    scene = threejs._capture((sensor, magnet), animation=True)
+    assert threejs.played_payload(scene) is None
+
+
+@needs_scene_graph
+def test_a_view_plays_a_moving_run_itself(swept):
+    """Nothing kept to serve, and a saved page carries poses, not frames."""
+    view = widget.SceneWidget(*swept, animation=True)
+    assert view.frames > 1
+    assert view.payload["tracks"]
+    assert view._scene is None
+    saved = view._saved()
+    assert saved["run"] == []
+    assert saved["state"]["payload"]["tracks"] == view.payload["tracks"]
 
 
 def _unpacked(page, name):
@@ -461,9 +552,9 @@ def test_a_view_writes_to_an_open_file_as_well(scene_objects):
 
 
 @needs_scene_graph
-def test_a_saved_run_plays_without_python(swept):
+def test_a_saved_run_plays_without_python(morphing):
     """Every frame travels with the file, so the page answers for them."""
-    view = widget.SceneWidget(*swept, animation=True)
+    view = widget.SceneWidget(*morphing, animation=True)
     saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))
     assert len(saved["run"]) == view.frames
     assert saved["run"][3] == threejs.frame_payload(view._scene, 3)

@@ -63,6 +63,11 @@ const SPACES = {
 let orientations = {}; // studio id -> the rotation baked into its vertices
 let anchors = {}; // studio id -> where the object is
 let paths = {}; // studio id -> every frame it passes through, when it has one
+// A run that is its first frame moved about: each motion, a pose per step,
+// and each trace that moves with the matrix it was hung with -- which is
+// where it stands at the first step.
+let tracks = [];
+let tracked = [];
 let shapes = {}; // studio id -> the one parameter a resize may drag
 let polarizations = {}; // studio id -> its polarization, in its own frame
 //: Sources a later step copies. Their copies are drawn on their own node and
@@ -1152,6 +1157,7 @@ function frameCount() {
  */
 function renderFrame(payload) {
   discard(new Set());
+  tracked = []; // built again below, at this frame's pose
   for (const item of payload.meshes.concat(payload.scatters)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
@@ -1160,6 +1166,34 @@ function renderFrame(payload) {
   for (const box of outlines) box.update();
   drawHints(); // round the nodes just built, not the ones discarded
 }
+
+/** Put each moving trace where it is at step `index` of the run, when the
+ *  payload carried the run as motion. Nothing is built: the traces are the
+ *  first frame's, moved, which magpylib's frames are to rounding -- the
+ *  engine checked before it sent the poses instead.
+ *
+ * A pose is the move from the first step, about the world's origin; the
+ * trace hangs on its object's node, so it is carried into the node's frame
+ * by the matrix it was hung with. */
+function poseFrame(index) {
+  const pose = new THREE.Matrix4();
+  const at = new THREE.Vector3();
+  const turn = new THREE.Quaternion();
+  const one = new THREE.Vector3(1, 1, 1);
+  for (const { built, rest, track } of tracked) {
+    const steps = tracks[track];
+    const [x, y, z, qx, qy, qz, qw] = steps[Math.min(index, steps.length - 1)];
+    pose.compose(at.set(x, y, z), turn.set(qx, qy, qz, qw), one);
+    built.matrix.copy(rest).multiply(pose);
+    built.matrix.decompose(built.position, built.quaternion, built.scale);
+  }
+  for (const box of outlines) box.update();
+  drawHints();
+}
+
+/** Whether the run can be played here, by `poseFrame`, with nothing to ask
+ *  for. */
+const posed = () => tracks.length > 0;
 
 /** Handles have no place on something moving of its own accord: a drag would
  *  fight the playback for the same object. */
@@ -1322,12 +1356,18 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   patterned = new Set(payload.patterned || []);
 
   discard(held);
+  tracks = payload.tracks || [];
+  tracked = [];
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
     if (held.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
-    node.attach(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
+    const built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
+    node.attach(built);
+    if (item.track != null) {
+      tracked.push({ built, rest: built.matrix.clone(), track: item.track });
+    }
   }
 
   // Size first: the fit depends on the aspect ratio, and on the very first
@@ -1377,6 +1417,8 @@ export const scene3d = {
   snapshot,
   setPlaying,
   renderFrame,
+  poseFrame,
+  posed,
   frameCount,
   nextObject,
   setSpace,

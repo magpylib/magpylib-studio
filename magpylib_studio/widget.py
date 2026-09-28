@@ -252,10 +252,11 @@ class SceneWidget(anywidget.AnyWidget):
         """
         traits, kwargs = self._split(kwargs)
         super().__init__(**traits)
-        #: The captured run, kept only when there is one: every frame holds
-        #: every trace of the scene as computed at that step, so this is the
-        #: megabytes the payload deliberately does not carry. Frames are
-        #: served from here one at a time, as the panel serves them.
+        #: The captured run, kept only when there is one that motion cannot
+        #: play -- see `_adopt`. Every frame holds every trace of the scene
+        #: as computed at that step, so this is the megabytes the payload
+        #: deliberately does not carry. Frames are served from here one at a
+        #: time, as the panel serves them.
         self._scene = None
         self._objects = {}
         #: Where the view was last looking, as it reported: a message, not a
@@ -305,12 +306,17 @@ class SceneWidget(anywidget.AnyWidget):
         still believes the last scene's frame count, and the playback controls
         are drawn from it.
         """
+        run = len(scene.frames) > 1
+        # A run that is its first frame moved about travels as the motion and
+        # plays in the browser, kernel or none. Only one that changes shape
+        # as it goes is kept here, to be served a frame at a time.
+        played = threejs.played_payload(scene) if run else None
         with self.hold_sync():
-            self._scene = scene if len(scene.frames) > 1 else None
+            self._scene = scene if run and played is None else None
             self.frames = len(scene.frames)
             self.duration = float(scene.animation.time)
             self.repeat = bool(scene.animation.repeat)
-            self.payload = threejs.view_payload(scene, index=0)
+            self.payload = played or threejs.view_payload(scene, index=0)
 
     def update(self, *objects, animation=False, **kwargs):
         """Point this view at `objects`.
@@ -403,8 +409,8 @@ class SceneWidget(anywidget.AnyWidget):
 
         The widget itself, not a picture of it: orbit, legend, keys and the
         selection and hiding as they are now, running against a model the
-        page holds. A captured run travels with it, every frame, so a path
-        still plays -- the one thing the view would otherwise ask python for.
+        page holds. A captured run travels with it -- as its motion, or every
+        frame of one that changes shape -- so a path still plays.
 
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
@@ -418,8 +424,9 @@ class SceneWidget(anywidget.AnyWidget):
         )
 
     def _saved(self):
-        """What a saved page holds: the model's state as it is now, and the
-        run, every frame of it -- the page answers for them itself."""
+        """What a saved page holds: the model's state as it is now, and --
+        for a run the payload does not carry as motion -- every frame of it,
+        which the page answers for itself."""
         state = {
             "payload": self.payload,
             "tree": self.tree,
