@@ -351,9 +351,13 @@ def _capture(objects, animation=False, **kwargs):
 
     With `animation`, that scene carries one frame per step of the longest
     path, each holding the whole scene *as computed at that step* -- which is
-    the only way to get what a pose cannot express. A sensor's arrows are
-    read from the field, so they turn as the magnet that makes them turns,
-    and no amount of moving meshes about will show it.
+    the only way to get what a pose cannot express: a shape that changes
+    along its path, or pixels coloured by the field they pass through.
+
+    Taken out of `_captured` as it is read, not left there: a scene holds
+    every trace of every frame, and -- where magpylib hands its backends the
+    objects -- the objects themselves, which a module-level reference would
+    keep alive until the next capture.
     """
     if not available():
         raise RuntimeError(UNAVAILABLE)
@@ -361,7 +365,7 @@ def _capture(objects, animation=False, **kwargs):
     magpy.show(
         objects, backend=_BACKEND, return_fig=True, animation=animation, **kwargs
     )
-    return _captured["scene"]
+    return _captured.pop("scene")
 
 
 def capture_frames(objects, steps):

@@ -91,8 +91,9 @@ the row under the pointer, and always on one that is hidden — a swatch in the
 colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
 range in tree order, a double click frames it. It writes `selected` and
 `hidden`, the traitlets a click in the view and a notebook cell write too. It
-needs the objects, because the payload cannot say how they nest, so it comes
-with `SceneWidget(...)` and `update()` and not with a bare `magpy.show()`.
+needs the objects, because the payload cannot say how they nest: it comes with
+`SceneWidget(...)` and `update()`, and with a bare `magpy.show()` only where
+magpylib hands its backends the objects (`Panel.objects`).
 
 What is selected, hidden or folded survives `update()`: an object passed again
 keeps it, and a rebuilt one inherits it from whatever sat in its place in the
