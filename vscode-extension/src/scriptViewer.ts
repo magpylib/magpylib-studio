@@ -161,6 +161,11 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
     ),
   );
   const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
+  // The notebook widget, which a `widget` figure is drawn with: copied in by
+  // `npm run compile`, see harness/copy-widget.js.
+  const widgetDir = vscode.Uri.joinPath(context.extensionUri, 'widget');
+  const widgetUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.js'));
+  const widgetCssUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
   // Same mapping as the studio's own panel: three ships ESM only and its
   // addons import the bare name, so the specifiers are mapped rather than
   // rewritten.
@@ -179,20 +184,23 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   const importMap = JSON.stringify({
     imports: { three: `${threeUri}`, 'three/addons/': `${threeAddonsUri}/` },
   });
+  // `blob:` in script-src: the widget loads its renderer from a blob URL, one
+  // module instance per view, so that two views on a page are two scenes.
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; font-src ${webview.cspSource};" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource} blob:; font-src ${webview.cspSource};" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Magpylib View</title>
   <link rel="stylesheet" href="${codiconUri}" />
   <link rel="stylesheet" href="${styleUri}" />
+  <link rel="stylesheet" href="${widgetCssUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
   <script type="importmap" nonce="${nonce}">${importMap}</script>
   <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
-<body>
+<body data-widget="${widgetUri}">
   <div id="bar">
     <span id="status">Waiting for a figure…</span>
     <button id="promote" hidden title="Runs this script again in the studio, which takes its objects">
@@ -469,7 +477,9 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
     );
     return undefined;
   }
-  if (payload.kind !== 'plotly' && payload.kind !== 'scene') {
+  // `scene` is what a package older than the widget-in-the-panel writes, and
+  // is still drawn as it always was.
+  if (!['plotly', 'scene', 'widget'].includes(payload.kind)) {
     say(`ignoring ${uri.fsPath}: unknown figure kind ${payload.kind}`);
     return undefined;
   }

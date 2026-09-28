@@ -4,6 +4,15 @@ All notable changes to the Magpylib Studio extension.
 
 ## [Unreleased]
 
+### Added
+
+- A figure a script draws with `magpy.show(..., backend="studio")`, or with
+  **Draw scripts here** on, is now the notebook widget: the legend nesting the
+  objects as their collections do, the tools and the keys. `animation=True`
+  plays in the panel from the run the figure carries, where it used to fall back
+  to a still picture. Needs magpylib main for the legend and the display-backend
+  API.
+
 ## [0.4.1]
 
 ### Fixed

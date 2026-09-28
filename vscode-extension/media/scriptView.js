@@ -35,6 +35,69 @@ let current = null;
 //: take it back cleanly
 let drawing = null;
 
+// A `widget` figure is the notebook widget's own state -- what
+// `SceneWidget.write_html` saves -- and is drawn with the widget: the same
+// legend, playback, tools and keys as a notebook cell. One model for the
+// panel's life: a re-run of the script re-points it, as `update()` does a
+// cell's, which keeps the camera where the user left it.
+let widgetModel = null;
+let widgetRun = []; // a run too big to carry as changes, every frame of it
+
+/** A model the widget can be run against, held here: what anywidget hands a
+ *  widget, answering for frames from the run the figure carries. */
+function localModel(state) {
+  const values = { ...state };
+  const listeners = {};
+  const emit = (event, value) =>
+    (listeners[event] || []).forEach((listener) => listener(value));
+  return {
+    get: (key) => values[key],
+    set(key, value) {
+      values[key] = value;
+      emit(`change:${key}`, value);
+    },
+    save_changes() {},
+    on: (event, listener) => (listeners[event] ||= []).push(listener),
+    off() {},
+    send(message) {
+      if (message.kind !== "frame" || !widgetRun.length) return;
+      const at = Math.max(0, Math.min(message.index, widgetRun.length - 1));
+      setTimeout(() =>
+        emit("msg:custom", {
+          kind: "frame",
+          ...widgetRun[at],
+          runId: message.runId,
+        }),
+      );
+    },
+  };
+}
+
+/** The widget fills the panel; its height is the model's, so it follows. */
+const fitWidget = () =>
+  widgetModel?.set("height", Math.max(240, canvasEl.clientHeight - 2));
+new ResizeObserver(fitWidget).observe(canvasEl);
+
+async function drawWidget(body) {
+  widgetRun = body.run || [];
+  if (widgetModel) {
+    // Everything but the payload first: the widget reads a new payload with
+    // the tree, run length and pace it belongs to.
+    for (const [key, value] of Object.entries(body.state)) {
+      if (key !== "payload" && key !== "height") widgetModel.set(key, value);
+    }
+    widgetModel.set("payload", body.state.payload);
+    return;
+  }
+  widgetModel = localModel(body.state);
+  fitWidget();
+  const widget = (await import(document.body.dataset.widget)).default;
+  canvasEl.innerHTML = "";
+  const el = document.createElement("div");
+  canvasEl.append(el);
+  widget.render({ model: widgetModel, el });
+}
+
 /** The scene graph is a module, and modules run after this script does — so a
  *  payload can arrive before there is anything to draw it with. `load` fires
  *  once every deferred module has executed. */
@@ -61,7 +124,12 @@ function drawn(payload, stale) {
     if (drawing === "plotly") Plotly.purge(canvasEl);
     canvasEl.innerHTML = "";
   }
+  if (drawing === "widget" && payload.kind !== "widget") widgetModel = null;
   drawing = payload.kind;
+  if (payload.kind === "widget") {
+    drawWidget(payload.body || {});
+    return;
+  }
   if (payload.kind === "scene") {
     // keepCamera is the whole point of addressing panels rather than
     // replacing them: a rerun of the script redraws this scene where the
@@ -104,6 +172,8 @@ window.addEventListener("message", (event) => {
 // drawn. Plotly holds the colours it was given, so they have to be re-given.
 new MutationObserver(() => {
   if (!current) return;
+  // the widget watches the theme itself, as it does in a notebook
+  if (current.kind === "widget") return;
   if (current.kind === "scene") {
     // The scene reads the editor background off the same CSS variable each
     // time it renders, so redrawing it is what picks the new theme up.

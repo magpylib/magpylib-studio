@@ -144,48 +144,6 @@ def _packed(text):
     return base64.b64encode(raw).decode("ascii")
 
 
-def _given(objects):
-    """The objects as passed, lists opened up and collections left whole."""
-    for obj in objects:
-        if isinstance(obj, list | tuple | set):
-            yield from _given(obj)
-        else:
-            yield obj
-
-
-def _tree(objects):
-    """The Collection hierarchy under `objects`, and every object in it by id.
-
-    It has to come from the objects. The payload cannot carry it: every trace
-    under a Collection is stamped with the *outermost* one's legendgroup, so
-    three levels of nesting arrive looking like one.
-
-    Each object appears once, where it sits in its collection. One that was
-    passed and is also inside another that was passed is shown in its
-    collection rather than a second time at the top.
-    """
-    given = list(_given(objects))
-    inside = {id(child) for obj in given for child in getattr(obj, "children_all", ())}
-    found = {}
-
-    def node(obj):
-        key = str(id(obj))
-        found[key] = obj
-        return {
-            "id": key,
-            "label": getattr(obj.style, "label", None) or type(obj).__name__,
-            "kind": type(obj).__name__,
-            "children": [node(child) for child in getattr(obj, "children", ())],
-        }
-
-    roots = [
-        node(obj)
-        for obj in given
-        if id(obj) not in inside and str(id(obj)) not in found
-    ]
-    return roots, found
-
-
 def _positions(tree, at=""):
     """Each node's id, and where it sits: ``"0"``, ``"0/1"``, ``"0/1/3"``.
 
@@ -373,7 +331,7 @@ class SceneWidget(anywidget.AnyWidget):
         nowhere to go is dropped.
         """
         before = dict(_positions(self.tree))
-        tree, objects = _tree(objects)
+        tree, objects = threejs.object_tree(objects)
         after = {path: key for key, path in _positions(tree)}
 
         def carried(ids):
