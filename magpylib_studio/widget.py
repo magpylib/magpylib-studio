@@ -15,10 +15,16 @@ redraws, and a click in the view is a value the next cell reads -- which is
 the parameter binding the studio's own GUI is heading for, with no protocol in
 the middle, because the notebook already re-runs the cell.
 
-Read only, and for the same reason `backend.py` is: what a view can offer to
-edit is what the host can put back, and here the host is a cell that has
-already run. Selection is the exception -- it is a value, not an edit -- and
-`picked` gives back the magpylib objects that were clicked.
+Read only by default, and for the same reason `backend.py` is: what a view
+can offer to edit is what the host can put back, and here the host is a cell
+that has already run. Selection is the exception -- it is a value, not an
+edit -- and `picked` gives back the magpylib objects that were clicked.
+
+``editable=True`` is the other way round: the objects are copied into a
+studio session in the kernel rather than left to the cell, so an edit has
+somewhere to be kept. Dragged there, a magnet moves in the session, can be
+undone, and comes back out as code. A path in place of the objects opens a
+script's objects, or a scene the studio saved, the same way.
 
 Imported only when a widget is actually drawn: the entry point magpylib
 resolves while it is importing names `backend.py`, which stays down to
@@ -32,8 +38,11 @@ import base64
 import gzip
 import html
 import json
+import os
 import pathlib
 import string
+import sys
+import warnings
 
 import anywidget
 import traitlets
@@ -194,6 +203,32 @@ class SceneWidget(anywidget.AnyWidget):
     frames = traitlets.Int(1).tag(sync=True)
     duration = traitlets.Float(5.0).tag(sync=True)
     repeat = traitlets.Bool(False).tag(sync=True)
+    #: Whether the view offers its handles: ``SceneWidget(..., editable=True)``.
+    #: Its objects are then a studio session's, which keeps what a
+    #: drag does to them -- see `objects`. Chosen when the view is made: a view
+    #: of the cell's own objects has nowhere to keep an edit.
+    editable = traitlets.Bool(False).tag(sync=True)
+    #: Counts the edits the notebook has been told of, in an editable view: a
+    #: drag's end, an undo, a redo. A cell that reads the widget in marimo
+    #: re-runs when it changes, and ``observe(..., "revision")`` hears of each
+    #: in Jupyter. Not the poses in between, which would be once a frame.
+    revision = traitlets.Int(0).tag(sync=True)
+
+    #: What an editable view may ask of its session: a drag, and undoing one.
+    #: Nothing that runs a file -- a script or a scene to load -- which the
+    #: view has no need of.
+    VIEW_CALLS = frozenset(
+        {
+            "begin_interaction",
+            "end_interaction",
+            "apply_edits",
+            "undo",
+            "redo",
+            "get_scene",
+        }
+    )
+    #: The calls after which the scene is settled, and the notebook is told.
+    _SETTLES = frozenset({"end_interaction", "undo", "redo"})
 
     def __init__(self, *objects, animation=False, **kwargs):
         """A view of `objects` -- or of nothing yet, to `update` later.
@@ -207,8 +242,19 @@ class SceneWidget(anywidget.AnyWidget):
         Returned rather than displayed, which is what a notebook wants from
         the last line of a cell. In marimo, wrap it in ``mo.ui.anywidget(...)``
         to have the cell's value follow the selection.
+
+        ``editable=True`` puts out the studio's handles -- W moves, E turns,
+        R resizes, P aims a polarization, L swaps the world's axes for the
+        object's own -- and undoes a drag at a time (Cmd/Ctrl+Z). The objects
+        are copied into a studio session, named after the variables that hold
+        them, and edited there: the cell that made them is left as it was, and
+        running it again does not take the edits away. `objects` are the
+        objects as edited, and `to_script` what was done. One path in place of
+        the objects is a magpylib script, run to find its objects, or a
+        ``.magpy.json`` scene the studio saved.
         """
         traits, kwargs = self._split(kwargs)
+        editable = traits.pop("editable", False)
         super().__init__(**traits)
         #: The captured run, kept only when there is one that motion cannot
         #: play -- see `_adopt`. Every frame holds every trace of the scene
@@ -217,12 +263,32 @@ class SceneWidget(anywidget.AnyWidget):
         #: time, as the panel serves them.
         self._scene = None
         self._objects = {}
+        #: The studio session an editable view's objects belong to; None for a
+        #: view of the cell's own.
+        self._session = None
         #: Where the view was last looking, as it reported: a message, not a
         #: trait, for the reason given where the view sends it. Kept for
         #: `to_html`, so a file saved from a cell opens on the same view.
         self._camera = None
         self.on_msg(self._on_message)
-        if objects:
+        if editable:
+            if animation or kwargs:
+                given = ", ".join(["animation"] * bool(animation) + list(kwargs))
+                raise TypeError(
+                    f"an editable view takes objects and traits, not {given}"
+                )
+            if len(objects) == 1 and isinstance(objects[0], (str, os.PathLike)):
+                self._edit(_session_from(pathlib.Path(objects[0])))
+            else:
+                # The caller's names, so the script that comes back out says
+                # `ring` where the cell did.
+                self._edit(_session_of(objects, sys._getframe(1).f_globals))
+        elif any(isinstance(obj, (str, os.PathLike)) for obj in objects):
+            raise TypeError(
+                "a script or a saved scene is opened to edit: "
+                "SceneWidget(path, editable=True)"
+            )
+        elif objects:
             # The traits again, after the scene: drawing one sets the run's
             # length, pace and repeat from what magpylib says, and a `repeat`
             # given here is the caller's word, not magpylib's.
@@ -302,6 +368,7 @@ class SceneWidget(anywidget.AnyWidget):
         # One message, not two: sent apart, the browser would draw the new
         # scene against the old tree, and the legend would list objects that
         # are no longer there beside ones it cannot name.
+        self._not_editable("update")
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
@@ -328,6 +395,7 @@ class SceneWidget(anywidget.AnyWidget):
         the legend keeps what is folded, for the same reason. Whatever has
         nowhere to go is dropped.
         """
+        self._not_editable("identify")
         before = dict(_positions(self.tree))
         tree, objects = threejs.object_tree(objects)
         after = {path: key for key, path in _positions(tree)}
@@ -360,7 +428,88 @@ class SceneWidget(anywidget.AnyWidget):
         magpylib that does not hand them to its backends: the ids are still
         there in `selected`, but there is nothing to resolve them to.
         """
-        return [self._objects[key] for key in self.selected if key in self._objects]
+        objects = self.objects
+        return [objects[key] for key in self.selected if key in objects]
+
+    @property
+    def objects(self):
+        """The objects in the view, by the ids `selected` and `hidden` use.
+
+        In an editable view, the session's, as edited: live magpylib objects
+        to compute with, rebuilt by every edit -- so keep the widget rather
+        than these. In any other, the objects it was given.
+        """
+        if self._session is None:
+            return dict(self._objects)
+        entries = self._session.list_objects(copies="count")
+        return {entry["id"]: self._session._objs[entry["id"]] for entry in entries}
+
+    def to_script(self):
+        """An editable view's scene as a magpylib script: what was built, and
+        every edit."""
+        return self._editing("to_script").to_script()
+
+    def undo(self):
+        """Take back an editable view's last edit -- a whole drag at a time."""
+        self._editing("undo").undo()
+        self._show()
+
+    def redo(self):
+        """Put back what `undo` took."""
+        self._editing("redo").redo()
+        self._show()
+
+    def save(self, file):
+        """Write an editable view's scene as a ``.magpy.json`` document, as
+        the VS Code studio saves one -- and opens."""
+        doc = self._editing("save").to_dict()
+        text = json.dumps(doc, indent=2) + "\n"
+        pathlib.Path(file).write_text(text, encoding="utf-8")
+
+    @traitlets.validate("editable")
+    def _editable_when_made(self, proposal):
+        # Handles on a view of the cell's own objects would reach nothing that
+        # keeps an edit: every drag would end in "no answer from Python".
+        if proposal["value"] and getattr(self, "_session", None) is None:
+            raise traitlets.TraitError(
+                "a view is editable from when it is made: "
+                "SceneWidget(..., editable=True)"
+            )
+        return proposal["value"]
+
+    def _edit(self, session):
+        """Make this the view of `session`'s scene, with its handles out."""
+        self._session = session
+        self.editable = True
+        self._show()
+
+    def _show(self):
+        """Draw the session's scene as it is now, keeping what is selected
+        and hidden where those objects still are, and tell the notebook."""
+        payload = self._session.get_scene()
+        tree = _tree_of(self._session.list_objects(copies="count"))
+        ids = {key for key, _ in _positions(tree)}
+        with self.hold_sync():
+            self.payload = payload
+            self.tree = tree
+            self.selected = [key for key in self.selected if key in ids]
+            self.hidden = [key for key in self.hidden if key in ids]
+            self.revision += 1
+
+    def _editing(self, what):
+        """The session, for what only an editable view can do."""
+        if self._session is None:
+            raise TypeError(
+                f"{what} is for an editable view: SceneWidget(..., editable=True)"
+            )
+        return self._session
+
+    def _not_editable(self, what):
+        if self._session is not None:
+            raise TypeError(
+                f"an editable view is edited, not re-pointed: no {what}(). "
+                "Make another for other objects."
+            )
 
     def to_html(self, title="magpylib scene"):
         """This view as one HTML file that needs nothing else.
@@ -433,7 +582,9 @@ class SceneWidget(anywidget.AnyWidget):
         step, and one frame is all anyone is looking at.
         """
         kind = content.get("kind") if isinstance(content, dict) else None
-        if kind == "frame" and self._scene is not None:
+        if kind == "rpc":
+            self._answer(content)
+        elif kind == "frame" and self._scene is not None:
             frame = threejs.frame_payload(self._scene, content.get("index", 0))
             # Said back as asked: the view drops a frame of a run it has
             # since been re-pointed away from.
@@ -444,6 +595,77 @@ class SceneWidget(anywidget.AnyWidget):
             self._camera = content.get("camera") or self._camera
             page = self.to_html()
             self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
+
+    def _answer(self, content):
+        """Answer what an editable view asks of its session -- see
+        `VIEW_CALLS` -- as the studio's panel is answered, and tell the
+        notebook when an edit is settled."""
+        from magpylib_studio import rpc
+
+        method = content.get("method")
+        if self._session is not None and method in self.VIEW_CALLS:
+            answer = rpc.handle(self._session, content)
+            if method in self._SETTLES:
+                self._show()
+        else:
+            refusal = f"the view may not call {method!r}"
+            answer = {
+                "id": content.get("id"),
+                "error": {"type": "MethodError", "message": refusal},
+            }
+        self.send({"kind": "rpc", **answer})
+
+
+def _tree_of(entries):
+    """`list_objects`'s entries as the legend's tree: nodes of ``{id, label,
+    kind, children}``, nested by each entry's parent."""
+    nodes = {
+        entry["id"]: {
+            "id": entry["id"],
+            "label": entry["label"],
+            "kind": entry["type"].rsplit(".", 1)[-1],
+            "children": [],
+        }
+        for entry in entries
+    }
+    roots = []
+    for entry in entries:
+        parent = nodes.get(entry["parent"])
+        (parent["children"] if parent else roots).append(nodes[entry["id"]])
+    return roots
+
+
+def _session_of(objects, namespace):
+    """A studio session holding `objects`, named from `namespace`."""
+    from magpylib_studio import importer
+
+    doc, said = importer.document_from_objects(objects, namespace)
+    return _loaded(lambda session: session.load_scene(doc), said, "these objects")
+
+
+def _session_from(path):
+    """A studio session holding the scene `path` holds: a script's, or a
+    saved scene's."""
+    if path.suffix == ".py":
+        return _loaded(lambda session: session.load_script(str(path)), [], path)
+    return _loaded(lambda session: session.load_scene(str(path)), [], path)
+
+
+def _loaded(load, said, what):
+    from magpylib_studio.session import MagpylibStudioSession
+
+    session = MagpylibStudioSession()
+    loaded = load(session)
+    if not loaded.get("ok", True):
+        raise ValueError(f"could not load {what}: {loaded.get('error')}")
+    # What running a script had to flatten, or naming objects could not
+    # name: said once, where the view was asked for.
+    for text in [*said, *(loaded.get("warnings") or [])]:
+        warnings.warn(f"magpylib-studio: {text}", stacklevel=4)
+    # The scene as loaded is where editing starts, not an edit: undone, it
+    # would leave the view empty.
+    session.forget_history()
+    return session
 
 
 def _objects_of(panel):

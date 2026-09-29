@@ -4472,6 +4472,14 @@ class MagpylibStudioSession:
             self._build()  # snapshots built before, so this cannot fail
         return {"ok": True}
 
+    def forget_history(self):
+        """Start the undo history here: what is loaded now is where undo
+        stops. For a host that loads a scene as its starting point rather
+        than as an edit -- a notebook's `edit` -- where undoing the load
+        would take the whole scene away and leave an empty view."""
+        self._undo = []
+        self._redo = []
+
     def redo(self, steps=1):
         for _ in range(steps):
             if not self._redo:

@@ -155,9 +155,9 @@ free FEM navigation.
 
 ### W1 — Edit in a notebook
 
-**What.** `magpylib_studio.edit(...)`: the widget with move and rotate handles,
-backed by a session in the kernel; undo, `to_script`, live objects. Plan in
-[docs/editable-widget.md](docs/editable-widget.md).
+**What.** `SceneWidget(..., editable=True)`: the widget with the studio's
+handles, backed by a session in the kernel; undo, `to_script`, live objects.
+Plan in [docs/editable-widget.md](docs/editable-widget.md).
 
 **Why.** Editing works only in VS Code today, yet the engine and the view both
 ship in the Python package: a notebook can have it with nothing else installed.

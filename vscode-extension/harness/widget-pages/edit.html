@@ -1,0 +1,129 @@
+<!doctype html>
+<!--
+  An editable view -- the notebook widget over a session in the kernel --
+  run against a fake kernel: the model a studio holds, with python's half of
+  each call answered from a scene fixed in advance. The drag is the
+  renderer's events on the view, as in studio-drag.html; the keys are keys.
+
+  `?silent` answers nothing, as a notebook read without its kernel does.
+
+  `window.result` is what the view asked the session, in order, what its
+  editing buttons showed along the way -- the handles, the axes, a resize
+  refused for the probe and taken for the magnet -- and what it said.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 80 && !test(); i++) await wait(50);
+        return test();
+      };
+      const { state, scene } = await (await fetch("/out/edit.json")).json();
+      const silent = new URLSearchParams(location.search).has("silent");
+
+      const asked = [];
+      const values = { ...state };
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "rpc") return;
+          asked.push({
+            method: message.method,
+            x: message.params?.edits?.[0]?.position?.[0],
+          });
+          if (silent) return;
+          const result = message.method === "get_scene" ? scene : { ok: true };
+          setTimeout(
+            () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
+            20,
+          );
+        },
+      };
+
+      const el = document.getElementById("root");
+      widget.render({ model, el });
+      await until(() => el.querySelector("canvas"));
+      await wait(500);
+      model.set("selected", ["probe"]); // the handles go to the selection
+      await wait(200);
+
+      const button = (start) =>
+        [...el.querySelectorAll(".magpy-icon")].find((b) =>
+          b.title.startsWith(start),
+        );
+      const stage = el.querySelector(".magpy-scene-stage");
+      const press = (key, extra = {}) =>
+        stage.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, ...extra }),
+        );
+      const noticed = () =>
+        el.querySelector(".magpy-scene-notice.shown")?.textContent ?? null;
+      press("e");
+      const turned = button("Turn").getAttribute("aria-pressed");
+      press("l");
+      const local = button("Axes:").title;
+      press("l");
+      const world = button("Axes:").title;
+      press("r"); // a sensor has no size to drag
+      const refused = {
+        notice: noticed(),
+        moving: button("Move").getAttribute("aria-pressed"),
+      };
+      model.set("selected", ["magnet"]);
+      await wait(100);
+      const resizing = button("Resize").getAttribute("aria-pressed");
+      model.set("selected", ["probe"]);
+      await wait(100);
+      press("w");
+      const moved = button("Move").getAttribute("aria-pressed");
+
+      const view = el.querySelector(".magpy-scene-view");
+      const fire = (type, detail) =>
+        view.dispatchEvent(new CustomEvent(type, { detail }));
+      const pose = (x, preview = true) => ({
+        preview,
+        edits: [{ objectId: "probe", position: [x, 0, 0.02] }],
+      });
+      fire("dragstart", { objectIds: ["probe"], mode: "translate" });
+      for (let x = 1; x <= 5; x++) fire("objecttransform", pose(x));
+      // long enough, when nothing answers, for the view to give up
+      await wait(silent ? 4600 : 500);
+      fire("objecttransform", pose(6, false));
+      await wait(300);
+      press("z", { metaKey: true });
+      await wait(200);
+
+      window.result = {
+        asked,
+        buttons: {
+          shown: !button("Undo").closest("[hidden]"),
+          turned,
+          moved,
+          local,
+          world,
+          refused,
+          resizing,
+        },
+        notice: el.querySelector(".magpy-scene-notice.shown")?.textContent,
+      };
+    </script>
+  </body>
+</html>

@@ -25,6 +25,7 @@
  * the extension depends on, and this is a small one that does not touch it.
  */
 import rendererSource from "../../build/renderer.txt";
+import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
 
 /** Live views: `{ host, api }`, where `api` is a promise of one scene3d. */
@@ -223,6 +224,25 @@ const ICONS = {
     'M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06"/>',
   dark: '<path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z"/>',
   play: '<path d="M5 3.25v9.5L12.5 8z" fill="currentColor" stroke="none"/>',
+  move:
+    '<path d="M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2' +
+    'M3.5 6l-2 2 2 2M12.5 6l2 2-2 2"/>',
+  turn: '<path d="M13 8a5 5 0 1 1-1.46-3.54"/><path d="M13 2v3h-3"/>',
+  resize:
+    '<rect x="2.5" y="6.5" width="7" height="7" rx="1"/>' +
+    '<path d="M9 2.5h4.5V7M13.5 2.5 9.5 6.5"/>',
+  aim:
+    '<circle cx="8" cy="8" r="5.5"/>' +
+    '<path d="M8 11V5M5.75 7.25 8 5l2.25 2.25"/>',
+  world:
+    '<circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11' +
+    "M8 2.5c1.9 1.6 2.6 3.6 2.6 5.5S9.9 11.9 8 13.5" +
+    'M8 2.5C6.1 4.1 5.4 6.1 5.4 8s.7 3.9 2.6 5.5"/>',
+  local:
+    '<path d="M3.5 12.5 13 8.5M3.5 12.5 7 3"/>' +
+    '<circle cx="3.5" cy="12.5" r="1"/>',
+  undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
+  redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H9"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
 };
 
@@ -259,6 +279,28 @@ const PICTURE_NAME = "magpylib-scene.png";
 const NO_ANSWER =
   "No answer from Python for this step: the kernel may be busy or not " +
   "running. Run the cell again to play this run.";
+
+/** What a view says when python does not answer an edit. */
+const NO_EDIT_ANSWER =
+  "No answer from Python for this edit: the kernel may be busy or not " +
+  "running. The view shows the scene as Python last sent it.";
+
+/** The keys that pick the handles, as the studio's panel has them. */
+const HANDLE_KEYS = {
+  w: "translate",
+  e: "rotate",
+  r: "scale",
+  p: "polarization",
+  q: "none",
+};
+
+/** What a drag in each mode writes: what an expression deciding it loses. */
+const DRAG_WRITES = {
+  translate: "position",
+  rotate: "orientation",
+  scale: "shape",
+  polarization: "polarization",
+};
 
 /** The theme button's round: each choice, what it is called, and the next. */
 const THEMES = {
@@ -360,6 +402,50 @@ function render({ model, el }) {
   );
   fullscreenButton.hidden = !document.fullscreenEnabled;
   pressed(fullscreenButton, false);
+  // Editing, for a view whose objects are a session's -- see `editable`. A
+  // shelf of their own down the side, always in sight: which handles are out
+  // is the state of the view, not a tool to reach for.
+  const editBar = document.createElement("div");
+  editBar.className = "magpy-scene-edit";
+  const handleButton = (icon, text, mode) =>
+    iconButton(icon, text, () => setHandles(mode, { asked: true }));
+  const modeButtons = {
+    translate: handleButton(
+      "move",
+      "Move (W) — Q puts the handles away",
+      "translate",
+    ),
+    rotate: handleButton("turn", "Turn (E)", "rotate"),
+    scale: handleButton(
+      "resize",
+      "Resize (R) — objects with one size to drag",
+      "scale",
+    ),
+    polarization: handleButton(
+      "aim",
+      "Aim the polarization (P)",
+      "polarization",
+    ),
+  };
+  const spaceButton = iconButton("world", "", () => toggleSpace());
+  const undoButton = iconButton("undo", "Undo (⌘Z / Ctrl+Z)", () =>
+    settle(call("undo")),
+  );
+  const redoButton = iconButton("redo", "Redo (⇧⌘Z / Ctrl+Shift+Z)", () =>
+    settle(call("redo")),
+  );
+  const rule = () => {
+    const line = document.createElement("div");
+    line.className = "magpy-scene-rule";
+    return line;
+  };
+  editBar.append(
+    ...Object.values(modeButtons),
+    spaceButton,
+    rule(),
+    undoButton,
+    redoButton,
+  );
   tools.append(
     legendButton,
     axesButton,
@@ -393,7 +479,7 @@ function render({ model, el }) {
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(tools, transport, notice);
+  stage.append(tools, editBar, transport, notice);
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -656,10 +742,31 @@ function render({ model, el }) {
   };
 
   stage.addEventListener("keydown", (event) => {
-    if (!api?.viewKey(event, viewActions)) return;
+    if (!editKey(event) && !api?.viewKey(event, viewActions)) return;
     event.preventDefault();
     event.stopPropagation(); // the notebook listens further up
   });
+
+  /** The editing keys, as the studio's panel has them: W, E, R and P pick
+   *  the handles and Q puts them away; X, Y or Z holds a drag to one axis
+   *  and A frees it; L swaps the world's axes for the object's own; S snaps
+   *  to round steps. Cmd/Ctrl+Z undoes -- with Shift, redoes. */
+  function editKey(event) {
+    if (!editable() || event.altKey) return false;
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === "z") {
+      settle(call(event.shiftKey ? "redo" : "undo"));
+      return true;
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return false;
+    if (HANDLE_KEYS[key]) setHandles(HANDLE_KEYS[key], { asked: true });
+    else if (key === "x" || key === "y" || key === "z") constrain(key);
+    else if (key === "a") constrain(null);
+    else if (key === "l") toggleSpace();
+    else if (key === "s") toggleSnap();
+    else return false;
+    return true;
+  }
   // A canvas cannot take focus, and the controls may keep it from moving
   // there on a press: give it to the stage outright.
   stage.addEventListener("pointerdown", () =>
@@ -838,6 +945,10 @@ function render({ model, el }) {
   });
 
   model.on("msg:custom", (message) => {
+    if (message.kind === "rpc") {
+      answer(message);
+      return;
+    }
     if (message.kind === "export") {
       download(message);
       return;
@@ -852,6 +963,164 @@ function render({ model, el }) {
     api.renderFrame(message);
     scrub.max = String(message.frames - 1);
     reached(message.frame);
+  });
+
+  // --- editing ----------------------------------------------------------
+  // An editable view's objects are a session's, in the kernel. The view asks it
+  // to record what the handles do, as the studio's panel asks its engine --
+  // the same calls -- and the drag itself is the panel's (`drag.mjs`): one
+  // pose in flight, the newest waiting, the scene redrawn between. Python
+  // redraws the view when a gesture is closed, and tells the notebook.
+  const editable = () =>
+    Boolean(model.get("editable")) && !model.get("standalone");
+  let handles = "translate"; // what the user asked the handles to do
+  let snapping = false;
+
+  /** Put out the handles for `mode`, as far as the selection allows: a
+   *  resize needs a size to drag and an aim a polarization, and neither
+   *  takes several objects at once. The renderer says what is in effect,
+   *  and the buttons show that; what was asked is kept, and asked again
+   *  whenever the selection changes. */
+  function setHandles(mode, { asked = false } = {}) {
+    handles = mode;
+    const inEffect = drawing() && editable() ? api.setGizmoMode(mode) : mode;
+    for (const [its, button] of Object.entries(modeButtons)) {
+      pressed(button, inEffect === its);
+    }
+    showSpace(inEffect);
+    if (!asked || inEffect === mode) return;
+    const chosen = model.get("selected") || [];
+    notify(
+      !chosen.length
+        ? "Select an object first"
+        : chosen.length > 1
+          ? "Resizing and aiming take one object at a time"
+          : mode === "scale"
+            ? `${chosen[0]} has no single size to drag`
+            : `${chosen[0]} has no polarization to aim`,
+    );
+  }
+
+  /** Which axes a drag in the mode in force goes along. A resize has no
+   *  choice: a size only means anything along the object's own axes. */
+  function showSpace(mode = handles) {
+    const local = drawing() && api.spaceOf() === "local";
+    setIcon(spaceButton, local ? "local" : "world");
+    name(
+      spaceButton,
+      mode === "scale"
+        ? "Axes: the object's own — a size has no other"
+        : local
+          ? "Axes: the object's own (L for the world's)"
+          : "Axes: the world's (L for the object's own)",
+    );
+    spaceButton.disabled = mode === "scale";
+  }
+
+  function toggleSpace() {
+    if (!drawing() || !editable()) return;
+    api.toggleSpace();
+    showSpace();
+  }
+
+  function constrain(axis) {
+    if (!drawing()) return;
+    api.constrainAxis(axis);
+    notify(axis ? `Along ${axis.toUpperCase()} only (A for all)` : "All axes");
+  }
+
+  function toggleSnap() {
+    if (!drawing()) return;
+    const step = api.setSnapping(!snapping);
+    snapping = step !== null && step !== undefined;
+    notify(
+      snapping
+        ? `Snapping to ${Number(step.toPrecision(3))} m and 15° (S)`
+        : "Snapping off",
+    );
+  }
+
+  function dressEditing() {
+    editBar.hidden = !editable();
+    setHandles(handles);
+  }
+
+  let nextCall = 0;
+  const calls = new Map(); // id -> { timer, settle }
+  function call(method, params = {}) {
+    return new Promise((resolve, reject) => {
+      const id = ++nextCall;
+      const timer = setTimeout(() => {
+        calls.delete(id);
+        unheard();
+        reject(new Error(NO_EDIT_ANSWER));
+      }, 4000);
+      calls.set(id, {
+        timer,
+        settle(message) {
+          if (message.error) reject(new Error(message.error.message));
+          else resolve(message.result);
+        },
+      });
+      model.send({ kind: "rpc", id, method, params });
+    });
+  }
+
+  function answer(message) {
+    const pending = calls.get(message.id);
+    if (!pending) return; // given up on already
+    calls.delete(message.id);
+    clearTimeout(pending.timer);
+    if (notice.textContent === NO_EDIT_ANSWER) notice.classList.remove("shown");
+    pending.settle(message);
+  }
+
+  /** An edit nobody answered: said, and the picture put back to the last
+   *  scene python sent -- which is what the session holds, as far as this
+   *  view can know. Most often a notebook read without its kernel. */
+  function unheard() {
+    notify(NO_EDIT_ANSWER, { stay: true });
+    if (drawing()) api.render(view, model.get("payload") || {});
+  }
+
+  /** Say what the session refused, or what went wrong asking it. */
+  function settle(asked) {
+    asked
+      .then((result) => {
+        if (result?.ok === false) notify(result.error);
+      })
+      .catch((error) => {
+        if (error.message !== NO_EDIT_ANSWER) notify(error.message);
+      });
+  }
+
+  const stopDrags = watchDrags(view, {
+    drawing: () => drawing() && editable(),
+    patterned: () => new Set(model.get("payload")?.patterned ?? []),
+    begin({ objectIds, mode }) {
+      if (playing) setPlaying(false); // the pointer is the one being asked
+      call("begin_interaction").catch(() => {});
+      // A value written in terms of a variable is set outright by a drag,
+      // and the variable stops deciding it: worth saying before, not after.
+      const field = DRAG_WRITES[mode];
+      const payload = model.get("payload") || {};
+      const names = (payload.parametric?.[objectIds[0]] || {})[field] || [];
+      if (names.length) {
+        notify(
+          `This drag sets its ${field} outright: ${names.join(", ")} stops deciding it`,
+        );
+      }
+    },
+    preview: (pose) => call("apply_edits", { edits: pose.edits }),
+    scene: () => call("get_scene"),
+    render(payload, { keep }) {
+      if (drawing()) api.render(view, payload, { keep });
+    },
+    commit(pose) {
+      settle(call("apply_edits", { edits: pose.edits }));
+      // after the pose, which the session answers in order
+      call("end_interaction").catch(() => {});
+    },
   });
 
   // --- selection --------------------------------------------------------
@@ -928,7 +1197,10 @@ function render({ model, el }) {
     // python for the old view would land on the new one's scene.
     if (!drawing()) return;
     if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
-    if (now.has("selected")) api.highlight(model.get("selected") || []);
+    if (now.has("selected")) {
+      api.highlight(model.get("selected") || []);
+      if (editable()) setHandles(handles); // what was asked, for the new one
+    }
   }
 
   // --- drawing ----------------------------------------------------------
@@ -958,7 +1230,8 @@ function render({ model, el }) {
     // nor a backdrop to find.
     dressTheme();
     wearBackdrop();
-    api.setGizmoMode("none"); // read only: nothing here can be dragged
+    // Read only, unless the objects are a session's.
+    api.setGizmoMode(editable() ? handles : "none");
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
@@ -979,6 +1252,7 @@ function render({ model, el }) {
     if (saved) showProjection(api.setCamera(saved));
     framed = true;
     api.highlight(model.get("selected") || []);
+    if (editable()) setHandles(handles);
     // The payload is the run's first frame, so a redraw of the same run --
     // a theme that changed -- would leave the picture at the start while the
     // counter says otherwise. Back to the step that was on screen.
@@ -1004,6 +1278,7 @@ function render({ model, el }) {
   dressTheme();
   dressLegend();
   dressTransport();
+  dressEditing();
   showAxes();
   draw();
 
@@ -1046,6 +1321,8 @@ function render({ model, el }) {
     clearTimeout(silence);
     clearTimeout(noticeTimer);
     clearTimeout(cameraTimer);
+    stopDrags();
+    for (const pending of calls.values()) clearTimeout(pending.timer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     // Only if it is still ours. A view whose element left the page has already
     // had its slot taken by the next cell that asked, and freeing it here --

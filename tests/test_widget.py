@@ -836,3 +836,185 @@ def test_the_view_is_shipped_with_the_package():
     # Built from what is in the tree -- which `harness/check-widget.js` is the
     # check for; this only asks that the stamp it looks for is there at all.
     assert "sources-sha256:" in bundle.read_text()[:500]
+
+
+# --- editing: SceneWidget(..., editable=True), over a session in the kernel -
+
+
+def _studio(**traits):
+    """A ring of three and a probe, edited; what the view says back is kept
+    in `sent` rather than going to a comm."""
+    ring = magpy.Collection(style_label="ring")
+    for i in range(3):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(0.03, 0, 0)
+        )
+        ring.add(magnet.rotate_from_angax(120 * i, "z", anchor=0))
+    probe = magpy.Sensor(position=(0, 0, 0.02), style_label="probe")
+    with pytest.warns(UserWarning, match="without a variable of their own"):
+        studio = widget.SceneWidget(ring, probe, editable=True, **traits)
+    studio.sent = []
+    studio.send = lambda message, buffers=None: studio.sent.append(message)
+    return studio
+
+
+def _ask(studio, method, **params):
+    """What the view sends when it calls the session, and the answer."""
+    studio._on_message(
+        studio,
+        {"kind": "rpc", "id": len(studio.sent), "method": method, "params": params},
+        [],
+    )
+    return studio.sent[-1]
+
+
+@needs_scene_graph
+def test_a_scene_to_edit_is_named_as_the_cell_names_it():
+    """`edit` takes the objects under the caller's names, nests them as they
+    are nested, and says once what it could not name."""
+    studio = _studio()
+    assert [(node["id"], node["kind"]) for node in studio.tree] == [
+        ("ring", "Collection"),
+        ("probe", "Sensor"),
+    ]
+    assert len(studio.tree[0]["children"]) == 3
+    assert studio.editable
+    assert isinstance(studio.objects["probe"], magpy.Sensor)
+    assert "probe" in studio.to_script()
+
+
+@needs_scene_graph
+def test_a_drag_in_the_view_is_one_edit_and_one_word_to_the_notebook():
+    """Poses go to the session as the drag goes, the notebook is told once
+    when it ends, and one undo takes the whole of it back."""
+    studio = _studio()
+    revision = studio.revision
+    assert _ask(studio, "begin_interaction")["result"]["ok"]
+    for x in (0.01, 0.02, 0.03):
+        edits = [{"objectId": "probe", "position": [x, 0, 0.02]}]
+        assert _ask(studio, "apply_edits", edits=edits)["result"]["ok"]
+        assert studio.revision == revision  # nothing re-runs mid-drag
+    _ask(studio, "end_interaction")
+    assert studio.revision == revision + 1
+    assert studio.payload["anchors"]["probe"] == pytest.approx([0.03, 0, 0.02])
+    assert "probe.position = (0.03, 0.0, 0.02)" in studio.to_script()
+
+    assert _ask(studio, "undo")["result"]["ok"]
+    assert np.ravel(studio.objects["probe"].position) == pytest.approx([0, 0, 0.02])
+    assert studio.payload["anchors"]["probe"] == pytest.approx([0, 0, 0.02])
+    studio.redo()
+    assert np.ravel(studio.objects["probe"].position) == pytest.approx([0.03, 0, 0.02])
+
+
+@needs_scene_graph
+def test_undo_stops_at_the_scene_as_it_was_given():
+    """Loading the objects is where editing starts, not an edit: undoing
+    past the first drag -- or before one -- says there is nothing to undo,
+    and the scene stays."""
+    studio = _studio()
+    before = sorted(studio.objects)
+    answer = _ask(studio, "undo")["result"]
+    assert answer == {"ok": False, "error": "nothing to undo"}
+    assert sorted(studio.objects) == before
+    assert studio.payload["meshes"]
+
+    _ask(studio, "begin_interaction")
+    _ask(
+        studio,
+        "apply_edits",
+        edits=[{"objectId": "probe", "position": [0.01, 0, 0.02]}],
+    )
+    _ask(studio, "end_interaction")
+    assert _ask(studio, "undo")["result"]["ok"]
+    assert not _ask(studio, "undo")["result"]["ok"]
+    assert sorted(studio.objects) == before
+
+
+@needs_scene_graph
+def test_a_resize_and_an_aim_in_the_view_are_edits_too():
+    """R and P hand the session a size and a polarization, as the panel's do."""
+    studio = _studio()
+    magnet = next(key for key in studio.objects if key != "ring" and key != "probe")
+    edits = [
+        {
+            "objectId": magnet,
+            "shape": {"attr": "dimension", "value": [0.02, 0.01, 0.01]},
+        },
+        {"objectId": magnet, "polarization": [1, 0, 0]},
+    ]
+    assert _ask(studio, "apply_edits", edits=edits)["result"]["ok"]
+    edited = studio.objects[magnet]
+    assert edited.dimension == pytest.approx([0.02, 0.01, 0.01])
+    assert edited.polarization == pytest.approx([1, 0, 0])
+
+
+@needs_scene_graph
+def test_the_view_may_not_run_files(tmp_path):
+    """The view calls what a drag needs, and nothing that executes."""
+    script = tmp_path / "touch.py"
+    marker = tmp_path / "ran"
+    script.write_text(f"open({str(marker)!r}, 'w').close()\n")
+    studio = _studio()
+    answer = _ask(studio, "load_script", path=str(script))
+    assert answer["error"]["type"] == "MethodError"
+    assert not marker.exists()
+
+
+@needs_scene_graph
+def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
+    """A path is a script to run, or a scene the studio saved -- which is
+    what `save` writes."""
+    script = tmp_path / "scene.py"
+    script.write_text(
+        "import magpylib as magpy\n"
+        "cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))\n"
+        "magpy.show(cube)\n"
+    )
+    studio = widget.SceneWidget(script, editable=True)
+    assert list(studio.objects) == ["cube"]
+    saved = tmp_path / "scene.magpy.json"
+    studio.save(saved)
+    again = widget.SceneWidget(saved, editable=True)
+    assert list(again.objects) == ["cube"]
+    assert json.loads(saved.read_text(encoding="utf-8")) == studio._session.to_dict()
+
+
+@needs_scene_graph
+def test_a_page_saved_from_a_studio_is_read_only():
+    """No kernel behind a saved page, so nothing to keep an edit."""
+    studio = _studio()
+    saved = json.loads(_unpacked(studio.to_html(), "magpy-scene"))
+    assert saved["state"]["standalone"] is True
+    assert not saved["state"].get("editable")
+
+
+@needs_scene_graph
+def test_a_studio_is_not_re_pointed():
+    studio = _studio()
+    with pytest.raises(TypeError, match="edit"):
+        studio.update(magpy.Sensor())
+
+
+@needs_scene_graph
+def test_a_view_is_editable_from_when_it_is_made(scene_objects):
+    """Handles on a view of the cell's own objects would reach nothing that
+    keeps an edit, so a view is made editable or not -- and what only an
+    editable view can do says so on any other."""
+    view = widget.SceneWidget(*scene_objects)
+    with pytest.raises(traitlets.TraitError, match="editable=True"):
+        view.editable = True
+    assert not view.editable
+    with pytest.raises(TypeError, match="editable=True"):
+        view.to_script()
+    magnet, sensor = scene_objects
+    assert view.objects == {str(id(magnet)): magnet, str(id(sensor)): sensor}
+
+
+@needs_scene_graph
+def test_a_path_is_opened_to_edit(scene_objects, tmp_path):
+    """A path is a scene to edit, not objects to draw -- and an editable view
+    takes objects and traits, not magpylib's drawing options."""
+    with pytest.raises(TypeError, match="editable=True"):
+        widget.SceneWidget(tmp_path / "scene.py")
+    with pytest.raises(TypeError, match="animation"):
+        widget.SceneWidget(*scene_objects, editable=True, animation=True)
