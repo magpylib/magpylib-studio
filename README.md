@@ -72,9 +72,11 @@ along the foot of the view plays and scrubs them: in the browser, from the
 motion, when every step is the first one moved — and a frame at a time from
 python when the run changes shape as it goes.
 
-It is read only, like the panel — what a view can offer to edit is what its host
-can put back, and a cell has already run. Selecting and hiding are the
-exceptions, because they are values rather than edits:
+A `SceneWidget` is read only, like the panel — what a view can offer to edit is
+what its host can put back, and a cell has already run (for a view you can edit,
+see [Editing a scene in the notebook](#editing-a-scene-in-the-notebook)).
+Selecting and hiding are the exceptions, because they are values rather than
+edits:
 
 ```python
 scene = mo.ui.anywidget(SceneWidget(height=460))   # one cell: the view
@@ -124,6 +126,40 @@ rebuilds the objects, the view redraws them, and a click is an input to the next
 cell. `examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb`
 the same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
 reactivity.
+
+### Editing a scene in the notebook
+
+`editable=True` puts out the studio's handles, over a studio session in the
+kernel — the engine the VS Code extension drives, with nothing of the extension
+needed:
+
+```python
+studio = SceneWidget(ring, probe, editable=True)
+studio  # W moves, E turns, R resizes, P aims; L for the object's own axes
+```
+
+`SceneWidget("scene.py", editable=True)` is the same view of a script's objects,
+or of a `.magpy.json` the studio saved.
+
+```python
+studio.objects["probe"]  # the objects as edited, to compute with
+print(studio.to_script())  # what was built, and every edit, as magpylib code
+studio.undo()  # a whole drag at a time; ⌘Z / ctrl-Z in the view
+studio.save("ring.magpy.json")  # opens in the VS Code studio
+```
+
+The objects are copied into the session rather than edited in place: the cell
+that made them stays as it was, and running it again does not take the edits
+away. A drag is recorded as it goes and is one step to undo; the notebook hears
+of it once, when it ends — in marimo, the cells that read
+`mo.ui.anywidget(studio)` re-run then, not on every frame. It needs a live
+kernel: without one the view says so and puts the object back, and a page saved
+with `write_html` is read only. The handles and their keys are the panel's —
+**W** moves, **E** turns, **R** resizes, **P** aims a polarization, **Q** puts
+them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
+swaps the world's axes for the object's own, **S** snaps — and a column down the
+view's right-hand side has the same. The variables come later —
+[docs/editable-widget.md](docs/editable-widget.md).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`

@@ -262,5 +262,39 @@ def _(magpy, np):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Editing the scene
+
+    `editable=True` puts out the studio's handles, over a
+    studio session in this kernel. Select an object and drag: **W** moves,
+    **E** turns, **R** resizes, **P** aims, **L** swaps the world's axes for
+    the object's own, and ⌘Z / ctrl-Z undoes a whole drag -- or use the
+    column down the right. The cell below re-runs when a drag ends, not on
+    every frame.
+    """)
+    return
+
+
+@app.cell
+def _(SceneWidget, magpy, mo):
+    _rotor = magpy.magnet.Cuboid(
+        dimension=(1, 1, 1), polarization=(0, 0, 1), style_label="rotor"
+    )
+    _pickup = magpy.Sensor(position=(0, 0, 2), style_label="pickup")
+    studio = mo.ui.anywidget(SceneWidget(_rotor, _pickup, editable=True, height=380))
+    studio
+    return (studio,)
+
+
+@app.cell
+def _(studio):
+    _edited = studio.widget.objects
+    # the field where the pickup is now; `studio.widget.to_script()` is the scene
+    _edited["pickup"].getB(_edited["rotor"])
+    return
+
+
 if __name__ == "__main__":
     app.run()

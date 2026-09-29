@@ -1,8 +1,9 @@
 # Editable widget — plan
 
-**Status: plan, nothing built.** Tracked in [TASKS.md](../TASKS.md) as W1.
-Written after the panel's widget (#16), to be edited in place as decisions land.
-Where a decision is made, the rejected alternative is recorded with it (§8).
+**Status: the first slice is built** (PR A, #18; PR B, below). Tracked in
+[TASKS.md](../TASKS.md) as W1. Written after the panel's widget (#16), to be
+edited in place as decisions land. Where a decision is made, the rejected
+alternative is recorded with it (§8).
 
 ---
 
@@ -12,10 +13,9 @@ Edit a scene in a notebook the way the studio edits one in VS Code, with nothing
 installed but the Python package:
 
 ```python
-import magpylib_studio
-
-studio = magpylib_studio.edit(magnet, sensor)  # or a script path, or a .magpy.json
+studio = SceneWidget(magnet, sensor, editable=True)
 studio  # the widget, with move and rotate handles
+# SceneWidget("scene.py", editable=True) -- or a .magpy.json -- for a file
 
 studio.objects  # live magpylib objects, by id, as edited
 studio.to_script()  # what was done, as code
@@ -25,7 +25,10 @@ studio.save("scene.magpy.json")  # opens in the VS Code studio too
 
 **The first slice:** move and rotate with the handles, undo and redo,
 `to_script`, in Jupyter (Lab, Notebook, VS Code notebooks) and marimo. Other
-anywidget hosts should work but are not a target.
+anywidget hosts should work but are not a target. Resizing, aiming a
+polarization, the world/local axes, one-axis drags and snapping came along in
+the end: the renderer and `apply_edits` had them already, and a first try found
+them missing (R, P, L, X/Y/Z/A, S, as in the panel).
 
 Without a kernel (a saved page, a docs page, the page a script opens), the
 widget stays read-only, as it is today.
@@ -85,11 +88,18 @@ never the reverse):
 
 ## 4. Design
 
-1. **The session in the kernel owns the objects.** `edit(...)` builds a
-   `MagpylibStudioSession`: from objects through `document_from_objects`, with
-   the caller's globals as the namespace (for variable names); from a path
-   through `load_script` or `load_scene`. `StudioWidget` is a `SceneWidget` that
-   holds it. Its payload is `session.get_scene()` and its legend is
+1. **The session in the kernel owns the objects.**
+   `SceneWidget(..., editable=True)` builds a `MagpylibStudioSession` from the
+   objects through `document_from_objects`, with the caller's globals as the
+   namespace (for variable names); from a path in place of the objects -- a
+   script or a saved scene -- through `load_script` or `load_scene`. Either way
+   the view is a `SceneWidget` that holds it -- first built as a subclass,
+   `StudioWidget`, behind a function `edit()`, and folded into `SceneWidget`
+   after a first try, so that editing is the flag on the view people already use
+   rather than a second name to find. What only an editable view can do
+   (`to_script`, `undo`, `save`) says so on any other, and a view cannot be made
+   editable after the fact: it would have handles and no session to keep what
+   they do. Its payload is `session.get_scene()` and its legend is
    `session.list_objects()`, nested by the `parent` links. Ids are the session's
    (`"cube"`), so selection and hiding use them too.
 2. **Transport: `rpc.handle` over the widget's kernel connection.** The view
@@ -125,11 +135,11 @@ never the reverse):
    `save(path)` (a `.magpy.json`, from `to_dict`). `write_html` saves a
    read-only page.
 
-**Not in the first slice:** resizing, aiming polarization, variables (later as
-notebook sliders calling `set_variable`, the parameter binding of
-`docs/direction.md` §5.3), and anything like the Scene tree, Inspector or
-Variables panel. Those are VS Code views; a widget equivalent would be built in
-the widget, in the package, not ported from the extension.
+**Not in the first slice:** variables (later as notebook sliders calling
+`set_variable`, the parameter binding of `docs/direction.md` §5.3), and anything
+like the Scene tree, Inspector or Variables panel. Those are VS Code views; a
+widget equivalent would be built in the widget, in the package, not ported from
+the extension.
 
 ## 5. Steps
 
@@ -140,24 +150,29 @@ Two pull requests: a refactor with no change in behaviour, then the feature.
 1. **Latency spike — done: go.** One drag over the kernel connection, measured
    in JupyterLab and marimo against the panel's stdio; the numbers are in §7.
    The spike's code is throwaway and was not committed.
-2. `session.apply_edits`; the VS Code host switches to it. Existing tests pass
-   unchanged.
-3. `drag.mjs` out of `studio.js`, in `magpylib_studio/static/`, copied into the
-   extension; the panel uses it. `npm test` and the harness pass unchanged.
+2. **Done (#18).** `session.apply_edits`; the VS Code host switches to it.
+   Existing tests pass unchanged.
+3. **Done (#18).** `drag.mjs` out of `studio.js`, in `magpylib_studio/static/`,
+   copied into the extension; the panel uses it. The panel's script became a
+   module, `studio.mjs`, to import it. A browser check pins the drag's order.
 
 **PR B — the editable widget**
 
-4. `StudioWidget` and `edit()`: the RPC over the connection, the allowed list,
-   handles, undo and redo, the no-answer fallback.
-5. The `revision` trait, and example cells for Jupyter and marimo.
-6. Tests (§6), and the wheel-only CI job (§2).
+4. **Done.** `SceneWidget(..., editable=True)`, for objects or a path: the RPC
+   over the connection, the allowed list, handles, undo and redo, the no-answer
+   fallback.
+5. **Done.** The `revision` trait, and example cells for Jupyter and marimo.
+6. **Done.** Tests (§6), and the wheel-only CI job (§2,
+   `tools/check-package-alone.py`). Also tried for real, headless: a drag and an
+   undo in JupyterLab and in marimo, with the kernel's session moving the object
+   and the notebook told once per drag.
 
 ## 6. Tests
 
 - **Python:** RPC over the connection (a fake comm); one drag is one undo step;
   `to_script` after a move; the allowed list refuses `load_script`; `write_html`
-  of an editable widget is read-only; `edit()` from objects, a script and a
-  `.magpy.json`.
+  of an editable widget is read-only; an editable view from objects, a script
+  and a `.magpy.json`; a view made editable after the fact is refused.
 - **Browser harness:** a page whose fake kernel answers from a canned session. A
   drag sends `begin_interaction`, previews, `apply_edits`, `end_interaction`, in
   that order; with no answer, the view goes back and says so.
@@ -193,7 +208,7 @@ Two pull requests: a refactor with no change in behaviour, then the feature.
   Measured once; the cause is not known. Small scenes are unaffected; a
   100-magnet drag is about 10 frames a second in marimo against 38 in
   JupyterLab. Look into it when the marimo step comes.
-- **marimo re-runs.** The cell that calls `edit()` must not read the widget's
+- **marimo re-runs.** The cell that makes the editable view must not read its
   value, or every edit rebuilds the session. The examples show the pattern.
 - **Flattened imports.** Live objects built in loops or helpers are flattened,
   with warnings (the "built without a variable of their own" message). Show them

@@ -24,6 +24,8 @@ Writes into OUT:
 * ``readings.json`` -- the studio's quiver example as its panel draws it, then
   again with the sensor moved: a sensor whose arrows are its own reading, for
   the panel's renderer to redraw while it is dragged;
+* ``edit.json`` -- an editable view's model, a ring and a probe to edit, and
+  the scene its session answers `get_scene` with;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -163,6 +165,17 @@ def main(out):
     if before["readings"] != ["field"]:
         raise SystemExit("readings.json: the quiver's sensor should be a reading")
     (out / "readings.json").write_text(json.dumps([before, after]))
+
+    # a scene to edit: the model a studio holds, and its session's answer
+    lone = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    lone.style.label = "magnet"
+    probe_to_edit = magpy.Sensor(position=(0, 0, 0.02), style_label="probe")
+    studio = SceneWidget(lone, probe_to_edit, editable=True)
+    if not studio.editable or "probe" not in studio.payload["anchors"]:
+        raise SystemExit("edit.json: the studio should hold a probe to edit")
+    (out / "edit.json").write_text(
+        json.dumps({"state": studio.get_state(), "scene": studio.payload})
+    )
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows}

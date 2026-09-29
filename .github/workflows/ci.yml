@@ -1,10 +1,11 @@
 # Everything green on a machine that is not the one it was written on.
 #
-# Three jobs because they fail for different reasons: the engine against both
+# Four jobs because they fail for different reasons: the engine against both
 # magpylib versions (the README claims it works with either, and that claim
 # was only ever checked by hand), the extension end to end in a real VS
-# Code — which needs the engine installed, since that is what it drives — and
-# the notebook widget in a real browser, which is where it has broken before.
+# Code — which needs the engine installed, since that is what it drives —
+# the notebook widget in a real browser, which is where it has broken before,
+# and the package alone, as pip installs it, with none of this checkout.
 name: CI
 
 on:
@@ -104,3 +105,31 @@ jobs:
       - name: Drive the widget in headless Chrome
         working-directory: vscode-extension
         run: node harness/check-widget-browser.mjs
+
+  alone:
+    name: package alone
+    runs-on: ubuntu-latest
+    steps:
+      # the whole history, for the version hatch-vcs reads off the tags
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build the wheel
+        run: pipx run build --wheel
+      # A fresh environment with the wheel and nothing of the checkout: no
+      # editable install, no node, no vscode-extension/. The editable widget
+      # has to work with the package alone (docs/editable-widget.md §2).
+      - name: Install the wheel alone
+        run: |
+          python -m venv "$RUNNER_TEMP/alone"
+          "$RUNNER_TEMP/alone/bin/pip" install "$(ls dist/*.whl)[widget]"
+          "$RUNNER_TEMP/alone/bin/pip" install \
+            "magpylib @ git+https://github.com/magpylib/magpylib@main"
+      - name: Edit a scene with it, from outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/alone/bin/python" \
+            "$GITHUB_WORKSPACE/tools/check-package-alone.py"

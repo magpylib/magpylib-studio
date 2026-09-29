@@ -75,6 +75,7 @@
 /* ---- controls -------------------------------------------------------------
    Panels floating over the view, in the legend's material. */
 .magpy-scene-tools,
+.magpy-scene-edit,
 .magpy-scene-transport,
 .magpy-scene-notice {
   position: absolute;
@@ -100,6 +101,42 @@
   padding: 2px;
   opacity: 0;
   transition: opacity 0.15s;
+}
+
+/* The editing tools, for a view whose objects are a session's: a column on
+   the right-hand edge, always in sight -- which handles are out is the state
+   of the view, not a tool to reach for. Centred in the height the other tools
+   and the transport leave free, rather than hung from a toolbar that is only
+   there on hover. */
+.magpy-scene-edit {
+  top: 44px;
+  bottom: 8px;
+  right: 8px;
+  height: fit-content;
+  margin-block: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px;
+}
+
+.magpy-animated .magpy-scene-edit {
+  bottom: 44px;
+}
+
+.magpy-scene-edit[hidden] {
+  display: none;
+}
+
+.magpy-scene-rule {
+  height: 1px;
+  margin: 3px 4px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-icon:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .magpy-scene:hover .magpy-scene-tools,
