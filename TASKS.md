@@ -3,20 +3,22 @@
 What to do next, ordered by what gates what. The reasoning behind each item
 lives in the plan it came from — this file stays thin enough to work from.
 
-| Question                    | Document                                 |
-| --------------------------- | ---------------------------------------- |
-| What is this?               | [README.md](README.md)                   |
-| What is built?              | [CONTINUE.md](CONTINUE.md)               |
-| **What do I do next?**      | **this file**                            |
-| Why is it going that way?   | [docs/direction.md](docs/direction.md)   |
-| How does instancing work?   | [docs/instancing.md](docs/instancing.md) |
-| How does FEM validation go? | [docs/fem.md](docs/fem.md)               |
+| Question                             | Document                                           |
+| ------------------------------------ | -------------------------------------------------- |
+| What is this?                        | [README.md](README.md)                             |
+| What is built?                       | [CONTINUE.md](CONTINUE.md)                         |
+| **What do I do next?**               | **this file**                                      |
+| Why is it going that way?            | [docs/direction.md](docs/direction.md)             |
+| How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
+| How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
+| How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
 
 **Track F (foundation) is primary.** It is what studio _is_ under the
 positioning in `docs/direction.md` §1, and everything else is an application of
 it. M runs in parallel because its lead time is upstream review rather than
 ours. V is downstream of F except for V1, which is orthogonal — a different repo
-that touches none of this.
+that touches none of this. W is independent of all three: it puts the engine as
+it is today in a notebook.
 
 ---
 
@@ -146,6 +148,22 @@ A content hash over field-affecting events only, excluding sensors and pixel
 grids. Solve once, probe forever. Undo back to a previous state must reproduce
 that state's earlier hash — that property is what turns history navigation into
 free FEM navigation.
+
+---
+
+## Track W — The notebook widget
+
+### W1 — Edit in a notebook
+
+**What.** `magpylib_studio.edit(...)`: the widget with move and rotate handles,
+backed by a session in the kernel; undo, `to_script`, live objects. Plan in
+[docs/editable-widget.md](docs/editable-widget.md).
+
+**Why.** Editing works only in VS Code today, yet the engine and the view both
+ship in the Python package: a notebook can have it with nothing else installed.
+
+**Done when.** The first slice works in Jupyter and marimo from the wheel alone,
+and the VS Code panel uses the same drag code.
 
 ---
 
