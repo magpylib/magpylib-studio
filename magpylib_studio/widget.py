@@ -42,10 +42,8 @@ from magpylib_studio import threejs
 
 STATIC = pathlib.Path(__file__).parent / "static"
 
-#: How tall the scene is drawn when nobody says. Tall enough for a scene to
-#: be legible in a notebook column, short enough to leave the next cell on
-#: screen.
-DEFAULT_HEIGHT = 420
+#: How tall the scene is drawn when nobody says; see `threejs.DEFAULT_HEIGHT`.
+DEFAULT_HEIGHT = threejs.DEFAULT_HEIGHT
 
 #: What the export button saves the file as, before the browser asks.
 EXPORT_NAME = "magpylib-scene.html"
@@ -266,17 +264,17 @@ class SceneWidget(anywidget.AnyWidget):
         still believes the last scene's frame count, and the playback controls
         are drawn from it.
         """
-        run = len(scene.frames) > 1
-        # A run that is its first frame moved about travels as the motion and
-        # plays in the browser, kernel or none. Only one that changes shape
-        # as it goes is kept here, to be served a frame at a time.
-        played = threejs.played_payload(scene) if run else None
+        # A run that is its first frame moved about travels as the motion, and
+        # what changes as it goes is carried with it: the view plays it, kernel
+        # or none. Only a run too big to carry is kept here, to be served a
+        # frame at a time.
+        payload, served = threejs.run_payload(scene)
         with self.hold_sync():
-            self._scene = scene if run and played is None else None
+            self._scene = served
             self.frames = len(scene.frames)
             self.duration = float(scene.animation.time)
             self.repeat = bool(scene.animation.repeat)
-            self.payload = played or threejs.view_payload(scene, index=0)
+            self.payload = payload
 
     def update(self, *objects, animation=False, **kwargs):
         """Point this view at `objects`.
@@ -376,36 +374,41 @@ class SceneWidget(anywidget.AnyWidget):
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
+        return self._page(title)
+
+    def _page(self, title="magpylib scene", limit=None):
+        """`to_html`, with a run past `limit` shown as its first step: for a
+        page nobody asked for by name, which should not be hundreds of
+        megabytes because a script said `show`."""
         return _PAGE.substitute(
             title=html.escape(title),
             css=(STATIC / "widget.css").read_text(encoding="utf-8"),
             bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
-            data=_packed(json.dumps(self._saved(), allow_nan=False)),
+            data=_packed(json.dumps(self._saved(limit), allow_nan=False)),
         )
 
-    def _saved(self):
+    def _saved(self, limit=None):
         """What a saved page holds: the model's state as it is now, and --
-        for a run the payload does not carry as motion -- every frame of it,
-        which the page answers for itself."""
-        state = {
-            "payload": self.payload,
-            "tree": self.tree,
-            "selected": list(self.selected),
-            "hidden": list(self.hidden),
-            "axes": self.axes,
-            "theme": self.theme,
-            "height": self.height,
-            "frames": self.frames,
-            "duration": self.duration,
-            "repeat": self.repeat,
-            "camera": self._camera,
-            # no python behind the page, so nothing to ask for another export
-            "standalone": True,
-        }
-        run = (
-            []
-            if self._scene is None
-            else [threejs.frame_payload(self._scene, i) for i in range(self.frames)]
+        for a run the payload does not carry as motion and changes -- every
+        frame of it, which the page answers for itself. Past `limit`, when
+        there is one, the page shows the first step, still, instead."""
+        frames = self.frames
+        run = [] if self._scene is None else threejs.whole_run(self._scene, limit)
+        if run is None:
+            threejs.too_big_to_carry(frames)
+            frames, run = 1, []
+        state = threejs.saved_state(
+            self.payload,
+            self.tree,
+            frames,
+            self.duration,
+            self.repeat,
+            selected=self.selected,
+            hidden=self.hidden,
+            axes=self.axes,
+            theme=self.theme,
+            height=self.height,
+            camera=self._camera,
         )
         return {"state": state, "run": run}
 
@@ -453,9 +456,9 @@ def display(widget):
     """Put `widget` in the cell's output, in whichever notebook this is.
 
     marimo first, because it is also importable in a Jupyter kernel and only
-    it can say whether it is the one running. Neither answering is not an
-    error: a script drawing with this backend gets the widget back from
-    `show(return_fig=True)` and can do as it likes with it.
+    it can say whether it is the one running. Returns whether either took
+    it; when neither did, the caller shows it the way a script can -- see
+    `backend._outside_a_notebook`.
     """
     try:
         import marimo
@@ -469,7 +472,10 @@ def display(widget):
         from IPython.core.getipython import get_ipython
         from IPython.display import display as ipy_display
 
-        if get_ipython() is not None:
+        shell = get_ipython()
+        # A terminal IPython -- `ipython script.py`, or its REPL -- has no cell
+        # to draw in, and would only print the widget's name.
+        if shell is not None and type(shell).__name__ != "TerminalInteractiveShell":
             ipy_display(widget)
             return True
     except ImportError:

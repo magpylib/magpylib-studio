@@ -1014,8 +1014,16 @@ function render({ model, el }) {
     setTimeout(() => URL.revokeObjectURL(href), 60_000);
   }
 
-  /** Have the browser save what `href` holds, as `filename`. */
+  /** Have the browser save what `href` holds, as `filename`.
+   *
+   * Unless the page says how it saves, as `window.magpySave`: a VS Code
+   * webview -- the studio's script panel -- has no downloads, and a click on
+   * the link would do nothing at all. It asks where, and says when it has. */
   function save(href, filename) {
+    if (typeof window.magpySave === "function") {
+      window.magpySave(href, filename);
+      return;
+    }
     const link = document.createElement("a");
     link.href = href;
     link.download = filename;

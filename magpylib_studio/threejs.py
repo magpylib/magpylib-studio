@@ -798,40 +798,115 @@ def object_tree(objects):
     return roots, found
 
 
-def widget_state(scene, height=420):
+#: How tall a view is drawn when nobody says: tall enough for a scene to be
+#: legible in a notebook column, short enough to leave the next cell on screen.
+DEFAULT_HEIGHT = 420
+
+#: How much of a run -- as JSON, every frame of it -- a view is handed whole
+#: when it cannot be played as motion and changes and there is nothing left
+#: to serve it a frame at a time: the studio's panel, a page a script opens.
+#: A 200-step run of a big scene is hundreds of megabytes, which the panel
+#: would read again each time its tab came back. Past this the view shows
+#: the run's first step, still, and says so.
+WHOLE_RUN_LIMIT: int = 50_000_000
+
+
+def run_payload(scene):
+    """What a view draws `scene` from, and the run kept to serve it a frame
+    at a time: None when there is no run, or it plays on its own, as motion
+    and carried changes -- see `played_payload`."""
+    animated = len(scene.frames) > 1
+    played = played_payload(scene) if animated else None
+    payload = played or view_payload(scene, index=0)
+    return payload, (scene if animated and played is None else None)
+
+
+def whole_run(scene, limit=None):
+    """Every frame of `scene`'s run, for a view with nobody to ask for them --
+    or None when that would come to more than `limit`."""
+    # Weighed frame by frame, not trace by trace through the run (`_runs`):
+    # a run that is served may be one whose frames hold different traces.
+    frames = [[t for t in f.traces if t["type"] in _DRAWN] for f in scene.frames]
+    if limit is not None and _weight(frames) > limit:
+        return None
+    return [frame_payload(scene, i) for i in range(len(scene.frames))]
+
+
+def saved_state(
+    payload,
+    tree,
+    frames,
+    duration,
+    repeat,
+    *,
+    selected=(),
+    hidden=(),
+    axes=True,
+    theme="auto",
+    height=DEFAULT_HEIGHT,
+    camera=None,
+):
+    """What a saved view's model holds: the widget's traits, as a page or the
+    studio's panel reads them. One layout, for `SceneWidget._saved` and for
+    `widget_state`, so the two cannot drift apart."""
+    return {
+        "payload": payload,
+        "tree": tree,
+        "selected": list(selected),
+        "hidden": list(hidden),
+        "axes": axes,
+        "theme": theme,
+        "height": height,
+        "frames": frames,
+        "duration": duration,
+        "repeat": repeat,
+        "camera": camera,
+        # no python behind the view, so nothing to ask for an export
+        "standalone": True,
+    }
+
+
+def too_big_to_carry(frames):
+    """Say, once, that a run is shown as its first step, and why."""
+    warnings.warn(
+        f"magpylib-studio: this run's {frames} steps change more than can be "
+        "carried to a view with no python behind it, so it shows the first "
+        "step, still. Draw it in a notebook, where frames are served one at a "
+        "time, or with fewer steps (animation_maxframes).",
+        stacklevel=2,
+    )
+
+
+def widget_state(scene, height=DEFAULT_HEIGHT):
     """The notebook widget's saved state for `scene`, and its run: what
     `SceneWidget.write_html` puts in a page, made from the scene alone.
 
     For a view with no python behind it -- the studio's panel, drawing the
     figure a script left before it exited. The widget there plays what it
-    is handed and asks for nothing, so a run too big to carry as changes
-    travels whole, every frame, as a saved page carries it. The legend comes
-    from the objects magpylib hands its backends, where it does.
+    is handed and asks for nothing, so a run it cannot play as motion and
+    changes travels whole, up to `WHOLE_RUN_LIMIT`, and past that as its
+    first step. The legend comes from the objects magpylib hands its
+    backends, where it does.
 
     Returns ``{"state": ..., "run": [...]}``, the shape `_saved` has.
     """
-    animated = len(scene.frames) > 1
-    played = played_payload(scene) if animated else None
+    payload, served = run_payload(scene)
     objects = [obj for panel in scene.panels for obj in getattr(panel, "objects", ())]
     tree, _ = object_tree(objects)
-    state = {
-        "payload": played or view_payload(scene, index=0),
-        "tree": tree,
-        "selected": [],
-        "hidden": [],
-        "axes": True,
-        "theme": "auto",
-        "height": height,
-        "frames": len(scene.frames),
-        "duration": float(scene.animation.time),
-        "repeat": bool(scene.animation.repeat),
-        "camera": None,
-        # no python behind it, so nothing to ask for an export
-        "standalone": True,
-    }
-    run = []
-    if animated and played is None:
-        run = [frame_payload(scene, i) for i in range(len(scene.frames))]
+    frames, run = len(scene.frames), []
+    if served is not None:
+        run = whole_run(served, WHOLE_RUN_LIMIT)
+        if run is None:
+            too_big_to_carry(frames)
+            frames, run = 1, []
+    state = saved_state(
+        payload,
+        tree,
+        frames,
+        float(scene.animation.time),
+        bool(scene.animation.repeat),
+        height=height,
+    )
     return {"state": state, "run": run}
 
 

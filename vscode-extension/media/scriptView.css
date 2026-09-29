@@ -27,6 +27,11 @@ body {
   min-width: 0;
   overflow: hidden;
 }
+/* The widget failed to load or draw: what went wrong, where it would have been. */
+#canvas .failed {
+  margin: 16px;
+  color: var(--vscode-errorForeground);
+}
 #bar {
   display: flex;
   align-items: center;
@@ -62,6 +67,19 @@ body {
 /* A state, not a control: it says what the figure is, takes no clicks, and
    does not pretend to be pressable. The button beside it is the thing to do
    about it. */
+/* Except over the notebook widget, whose legend has that corner too: floated
+   there, the badge covered its first rows. So the badge takes a strip of its
+   own, above the figure -- still top left -- and the widget, which follows
+   the size of its box, gives up the room while it shows. Not for Plotly,
+   which follows only the window's size, and would be cropped instead. */
+body[data-kind="widget"] #stage {
+  flex-direction: column;
+}
+body[data-kind="widget"] #overlay {
+  position: static;
+  order: -1;
+  padding: 6px 8px;
+}
 #stale {
   padding: 1px 6px;
   border-radius: 3px;

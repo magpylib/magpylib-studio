@@ -86,7 +86,8 @@ def test_a_script_gets_the_view_in_a_page_of_its_own(
         backend.webbrowser, "open", lambda url: opened.append(url) or True
     )
     assert magpy.show(*scene_objects, backend="widget") is None
-    (page,) = (tmp_path / "magpylib-studio").glob("scene-*.html")
+    # in the temp directory itself, as Plotly's pages are
+    (page,) = tmp_path.glob("magpylib-scene-*.html")
     assert "magpy-widget" in page.read_text(encoding="utf-8")
     assert str(page) in capsys.readouterr().err
     assert opened == []  # a test suite opens no tabs
@@ -105,12 +106,67 @@ def test_a_script_in_a_studio_terminal_gets_the_view_in_the_panel(
     """Run from a studio window's terminal, the widget goes to the panel,
     which draws the same widget."""
     monkeypatch.setenv("MAGPYLIB_STUDIO_DROP", str(tmp_path))
+    # Even in a process the window's setting did claim: this script asked
+    # for the widget by name, which is no claim of the window's.
+    monkeypatch.setattr(backend, "CLAIMED", True)
     magpy.show(*scene_objects, backend="widget")
     (written,) = list((tmp_path / "views").iterdir())
     figure = json.loads(written.read_text(encoding="utf-8"))
     assert figure["kind"] == "widget"
     assert figure["body"]["state"]["payload"]["meshes"]
+    assert figure["claimed"] is False
     assert "panel" in capsys.readouterr().err
+
+
+def test_a_terminal_ipython_is_no_notebook(scene_objects, monkeypatch):
+    """`ipython script.py` has a shell but no cell to draw in: the widget is
+    not handed to it, which would only print its name, and the script's way
+    of showing it is taken instead."""
+    getipython = pytest.importorskip("IPython.core.getipython")
+    shown = []
+    monkeypatch.setattr("IPython.display.display", shown.append)
+    view = widget.SceneWidget(*scene_objects)
+
+    class TerminalInteractiveShell:
+        pass
+
+    class ZMQInteractiveShell:
+        pass
+
+    monkeypatch.setattr(getipython, "get_ipython", TerminalInteractiveShell)
+    assert widget.display(view) is False
+    monkeypatch.setattr(getipython, "get_ipython", ZMQInteractiveShell)
+    assert widget.display(view) is True
+    assert shown == [view]
+
+
+@needs_scene_graph
+def test_a_run_too_big_to_hand_over_whole_is_shown_still(
+    morphing, served, tmp_path, monkeypatch
+):
+    """With nothing behind the view to serve it a frame at a time -- the
+    studio's panel, the page a script opens -- a run past `WHOLE_RUN_LIMIT`
+    is its first step, still, and says so. A page saved by name has all of
+    it: whoever asked for the file asked for its size."""
+    monkeypatch.setattr(threejs, "WHOLE_RUN_LIMIT", 0)
+    scene = threejs._capture(morphing, animation=True)
+    with pytest.warns(UserWarning, match="first step"):
+        body = threejs.widget_state(scene)
+    assert body["run"] == []
+    assert body["state"]["frames"] == 1
+
+    monkeypatch.delenv("MAGPYLIB_STUDIO_DROP", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with pytest.warns(UserWarning, match="first step"):
+        magpy.show(*morphing, backend="widget", animation=True)
+    (page,) = tmp_path.glob("magpylib-scene-*.html")
+    saved = json.loads(_unpacked(page.read_text(encoding="utf-8"), "magpy-scene"))
+    assert saved["run"] == []
+    assert saved["state"]["frames"] == 1
+
+    view = widget.SceneWidget(*morphing, animation=True)
+    saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))
+    assert len(saved["run"]) == view.frames == 10
 
 
 @needs_scene_graph

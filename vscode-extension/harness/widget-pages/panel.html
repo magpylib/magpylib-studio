@@ -2,8 +2,14 @@
 <!--
   The panel a script draws into -- its page as scriptViewer.ts builds it, and
   its own media/scriptView.js -- handed the figure the `studio` backend
-  writes, then handed it again as a re-run would. `window.result` is what the
-  legend showed, how far the run played, and how many views there were.
+  writes, then handed it again as a re-run would, every id new. In between,
+  the user hides a row, picks the light theme and saves a picture.
+  `window.result` is what the legend showed, how far the run played, how many
+  views there were, what stayed hidden and themed across the re-run, what
+  the page asked its host to save, and where the out-of-date badge went.
+
+  `?missing` points the page at a widget bundle that is not there, and
+  `window.result` is what the panel said about it.
 -->
 <html>
   <head>
@@ -18,8 +24,12 @@
     <link rel="stylesheet" href="/media/scriptView.css" />
     <link rel="stylesheet" href="/static/widget.css" />
     <script>
-      // what VS Code gives a webview, which the page talks to its host with
-      window.acquireVsCodeApi = () => ({ postMessage() {} });
+      // what VS Code gives a webview, which the page talks to its host with:
+      // here, what it says is kept
+      window.posted = [];
+      window.acquireVsCodeApi = () => ({
+        postMessage: (message) => window.posted.push(message),
+      });
     </script>
   </head>
   <body
@@ -41,41 +51,94 @@
     <script src="/media/scriptView.js"></script>
     <script type="module">
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 60 && !test(); i++) await wait(250);
+        return test();
+      };
+      const missing = new URLSearchParams(location.search).has("missing");
+      if (missing) document.body.dataset.widget = "/static/no-such-bundle.js";
       const body = await (await fetch("/out/panel.json")).json();
       const figure = { kind: "widget", script: "/tmp/rings.py", body };
       postMessage({ type: "view", payload: figure, stale: false });
-      for (
-        let i = 0;
-        i < 60 && !document.querySelector(".magpy-legend-row");
-        i++
-      ) {
-        await wait(250);
-      }
-      await wait(800);
-      const rows = [...document.querySelectorAll(".magpy-legend-row")]
-        .filter((row) => row.getClientRects().length)
-        .map((row) => row.querySelector(".magpy-legend-label").textContent);
-      [...document.querySelectorAll(".magpy-icon")]
-        .find((b) => b.title.startsWith("Play the path"))
-        .click();
-      await wait(1500);
-      const step = parseInt(
-        document.querySelector(".magpy-scene-counter").textContent,
-      );
-      postMessage({ type: "view", payload: figure, stale: false }); // a re-run
-      await wait(1000);
-      const width = () =>
-        Math.round(
-          document.querySelector(".magpy-scene").getBoundingClientRect().width,
+      if (missing) {
+        const failed = await until(() =>
+          document.querySelector("#canvas .failed"),
         );
-      const before = width();
-      await wait(1500);
-      window.result = {
-        rows,
-        step,
-        views: document.querySelectorAll(".magpy-scene").length,
-        widths: [before, width(), innerWidth],
-      };
+        window.result = { failed: failed?.textContent ?? null };
+      } else {
+        await until(() => document.querySelector(".magpy-legend-row"));
+        await wait(800);
+        const legend = () => [
+          ...document.querySelectorAll(".magpy-legend-row"),
+        ];
+        const label = (row) =>
+          row.querySelector(".magpy-legend-label").textContent;
+        const icon = (start) =>
+          [...document.querySelectorAll(".magpy-icon")].find((b) =>
+            b.title.startsWith(start),
+          );
+        const rows = legend()
+          .filter((row) => row.getClientRects().length)
+          .map(label);
+        icon("Play the path").click();
+        await wait(1500);
+        const step = parseInt(
+          document.querySelector(".magpy-scene-counter").textContent,
+        );
+        // What the user sets, which is theirs rather than the script's
+        icon("Save the view as a PNG").click();
+        icon("Theme").click(); // auto, to light
+        legend().at(-1).querySelector(".magpy-legend-eye").click();
+        await wait(300);
+        const off = () =>
+          legend()
+            .filter((row) => row.classList.contains("off"))
+            .map(label);
+        const hidden = off();
+        // A re-run: the same figure from a new process, so every object's
+        // id is new.
+        const again = JSON.parse(
+          JSON.stringify(body).replace(/"(\d{6,})"/g, '"$1-again"'),
+        );
+        postMessage({
+          type: "view",
+          payload: { ...figure, body: again },
+          stale: false,
+        });
+        await wait(1000);
+        const width = () =>
+          Math.round(
+            document.querySelector(".magpy-scene").getBoundingClientRect()
+              .width,
+          );
+        const before = width();
+        await wait(1500);
+        const saved = window.posted.find((m) => m.type === "saveFile");
+        // Out of date: the badge, and the widget beside it rather than under
+        postMessage({ type: "stale", stale: true });
+        await wait(500);
+        const box = (selector) =>
+          document.querySelector(selector).getBoundingClientRect();
+        const badge = box("#overlay");
+        const scene = box(".magpy-scene");
+        window.result = {
+          rows,
+          step,
+          views: document.querySelectorAll(".magpy-scene").length,
+          widths: [before, width(), innerWidth],
+          hidden: [hidden, off()],
+          theme: icon("Theme").title,
+          stale: {
+            shown: badge.height > 0,
+            below: Math.round(scene.top - badge.bottom),
+            overflow: Math.round(scene.bottom - innerHeight),
+          },
+          saved: saved && {
+            filename: saved.filename,
+            png: saved.dataUrl.startsWith("data:image/png;base64,"),
+          },
+        };
+      }
     </script>
   </body>
 </html>

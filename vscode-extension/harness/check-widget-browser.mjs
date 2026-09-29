@@ -674,6 +674,78 @@ async function panel(port, base, expected) {
       }
     },
   );
+  await check(
+    "a re-run in the panel keeps what the user hid and the theme they chose",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/panel.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const [hidden, after] = result.hidden;
+        if (!hidden.length) return "hiding a row hid nothing";
+        if (after.join() !== hidden.join()) {
+          return `hid ${hidden.join(", ")}; after the re-run, ${after.join(", ") || "nothing"}`;
+        }
+        if (!result.theme.startsWith("Theme: light")) {
+          return `the theme button says ${result.theme}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+  await check(
+    "a picture taken in the panel is handed to VS Code to save",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/panel.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        if (!result.saved) return "nothing was handed over";
+        if (!result.saved.png || !result.saved.filename.endsWith(".png")) {
+          return `handed ${JSON.stringify(result.saved)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+  await check(
+    "an out-of-date panel's badge sits above the widget, not on its legend",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/panel.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const { shown, below, overflow } = result.stale;
+        if (!shown) return "no badge";
+        if (below < 0) return `the badge covers the widget by ${-below} px`;
+        if (overflow > 0) return `the widget runs ${overflow} px off the panel`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+  await check("a panel that cannot load the widget says so", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/panel.html?missing`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "never finished";
+      if (!result.failed?.startsWith("The view could not be drawn")) {
+        return `the panel says ${JSON.stringify(result.failed)}`;
+      }
+      return null;
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 async function pool(port, base) {
