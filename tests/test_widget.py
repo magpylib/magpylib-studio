@@ -949,6 +949,31 @@ def test_a_resize_and_an_aim_in_the_view_are_edits_too():
 
 
 @needs_scene_graph
+def test_the_notebook_edits_as_the_view_does():
+    """`set` is one edit -- a pose and a parameter together, one step to
+    undo -- told to the notebook like a drag's end; and a value already there
+    is no edit, so a slider fed back from the view does not echo."""
+    studio = _studio()
+    magnet = next(key for key in studio.objects if key not in ("ring", "probe"))
+    revision, steps = studio.revision, len(studio._session._undo)
+    studio.set(magnet, position=(0.05, 0, 0), dimension=(0.02, 0.01, 0.01))
+    assert studio.revision == revision + 1
+    assert len(studio._session._undo) == steps + 1
+    edited = studio.objects[magnet]
+    assert np.ravel(edited.position) == pytest.approx([0.05, 0, 0])
+    assert edited.dimension == pytest.approx([0.02, 0.01, 0.01])
+    assert studio.payload["anchors"][magnet] == pytest.approx([0.05, 0, 0])
+
+    studio.set(magnet, position=(0.05, 0, 0), dimension=(0.02, 0.01, 0.01))
+    assert studio.revision == revision + 1  # the echo: nothing recorded
+    studio.undo()
+    assert np.ravel(studio.objects[magnet].position) != pytest.approx([0.05, 0, 0])
+
+    with pytest.raises(TypeError, match="editable=True"):
+        widget.SceneWidget(magpy.Sensor()).set("x", position=(0, 0, 0))
+
+
+@needs_scene_graph
 def test_the_view_may_not_run_files(tmp_path):
     """The view calls what a drag needs, and nothing that executes."""
     script = tmp_path / "touch.py"

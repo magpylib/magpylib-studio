@@ -45,6 +45,7 @@ import sys
 import warnings
 
 import anywidget
+import numpy as np
 import traitlets
 
 from magpylib_studio import threejs
@@ -449,6 +450,57 @@ class SceneWidget(anywidget.AnyWidget):
         every edit."""
         return self._editing("to_script").to_script()
 
+    def set(self, object_id, *, position=None, orientation=None, **params):
+        """Edit an object from the notebook, as a drag in the view does.
+
+        `position` is where it goes, in world coordinates, and `orientation`
+        how it is turned, as a rotation vector in degrees -- the pose a drag
+        reports. Any other keyword is a parameter by its magpylib name:
+        ``dimension=``, ``polarization=``, ``current=``. All of it is one
+        step to undo, drawn, and told to the notebook as a drag's end is.
+
+        A value the object already has is no edit at all. That is what lets a
+        slider and the view follow each other: the slider sets a value, the
+        view's `revision` moves the slider to it, and the slider's own echo
+        of that changes nothing and records nothing.
+        """
+        session = self._editing("set")
+        calls = []
+        pose = session.get_transform(object_id)
+        moved = {
+            key: value
+            for key, value in (("position", position), ("orientation", orientation))
+            if value is not None and not _same(value, pose[key])
+        }
+        if moved:
+            calls.append(
+                {"method": "set_transform", "params": {"object_id": object_id, **moved}}
+            )
+        obj = session._objs[object_id]
+        for name, value in params.items():
+            if not _same(value, getattr(obj, name, None)):
+                calls.append(
+                    {
+                        "method": "set_param",
+                        "params": {
+                            "object_id": object_id,
+                            "name": name,
+                            "value": value,
+                        },
+                    }
+                )
+        if not calls:
+            return
+        result = session.batch(calls) if len(calls) > 1 else _call(session, calls[0])
+        if not result.get("ok", True):
+            refused = result.get("error") or "; ".join(
+                r.get("error", "refused")
+                for r in result.get("results", [])
+                if not r["ok"]
+            )
+            raise ValueError(f"{object_id}: {refused}")
+        self._show()
+
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time."""
         self._editing("undo").undo()
@@ -633,6 +685,20 @@ def _tree_of(entries):
         parent = nodes.get(entry["parent"])
         (parent["children"] if parent else roots).append(nodes[entry["id"]])
     return roots
+
+
+def _same(value, current):
+    """Whether `value` is what `current` already is, to rounding."""
+    try:
+        return current is not None and np.allclose(
+            np.asarray(value, dtype=float), np.asarray(current, dtype=float)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _call(session, call):
+    return getattr(session, call["method"])(**call["params"])
 
 
 def _session_of(objects, namespace):

@@ -146,7 +146,12 @@ studio.objects["probe"]  # the objects as edited, to compute with
 print(studio.to_script())  # what was built, and every edit, as magpylib code
 studio.undo()  # a whole drag at a time; ⌘Z / ctrl-Z in the view
 studio.save("ring.magpy.json")  # opens in the VS Code studio
+studio.set("probe", position=(0, 0, 0.02))  # an edit from code, as a drag makes
 ```
+
+`set` and `observe(..., "revision")` keep a notebook control and the view in
+step both ways — `examples/jupyter_demo.ipynb` does it with a slider. A value
+the object already has is no edit, so neither side echoes the other.
 
 The objects are copied into the session rather than edited in place: the cell
 that made them stays as it was, and running it again does not take the edits
