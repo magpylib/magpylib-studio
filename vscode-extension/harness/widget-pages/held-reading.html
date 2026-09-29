@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  The panel's own renderer, media/scene3d.mjs, drawing the studio's quiver
+  example, then drawing it again part-way through a drag: first with the
+  sensor held -- its arrows are its own reading -- then with the magnet held.
+  The drag itself is not needed for this: what a drag does to a redraw is the
+  `keep` it passes, and that is passed here.
+
+  `window.result` is what became of each held object's node and drawing.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/three/build/three.module.js",
+          "three/addons/": "/three/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      #view {
+        width: 640px;
+        height: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <script type="module">
+      import * as THREE from "three";
+      import { scene3d } from "/media/scene3d.mjs";
+
+      const [before, after] = await (await fetch("/out/readings.json")).json();
+      const el = document.getElementById("view");
+      const node = (id) => scene3d.byObjectId.get(id);
+      const drawn = (id) => node(id).children.map((child) => child.uuid);
+      // the middle of what is drawn on a node, from its vertices
+      const onScreen = (id) =>
+        new THREE.Box3()
+          .setFromObject(node(id), true)
+          .getCenter(new THREE.Vector3());
+      // the middle of where the engine put an object's meshes
+      const fromEngine = (payload, id) => {
+        const box = new THREE.Box3();
+        for (const item of payload.meshes) {
+          if (item.object_id === id) {
+            box.union(new THREE.Box3().setFromArray(item.position));
+          }
+        }
+        return box.getCenter(new THREE.Vector3());
+      };
+
+      scene3d.render(el, before);
+      const sensorNode = node("field");
+      const sensorWas = drawn("field");
+      scene3d.render(el, after, { keep: ["field"] }); // the sensor held
+      const sensor = {
+        sameNode: node("field") === sensorNode,
+        redrawn:
+          drawn("field").length > 0 &&
+          drawn("field").every((uuid) => !sensorWas.includes(uuid)),
+        moved:
+          fromEngine(after, "field").distanceTo(fromEngine(before, "field")) >
+            1e-4 &&
+          onScreen("field").distanceTo(fromEngine(after, "field")) < 1e-6,
+      };
+
+      const magnetNode = node("magnet");
+      const magnetWas = drawn("magnet");
+      scene3d.render(el, after, { keep: ["magnet"] }); // the magnet held
+      const magnet = {
+        sameNode: node("magnet") === magnetNode,
+        untouched: drawn("magnet").join() === magnetWas.join(),
+      };
+      window.result = { sensor, magnet };
+    </script>
+  </body>
+</html>

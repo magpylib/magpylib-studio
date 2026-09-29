@@ -19,8 +19,9 @@
  *   a run that plays with no python behind it.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
- * WebSocket, and a python with the widget's extra installed -- `pip install
- * -e ".[widget]"` -- and magpylib's display-backend API. Missing any of them
+ * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
+ * renderer loads, and a python with the widget's extra installed -- `pip
+ * install -e ".[widget]"` -- and magpylib's display-backend API. Missing any of them
  * is a failure, not a skip: a check that passes without having run is worse
  * than none. WebGL runs on SwiftShader, so no GPU is needed.
  */
@@ -40,6 +41,7 @@ const REPO = path.join(HARNESS, "..", "..");
 const STATIC = path.join(REPO, "magpylib_studio", "static");
 const PAGES = path.join(HARNESS, "widget-pages");
 const MEDIA = path.join(HARNESS, "..", "media");
+const THREE = path.join(HARNESS, "..", "node_modules", "three");
 
 function fail(message) {
   console.error(`check-widget-browser: ${message}`);
@@ -123,7 +125,15 @@ async function launch(chrome, profile) {
 
 /** This repo's files, over http: modules do not load from file://. */
 function serve(out) {
-  const roots = { static: STATIC, pages: PAGES, media: MEDIA, out };
+  // three.js for the pages that load the panel's own renderer, from the copy
+  // the panel loads it from.
+  const roots = {
+    static: STATIC,
+    pages: PAGES,
+    media: MEDIA,
+    three: THREE,
+    out,
+  };
   const TYPES = {
     ".js": "text/javascript",
     ".mjs": "text/javascript",
@@ -748,6 +758,35 @@ async function panel(port, base, expected) {
   });
 }
 
+/** The panel's renderer, mid-drag: a held sensor that draws its own reading
+ *  is redrawn from the scene on the node the handles are on, and any other
+ *  held object is left exactly as the drag carried it. */
+async function heldReadings(port, base) {
+  await check(
+    "a sensor dragged in the panel shows what it reads where it is",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/held-reading.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const { sensor, magnet } = result;
+        if (!sensor.sameNode) return "the dragged sensor's node was replaced";
+        if (!sensor.redrawn)
+          return "the dragged sensor's arrows were not redrawn";
+        if (!sensor.moved)
+          return "the redrawn arrows are not where the engine put them";
+        if (!magnet.sameNode || !magnet.untouched) {
+          return "a dragged magnet was redrawn, which would end its drag";
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -980,6 +1019,9 @@ const chrome = findChrome();
 if (!chrome) fail("no Chrome or Chromium found; set CHROME to name one");
 const python = enginePython();
 if (!python) fail("no python here can import magpylib_studio");
+if (!fs.existsSync(THREE)) {
+  fail("three.js is missing: run 'npm ci' in vscode-extension/ first");
+}
 
 const out = fs.mkdtempSync(path.join(os.tmpdir(), "magpy-widget-"));
 try {
@@ -1015,6 +1057,7 @@ try {
   await staleFrame(browser.port, base);
   await silent(browser.port, base);
   await panel(browser.port, base, expected);
+  await heldReadings(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

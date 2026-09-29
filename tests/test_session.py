@@ -829,6 +829,19 @@ def test_parametric_names_the_variables_a_drag_would_supersede(session):
 
 
 @needs_scene_graph
+def test_get_scene_names_what_draws_its_own_reading():
+    """A sensor whose pixels show the field is not right where a drag carries
+    it, as a magnet is: the view redraws it while it is dragged. The quiver's
+    grid is one; halbach's sensor, which draws only itself, is not."""
+    quiver = MagpylibStudioSession()
+    quiver.load_example("quiver")
+    assert quiver.get_scene()["readings"] == ["field"]
+    halbach = MagpylibStudioSession()
+    halbach.load_example("halbach")
+    assert halbach.get_scene()["readings"] == []
+
+
+@needs_scene_graph
 def test_get_scene_reports_the_orientation_a_drag_needs(session):
     """The rotation a drag has to add its turn to, which the picture cannot
     show: magpylib bakes it into the vertices, so the node arrives unrotated

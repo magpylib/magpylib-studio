@@ -992,6 +992,10 @@ def scene_payload(objects, live=None, derived=None):
     lands at the end of the event log, after the duplication that made the
     copies, so the source moves and the copies stay where they were. A view
     that offers drag handles has to know not to offer them there.
+
+    `readings` names the objects whose drawing is their own reading of the
+    field -- see `_reads_the_field` -- which a view redraws while they are
+    dragged, rather than carrying the picture along with the handles.
     """
     scene = _capture(objects, on_behalf_of="studio")
     panel = scene.panel(1, 1)
@@ -1001,10 +1005,12 @@ def scene_payload(objects, live=None, derived=None):
     derived = derived or {}
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
     anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
-    paths = {}
+    paths, readings = {}, []
     for key, obj in live.items():
         if key in source_of:
             continue  # a copy is drawn on its source's node
+        if _reads_the_field(obj):
+            readings.append(key)
         anchors[key] = np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist()
         # Where the object *looks* like it is, which is not always where it
         # is: a Tetrahedron's position is the origin its vertices are written
@@ -1061,4 +1067,16 @@ def scene_payload(objects, live=None, derived=None):
         "shapes": shapes,
         "polarizations": polarizations,
         "patterned": sorted(derived),
+        "readings": sorted(readings),
     }
+
+
+def _reads_the_field(obj):
+    """Whether what `obj` draws is its own reading of the field: a sensor
+    whose pixels are coloured, or drawn as arrows, by what they measure.
+
+    Such a drawing is not right where a drag puts it, as a magnet's is: what
+    it shows depends on where it is. A view redraws it while it is dragged,
+    rather than carrying the picture from where the drag began."""
+    pixel = getattr(getattr(obj, "style", None), "pixel", None)
+    return getattr(getattr(pixel, "field", None), "source", None) is not None
