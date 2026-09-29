@@ -12,6 +12,15 @@ All notable changes to the Magpylib Studio extension.
   plays in the panel from the run the figure carries, where it used to fall back
   to a still picture. Needs magpylib main for the legend and the display-backend
   API.
+- A re-run of the script redraws the panel as you left it: what you hid, the
+  theme you chose and the camera stay. The picture button asks where to save the
+  PNG.
+
+### Changed
+
+- The package now writes figures as payload version 2, which this extension
+  reads along with version 1. An older extension skips them, and its **Magpylib
+  Studio Views** output says to update it.
 
 ## [0.4.1]
 

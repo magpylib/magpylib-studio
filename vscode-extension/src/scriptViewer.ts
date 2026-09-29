@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { basename, extname } from 'path';
 
 import * as vscode from 'vscode';
 
@@ -22,8 +23,9 @@ import { mediaUri, nonce as webviewNonce } from './webview';
 /** Must match `VIEWS_SUBDIR` in magpylib_studio/viewer.py. */
 const VIEWS_SUBDIR = 'views';
 
-/** Must match `PAYLOAD_VERSION` there. Refuse what we cannot read whole. */
-const PAYLOAD_VERSION = 1;
+/** The `PAYLOAD_VERSION`s there this panel reads whole; it refuses the rest.
+ *  2 added the `widget` kind; a 1 is a package from before it, still drawn. */
+const PAYLOAD_VERSIONS = [1, 2];
 
 const PANEL_TYPE = 'magpylibScriptView';
 
@@ -304,7 +306,7 @@ function draw(
   views.set(key, { panel, payload, stale: false });
   panel.webview.html = html(context, panel.webview);
   void noticeOnce(context, payload);
-  panel.webview.onDidReceiveMessage((message: { type?: string }) => {
+  panel.webview.onDidReceiveMessage((message: PageMessage) => {
     // The page asks when it is ready rather than being told when the panel is
     // created: a hidden panel is torn down and rebuilt from this HTML, and a
     // message posted to one that is still parsing goes nowhere.
@@ -321,11 +323,53 @@ function draw(
       void promote(key);
     } else if (message.type === 'rerun') {
       rerun(key);
+    } else if (message.type === 'saveFile') {
+      void saveFile(key, message);
     }
   });
   panel.onDidDispose(() => {
     views.delete(key);
   });
+}
+
+/** What the page says. `saveFile` carries a file it made -- the widget's
+ *  picture -- as a data URL. */
+interface PageMessage {
+  type?: string;
+  filename?: unknown;
+  dataUrl?: unknown;
+}
+
+/** Save a file the page made, where the user says.
+ *
+ *  The page cannot: a webview has no downloads, so the widget's save -- an
+ *  `<a download>` anywhere else -- would do nothing at all here. It hands the
+ *  bytes over instead. Beside the script by default, where its other output
+ *  most likely goes. */
+async function saveFile(key: string, message: PageMessage): Promise<void> {
+  const { filename, dataUrl } = message;
+  if (typeof filename !== 'string' || typeof dataUrl !== 'string') {
+    return;
+  }
+  const encoded = /^data:[^,]*;base64,/.exec(dataUrl);
+  if (!encoded) {
+    return;
+  }
+  // A name, never a path: the page does not get to choose the folder.
+  const name = basename(filename);
+  const cwd = views.get(key)?.payload.cwd;
+  const folder = cwd ? vscode.Uri.file(cwd) : vscode.workspace.workspaceFolders?.[0]?.uri;
+  const extension = extname(name).slice(1);
+  const target = await vscode.window.showSaveDialog({
+    defaultUri: folder && vscode.Uri.joinPath(folder, name),
+    filters: extension ? { [extension.toUpperCase()]: [extension] } : undefined,
+  });
+  if (!target) {
+    return;
+  }
+  const bytes = Buffer.from(dataUrl.slice(encoded[0].length), 'base64');
+  await vscode.workspace.fs.writeFile(target, bytes);
+  void vscode.window.showInformationMessage(`Magpylib Studio: saved ${basename(target.fsPath)}`);
 }
 
 /** Hand the studio the script this panel was drawn from.
@@ -469,10 +513,10 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
     say(`not a figure: ${uri.fsPath}: ${err instanceof Error ? err.message : err}`);
     return undefined;
   }
-  if (payload.version !== PAYLOAD_VERSION) {
+  if (!PAYLOAD_VERSIONS.includes(payload.version)) {
     say(
       `ignoring ${uri.fsPath}: payload version ${payload.version}, ` +
-        `this extension reads ${PAYLOAD_VERSION}. Update the extension or ` +
+        `this extension reads ${PAYLOAD_VERSIONS.join(' and ')}. Update the extension or ` +
         'the magpylib-studio package so the two agree.',
     );
     return undefined;

@@ -42,6 +42,8 @@ let drawing = null;
 // cell's, which keeps the camera where the user left it.
 let widgetModel = null;
 let widgetRun = []; // a run too big to carry as changes, every frame of it
+let widgetCleanup = null; // what `render` hands back, to let its renderer go
+let widgetLoad = 0; // which figure a load still on its way is for
 
 /** A model the widget can be run against, held here: what anywidget hands a
  *  widget, answering for frames from the run the figure carries. */
@@ -73,29 +75,94 @@ function localModel(state) {
   };
 }
 
+// The widget saves its picture as a download, which a webview does not have:
+// the click would do nothing. It hands the file here instead, and the host
+// asks where to put it. A picture is all it can save here -- with no python
+// behind the panel, it offers no HTML export.
+window.magpySave = (href, filename) => {
+  if (href.startsWith("data:")) {
+    vscodeApi.postMessage({ type: "saveFile", filename, dataUrl: href });
+  }
+};
+
 /** The widget fills the panel; its height is the model's, so it follows. */
-const fitWidget = () =>
-  widgetModel?.set("height", Math.max(240, canvasEl.clientHeight - 2));
+const fittedHeight = () => Math.max(240, canvasEl.clientHeight - 2);
+const fitWidget = () => widgetModel?.set("height", fittedHeight());
 new ResizeObserver(fitWidget).observe(canvasEl);
 
+/** Each object's place in the legend -- its position and name at every level
+ *  down -- by its id. The ids are the objects' own, from the process that
+ *  drew them, so a re-run's are all new; the place is what carries over. */
+function placesIn(tree, above = "", places = new Map()) {
+  tree.forEach((node, i) => {
+    const place = `${above}/${i}:${node.label}`;
+    places.set(node.id, place);
+    placesIn(node.children || [], place, places);
+  });
+  return places;
+}
+
+/** `ids` in the tree `before`, as the ids of the same places in `after`.
+ *  One whose place is gone, or now holds something else, is dropped. */
+function carried(ids, before, after) {
+  const was = placesIn(before);
+  const now = new Map([...placesIn(after)].map(([id, place]) => [place, id]));
+  return ids.map((id) => now.get(was.get(id))).filter(Boolean);
+}
+
 async function drawWidget(body) {
-  widgetRun = body.run || [];
+  const load = ++widgetLoad;
+  const state = body.state || {};
   if (widgetModel) {
-    // Everything but the payload first: the widget reads a new payload with
-    // the tree, run length and pace it belongs to.
-    for (const [key, value] of Object.entries(body.state)) {
-      if (key !== "payload" && key !== "height") widgetModel.set(key, value);
+    widgetRun = body.run || [];
+    // A re-run: the script's new figure, in the view as the user left it.
+    // What was set here -- theme, axes, what is hidden and picked -- was set
+    // by the user, not the script, and stays. Everything before the payload:
+    // the widget reads a new payload with the tree, run length and pace it
+    // belongs to.
+    const before = widgetModel.get("tree") || [];
+    const after = state.tree || [];
+    for (const key of ["hidden", "selected"]) {
+      widgetModel.set(key, carried(widgetModel.get(key) || [], before, after));
     }
-    widgetModel.set("payload", body.state.payload);
+    for (const key of ["tree", "frames", "duration", "repeat"]) {
+      widgetModel.set(key, state[key]);
+    }
+    widgetModel.set("payload", state.payload);
     return;
   }
-  widgetModel = localModel(body.state);
-  fitWidget();
-  const widget = (await import(document.body.dataset.widget)).default;
-  canvasEl.innerHTML = "";
-  const el = document.createElement("div");
-  canvasEl.append(el);
-  widget.render({ model: widgetModel, el });
+  try {
+    const widget = (await import(document.body.dataset.widget)).default;
+    // Overtaken while it loaded: a newer figure is drawing, or the panel
+    // has moved on to another kind.
+    if (load !== widgetLoad) return;
+    const model = localModel({ ...state, height: fittedHeight() });
+    canvasEl.innerHTML = "";
+    const el = document.createElement("div");
+    canvasEl.append(el);
+    widgetRun = body.run || [];
+    widgetCleanup = widget.render({ model, el }) || null;
+    widgetModel = model;
+  } catch (error) {
+    if (load !== widgetLoad) return;
+    // Said, not swallowed: an empty panel tells nobody anything.
+    canvasEl.innerHTML = "";
+    const failed = document.createElement("p");
+    failed.className = "failed";
+    failed.textContent =
+      "The view could not be drawn: " + (error?.message || String(error));
+    canvasEl.append(failed);
+  }
+}
+
+/** Let the widget go: its renderer back to the pool, its watchers and timers
+ *  stopped, and any load of it still on its way dropped. */
+function dropWidget() {
+  widgetLoad += 1;
+  widgetCleanup?.();
+  widgetCleanup = null;
+  widgetModel = null;
+  widgetRun = [];
 }
 
 /** The scene graph is a module, and modules run after this script does — so a
@@ -117,15 +184,17 @@ function drawn(payload, stale) {
   overlayEl.hidden = !stale;
   promoteEl.hidden = payload.script.startsWith("<");
   if (drawing && drawing !== payload.kind) {
-    // The two renderers do not share a canvas. Plotly keeps its state on the
+    if (drawing === "widget") dropWidget();
+    // The renderers do not share a canvas. Plotly keeps its state on the
     // element rather than in the DOM it drew, so emptying the element without
     // telling it leaves that state describing a plot that is gone; the scene
     // graph re-hangs its own canvas when it finds the host emptied.
     if (drawing === "plotly") Plotly.purge(canvasEl);
     canvasEl.innerHTML = "";
   }
-  if (drawing === "widget" && payload.kind !== "widget") widgetModel = null;
   drawing = payload.kind;
+  // what the stylesheet places the out-of-date badge by
+  document.body.dataset.kind = payload.kind;
   if (payload.kind === "widget") {
     drawWidget(payload.body || {});
     return;

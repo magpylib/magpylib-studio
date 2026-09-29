@@ -1467,4 +1467,9 @@ export const scene3d = {
   byObjectId,
 };
 
-window.scene3d = scene3d;
+// The first instance keeps the name. The notebook widget makes one of these
+// per view, from a blob, and the studio's script panel draws that widget
+// beside its own copy of this file -- which would otherwise lose `window`'s
+// renderer to the widget's the moment one was drawn, and draw its next plain
+// scene with a renderer the widget still holds.
+window.scene3d ??= scene3d;

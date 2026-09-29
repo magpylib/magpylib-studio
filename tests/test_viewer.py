@@ -4,6 +4,8 @@ import base64
 import hashlib
 import json
 import os
+import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,17 @@ def drop(tmp_path, monkeypatch):
     monkeypatch.setenv("MAGPYLIB_STUDIO_DROP", str(tmp_path))
     monkeypatch.setattr(viewer, "_calls", {})
     return tmp_path / viewer.VIEWS_SUBDIR
+
+
+def test_the_panel_reads_the_version_written():
+    """A bump here that the panel was not told of would have it refuse every
+    figure a script draws."""
+    source = (
+        pathlib.Path(__file__).parent.parent / "vscode-extension/src/scriptViewer.ts"
+    ).read_text(encoding="utf-8")
+    read = re.search(r"const PAYLOAD_VERSIONS = \[([\d, ]+)\]", source)
+    assert read, "scriptViewer.ts no longer says which versions it reads"
+    assert viewer.PAYLOAD_VERSION in {int(v) for v in read.group(1).split(",")}
 
 
 def test_unstamped_process_writes_nothing(monkeypatch):

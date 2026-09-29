@@ -35,8 +35,9 @@ import time
 from pathlib import Path
 
 #: Bumped when the payload's shape changes. A panel that does not know a
-#: version says so rather than drawing part of it.
-PAYLOAD_VERSION = 1
+#: version says so rather than drawing part of it. 2 added the `widget` kind,
+#: which a panel reading only 1 would drop with a less helpful word.
+PAYLOAD_VERSION = 2
 
 #: The stamp names the window's storage directory, which holds other things.
 #: The views get a subdirectory of their own so only they are watched.

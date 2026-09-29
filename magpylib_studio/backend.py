@@ -130,19 +130,23 @@ def _outside_a_notebook(widget, title):
     with `write_html`, which plays a run with no python behind it.
     """
     if drop_dir() is not None:
-        write_view("widget", widget._saved(), title=title, claimed=CLAIMED)
+        # The script asked for the widget itself, so the window did not
+        # choose the backend: nothing to say about that in the panel.
+        state = widget._saved(threejs.WHOLE_RUN_LIMIT)
+        write_view("widget", state, title=title, claimed=False)
         print(
             "magpylib-studio: not in a notebook, so the view is in the "
             "Magpylib Studio panel.",
             file=sys.stderr,
         )
         return
-    folder = Path(tempfile.gettempdir()) / "magpylib-studio"
-    folder.mkdir(exist_ok=True)
-    handle, name = tempfile.mkstemp(suffix=".html", prefix="scene-", dir=folder)
+    # In the temp directory itself, as Plotly puts its pages: a folder of our
+    # own there would be one another user on the machine could make first.
+    handle, name = tempfile.mkstemp(suffix=".html", prefix="magpylib-scene-")
     os.close(handle)
     page = Path(name)
-    widget.write_html(page, title=title or "magpylib scene")
+    html = widget._page(title or "magpylib scene", threejs.WHOLE_RUN_LIMIT)
+    page.write_text(html, encoding="utf-8")
     # Not from a test suite, which would open a tab per test.
     opened = not _under_a_test_runner() and webbrowser.open(page.as_uri())
     print(
