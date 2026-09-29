@@ -1,5 +1,10 @@
 // Selection and style editing live in the sidebar (Scene tree + Inspector);
 // this panel is only the live 3D view.
+//
+// A drag of the handles is the package's `drag.mjs`, which the notebook
+// widget shares; `npm run compile` copies it into widget/.
+import { watchDrags } from "../widget/drag.mjs";
+
 const vscodeApi = acquireVsCodeApi();
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
@@ -57,9 +62,6 @@ let nextReqId = 1;
 const pending = new Map();
 let selectedIds = []; // the sidebar shows the first; a drag carries all
 let patterned = new Set(); // sources whose copies would not follow an edit
-let poseInFlight = false;
-let pendingPose = null;
-let dragging = null; // { objectId, keep } while a handle is held
 let parametric = {}; // objectId -> which drag-written fields a variable decides
 //: What the scene last said each object's draggable fields hold, keyed the
 //: way DRAG_WRITES names them. The corner reads its numbers from here rather
@@ -363,26 +365,38 @@ function showSelection() {
 
 // A drag is an edit like any other, so it goes to the host rather than
 // straight down the RPC: only the host marks the scene dirty, refreshes the
-// trees, and reports what the engine said.
-//
-// Mid-drag poses are paced by the round trip rather than by a timer: one is
-// in flight at a time and the newest waiting pose wins, so the rate settles
-// wherever the scene's cost puts it -- measured from 1.4 ms for two magnets
-// to 180 ms for a thousand. Any fixed interval would be wrong at one end of
-// that or the other, and a queue would only make the view lag further behind
-// the pointer the longer the drag went on.
-canvasEl.addEventListener("objecttransform", (event) => {
-  if (event.detail.preview) {
-    // Read out at pointer rate rather than at engine rate: the numbers are
-    // already known here, and waiting for the round trip to show them would
-    // make a fast drag on a heavy scene look like it had stopped responding.
-    showPose(event.detail);
-    pendingPose = event.detail;
-    sendPose();
-    return;
-  }
-  dragging = null;
-  pendingPose = null; // the final pose supersedes anything still waiting
+// trees, and reports what the engine said. The pacing, and the redraw around
+// the drag, are `drag.mjs`'s.
+let previewTaken = null; // settles the preview the host has not yet answered
+watchDrags(canvasEl, {
+  drawing: drawingScene,
+  patterned: () => patterned,
+  // Told at the start, so the edits the drag is about to make are grouped
+  // into one thing to undo, and so anything it will supersede can be said
+  // once -- before the drag rather than after, which is when it stops being
+  // useful. A drag and a running path are two things moving the same object.
+  // The playback yields, since the pointer is the one being asked.
+  begin({ objectIds, mode }) {
+    if (playing) playPause();
+    // `objectIds`, plural, is what the view sends: a drag can carry a whole
+    // selection. Read as `objectId` this was undefined every time, which
+    // cost more than it looks -- the warning that a drag is about to take a
+    // value away from the variable deciding it was looked up under an
+    // undefined key and so never once appeared.
+    const objectId = objectIds[0];
+    vscodeApi.postMessage({
+      type: "dragStart",
+      objectId,
+      field: DRAG_WRITES[mode],
+      names: (parametric[objectId] || {})[DRAG_WRITES[mode]],
+    });
+  },
+  showPose,
+  preview: (pose) =>
+    new Promise((resolve) => {
+      previewTaken = resolve;
+      vscodeApi.postMessage({ type: "previewTransform", ...pose });
+    }),
   // `transformObjects`, plural, is the name the host answers to. Singular it
   // went nowhere: the pose the drag ended on was never recorded, the undo
   // group it opened was never closed -- so the next edit anywhere was
@@ -390,81 +404,14 @@ canvasEl.addEventListener("objecttransform", (event) => {
   // marked as having changed, so a window closed after a drag offered to save
   // nothing. Every gesture looked right, because the previews had already
   // done the work; only what happens at the end of one was missing.
-  vscodeApi.postMessage({ type: "transformObjects", ...event.detail });
+  commit: (pose) =>
+    vscodeApi.postMessage({ type: "transformObjects", ...pose }),
+  scene: () => rpc("get_scene", {}),
+  render(payload, { keep }) {
+    patterned = new Set(payload.patterned);
+    window.scene3d?.render(canvasEl, payload, { keep });
+  },
 });
-
-// Told at the start, so the edits the drag is about to make are grouped into
-// one thing to undo, and so anything it will supersede can be said once --
-// before the drag rather than after, which is when it stops being useful.
-// A drag and a running path are two things moving the same object. The
-// playback yields, since the pointer is the one being asked.
-canvasEl.addEventListener("dragstart", (event) => {
-  if (playing) playPause();
-  // `objectIds`, plural, is what the view sends: a drag can carry a whole
-  // selection. Read as `objectId` this was undefined every time, which cost
-  // more than it looks -- nothing was ever held through a redraw, and the
-  // warning that a drag is about to take a value away from the variable
-  // deciding it was looked up under an undefined key and so never once
-  // appeared.
-  const { objectIds, mode } = event.detail;
-  const objectId = objectIds[0];
-  // Nothing is kept where the picture has to come from the engine to be
-  // right: aiming a polarization redraws the magnet's colours, and a
-  // patterned source's copies move by the mirror or the pitch of the drag
-  // rather than with it, which only a rebuild knows. Neither has the handles
-  // on that node -- see setGizmoMode -- so there is nothing to swap out from
-  // under them.
-  //
-  // Several objects at once is the exception: they are hung on the rig for
-  // the length of the drag, and a rebuild that took their nodes away would
-  // leave them drawn twice, once on the rig and once from the payload. They
-  // keep their nodes, and a pattern among them catches up at the release.
-  const rebuilt =
-    mode === "polarization" ||
-    (objectIds.length === 1 && patterned.has(objectId));
-  dragging = { objectId, keep: rebuilt ? null : objectIds };
-  vscodeApi.postMessage({
-    type: "dragStart",
-    objectId,
-    field: DRAG_WRITES[mode],
-    names: (parametric[objectId] || {})[DRAG_WRITES[mode]],
-  });
-});
-
-/** How long building the scene may take before a drag stops waiting for it.
- *
- * Well under a frame at 60 Hz. Everything else a drag updates lives in
- * another webview and cannot slow the pointer down; this one runs here, so
- * it is the only thing that can make the gesture itself feel heavy. */
-const REDRAW_BUDGET_MS = 8;
-
-/** Redraw what the drag changed, except the object under the pointer.
- *
- * Moving a magnet moves more than the magnet: a field's arrows are computed
- * from it and have to be asked for again. This is the expensive half of the
- * round trip, so it runs *inside* the pacing loop rather than beside it --
- * the next pose is not sent until the scene it caused has been drawn, which
- * keeps a heavy scene sending fewer poses instead of falling behind.
- *
- * Pacing stops the work queueing up; it does not stop one slow redraw from
- * stuttering the drag it is meant to illustrate. So the first redraw of each
- * gesture is timed, and if building the scene costs more than a frame, the
- * rest of that drag goes without: the object under the pointer keeps up, the
- * field and the Inspector keep updating in their own webviews, and the scene
- * catches up when the drag ends. A big scene on a slow machine then loses
- * the thing that was never going to look right anyway, rather than the
- * smoothness of the gesture.
- */
-async function redrawAroundDrag() {
-  if (!drawingScene() || !dragging || dragging.tooSlow) return;
-  const payload = await rpc("get_scene", {});
-  patterned = new Set(payload.patterned);
-  // Timed around the render alone. The request before it is the engine's
-  // time, not ours: it delays the next pose without blocking this one.
-  const started = performance.now();
-  window.scene3d?.render(canvasEl, payload, { keep: dragging.keep });
-  dragging.tooSlow = performance.now() - started > REDRAW_BUDGET_MS;
-}
 
 /** The pose being dragged, over the view rather than in the bar.
  *
@@ -718,14 +665,6 @@ function showTakeover() {
   showReadout();
 }
 
-function sendPose() {
-  if (poseInFlight || !pendingPose) return;
-  poseInFlight = true;
-  const pose = pendingPose;
-  pendingPose = null;
-  vscodeApi.postMessage({ type: "previewTransform", ...pose });
-}
-
 /** Show the handles, less the ones the selected object cannot honour.
  *
  * A pattern's copies are drawn on their source's node and under its id, so
@@ -890,20 +829,9 @@ window.addEventListener("message", (event) => {
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
   } else if (message.type === "previewDone") {
-    // On the next frame, not on the reply: a small scene answers in under two
-    // milliseconds, and rebuilding it several hundred times a second to show
-    // it sixty is work the screen throws away. Whichever is slower decides,
-    // which is the rule a variable slider drag already runs by -- and the
-    // object under the pointer is not waiting on any of it, since the handles
-    // move its node locally.
-    requestAnimationFrame(() => {
-      redrawAroundDrag()
-        .catch(() => {}) // a failed redraw must not end the drag
-        .finally(() => {
-          poseInFlight = false;
-          sendPose(); // whatever the pointer reached while that one was away
-        });
-    });
+    // the engine has the pose: `drag.mjs` redraws, then sends the next
+    previewTaken?.();
+    previewTaken = null;
   } else if (message.type === "select") {
     // a plain pick, or the Scene tree: one object, and the set restarts
     selectedIds = message.objectId ? [message.objectId] : [];

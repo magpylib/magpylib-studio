@@ -1063,6 +1063,32 @@ def _skipped_note(skipped):
 
 
 # Operations allowed inside batch() — mutating, per-object (plus clear).
+def _calls_for(edit):
+    """The engine calls one edit from a view's handles comes to -- see
+    `MagpylibStudioSession.apply_edits`."""
+    object_id = edit["objectId"]
+
+    def call(method, **params):
+        return {"method": method, "params": {"object_id": object_id, **params}}
+
+    calls = []
+    shape = edit.get("shape")
+    if shape is not None:
+        attr, value = shape["attr"], shape["value"]
+        if attr.startswith("style."):
+            path = attr.removeprefix("style.")
+            calls.append(call("apply_edit", path=path, value=value))
+        else:
+            calls.append(call("set_param", name=attr, value=value))
+    if edit.get("polarization") is not None:
+        value = edit["polarization"]
+        calls.append(call("set_param", name="polarization", value=value))
+    pose = {k: edit[k] for k in ("position", "orientation") if edit.get(k) is not None}
+    if pose:
+        calls.append(call("set_transform", **pose))
+    return calls
+
+
 _BATCHABLE = {
     "apply_edit",
     "add_object",
@@ -3966,6 +3992,35 @@ class MagpylibStudioSession:
             self._redo = self._interaction_redo
         self._interaction = None
         self._interaction_redo = []
+
+    def apply_edits(self, edits):
+        """Record what a 3D view's handles did.
+
+        `edits` are the renderer's own records, one per object dragged, as its
+        `objecttransform` event reports them: ``{"objectId", "position",
+        "orientation", "shape": {"attr", "value"}, "polarization"}``, each but
+        the id optional. A pose is one `set_transform`; a resize or an aim is
+        a parameter, and where the parameter lives decides the method -- a
+        ``style.`` one is a style edit.
+
+        Here, not in each view's host, so that every view turns a drag into
+        the same edits: the studio's panel does, and so will a notebook's
+        widget. Several calls go as one `batch`, and so one undo step: objects
+        dragged together were one gesture. A batch that fails says why in
+        `error`, as a single call does, rather than only per call.
+        """
+        calls = [call for edit in edits for call in _calls_for(edit)]
+        if not calls:
+            return {"ok": True}
+        if len(calls) == 1:
+            (call,) = calls
+            return getattr(self, call["method"])(**call["params"])
+        result = self.batch(calls)
+        if not result["ok"]:
+            result["error"] = "; ".join(
+                r.get("error", "refused") for r in result["results"] if not r["ok"]
+            )
+        return result
         self._replay_frames = {}
         return {"ok": True}
 

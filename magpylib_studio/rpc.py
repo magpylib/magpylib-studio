@@ -36,6 +36,7 @@ _PUBLIC = {
     "set_visible",
     "begin_interaction",
     "end_interaction",
+    "apply_edits",
     "set_param",
     "get_params",
     "get_transform",

@@ -1571,70 +1571,17 @@ interface Edit {
   polarization?: number[];
 }
 
-/** The engine calls one edit turns into. A pose is one call; a resize or an
- *  aim is a parameter, and where that parameter lives decides the method. */
-function callsFor(edit: Edit): { method: string; params: Record<string, unknown> }[] {
-  const calls = [];
-  if (edit.shape) {
-    const { attr, value } = edit.shape;
-    calls.push(
-      attr.startsWith('style.')
-        ? {
-            method: 'apply_edit',
-            params: {
-              object_id: edit.objectId,
-              path: attr.slice('style.'.length),
-              value,
-            },
-          }
-        : { method: 'set_param', params: { object_id: edit.objectId, name: attr, value } },
-    );
-  }
-  if (edit.polarization) {
-    calls.push({
-      method: 'set_param',
-      params: {
-        object_id: edit.objectId,
-        name: 'polarization',
-        value: edit.polarization,
-      },
-    });
-  }
-  if (edit.position || edit.orientation) {
-    const params: Record<string, unknown> = { object_id: edit.objectId };
-    if (edit.position) {
-      params.position = edit.position;
-    }
-    if (edit.orientation) {
-      params.orientation = edit.orientation;
-    }
-    calls.push({ method: 'set_transform', params });
-  }
-  return calls;
-}
-
 async function transformFromPanel(
   context: vscode.ExtensionContext,
   message: { edits: Edit[] },
   previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
-  const calls = message.edits.flatMap(callsFor);
-  if (!calls.length) {
-    if (previewFor) {
-      finishPreview(previewFor);
-    } else {
-      await finishDrag(context);
-    }
-    return;
-  }
   try {
     const engine = await getEngine(context);
-    // Several objects dragged together go as a batch, which the engine
-    // records as one step: sent one at a time they would be one history
-    // entry each, and the gesture was one thing the user did.
-    const result = (await (calls.length === 1
-      ? engine.request(calls[0].method, calls[0].params)
-      : engine.request('batch', { operations: calls }))) as {
+    // The engine turns the view's edits into its own calls, as it does for
+    // any other view of a session: several objects dragged together are one
+    // step to undo, since the gesture was one thing the user did.
+    const result = (await engine.request('apply_edits', { edits: message.edits })) as {
       ok: boolean;
       error?: string;
     };
@@ -4643,7 +4590,7 @@ export function createWebviewHtml(
 ): string {
   const nonce = webviewNonce();
   const studioStyleUri = mediaUri(webview, context.extensionUri, 'studio.css');
-  const studioScriptUri = mediaUri(webview, context.extensionUri, 'studio.js');
+  const studioScriptUri = mediaUri(webview, context.extensionUri, 'studio.mjs');
   const plotlyUri = webview.asWebviewUri(
     vscode.Uri.joinPath(
       context.extensionUri,
@@ -4759,7 +4706,7 @@ export function createWebviewHtml(
     </details>
     <span id="status">Starting…</span>
   </div>
-  <script nonce="${nonce}" src="${studioScriptUri}"></script>
+  <script type="module" nonce="${nonce}" src="${studioScriptUri}"></script>
 </body>
 </html>`;
 }
