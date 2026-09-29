@@ -118,14 +118,16 @@ def test_a_script_in_a_studio_terminal_gets_the_view_in_the_panel(
     assert "panel" in capsys.readouterr().err
 
 
-def test_a_terminal_ipython_is_no_notebook(scene_objects, monkeypatch):
+def test_a_terminal_ipython_is_no_notebook(monkeypatch):
     """`ipython script.py` has a shell but no cell to draw in: the widget is
     not handed to it, which would only print its name, and the script's way
     of showing it is taken instead."""
     getipython = pytest.importorskip("IPython.core.getipython")
     shown = []
     monkeypatch.setattr("IPython.display.display", shown.append)
-    view = widget.SceneWidget(*scene_objects)
+    # what is shown is only handed on, so any object will do -- and one that
+    # is not a real widget needs no display-backend API from magpylib
+    view = object()
 
     class TerminalInteractiveShell:
         pass
