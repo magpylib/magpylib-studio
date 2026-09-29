@@ -16,6 +16,7 @@ from magpylib_studio.session import (
     DOC_VERSION,
     EXAMPLES,
     MagpylibStudioSession,
+    _calls_for,
     _linspace_lit,
 )
 
@@ -424,6 +425,70 @@ def test_edits_after_a_gesture_undo_on_their_own_again(session):
     session.set_transform("cube", position=[5, 0, 0])
     session.end_interaction()
     assert len(session.get_history()["entries"]) == entries + 4
+
+
+def test_a_views_pose_is_set_where_it_was_dragged_to(session):
+    """`apply_edits` takes the renderer's records as they come: a pose is
+    the world pose reached, one step to undo, as `set_transform` makes it."""
+    entries = len(session.get_history()["entries"])
+    result = session.apply_edits([{"objectId": "cube", "position": [1.0, -2.0, 0.5]}])
+    assert result["ok"]
+    assert np.ravel(session._objs["cube"].position) == pytest.approx([1.0, -2.0, 0.5])
+    assert len(session.get_history()["entries"]) == entries + 1
+
+
+def test_objects_dragged_together_are_one_step_to_undo(session):
+    """Several objects in one gesture: one batch, one undo back to both."""
+    before = {
+        key: np.ravel(session._objs[key].position).copy() for key in ("cube", "cyl")
+    }
+    entries = len(session.get_history()["entries"])
+    edits = [
+        {"objectId": "cube", "position": [5.0, 0, 0]},
+        {"objectId": "cyl", "position": [0, 5.0, 0], "orientation": [0, 0, 45.0]},
+    ]
+    assert session.apply_edits(edits)["ok"]
+    assert len(session.get_history()["entries"]) == entries + 1
+    assert session.undo()["ok"]
+    for key, position in before.items():
+        assert np.ravel(session._objs[key].position) == pytest.approx(position)
+
+
+def test_a_resize_or_an_aim_goes_where_its_parameter_lives(session):
+    """A shape is a constructor parameter, or a style one when the renderer
+    names it `style.` -- a dipole's size -- and an aim is the polarization."""
+    edit = {"objectId": "cube", "shape": {"attr": "dimension", "value": [2, 3, 4]}}
+    assert session.apply_edits([{**edit, "polarization": [0, 1, 0]}])["ok"]
+    assert session._objs["cube"].dimension == pytest.approx([2, 3, 4])
+    assert session._objs["cube"].polarization == pytest.approx([0, 1, 0])
+
+    (call,) = _calls_for(
+        {"objectId": "dip", "shape": {"attr": "style.size", "value": 2}}
+    )
+    assert call == {
+        "method": "apply_edit",
+        "params": {"object_id": "dip", "path": "size", "value": 2},
+    }
+
+
+def test_a_refused_drag_of_several_says_why(session):
+    """`batch` answers per call; a host shows one message, so the refusal is
+    said in `error`, as a single call's is."""
+    result = session.apply_edits(
+        [
+            {"objectId": "cube", "position": [1.0, 0, 0]},
+            {"objectId": "nowhere", "position": [2.0, 0, 0]},
+        ]
+    )
+    assert result["ok"] is False
+    assert "nowhere" in result["error"]
+
+
+def test_nothing_dragged_is_nothing_recorded(session):
+    entries = len(session.get_history()["entries"])
+    assert session.apply_edits([{"objectId": "cube"}]) == {"ok": True}
+    assert session.apply_edits([]) == {"ok": True}
+    assert len(session.get_history()["entries"]) == entries
 
 
 def test_a_whole_drag_is_one_construction_step(session):

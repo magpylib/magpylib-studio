@@ -5,8 +5,8 @@
 // the protocol already uses, so a later change can move or recolour a single
 // object without asking python for a new scene.
 //
-// Loaded as a module because three ships ESM only; `scene3d` is on window so
-// the classic studio.js can drive it.
+// Loaded as a module because three ships ESM only; `scene3d` is on window as
+// well as exported, so the panels' own scripts can drive it.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";

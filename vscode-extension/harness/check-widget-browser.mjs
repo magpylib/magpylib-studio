@@ -1,7 +1,7 @@
 /**
  * The notebook widget in a real browser, driven the way a person drives it.
  *
- *   node harness/check-widget-browser.mjs
+ *   node harness/check-widget-browser.mjs [--only <part of a check's name>]
  *
  * `check-widget.js` says the bundle was built from the sources in the tree;
  * nothing said the bundle *works*. What went wrong with it went wrong only in
@@ -126,9 +126,12 @@ async function launch(chrome, profile) {
 /** This repo's files, over http: modules do not load from file://. */
 function serve(out) {
   // three.js for the pages that load the panel's own renderer, from the copy
-  // the panel loads it from.
+  // the panel loads it from. `widget/` is what `npm run compile` copies out
+  // of the package's static files, and is served from where it is copied
+  // from: a run needs no build.
   const roots = {
     static: STATIC,
+    widget: STATIC,
     pages: PAGES,
     media: MEDIA,
     three: THREE,
@@ -276,7 +279,14 @@ const row = (label) =>
 let failures = 0;
 
 /** Run `body`, which answers what is wrong -- nothing, when all is well. */
+//: `--only <text>` runs the checks whose name holds it, and none of the rest:
+//: the whole run takes minutes, and a change to one page wants one answer.
+const only = process.argv.includes("--only")
+  ? process.argv[process.argv.indexOf("--only") + 1]
+  : null;
+
 async function check(name, body) {
+  if (only && !name.includes(only)) return;
   let problem;
   try {
     problem = await within(
@@ -787,6 +797,58 @@ async function heldReadings(port, base) {
   );
 }
 
+/** The studio panel's half of a drag, which the notebook widget will share:
+ *  the undo group opened first, one preview in flight with the newest pose
+ *  waiting, a redraw between previews that keeps what the handles hold, and
+ *  the pose the drag ends on recorded last. */
+async function studioDrag(port, base) {
+  await check(
+    "a drag in the studio panel says what it did, in order",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/studio-drag.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const { said, kept } = result;
+        const shown = said.map((m) => m.type + (m.x ?? "")).join(" ");
+        const first = said[0];
+        if (first?.type !== "dragStart" || first.field !== "position") {
+          return `it began with ${JSON.stringify(first)}`;
+        }
+        const previews = said.filter((m) => m.type === "previewTransform");
+        const xs = previews.map((m) => m.x);
+        if (xs.join() !== "1,10,11,15") {
+          return `previews at ${xs.join(", ")}, not 1, 10, 11, 15: ${shown}`;
+        }
+        // one in flight, and the scene redrawn before the next goes
+        for (let i = 1; i < said.length; i++) {
+          if (said[i].type !== "previewTransform") continue;
+          const since = said
+            .slice(0, i)
+            .map((m) => m.type)
+            .lastIndexOf("previewTransform");
+          if (since < 0) continue;
+          const between = said.slice(since + 1, i);
+          if (!between.some((m) => m.method === "get_scene")) {
+            return `two previews with no redraw between them: ${shown}`;
+          }
+        }
+        const last = said.at(-1);
+        if (last.type !== "transformObjects" || last.x !== 16) {
+          return `it ended with ${JSON.stringify(last)}: ${shown}`;
+        }
+        if (!kept.length || kept.some((keep) => keep?.join() !== "cube")) {
+          return `the redraws kept ${JSON.stringify(kept)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -1058,6 +1120,7 @@ try {
   await silent(browser.port, base);
   await panel(browser.port, base, expected);
   await heldReadings(browser.port, base);
+  await studioDrag(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

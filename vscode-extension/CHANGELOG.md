@@ -21,9 +21,15 @@ All notable changes to the Magpylib Studio extension.
 - The package now writes figures as payload version 2, which this extension
   reads along with version 1. An older extension skips them, and its **Magpylib
   Studio Views** output says to update it.
+- The engine now turns a drag of the 3D view's handles into edits
+  (`apply_edits`), where the extension used to. This needs an engine from the
+  same release: with an older one, a drag is refused with "unknown method
+  'apply_edits'". Update both together.
 
 ### Fixed
 
+- A drag of several objects that the engine refused said only "undefined". It
+  now says why.
 - A sensor that draws its own reading -- pixels coloured, or arrows, by the
   field -- showed what it measured where a drag began until the drag ended. It
   is now redrawn as it moves, like the rest of the scene.
