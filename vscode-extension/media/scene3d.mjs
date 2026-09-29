@@ -1135,6 +1135,19 @@ function drawAxes(ranges, labels) {
 /** Drop every node but the ones held, freeing what they hold on the GPU.
  *  This runs on every edit: a colorscale texture per mesh, left to
  *  accumulate, is a leak. */
+/** Take what is drawn on `node` off it, and free it. The node itself stays,
+ *  and whatever is attached to it -- the handles -- with it. */
+function clearNode(node) {
+  for (const child of [...(node?.children ?? [])]) {
+    node.remove(child);
+    child.traverse((part) => {
+      part.geometry?.dispose();
+      part.material?.map?.dispose();
+      part.material?.dispose();
+    });
+  }
+}
+
 function discard(held) {
   for (const [objectId, node] of byObjectId) {
     if (held.has(objectId)) continue;
@@ -1358,8 +1371,15 @@ function viewKey(event, host = {}) {
  * else in the scene is redrawn, because plenty of it is *derived* from the
  * dragged object -- a field's arrows turn as the magnet that makes them
  * moves, and no amount of moving a mesh locally will show that. The dragged
- * object itself is the one thing the picture already has right, and swapping
- * it out from under the gizmo mid-drag would end the drag.
+ * object itself is the one thing the picture usually has right, and swapping
+ * its node out from under the gizmo mid-drag would end the drag.
+ *
+ * Usually: a sensor that draws its own reading -- pixels coloured, or drawn
+ * as arrows, by the field they measure -- shows what it measured where the
+ * drag began, carried along. The payload names those (`readings`). Their
+ * node stays, with the handles on it, and what is drawn on it is replaced
+ * like everything else: from the scene as the engine has it, which is a
+ * round trip behind the pointer, and caught up by the next redraw.
  */
 function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const held = new Set([].concat(keep ?? []));
@@ -1385,6 +1405,10 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   patterned = new Set(payload.patterned || []);
 
   discard(held);
+  const readings = new Set(payload.readings ?? []);
+  for (const objectId of held) {
+    if (readings.has(objectId)) clearNode(byObjectId.get(objectId));
+  }
   tracks = payload.tracks ?? null;
   tracked = [];
   changes = payload.changes ?? [];
@@ -1393,7 +1417,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
   for (const item of payload.meshes.concat(payload.scatters)) {
-    if (held.has(item.object_id)) continue;
+    if (held.has(item.object_id) && !readings.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
     const built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
     node.attach(built);

@@ -22,6 +22,12 @@ All notable changes to the Magpylib Studio extension.
   reads along with version 1. An older extension skips them, and its **Magpylib
   Studio Views** output says to update it.
 
+### Fixed
+
+- A sensor that draws its own reading -- pixels coloured, or arrows, by the
+  field -- showed what it measured where a drag began until the drag ended. It
+  is now redrawn as it moves, like the rest of the scene.
+
 ## [0.4.1]
 
 ### Fixed

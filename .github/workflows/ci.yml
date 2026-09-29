@@ -86,11 +86,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      # 22 for its WebSocket: the check talks to Chrome itself, and needs
-      # nothing from npm. Chrome is already on GitHub's Ubuntu runners.
+      # 22 for its WebSocket: the check talks to Chrome itself. Chrome is
+      # already on GitHub's Ubuntu runners.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # three.js, for the pages that load the panel's own renderer
+      - name: Install the extension's packages
+        working-directory: vscode-extension
+        run: npm ci
       - run: pip install -e ".[widget]"
       # The widget draws through magpylib's display-backend API, which is
       # not in a release yet.

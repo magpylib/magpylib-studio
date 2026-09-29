@@ -21,6 +21,9 @@ Writes into OUT:
   model holds them, for pages that play the notebook themselves;
 * ``panel.json`` -- what the ``studio`` backend leaves for the panel: a stack
   of turning rings and a probe, as the widget's state, with its legend;
+* ``readings.json`` -- the studio's quiver example as its panel draws it, then
+  again with the sensor moved: a sensor whose arrows are its own reading, for
+  the panel's renderer to redraw while it is dragged;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -33,6 +36,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import threejs
+from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 
 #: A parallel view from the front and a little above -- nothing the page
@@ -149,6 +153,16 @@ def main(out):
     if not panel["state"]["tree"] or not panel["state"]["payload"].get("tracks"):
         raise SystemExit("panel.json: the legend and the motion should be there")
     (out / "panel.json").write_text(json.dumps(panel))
+
+    # the quiver's sensor where it starts, and part-way through a drag
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    before = session.get_scene()
+    session.set_transform("field", position=[0.004, 0.003, 0.012])
+    after = session.get_scene()
+    if before["readings"] != ["field"]:
+        raise SystemExit("readings.json: the quiver's sensor should be a reading")
+    (out / "readings.json").write_text(json.dumps([before, after]))
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows}
