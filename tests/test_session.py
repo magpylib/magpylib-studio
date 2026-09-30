@@ -111,6 +111,54 @@ def test_the_object_tree_is_what_a_legend_draws():
     assert hidden["visible"] is False
 
 
+@needs_scene_graph
+def test_the_payload_says_what_each_collection_holds():
+    """By the ids a view draws them under, nested collections too, and a
+    pattern's copies as their source, whose node they are drawn on. A
+    collection holding a whole pattern is carried like any other; one that
+    splits a pattern -- its source moved out, the copies left behind -- is
+    drawn from the engine, as a patterned source is."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    scene = s.get_scene()
+    assert scene["collections"] == {
+        "halbach": ["ring1", "r1", "ring2", "r2"],
+        "ring1": ["r1"],
+        "ring2": ["r2"],
+    }
+    assert scene["patterned"] == ["r1", "r2"]
+    s.move_object("r1", "halbach")
+    assert s.get_scene()["patterned"] == ["r1", "r2", "ring1"]
+
+
+def test_a_collection_edited_moves_what_it_holds_as_one_step():
+    """What a drag of a collection's own handles sends: one edit, for the
+    collection, and everything in it -- a pattern's copies too -- moves and
+    turns with it, as one step to undo."""
+    import numpy as np
+
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+
+    def at(object_id):
+        return np.array(s.get_transform(object_id)["position"])
+
+    ring = [o["id"] for o in s.list_objects() if o["id"].split("#")[0] == "r1"]
+    assert len(ring) == 10  # the source and its nine copies
+    before = {k: at(k) for k in ring}
+    steps = len(s.get_history()["undo"])
+    assert s.apply_edits([{"objectId": "ring1", "position": [0, 0, 0.01]}])["ok"]
+    for k in ring:
+        np.testing.assert_allclose(at(k) - before[k], [0, 0, 0.01], atol=1e-12)
+    assert s.apply_edits([{"objectId": "ring1", "orientation": [0, 0, 90]}])["ok"]
+    x, y, z = before["r1"]
+    np.testing.assert_allclose(at("r1"), [-y, x, z + 0.01], atol=1e-12)
+    assert len(s.get_history()["undo"]) == steps + 2
+    s.undo()
+    s.undo()
+    np.testing.assert_allclose(at("r1"), before["r1"], atol=1e-12)
+
+
 def test_list_objects(session):
     objs = session.list_objects()
     assert [o["id"] for o in objs] == ["cube", "cyl"]

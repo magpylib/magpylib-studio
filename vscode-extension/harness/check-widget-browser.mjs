@@ -1071,6 +1071,86 @@ async function editing(port, base) {
   );
 }
 
+async function collection(port, base) {
+  await check("a collection's own handles move it whole", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/collection.html`);
+      if (!(await tab.until("return window.ready", 20_000))) {
+        return "never ready";
+      }
+      const selected = () => tab.evaluate(`return page.model.get("selected")`);
+      const press = (key) =>
+        tab.evaluate(`document.querySelector(".magpy-scene-stage")
+          .dispatchEvent(new KeyboardEvent("keydown", { key: "${key}", bubbles: true }))`);
+
+      // C, from a magnet picked in the view: the collection holding it; and
+      // again, at the top, nothing further
+      await tab.evaluate(`page.model.set("selected", ["left"])`);
+      await press("c");
+      const up = await selected();
+      await press("c");
+      const top = await selected();
+      if (up.join() !== "pair" || top.join() !== "pair") {
+        return `C went from left to ${up}, then to ${top}`;
+      }
+
+      // the legend's row selects the collection itself
+      await tab.evaluate(`page.model.set("selected", [])`);
+      await tab.evaluate(
+        `${row("pair")}.querySelector(".magpy-legend-label").click()`,
+      );
+      await wait(200);
+      const clicked = await selected();
+      if (clicked.join() !== "pair") return `its row selected ${clicked}`;
+      const on = await tab.evaluate(`return page.on()`);
+      if (on !== "pair") return `the handles are on ${on}`;
+
+      // a real drag of its handles: what it holds goes with it, through the
+      // redraws around the drag, and the session is told of the pair alone
+      const at = await tab.evaluate(`return page.handlesAt()`);
+      const mouse = (type, x, buttons = 1) =>
+        tab.send("Input.dispatchMouseEvent", {
+          type,
+          x,
+          y: at.y,
+          button: "left",
+          buttons,
+          clickCount: 1,
+        });
+      await mouse("mouseMoved", at.x, 0);
+      await mouse("mousePressed", at.x);
+      for (let step = 1; step <= 6; step++) {
+        await mouse("mouseMoved", at.x + step * 15);
+        await wait(60);
+      }
+      await wait(300);
+      const midway = await tab.evaluate(
+        `return [page.carriedBy("left"), page.carriedBy("right")]`,
+      );
+      await mouse("mouseReleased", at.x + 90, 0);
+      await wait(400);
+      if (midway.join() !== "pair,pair") {
+        return `mid-drag, left and right hung on ${midway}`;
+      }
+      const after = await tab.evaluate(`return page.carriedBy("left")`);
+      if (after !== null) return `after the drag, left still hangs on ${after}`;
+      const edits = await tab.evaluate(
+        `return page.asked.filter((a) => a.method === "apply_edits").map((a) => a.edits)`,
+      );
+      if (!edits.length) return "the drag sent nothing";
+      const ids = [...new Set(edits.flat().map((edit) => edit.objectId))];
+      if (ids.join() !== "pair") return `the drag edited ${ids}`;
+      if (!edits.at(-1)[0].position) {
+        return `the release sent ${JSON.stringify(edits.at(-1))}`;
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 async function pool(port, base) {
   const cases = {
     detached: [
@@ -1344,6 +1424,7 @@ try {
   await heldReadings(browser.port, base);
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
+  await collection(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

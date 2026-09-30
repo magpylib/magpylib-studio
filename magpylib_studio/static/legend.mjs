@@ -8,6 +8,10 @@
  * in tree order, which is the only order a scene has. A double click frames
  * what the row holds, and the pointer resting on a row shows where it is.
  *
+ * A plain click on a collection selects the collection itself, where the view
+ * can put handles on one (its payload's `collections`), so a drag moves it
+ * whole; otherwise, and for the other clicks, what it holds.
+ *
  * A component, not a panel with opinions: it holds nothing a notebook can see.
  * What is selected and what is hidden are the widget's traitlets. The legend
  * is told them (`sync`) and says what a click would make them (`onSelect`,
@@ -102,6 +106,7 @@ function part(className, title) {
 export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
+  let holds = {}; // the collections the view can select, as the payload says
   let swatches = new Map();
   let selected = [];
   let hidden = new Set();
@@ -149,6 +154,10 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     onSelect(ids);
   }
 
+  /** `ids`, a collection among them as the drawn objects it holds. */
+  const drawnOf = (ids) =>
+    ids.flatMap((id) => (holds[id] ? (leaves.get(id) ?? []) : [id]));
+
   function select(node, mode) {
     const mine = leaves.get(node.id);
     if (mode === "range" && anchor !== null) {
@@ -162,7 +171,7 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     }
     anchor = node.id;
     if (mode === "toggle") {
-      const chosen = new Set(selected);
+      const chosen = new Set(drawnOf(selected));
       const all = mine.length > 0 && mine.every((id) => chosen.has(id));
       for (const id of mine) all ? chosen.delete(id) : chosen.add(id);
       propose([...chosen]);
@@ -170,10 +179,11 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     }
     // Clicking the row that is already exactly the selection clears it, as a
     // second click on the only selected object in the view does.
+    const picking = holds[node.id] ? [node.id] : mine;
     const same =
-      mine.length === selected.length &&
-      mine.every((id) => selected.includes(id));
-    propose(same ? [] : mine);
+      picking.length === selected.length &&
+      picking.every((id) => selected.includes(id));
+    propose(same ? [] : picking);
   }
 
   /** The eye cascades: anything showing, and the lot goes; none, and it all
@@ -263,6 +273,7 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   /** Draw `tree`, for a view drawing `payload`. */
   function update({ tree, payload }) {
     const drawn = drawnIn(payload);
+    holds = payload.collections || {};
     order = inTreeOrder(tree);
     leaves = new Map();
     parents = new Map();
@@ -320,7 +331,7 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
    *  when some of it is -- which is how a folded collection says that what
    *  was picked in the view, or hidden, is inside it. */
   function paint() {
-    const chosen = new Set(selected);
+    const chosen = new Set(drawnOf(selected));
     for (const node of order) {
       const mine = leaves.get(node.id);
       const row = rows.get(node.id);

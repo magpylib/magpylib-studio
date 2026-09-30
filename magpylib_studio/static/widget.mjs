@@ -342,6 +342,7 @@ const KEY_LIST = {
     ["Q", "put the handles away"],
     ["X · Y · Z", "along one axis — A: all of them"],
     ["L", "the world's axes, or the object's own"],
+    ["C", "select the collection it is in — again: the one round that"],
     ["S", "snap to round steps"],
     ["⌘Z", "undo — ⇧⌘Z: redo"],
   ],
@@ -357,6 +358,30 @@ const THEMES = {
 /** How many rows a tree makes. */
 const rowsIn = (nodes) =>
   nodes.reduce((count, node) => count + 1 + rowsIn(node.children), 0);
+
+/** The id of the collection holding `objectId` in `tree`: null at the top,
+ *  undefined when it is not there at all. */
+function parentIn(tree, objectId, holder = null) {
+  for (const node of tree) {
+    if (node.id === objectId) return holder;
+    const found = parentIn(node.children || [], objectId, node.id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** `objectIds`, with each collection among them as what it holds -- the
+ *  payload's `collections` -- and only what is drawn: what can be hidden. */
+function drawnFor(objectIds, payload) {
+  const collections = payload?.collections || {};
+  const drawn = new Set();
+  for (const objectId of objectIds) {
+    for (const each of collections[objectId] ?? [objectId]) {
+      if (!collections[each]) drawn.add(each);
+    }
+  }
+  return [...drawn];
+}
 
 function render({ model, el }) {
   el.classList.add("magpy-scene");
@@ -800,12 +825,29 @@ function render({ model, el }) {
       if (frames() < 2) return false;
       setPlaying(!playing);
     },
+    // Up from what was picked to the collection holding it, whose handles
+    // move it whole -- a click in the view picks what is drawn, and a
+    // collection draws nothing of its own.
+    // Only where the view can hold a collection: a view with no session
+    // behind it has no handles for one, and nothing it would draw as chosen.
+    parent(objectId) {
+      const holder = parentIn(model.get("tree") || [], objectId);
+      if (!holder || !model.get("payload")?.collections?.[holder]) {
+        return false;
+      }
+      commit("selected", [holder]);
+    },
     deselect() {
       if (!(model.get("selected") || []).length) return false;
       commit("selected", []);
     },
     hide({ isolate }) {
-      const chosen = model.get("selected") || [];
+      // A collection hides as what it holds: that is what is drawn, and what
+      // the legend's eye hides too.
+      const chosen = drawnFor(
+        model.get("selected") || [],
+        model.get("payload"),
+      );
       const hidden = new Set(model.get("hidden") || []);
       if (isolate) {
         // Show only the selection -- or, when it is all that shows already,
