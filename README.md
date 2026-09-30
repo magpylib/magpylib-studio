@@ -79,10 +79,10 @@ Selecting and hiding are the exceptions, because they are values rather than
 edits:
 
 ```python
-scene = mo.ui.anywidget(SceneWidget(height=460))   # one cell: the view
+scene = mo.ui.anywidget(SceneWidget(height=460))  # one cell: the view
 ...
-scene.widget.update(ring, probe)                   # another: what it draws
-scene.widget.picked                                # a third: what was clicked
+scene.widget.update(ring, probe)  # another: what it draws
+scene.widget.picked  # a third: what was clicked
 ```
 
 **Make the view once and re-point it.** A slider re-runs every cell that reads
