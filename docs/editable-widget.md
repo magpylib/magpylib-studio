@@ -106,8 +106,8 @@ never the reverse):
    sends `{kind: "rpc", id, method, params}`; Python answers
    `{kind: "rpc", id, result}` or `{..., error}`. The widget allows a short list
    of its own: `begin_interaction`, `end_interaction`, `apply_edits`, `undo`,
-   `redo`, `get_scene`. Nothing that runs a file (`load_script`,
-   `apply_script`): the view does not need them.
+   `redo`, `get_scene`. Nothing that runs a file (`load_script`): the view does
+   not need it.
 3. **Edits become calls in Python, once.** `callsFor` and `transformFromPanel`
    move into the session as `apply_edits(edits)`, with the same batching (one
    undo step for several objects). The VS Code host calls it too, so there is

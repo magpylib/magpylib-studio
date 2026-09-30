@@ -940,8 +940,6 @@ _MIRROR_NORMALS = {"xy": [0, 0, 1], "xz": [0, 1, 0], "yz": [1, 0, 0]}
 # express this, so an RPC caller either omits the argument or names a place.
 _BESIDE = object()
 
-# Emitted into a script that contains a mirror, since magpylib has none. Kept
-# in one piece so what runs and what parse_script reads back cannot drift.
 #: What a superquadric source is written as, since magpylib has no class for
 #: one. A helper rather than the triangles it produces, for the same reason
 #: the mirror below is a helper: the script stays parametric, so the shape
@@ -998,6 +996,7 @@ _SUPERQUADRIC_HELPER = [
     "    return tri[~flat]",
 ]
 
+# Emitted into a script that contains a mirror, since magpylib has none.
 _MIRROR_HELPER = [
     "def _mirror(obj, normal, anchor=(0, 0, 0)):",
     '    """A reflected copy. Polarization is an axial vector: its component',
@@ -5047,9 +5046,8 @@ class MagpylibStudioSession:
     def _duplicate_source(self, event):
         """A pattern event as plain runnable magpylib: there is no library
         primitive for "N of these about an axis" or "N of these in a row", so
-        each exports as the loop it means. importer.parse_script reads exactly
-        these shapes back, which is what keeps an arrangement parametric
-        across a round trip."""
+        each exports as the loop it means, and the arrangement stays
+        parametric: change the count and the script follows."""
         target = event["target"]
         count = _lit(event.get("count", 1))
         # Collected and added once at the end, not one at a time inside the
@@ -5105,7 +5103,7 @@ class MagpylibStudioSession:
 
         The cost is that a Collection can no longer take its children as
         constructor arguments — it is written before they exist — so they join
-        with `.add()`, which parse_script reads back.
+        with `.add()`.
         """
         from magpylib_studio import importer
 
@@ -5185,8 +5183,7 @@ class MagpylibStudioSession:
             lines += [*_MIRROR_HELPER, ""]
         variables = self.doc.get("variables") or {}
         if variables:
-            # Real Python variables: the script stays parametric, and reading
-            # it back recovers them (see importer.parse_script). Their limits
+            # Real Python variables: the script stays parametric. Their limits
             # ride along in a comment — a slider is part of what a variable is,
             # and a script that dropped it said less than the panel beside it.
             var_bounds = self.doc.get("variable_bounds") or {}
@@ -5229,8 +5226,8 @@ class MagpylibStudioSession:
             if parent_of.get(target) is not None:
                 lines.append(f"{parent_of[target]}.add({target})")
 
-        # The log, in order, in its own notation — which is why editing a line
-        # of the script edits an event. Every object has a create event to be
+        # The log, in order, in its own notation, so the script reads as the
+        # steps that built the scene. Every object has a create event to be
         # emitted from: _migrate_events synthesises one for any spec that
         # arrived without it, so there is no such thing as an object the log
         # does not describe.
