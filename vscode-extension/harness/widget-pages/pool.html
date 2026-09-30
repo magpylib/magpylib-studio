@@ -17,7 +17,8 @@
   cap: more views than the page has renderers for. No more than eight are
     live, those in sight are, and one reached for takes a renderer back.
   boxed: and drawn before they are on the page, which is how a box of them
-    arrives. Still no more than eight, and each shows something.
+    arrives. Still no more than eight, each shows something, and each is
+    dressed for the white page rather than the dark system the check sets.
 -->
 <html>
   <head>
@@ -35,7 +36,9 @@
       }
     </script>
   </head>
-  <body style="margin: 12px">
+  <!-- White, in a system the check sets dark: a view that dresses from the
+       system and not from the page shows up. -->
+  <body style="margin: 12px; background: #fff">
     <div id="page"></div>
     <script type="module">
       import { widget, localModel, wait } from "./host.mjs";
@@ -143,12 +146,23 @@
           const resting = views.filter((v) => !drawn(v)).at(-1);
           resting.dispatchEvent(new PointerEvent("pointerdown"));
           await wait(1000);
-          return {
-            ...before,
+          const woke = {
             woke: drawn(resting),
             after: page.querySelectorAll(LIVE).length,
             pictures: page.querySelectorAll("canvas.magpy-scene-still").length,
           };
+          // And the one that gave it up -- it had drawn, so it rests as a
+          // picture -- reached for in turn: it comes back looking from where
+          // it was, through the same perspective. Handed back its camera, it
+          // used to come back parallel, and zoomed right in.
+          const gaveUp = views.find((v) =>
+            v.querySelector("canvas.magpy-scene-still"),
+          );
+          gaveUp.dispatchEvent(new PointerEvent("pointerdown"));
+          await wait(1000);
+          const slot = livePool().find((s) => gaveUp.contains(s.host));
+          const camera = (await slot?.api)?.cameraState();
+          return { ...before, ...woke, backAs: camera?.projection };
         },
         async boxed() {
           // A box of views, all drawn before any is on the page.
@@ -158,14 +172,24 @@
           }
           await wait(0);
           page.append(...views);
-          await wait(2500);
+          // The first frames on the page, before most renderers have loaded:
+          // dressed for the page already, not for the system and then the
+          // page as each one draws.
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          const light = views.every((v) => !v.classList.contains("magpy-dark"));
+          // Every view showing its scene, or how to have it.
+          const shown = (v) =>
+            drawn(v) || v.querySelector(".magpy-scene-still");
+          for (let waited = 0; waited < 15000 && !views.every(shown);) {
+            await wait(250);
+            waited += 250;
+          }
           return {
             renderers: livePool().length,
             canvases: page.querySelectorAll(LIVE).length,
-            // every view shows something: its scene, or how to have it
-            shown: views.every(
-              (v) => drawn(v) || v.querySelector(".magpy-scene-still"),
-            ),
+            shown: views.every(shown),
+            light,
           };
         },
       };
