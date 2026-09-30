@@ -2882,6 +2882,35 @@ class MagpylibStudioSession:
             moved += 1
         return moved
 
+    def object_tree(self):
+        """The scene's objects as a legend draws them: nodes of ``{id, label,
+        kind, visible, children}``, nested as their collections are.
+
+        A pattern's copies are left out -- they are drawn on their source's
+        node, and a click on one is a click on it. An object with no label of
+        its own is listed by its id, which is its name in the scene -- the
+        variable it came from -- rather than by its type: two sensors are not
+        both "Sensor", and the readout and the tree call it by that name.
+        """
+        entries = self.list_objects(copies="count")
+        nodes = {
+            entry["id"]: {
+                "id": entry["id"],
+                "label": (
+                    entry["id"] if entry["label"] == entry["type"] else entry["label"]
+                ),
+                "kind": entry["type"].rsplit(".", 1)[-1],
+                "visible": entry["visible"],
+                "children": [],
+            }
+            for entry in entries
+        }
+        roots = []
+        for entry in entries:
+            parent = nodes.get(entry["parent"])
+            (parent["children"] if parent else roots).append(nodes[entry["id"]])
+        return roots
+
     def get_transform(self, object_id):
         """World pose of an object, for the inspector's transform widgets."""
         obj = self._objs[object_id]

@@ -811,54 +811,97 @@ async function heldReadings(port, base) {
   );
 }
 
-/** The studio panel's half of a drag, which the notebook widget will share:
- *  the undo group opened first, one preview in flight with the newest pose
- *  waiting, a redraw between previews that keeps what the handles hold, and
- *  the pose the drag ends on recorded last. */
+/** The studio panel: the notebook widget, run by the panel's own
+ *  studioView.mjs against a stub of VS Code. What it tells the host is what
+ *  the old panel told it -- a pick, a drag's start, one pose in flight with
+ *  the newest waiting and the scene redrawn between, the release -- and
+ *  hiding goes to the host as an edit, Cmd+Z is left to VS Code's keybinding,
+ *  a refresh asks the engine again, and Chart mode draws the chart. */
 async function studioDrag(port, base) {
+  let seen = null;
+  const page = async () => {
+    if (seen) return seen;
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/studio-drag.html`);
+      const result = await tab.until("return window.result", 30_000);
+      seen = { result, problem: result ? thrown(tab) : "never finished" };
+      return seen;
+    } finally {
+      await tab.close();
+    }
+  };
+  const said = (messages) =>
+    messages
+      .map((m) => m.type + (m.method ? `:${m.method}` : "") + (m.x ?? ""))
+      .join(" ");
+
   await check(
     "a drag in the studio panel says what it did, in order",
     async () => {
-      const tab = await openTab(port);
-      try {
-        await tab.navigate(`${base}/pages/studio-drag.html`);
-        const result = await tab.until("return window.result", 20_000);
-        if (!result) return "never finished";
-        const { said, kept } = result;
-        const shown = said.map((m) => m.type + (m.x ?? "")).join(" ");
-        const first = said[0];
-        if (first?.type !== "dragStart" || first.field !== "position") {
-          return `it began with ${JSON.stringify(first)}`;
-        }
-        const previews = said.filter((m) => m.type === "previewTransform");
-        const xs = previews.map((m) => m.x);
-        if (xs.join() !== "1,10,11,15") {
-          return `previews at ${xs.join(", ")}, not 1, 10, 11, 15: ${shown}`;
-        }
-        // one in flight, and the scene redrawn before the next goes
-        for (let i = 1; i < said.length; i++) {
-          if (said[i].type !== "previewTransform") continue;
-          const since = said
-            .slice(0, i)
-            .map((m) => m.type)
-            .lastIndexOf("previewTransform");
-          if (since < 0) continue;
-          const between = said.slice(since + 1, i);
-          if (!between.some((m) => m.method === "get_scene")) {
-            return `two previews with no redraw between them: ${shown}`;
-          }
-        }
-        const last = said.at(-1);
-        if (last.type !== "transformObjects" || last.x !== 16) {
-          return `it ended with ${JSON.stringify(last)}: ${shown}`;
-        }
-        if (!kept.length || kept.some((keep) => keep?.join() !== "cube")) {
-          return `the redraws kept ${JSON.stringify(kept)}`;
-        }
-        return thrown(tab);
-      } finally {
-        await tab.close();
+      const { result, problem } = await page();
+      if (!result) return problem;
+      const { dragged, kept } = result;
+      const shown = said(dragged);
+      if (dragged[0]?.type !== "dragStart" || dragged[0].objectId !== "probe") {
+        return `it began: ${shown}`;
       }
+      const xs = dragged
+        .filter((m) => m.type === "previewTransform")
+        .map((m) => m.x);
+      if (xs.join() !== "1,10,11,15") {
+        return `previews at ${xs.join(", ")}, not 1, 10, 11, 15: ${shown}`;
+      }
+      for (let i = 1; i < dragged.length; i++) {
+        if (dragged[i].type !== "previewTransform") continue;
+        const since = dragged
+          .slice(0, i)
+          .map((m) => m.type)
+          .lastIndexOf("previewTransform");
+        if (since < 0) continue;
+        if (
+          !dragged.slice(since + 1, i).some((m) => m.method === "get_scene")
+        ) {
+          return `two previews with no redraw between them: ${shown}`;
+        }
+      }
+      const last = dragged.at(-1);
+      if (last?.type !== "transformObjects" || last.x !== 16) {
+        return `it ended: ${shown}`;
+      }
+      if (!kept.length || kept.some((keep) => keep?.join() !== "probe")) {
+        return `the redraws kept ${JSON.stringify(kept)}`;
+      }
+      return problem;
+    },
+  );
+  await check(
+    "the studio panel tells the sidebar, and hides as an edit",
+    async () => {
+      const { result, problem } = await page();
+      if (!result) return problem;
+      const { editing, picked, keyed, refreshed, chart } = result;
+      if (!editing) return "the panel shows no editing column";
+      const picks = picked.filter((m) => m.type === "selectObject");
+      if (picks.length !== 1 || picks[0].objectId !== "probe") {
+        return `a pick told the host: ${said(picked)}`;
+      }
+      const hid = keyed.find((m) => m.type === "setVisible");
+      if (hid?.visible !== false || hid.objectIds?.join() !== "probe") {
+        return `H told the host: ${said(keyed)}`;
+      }
+      const undos = keyed.filter((m) => m.type === "undo").length;
+      if (undos !== 1) {
+        return `${undos} undos for Cmd+Z and the button -- Cmd+Z is VS Code's: ${said(keyed)}`;
+      }
+      const asked = refreshed.map((m) => m.method);
+      if (!asked.includes("get_scene") || !asked.includes("object_tree")) {
+        return `a refresh asked for ${asked.join(", ")}`;
+      }
+      if (!chart.drawn || !chart.viewHidden) {
+        return `Chart mode: ${JSON.stringify(chart)}`;
+      }
+      return problem;
     },
   );
 }

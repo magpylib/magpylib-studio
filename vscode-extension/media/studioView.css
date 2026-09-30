@@ -1,0 +1,62 @@
+/* The studio panel: the notebook widget, filling it, and a bar beneath for
+   the chart and anything the panel has to say. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  font-family: var(--vscode-font-family, sans-serif);
+  color: var(--vscode-foreground);
+}
+#view,
+#chart {
+  flex: 1;
+  /* A flex item will not shrink below its content unless told, and the
+     widget sizes itself to this box: without these, a view a pixel wider than
+     the box widens the box, and the two grow without end. */
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* `hidden` is only `[hidden] { display: none }` in the browser's own sheet,
+   which the rules here outrank. */
+#view[hidden],
+#chart[hidden],
+#bar [hidden] {
+  display: none;
+}
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-top: 1px solid var(--vscode-panel-border, rgb(128 128 128 / 30%));
+}
+#bar button {
+  padding: 1px 8px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--vscode-button-border, rgb(128 128 128 / 40%));
+  cursor: pointer;
+}
+#mode button + button {
+  border-left: none;
+}
+#bar button.on {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+#status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}

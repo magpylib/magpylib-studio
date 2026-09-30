@@ -458,7 +458,13 @@ function render({ model, el }) {
     keyList.hidden = !open;
     pressed(keysButton, open);
     if (!open) return;
-    const rows = [...KEY_LIST.view, ...(editable() ? KEY_LIST.edit : [])];
+    const rows = [
+      ...KEY_LIST.view,
+      ...(model.tabWalks
+        ? [["Tab", "select the next object — ⇧Tab: the one before"]]
+        : []),
+      ...(editable() ? KEY_LIST.edit : []),
+    ];
     keyList.replaceChildren(
       ...rows.flatMap(([keys, does]) => {
         const kbd = document.createElement("kbd");
@@ -611,7 +617,10 @@ function render({ model, el }) {
     // needs no list -- which is not a decision: a scene that grows later,
     // a slider making a ring of what was one magnet, still gets its look.
     if (legendOpen !== null) showLegend(legendOpen);
-    else if (rows === 1) {
+    else if (model.legendStartsClosed) {
+      // a host with a legend of its own -- the studio's Scene tree
+      showLegend(false);
+    } else if (rows === 1) {
       legendEl.hidden = true;
       pressed(legendButton, false);
     } else settleLegend();
@@ -774,12 +783,19 @@ function render({ model, el }) {
   }
 
   /** What the view keys ask of this host -- see `VIEW_KEYS` in scene3d.mjs,
-   *  which holds the keys and moves the camera itself. Tab is not answered:
-   *  in a notebook it moves between cells, and a view that kept it would be
-   *  a trap. Each declines, with false, when it has nothing to do, so the
-   *  key is left to the page. */
+   *  which holds the keys and moves the camera itself. Tab is answered only
+   *  where the host asks (below). Each declines, with false, when it has
+   *  nothing to do, so the key is left to the page. */
   const viewActions = {
     projection: showProjection,
+    // Tab walks the objects where the host says so -- the studio panel. In a
+    // notebook it moves between cells, and a view that kept it would trap it.
+    next: model.tabWalks
+      ? (objectId) => {
+          if (!objectId) return false;
+          commit("selected", [objectId]);
+        }
+      : undefined,
     play() {
       if (frames() < 2) return false;
       setPlaying(!playing);
@@ -825,6 +841,10 @@ function render({ model, el }) {
     if (!editable() || event.altKey) return false;
     const key = event.key.toLowerCase();
     if ((event.metaKey || event.ctrlKey) && key === "z") {
+      // A host that has its own undo key -- VS Code runs its keybinding on
+      // Cmd+Z in the studio panel -- says so, and the view leaves the key to
+      // it: taken here as well, one press would undo twice.
+      if (editor.undoKeys === false) return false;
       settle(event.shiftKey ? editor.redo() : editor.undo());
       return true;
     }
@@ -1041,8 +1061,12 @@ function render({ model, el }) {
   // the same calls -- and the drag itself is the panel's (`drag.mjs`): one
   // pose in flight, the newest waiting, the scene redrawn between. Python
   // redraws the view when a gesture is closed, and tells the notebook.
+  // Editable when the model says so, and something can take the edits: a
+  // kernel, or a host's own editor. A page saved from a view -- standalone,
+  // with neither -- is read only.
   const editable = () =>
-    Boolean(model.get("editable")) && !model.get("standalone");
+    Boolean(model.get("editable")) &&
+    (model.editor !== undefined || !model.get("standalone"));
   let handles = "translate"; // what the user asked the handles to do
   let inEffect = "translate"; // what they do: a resize may not be possible
   let snapping = false;
@@ -1323,7 +1347,8 @@ function render({ model, el }) {
    *  session in its kernel, over this widget's own connection. A host with
    *  its own way to the session -- the VS Code studio panel, whose edits go
    *  through the extension host so that its sidebar and field view keep up --
-   *  hands one over on the model, and the view does not need to know which. */
+   *  hands one over on the model, and the view does not need to know which.
+   *  `undoKeys: false` on it leaves Cmd/Ctrl+Z to a host that has its own. */
   const editor = model.editor ?? {
     begin: () => call("begin_interaction"),
     preview: (edits) => call("apply_edits", { edits }),

@@ -1449,10 +1449,11 @@ function adoptStudioPanel(
       void transformFromPanel(context, message);
     } else if (message.type === 'previewTransform') {
       void transformFromPanel(context, message, panel);
-    } else if (message.type === 'toggleVisible') {
-      void toggleVisibleFromPanel(context, message.objectId);
-    } else if (message.type === 'isolateObject') {
-      void isolateFromPanel(context, message.objectId);
+    } else if (message.type === 'setVisible') {
+      void setVisibleFromPanel(context, message.objectIds, message.visible);
+    } else if (message.type === 'undo' || message.type === 'redo') {
+      // the view's buttons: the same commands the keys and the tree run
+      void vscode.commands.executeCommand(`magpylib-studio.${message.type}`);
     } else if (message.type === 'notice') {
       // Passing remarks go where VS Code puts them, and expire on their own.
       // The panel's own line is for the numbers a drag is changing, which are
@@ -1643,75 +1644,36 @@ async function finishDrag(context: vscode.ExtensionContext): Promise<void> {
   broadcastMutation();
 }
 
-/** Hide the object, or show it again.
+/** Show or hide objects, from the view: its eye, H, or shift-H.
  *
- * The engine holds the current state, so the toggle is resolved here rather
- * than in the view: a hidden object is not drawn, and a view that tracked
- * visibility itself would be guessing about things it cannot see.
+ * Visibility is the document's here, not the view's -- saved, and undone like
+ * any edit -- so the view says what it wants and the engine records it, as one
+ * step however many objects it covers: shift-H hides everything else in one
+ * keystroke, and one undo shows it all again. A hidden object is not drawn;
+ * the legend and the Scene tree still list it, to be shown again from either.
  */
-async function toggleVisibleFromPanel(
+async function setVisibleFromPanel(
   context: vscode.ExtensionContext,
-  objectId: string,
+  objectIds: string[],
+  visible: boolean,
 ): Promise<void> {
+  if (!Array.isArray(objectIds) || !objectIds.length) {
+    return;
+  }
   try {
     const engine = await getEngine(context);
-    const objects = (await engine.request('list_objects')) as {
-      id: string;
-      visible: boolean;
-    }[];
-    const shown = objects.find((entry) => entry.id === objectId)?.visible ?? true;
-    await engine.request('set_visible', { object_id: objectId, visible: !shown });
-    if (shown) {
-      // It has just left the picture, and clicking what is not there cannot
-      // bring it back. The Scene tree can, so say where to look.
+    await engine.request('batch', {
+      operations: objectIds.map((objectId) => ({
+        method: 'set_visible',
+        params: { object_id: objectId, visible },
+      })),
+    });
+    if (!visible) {
       vscode.window.setStatusBarMessage(
-        `Magpylib Studio: ${objectId} hidden — show it again from the Scene tree`,
+        `Magpylib Studio: ${objectIds.join(', ')} hidden — show again from the legend or the Scene tree`,
         5000,
       );
     }
-  } catch (err) {
-    vscode.window.showErrorMessage(
-      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
-    );
-  }
-  broadcastMutation();
-}
-
-/** Show one object and hide the rest, or put everything back.
- *
- * Sent as a batch, which the engine records as a single step: hiding
- * everything else one call at a time would be a screenful of history for one
- * keystroke, and as many undos to reverse. Pressing it again when the scene
- * is already down to one object shows them all, so the same key gets out of
- * what it got into.
- */
-async function isolateFromPanel(
-  context: vscode.ExtensionContext,
-  objectId: string,
-): Promise<void> {
-  try {
-    const engine = await getEngine(context);
-    const objects = (await engine.request('list_objects')) as {
-      id: string;
-      visible: boolean;
-    }[];
-    const others = objects.filter((entry) => entry.id !== objectId);
-    const alone = others.every((entry) => !entry.visible);
-    await engine.request('batch', {
-      operations: [
-        { method: 'set_visible', params: { object_id: objectId, visible: true } },
-        ...others.map((entry) => ({
-          method: 'set_visible',
-          params: { object_id: entry.id, visible: alone },
-        })),
-      ],
-    });
-    vscode.window.setStatusBarMessage(
-      alone
-        ? 'Magpylib Studio: showing everything again'
-        : `Magpylib Studio: showing ${objectId} alone — shift+H again to undo it`,
-      5000,
-    );
   } catch (err) {
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
@@ -4589,8 +4551,8 @@ export function createWebviewHtml(
   webview: vscode.Webview,
 ): string {
   const nonce = webviewNonce();
-  const studioStyleUri = mediaUri(webview, context.extensionUri, 'studio.css');
-  const studioScriptUri = mediaUri(webview, context.extensionUri, 'studio.mjs');
+  const styleUri = mediaUri(webview, context.extensionUri, 'studioView.css');
+  const scriptUri = mediaUri(webview, context.extensionUri, 'studioView.mjs');
   const plotlyUri = webview.asWebviewUri(
     vscode.Uri.joinPath(
       context.extensionUri,
@@ -4599,114 +4561,39 @@ export function createWebviewHtml(
       'plotly.min.js',
     ),
   );
-  const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
-  // three ships ESM only, and its addons import the bare name 'three', so the
-  // module specifiers are mapped rather than rewritten. Both entries point
-  // inside node_modules, which the webview may read as extension resources.
-  const threeUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(
-      context.extensionUri,
-      'node_modules',
-      'three',
-      'build',
-      'three.module.min.js',
-    ),
-  );
-  const threeAddonsUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(
-      context.extensionUri,
-      'node_modules',
-      'three',
-      'examples',
-      'jsm',
-    ),
-  );
-  const importMap = JSON.stringify({
-    imports: {
-      three: `${threeUri}`,
-      'three/addons/': `${threeAddonsUri}/`,
-    },
-  });
+  // The notebook widget draws the scene: the same view, controls and keys as
+  // a notebook cell and the script panel. It is the package's, copied beside
+  // media/ by `npm run compile` (harness/copy-widget.js), and loads its
+  // renderer from a blob -- hence `blob:` below.
+  const widgetDir = vscode.Uri.joinPath(context.extensionUri, 'widget');
+  const widgetUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.js'));
+  const widgetStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; font-src ${webview.cspSource};" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data: blob:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource} blob:; font-src ${webview.cspSource};" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Magpylib Studio</title>
-  <link rel="stylesheet" href="${studioStyleUri}" />
+  <link rel="stylesheet" href="${widgetStyleUri}" />
+  <link rel="stylesheet" href="${styleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
-  <script type="importmap" nonce="${nonce}">${importMap}</script>
-  <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
 </head>
-<body>
-  <div id="canvas"></div>
-  <div id="readout" hidden>
-        <div id="readoutHead"></div>
-        <div id="readoutFields"></div>
-      </div>
-  <div id="statusbar">
+<body data-widget="${widgetUri}">
+  <div id="view"></div>
+  <div id="chart" hidden></div>
+  <div id="bar">
     <span id="mode">
       <button id="modeEdit" type="button" class="on"
-        title="Draw a scene you can pick and drag">Edit</button
+        title="The scene, to pick and drag">Edit</button
       ><button id="modeChart" type="button"
-        title="Draw a Plotly chart: read only">Chart</button>
+        title="A Plotly chart of the scene: read only">Chart</button>
     </span>
-    <button id="fit" type="button" hidden>Fit view</button>
-    <button id="play" type="button" hidden title="Play the paths (space)"
-      >&#9654;</button>
-    <input id="frame" type="range" min="0" max="0" value="0" hidden
-      title="Scrub through the path" />
-    <label id="gizmoLabel" hidden
-      >Drag
-      <select id="gizmo">
-        <option value="translate">to move (W)</option>
-        <option value="rotate">to rotate (E)</option>
-        <option value="scale">to resize (R)</option>
-        <option value="polarization">to aim polarization (P)</option>
-        <option value="none">nothing (Q)</option>
-      </select>
-    </label>
-    <label id="axesLabel" hidden
-      >along
-      <select id="axes">
-        <option value="world">world axes (L)</option>
-        <option value="local">object axes (L)</option>
-      </select>
-    </label>
     <button id="animate" type="button" hidden
       title="Bake the paths into the chart, with Plotly's own transport">Animate</button>
-    <button id="axis" type="button" hidden
-      title="Which axes a drag runs along (X, Y, Z; A for all)">XYZ</button>
-    <button id="snap" type="button" hidden
-      title="Snap to round steps (S)">Snap</button>
-    <button id="projection" type="button" hidden
-      title="Perspective or parallel projection (5)">Persp</button>
-    <span id="selection" hidden></span>
-    <details id="controls" hidden>
-      <summary>Keys</summary>
-      <div>
-        <kbd>W</kbd><span>move</span>
-        <kbd>E</kbd><span>rotate</span>
-        <kbd>R</kbd><span>resize</span>
-        <kbd>P</kbd><span>aim polarization</span>
-        <kbd>Q</kbd><span>no handles</span>
-        <kbd>H</kbd><span>hide / show (<kbd>&#8679;</kbd> show alone)</span>
-        <kbd>S</kbd><span>snap to a round step</span>
-        <kbd>X</kbd><span>one axis (<kbd>A</kbd> all)</span>
-        <kbd>L</kbd><span>world / object axes</span>
-        <kbd>F</kbd><span>frame selected</span>
-        <kbd>Home</kbd><span>frame everything</span>
-        <kbd>1</kbd><span>front &middot; <kbd>3</kbd> right &middot; <kbd>7</kbd> top</span>
-        <kbd>5</kbd><span>parallel / perspective</span>
-        <kbd>space</kbd><span>play / pause paths</span>
-        <kbd>&#8677;</kbd><span>select the next object</span>
-        <kbd>&#8984;</kbd><span>click: add to the selection</span>
-      </div>
-    </details>
     <span id="status">Starting…</span>
   </div>
-  <script type="module" nonce="${nonce}" src="${studioScriptUri}"></script>
+  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
 }

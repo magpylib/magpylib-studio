@@ -1,6 +1,6 @@
 /**
- * The notebook widget, copied where the script panel can load it -- and the
- * drag of the 3D view's handles, which the studio panel shares with it.
+ * The notebook widget, copied where the extension's panels can load it: the
+ * studio panel and the script panel both draw it.
  *
  *   node harness/copy-widget.js
  *
@@ -20,8 +20,7 @@ const STATIC = path.join(EXT, "..", "magpylib_studio", "static");
 const TARGET = path.join(EXT, "widget");
 
 fs.mkdirSync(TARGET, { recursive: true });
-// `drag.mjs` is source, not built: the studio panel imports it as it is.
-for (const file of ["widget.js", "widget.css", "drag.mjs"]) {
+for (const file of ["widget.js", "widget.css"]) {
   fs.copyFileSync(path.join(STATIC, file), path.join(TARGET, file));
 }
 console.log("copy-widget: the notebook widget is in widget/ for the panel.");

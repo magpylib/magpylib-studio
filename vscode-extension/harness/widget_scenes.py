@@ -26,6 +26,8 @@ Writes into OUT:
   the panel's renderer to redraw while it is dragged;
 * ``edit.json`` -- an editable view's model, a ring and a probe to edit, and
   the scene its session answers `get_scene` with;
+* ``studio.json`` -- what the studio panel's engine answers for that scene:
+  ``get_scene`` and ``object_tree``;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -180,6 +182,10 @@ def main(out):
         raise SystemExit("edit.json: the studio should hold a probe to edit")
     (out / "edit.json").write_text(
         json.dumps({"state": studio.get_state(), "scene": studio.payload})
+    )
+    # what the studio panel's engine answers: the scene, and its tree
+    (out / "studio.json").write_text(
+        json.dumps({"scene": studio.payload, "tree": studio.tree})
     )
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]

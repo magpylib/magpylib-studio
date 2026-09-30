@@ -73,7 +73,10 @@
 }
 
 /* ---- controls -------------------------------------------------------------
-   Panels floating over the view, in the legend's material. */
+   Panels floating over the view, in the legend's material. Nearly opaque, and
+   not blurred behind: a `backdrop-filter` is composited again on every frame
+   the scene draws, and on a machine drawing without a GPU the widget's panels
+   made each frame of a 1000-object scene 15-20% slower. */
 .magpy-scene-tools,
 .magpy-scene-edit,
 .magpy-scene-readout,
@@ -84,10 +87,9 @@
   box-sizing: border-box;
   background: color-mix(
     in srgb,
-    var(--vscode-editor-background) 88%,
+    var(--vscode-editor-background) 94%,
     transparent
   );
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
   border-radius: 7px;
 }
@@ -347,10 +349,9 @@
   line-height: 1.5;
   background: color-mix(
     in srgb,
-    var(--vscode-editor-background) 88%,
+    var(--vscode-editor-background) 94%,
     transparent
   );
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
   border-radius: 6px;
   user-select: none;
