@@ -169,8 +169,16 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** `promise`'s value, or `otherwise` if it has not settled within `ms`. A
  *  page that locks up answers nothing -- the regression some of these checks
  *  exist to catch -- and a check waiting on it must fail, not wait. */
-const within = (ms, promise, otherwise) =>
-  Promise.race([promise, wait(ms).then(() => otherwise)]);
+const within = (ms, promise, otherwise) => {
+  // The timer is cleared once the check is done: left running, the last
+  // check's kept the process alive for its full two minutes after the run
+  // had finished -- half of every run, spent waiting.
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(otherwise), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+};
 
 async function openTab(port) {
   const devtools = `http://127.0.0.1:${port}`;

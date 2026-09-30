@@ -36,10 +36,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      # uv, as in ci.yml; `--no-sources` keeps this on magpylib as released,
+      # which is what pip installed here before.
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
+          activate-environment: true
+          enable-cache: true
+      - run: uv pip install --no-sources -e ".[dev]"
       - run: python -m pytest -q
 
   dist:
