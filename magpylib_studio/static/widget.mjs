@@ -248,6 +248,9 @@ const ICONS = {
   local:
     '<path d="M3.5 12.5 13 8.5M3.5 12.5 7 3"/>' +
     '<circle cx="3.5" cy="12.5" r="1"/>',
+  keys:
+    '<rect x="1.5" y="4" width="13" height="8" rx="1.5"/>' +
+    '<path d="M4 6.75h1M7.5 6.75h1M11 6.75h1M4.5 9.5h7"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
   redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H9"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
@@ -307,6 +310,41 @@ const DRAG_WRITES = {
   rotate: "orientation",
   scale: "shape",
   polarization: "polarization",
+};
+
+/** How each field a drag writes reads in the readout: what it is in, how
+ *  much of it is worth showing, how wide its box is -- what the widest value
+ *  of that kind needs, "-0.0100" or "-180.0" -- and where the scene says
+ *  what it holds now. Fixed decimals rather than significant figures: those
+ *  change the length of a number as it crosses a scale, which at pointer
+ *  rate reads as a twitch. */
+const FIELD_READS = {
+  position: { unit: "m", decimals: 4, width: "7ch", from: "anchors" },
+  orientation: { unit: "°", decimals: 1, width: "6ch", from: "orientations" },
+  shape: { unit: "m", decimals: 4, width: "7ch", from: "shapes" },
+  polarization: { unit: "T", decimals: 4, width: "7ch", from: "polarizations" },
+};
+
+/** The keys, as the key list says them: the view's everywhere, and the
+ *  handles' where the view edits. */
+const KEY_LIST = {
+  view: [
+    ["F", "frame the selection — Home: everything"],
+    ["1 · 3 · 7", "look from the front, the right, the top"],
+    ["5", "perspective or parallel"],
+    ["H", "hide the selection — ⇧H: show only it"],
+    ["Esc", "select nothing"],
+    ["space", "play the path"],
+    ["⌘ / Ctrl click", "add to the selection"],
+  ],
+  edit: [
+    ["W · E · R · P", "move, turn, resize, aim the polarization"],
+    ["Q", "put the handles away"],
+    ["X · Y · Z", "along one axis — A: all of them"],
+    ["L", "the world's axes, or the object's own"],
+    ["S", "snap to round steps"],
+    ["⌘Z", "undo — ⇧⌘Z: redo"],
+  ],
 };
 
 /** The theme button's round: each choice, what it is called, and the next. */
@@ -409,6 +447,28 @@ function render({ model, el }) {
   );
   fullscreenButton.hidden = !document.fullscreenEnabled;
   pressed(fullscreenButton, false);
+  const keysButton = iconButton("keys", "Keys", () => showKeys(keyList.hidden));
+  pressed(keysButton, false);
+  const keyList = document.createElement("div");
+  keyList.className = "magpy-scene-keys";
+  keyList.hidden = true;
+  /** The key list, open or shut -- with the handles' keys where there are
+   *  handles. Built when opened, so it says what this view has now. */
+  function showKeys(open) {
+    keyList.hidden = !open;
+    pressed(keysButton, open);
+    if (!open) return;
+    const rows = [...KEY_LIST.view, ...(editable() ? KEY_LIST.edit : [])];
+    keyList.replaceChildren(
+      ...rows.flatMap(([keys, does]) => {
+        const kbd = document.createElement("kbd");
+        kbd.textContent = keys;
+        const text = document.createElement("span");
+        text.textContent = does;
+        return [kbd, text];
+      }),
+    );
+  }
   // Editing, for a view whose objects are a session's -- see `editable`. A
   // shelf of their own down the side, always in sight: which handles are out
   // is the state of the view, not a tool to reach for.
@@ -461,6 +521,7 @@ function render({ model, el }) {
     themeButton,
     pictureButton,
     exportButton,
+    keysButton,
     fullscreenButton,
   );
 
@@ -486,7 +547,7 @@ function render({ model, el }) {
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(tools, editBar, transport, notice);
+  stage.append(tools, editBar, keyList, transport, notice);
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -749,6 +810,8 @@ function render({ model, el }) {
   };
 
   stage.addEventListener("keydown", (event) => {
+    // typed into a box -- the readout's -- a key is a character, not a command
+    if (event.target.closest?.("input, select, textarea")) return;
     if (!editKey(event) && !api?.viewKey(event, viewActions)) return;
     event.preventDefault();
     event.stopPropagation(); // the notebook listens further up
@@ -981,6 +1044,7 @@ function render({ model, el }) {
   const editable = () =>
     Boolean(model.get("editable")) && !model.get("standalone");
   let handles = "translate"; // what the user asked the handles to do
+  let inEffect = "translate"; // what they do: a resize may not be possible
   let snapping = false;
 
   /** Put out the handles for `mode`, as far as the selection allows: a
@@ -990,11 +1054,12 @@ function render({ model, el }) {
    *  whenever the selection changes. */
   function setHandles(mode, { asked = false } = {}) {
     handles = mode;
-    const inEffect = drawing() && editable() ? api.setGizmoMode(mode) : mode;
+    inEffect = drawing() && editable() ? api.setGizmoMode(mode) : mode;
     for (const [its, button] of Object.entries(modeButtons)) {
       pressed(button, inEffect === its);
     }
     showSpace(inEffect);
+    showReadout();
     if (!asked || inEffect === mode) return;
     const chosen = model.get("selected") || [];
     notify(
@@ -1049,6 +1114,7 @@ function render({ model, el }) {
 
   function dressEditing() {
     editBar.hidden = !editable();
+    if (!keyList.hidden) showKeys(true);
     setHandles(handles);
     if (!editable() && drawing()) api.setGizmoMode("none");
   }
@@ -1110,6 +1176,148 @@ function render({ model, el }) {
       });
   }
 
+  // --- the readout ---------------------------------------------------------
+  // The numbers the handles are writing, in the corner, as boxes that take a
+  // typed value too: a drag is for finding a value and a keyboard for saying
+  // one, and they are wanted in the same breath. The boxes follow the handles
+  // while they move and take a typed value when they stop. Rebuilt only when
+  // what they show changes, and never over the one being typed in.
+  const readout = document.createElement("div");
+  readout.className = "magpy-scene-readout";
+  readout.hidden = true;
+  const readoutHead = document.createElement("div");
+  readoutHead.className = "magpy-scene-readout-head";
+  const readoutFields = document.createElement("div");
+  readoutFields.className = "magpy-scene-readout-fields";
+  const readoutTakes = document.createElement("div");
+  readoutTakes.className = "magpy-scene-readout-takes";
+  readout.append(readoutHead, readoutFields, readoutTakes);
+  stage.append(readout);
+  let readoutKey = "";
+
+  /** What the readout can show: one object, the field the handles in effect
+   *  write, as numbers someone could type. Several objects have no single
+   *  value, and a mesh's parameter is its whole vertex array. */
+  function readable() {
+    const chosen = model.get("selected") || [];
+    const field = DRAG_WRITES[inEffect];
+    if (!editable() || chosen.length !== 1 || !field) return null;
+    const read = FIELD_READS[field];
+    const value = (model.get("payload")?.[read.from] || {})[chosen[0]];
+    if (value === undefined) return null;
+    const numbers = field === "shape" ? value.value : value;
+    if (!Array.isArray(numbers) || Array.isArray(numbers[0])) return null;
+    const attr = field === "shape" ? value.attr : field;
+    return { objectId: chosen[0], field, attr, numbers, ...read };
+  }
+
+  function showReadout() {
+    // What a drag in this mode would take over, said on the object before
+    // the drag rather than after: a value written `=gap / 2` is set outright
+    // by a drag, and the variable stops deciding it.
+    const chosen = model.get("selected") || [];
+    const parametric = model.get("payload")?.parametric?.[chosen[0]] || {};
+    const names = (editable() && parametric[DRAG_WRITES[inEffect]]) || [];
+    const decide = names.length > 1 ? "decide" : "decides";
+    readoutTakes.textContent = names.length
+      ? `${names.join(", ")} ${decide} this — a drag takes it over`
+      : "";
+    const shown = readable();
+    if (!shown) {
+      readoutKey = "";
+      readoutHead.textContent = "";
+      readoutFields.replaceChildren();
+      readout.hidden = !readoutTakes.textContent;
+      el.classList.toggle("magpy-reading", !readout.hidden);
+      return;
+    }
+    readoutHead.textContent = `${shown.objectId} · ${shown.attr}`;
+    const key = `${shown.objectId}/${shown.attr}/${shown.numbers.length}`;
+    if (key !== readoutKey) {
+      readoutKey = key;
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = shown.unit;
+      readoutFields.replaceChildren(
+        ...shown.numbers.map((_, index) => numberBox(index, shown.width)),
+        unit,
+      );
+    }
+    fillReadout(shown.numbers, shown.decimals);
+    readout.hidden = false;
+    el.classList.add("magpy-reading");
+  }
+
+  function numberBox(index, width) {
+    const box = document.createElement("input");
+    box.style.width = width;
+    // Not `type="number"`: its spinners are noise at this size, and one on a
+    // value in metres steps by a metre.
+    box.type = "text";
+    box.inputMode = "decimal";
+    box.dataset.index = String(index);
+    box.title = "Type a value, or drag the handles";
+    box.addEventListener("change", commitReadout);
+    box.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") commitReadout();
+      else if (event.key === "Escape") {
+        showReadout(); // back to what the scene says
+        box.blur();
+      }
+    });
+    return box;
+  }
+
+  function fillReadout(numbers, decimals) {
+    for (const box of readoutFields.querySelectorAll("input")) {
+      if (box === box.getRootNode().activeElement) continue; // being typed in
+      const value = numbers[Number(box.dataset.index)];
+      box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
+    }
+  }
+
+  /** The numbers at pointer rate, while the handles move them. */
+  function showPose(pose) {
+    const shown = readable();
+    const edit = pose.edits[0];
+    if (!shown || pose.edits.length > 1 || edit.objectId !== shown.objectId) {
+      return;
+    }
+    const last = (value) =>
+      Array.isArray(value?.[0]) ? value[value.length - 1] : value;
+    let live = last(edit[shown.field]);
+    if (shown.field === "shape") {
+      const value = edit.shape?.value;
+      live = value && !Array.isArray(value[0]) ? [].concat(value) : null;
+    }
+    if (live?.length === shown.numbers.length) {
+      fillReadout(live, shown.decimals);
+    }
+  }
+
+  /** What was typed, as the same edit a drag's release sends -- through the
+   *  view, which knows whether the object is on a path: a typed pose moves a
+   *  path the way a drag does, rather than replacing it with one pose. */
+  function commitReadout() {
+    const shown = readable();
+    if (!shown || !drawing()) return;
+    const typed = [...readoutFields.querySelectorAll("input")].map(
+      (box, index) => {
+        const value = Number(box.value);
+        return Number.isFinite(value) ? value : shown.numbers[index];
+      },
+    );
+    if (typed.every((value, index) => value === shown.numbers[index])) {
+      showReadout(); // nothing said, and anything unreadable typed goes back
+      return;
+    }
+    const edit = { objectId: shown.objectId };
+    if (shown.field === "shape") {
+      edit.shape = { attr: shown.attr, value: typed };
+    } else edit[shown.field] = api.poseEdit(shown.objectId, shown.field, typed);
+    settle(editor.commit([edit]));
+  }
+
   /** What the view edits through: `begin`, `preview`, `commit`, `scene`,
    *  `undo`, `redo`, each a promise of the answer. A notebook's is the
    *  session in its kernel, over this widget's own connection. A host with
@@ -1137,17 +1345,8 @@ function render({ model, el }) {
       dragActive = true;
       if (playing) setPlaying(false); // the pointer is the one being asked
       editor.begin({ objectIds, mode }).catch(() => {});
-      // A value written in terms of a variable is set outright by a drag,
-      // and the variable stops deciding it: worth saying before, not after.
-      const field = DRAG_WRITES[mode];
-      const payload = model.get("payload") || {};
-      const names = (payload.parametric?.[objectIds[0]] || {})[field] || [];
-      if (names.length) {
-        notify(
-          `This drag sets its ${field} outright: ${names.join(", ")} stops deciding it`,
-        );
-      }
     },
+    showPose,
     preview: (pose) => editor.preview(pose.edits),
     scene: () => editor.scene(),
     render(payload, { keep }) {
@@ -1212,6 +1411,7 @@ function render({ model, el }) {
     if (now.has("axes")) showAxes();
     if (now.has("theme")) retheme();
     if (now.has("editable")) dressEditing();
+    if (now.has("payload") || now.has("selected")) showReadout();
     if (now.has("revision") && model.get("revision") !== echoed) {
       // An edit python settled. marimo re-runs the cells that read a widget
       // when the view says the widget changed, not when python does -- so

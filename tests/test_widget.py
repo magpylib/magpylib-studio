@@ -1162,6 +1162,19 @@ def test_objects_are_named_after_the_callers_own_variables():
 
 
 @needs_scene_graph
+def test_the_legend_names_an_unlabelled_object_as_the_scene_does():
+    """No label of its own: listed as the name it has in the scene, which is
+    what the readout and `objects` say, not as its type."""
+    rotor = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+    pickup = magpy.Sensor(style_label="the pickup")
+    studio = widget.SceneWidget(rotor, pickup, editable=True)
+    assert [(n["id"], n["label"]) for n in studio.tree] == [
+        ("rotor", "rotor"),
+        ("pickup", "the pickup"),
+    ]
+
+
+@needs_scene_graph
 def test_objects_may_come_as_a_list(scene_objects):
     """As `show` and a read-only view take them -- and none is said plainly."""
     studio = widget.SceneWidget(list(scene_objects), editable=True)

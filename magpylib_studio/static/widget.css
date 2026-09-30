@@ -76,6 +76,8 @@
    Panels floating over the view, in the legend's material. */
 .magpy-scene-tools,
 .magpy-scene-edit,
+.magpy-scene-readout,
+.magpy-scene-keys,
 .magpy-scene-transport,
 .magpy-scene-notice {
   position: absolute;
@@ -126,6 +128,94 @@
 
 .magpy-scene-edit[hidden] {
   display: none;
+}
+
+/* The readout: the numbers the handles are writing, bottom left -- above the
+   transport when there is one -- as boxes that take a typed value. Everything
+   in it is click-through but the boxes, so the view is still what the
+   pointer is for. */
+.magpy-scene-readout {
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.magpy-animated .magpy-scene-readout {
+  bottom: 44px;
+}
+
+.magpy-scene-readout[hidden],
+.magpy-scene-keys[hidden] {
+  display: none;
+}
+
+.magpy-scene-readout-head {
+  opacity: 0.7;
+}
+
+.magpy-scene-readout-fields:not(:empty) {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  margin-top: 1px;
+}
+
+.magpy-scene-readout .unit {
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* Underlined rather than boxed: three bordered fields over a 3D view read as
+   a form that has landed on it, and the numbers are the point. */
+.magpy-scene-readout input {
+  pointer-events: auto;
+  padding: 0 1px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.magpy-scene-readout input:focus {
+  outline: none;
+  border-bottom-color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* What a drag would take away from a variable: said on the object, and still
+   there while the drag goes on. Narrow, so it does not set the corner's
+   width. */
+.magpy-scene-readout-takes:not(:empty) {
+  margin-top: 2px;
+  max-width: 15em;
+  color: var(--vscode-editorWarning-foreground, #b58900);
+}
+
+/* The legend gives the readout its corner. */
+.magpy-reading .magpy-scene-legend {
+  max-height: calc(100% - 84px);
+}
+
+/* The key list: under the tools, over the editing column while it is open. */
+.magpy-scene-keys {
+  top: 44px;
+  right: 8px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 3px 10px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+}
+
+.magpy-scene-keys kbd {
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .magpy-scene-rule {

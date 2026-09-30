@@ -717,11 +717,14 @@ class SceneWidget(anywidget.AnyWidget):
 
 def _tree_of(entries):
     """`list_objects`'s entries as the legend's tree: nodes of ``{id, label,
-    kind, children}``, nested by each entry's parent."""
+    kind, children}``, nested by each entry's parent. An object with no label
+    of its own is listed by its name in the scene -- the variable it came
+    from -- rather than by its type: two sensors are not both "Sensor", and
+    the readout and `objects` call it by that name too."""
     nodes = {
         entry["id"]: {
             "id": entry["id"],
-            "label": entry["label"],
+            "label": entry["id"] if entry["label"] == entry["type"] else entry["label"],
             "kind": entry["type"].rsplit(".", 1)[-1],
             "children": [],
         }
