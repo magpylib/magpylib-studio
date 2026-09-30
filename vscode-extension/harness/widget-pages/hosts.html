@@ -26,8 +26,9 @@
         // variables on the root; the output white and padded 8px, and the
         // box inside it white again and padded 0 8px, holding an empty
         // `div.cell-output` beside the widget. `?layout=` says what else the
-        // box holds: nothing (alone), sliders in the same VBox (shared), or
-        // sliders that arrive after the view has drawn (late).
+        // box holds: nothing (alone), sliders in the same VBox (shared),
+        // sliders that arrive after the view has drawn (late), or a second
+        // view of the same widget (twice).
         vscode: {
           css: `
             body { margin: 0; background-color: transparent;
@@ -58,6 +59,9 @@
             } else if (layout === "late") {
               content = make("lm-Widget widget-vbox", el);
               window.arrive = () => content.prepend(slider());
+            } else if (layout === "twice") {
+              window.second = make("lm-Widget");
+              content = make("lm-Widget widget-vbox", el, window.second);
             }
             holder.append(
               make(
@@ -143,10 +147,10 @@
       host.wrap?.(document.getElementById("widget"));
       host.flip?.(false);
       window.flip = host.flip;
-      widget.render({
-        model: localModel(),
-        el: document.getElementById("widget"),
-      });
+      const model = localModel();
+      widget.render({ model, el: document.getElementById("widget") });
+      // a second view of the same widget, as a second `display` of it makes
+      if (window.second) widget.render({ model, el: window.second });
       window.ready = true;
     </script>
   </body>

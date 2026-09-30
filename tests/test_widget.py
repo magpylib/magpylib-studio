@@ -1043,3 +1043,140 @@ def test_a_path_is_opened_to_edit(scene_objects, tmp_path):
         widget.SceneWidget(tmp_path / "scene.py")
     with pytest.raises(TypeError, match="animation"):
         widget.SceneWidget(*scene_objects, editable=True, animation=True)
+
+
+# --- the editable view, as the review of #20 found it ----------------------
+
+
+@needs_scene_graph
+def test_numpy_values_do_not_poison_the_session(tmp_path):
+    """A value handed over as an array is stored as a list: the document
+    stays JSON, and every edit after it -- and a save -- still works."""
+    studio = _studio()
+    magnet = next(key for key in studio.objects if key not in ("ring", "probe"))
+    studio.set(magnet, dimension=np.array([0.02, 0.01, 0.01]))
+    studio.set(magnet, polarization=np.array([1.0, 0, 0]), position=np.zeros(3))
+    studio.save(tmp_path / "scene.magpy.json")
+    assert studio.objects[magnet].dimension == pytest.approx([0.02, 0.01, 0.01])
+
+
+@needs_scene_graph
+def test_a_refused_set_changes_nothing():
+    """A pose and a size set together are one edit: when the size is
+    refused, the pose does not go through either, and nothing is told."""
+    studio = _studio()
+    magnet = next(key for key in studio.objects if key not in ("ring", "probe"))
+    before = np.ravel(studio.objects[magnet].position).copy()
+    revision, steps = studio.revision, len(studio._session.get_history()["undo"])
+    with pytest.raises(ValueError, match=magnet):
+        studio.set(magnet, position=(0.05, 0, 0), dimension=(-1, "x", 0))
+    assert np.ravel(studio.objects[magnet].position) == pytest.approx(before)
+    assert studio.revision == revision
+    assert len(studio._session.get_history()["undo"]) == steps
+
+
+@needs_scene_graph
+def test_a_small_value_is_still_an_edit():
+    """In SI units a real edit can be tiny: a nanoampere-metre moment, a
+    nanometre move. Only the very same value is no edit."""
+    dipole = magpy.misc.Dipole(moment=(0, 0, 1e-9))
+    studio = widget.SceneWidget(dipole, editable=True)
+    studio.set("dipole", moment=(0, 0, 2e-9))
+    assert studio.objects["dipole"].moment == pytest.approx([0, 0, 2e-9])
+    revision = studio.revision
+    studio.set("dipole", moment=(0, 0, 2e-9))
+    assert studio.revision == revision
+
+
+@needs_scene_graph
+def test_only_a_change_is_news():
+    """Undo with nothing to undo, or a gesture that changed nothing, tells
+    the notebook nothing; `undo()` says whether it did anything."""
+    studio = _studio()
+    revision = studio.revision
+    assert studio.undo() is False
+    _ask(studio, "undo")
+    _ask(studio, "begin_interaction")
+    _ask(studio, "end_interaction")
+    assert studio.revision == revision
+
+
+@needs_scene_graph
+def test_the_view_is_answered_before_the_notebook_is_told():
+    """A callback on `revision` that raises -- or takes long -- does not
+    keep the answer from the view, which would give up on it."""
+    studio = _studio()
+
+    def broken(change):
+        raise RuntimeError("a notebook callback that fails")
+
+    studio.observe(broken, "revision")
+    _ask(studio, "begin_interaction")
+    _ask(
+        studio,
+        "apply_edits",
+        edits=[{"objectId": "probe", "position": [0.01, 0, 0.02]}],
+    )
+    asked = len(studio.sent)
+    with pytest.raises(RuntimeError):
+        _ask(studio, "end_interaction")
+    answer = studio.sent[-1]
+    assert answer["kind"] == "rpc" and answer["id"] == asked
+    assert "error" not in answer
+
+
+@needs_scene_graph
+def test_what_an_edit_was_is_said():
+    """`last_edit` says what `revision` counted: a drag and what it left, a
+    `set`, an undo and the step it took back."""
+    studio = _studio()
+    _ask(studio, "begin_interaction")
+    _ask(
+        studio,
+        "apply_edits",
+        edits=[{"objectId": "probe", "position": [0.01, 0, 0.02]}],
+    )
+    _ask(studio, "end_interaction")
+    assert studio.last_edit == {
+        "by": "drag",
+        "objects": ["probe"],
+        "changed": {"probe": {"position": [0.01, 0, 0.02]}},
+    }
+    studio.set("probe", position=(0.02, 0, 0.02))
+    assert studio.last_edit["by"] == "set"
+    assert studio.last_edit["changed"] == {"probe": {"position": [0.02, 0, 0.02]}}
+    studio.undo()
+    assert studio.last_edit == {"by": "undo", "step": "set transform probe"}
+
+
+@needs_scene_graph
+def test_objects_are_named_after_the_callers_own_variables():
+    """A function's own variables name its objects, not only a module's."""
+
+    def make():
+        cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+        pickup = magpy.Sensor(position=(0, 0, 2))
+        return widget.SceneWidget(cube, pickup, editable=True)
+
+    assert sorted(make().objects) == ["cube", "pickup"]
+
+
+@needs_scene_graph
+def test_objects_may_come_as_a_list(scene_objects):
+    """As `show` and a read-only view take them -- and none is said plainly."""
+    studio = widget.SceneWidget(list(scene_objects), editable=True)
+    assert len(studio.objects) == 2
+    with pytest.raises(TypeError, match="nothing to edit"):
+        widget.SceneWidget(editable=True)
+
+
+@needs_scene_graph
+def test_a_saved_step_that_no_longer_applies_is_said(tmp_path):
+    cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+    doc = widget.SceneWidget(cube, editable=True)._session.to_dict()
+    ghost = {"id": "ghost", "target": "nobody", "op": "move", "displacement": [1, 0, 0]}
+    doc["events"].append(ghost)
+    saved = tmp_path / "scene.magpy.json"
+    saved.write_text(json.dumps(doc))
+    with pytest.warns(UserWarning, match="no longer applies"):
+        widget.SceneWidget(saved, editable=True)

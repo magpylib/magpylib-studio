@@ -33,6 +33,11 @@ All notable changes to the Magpylib Studio extension.
 - A sensor that draws its own reading -- pixels coloured, or arrows, by the
   field -- showed what it measured where a drag began until the drag ended. It
   is now redrawn as it moves, like the rest of the scene.
+- A handle clicked and let go without moving left the drag's undo group open, so
+  the next edit anywhere was folded into it. The group now opens on the drag's
+  first move.
+- A drag of several objects that the engine refused in part moved the others. It
+  is now all or nothing.
 
 ## [0.4.1]
 

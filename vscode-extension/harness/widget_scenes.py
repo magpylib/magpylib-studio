@@ -71,6 +71,14 @@ def ring(label, z):
     )
 
 
+def scene_to_edit():
+    """A magnet and a probe, editable -- named, as the view names them, after
+    the variables that hold them here."""
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    probe = magpy.Sensor(position=(0, 0, 0.02))
+    return SceneWidget(magnet, probe, editable=True)
+
+
 def main(out):
     out.mkdir(parents=True, exist_ok=True)
     stack = magpy.Collection(ring("upper", 1), ring("lower", -1), style_label="stack")
@@ -167,10 +175,7 @@ def main(out):
     (out / "readings.json").write_text(json.dumps([before, after]))
 
     # a scene to edit: the model a studio holds, and its session's answer
-    lone = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
-    lone.style.label = "magnet"
-    probe_to_edit = magpy.Sensor(position=(0, 0, 0.02), style_label="probe")
-    studio = SceneWidget(lone, probe_to_edit, editable=True)
+    studio = scene_to_edit()
     if not studio.editable or "probe" not in studio.payload["anchors"]:
         raise SystemExit("edit.json: the studio should hold a probe to edit")
     (out / "edit.json").write_text(

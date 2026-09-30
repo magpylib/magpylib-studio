@@ -322,6 +322,12 @@ const HOSTS = [
     "VS Code notebook, sharing its output",
     { alwaysLight: true, system: "opposite", backdrops: "white" },
   ],
+  // A second view of the same widget is no company: both wear the theme.
+  [
+    "vscode&layout=twice",
+    "VS Code notebook, the same view twice",
+    { system: "opposite", backdrops: "painted" },
+  ],
   ["pydata", "pydata-sphinx-theme"],
   ["furo", "furo"],
   ["jupyterbook", "Jupyter Book 2"],

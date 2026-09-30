@@ -45,9 +45,11 @@ export const REDRAW_BUDGET_MS = 8;
  *
  * What the view supplies:
  *
- * - `begin({ objectIds, mode })`: a drag has started. Open the undo group --
- *   the edits it is about to make are one thing to undo -- and say anything
- *   it will supersede, before rather than after.
+ * - `begin({ objectIds, mode })`: a drag has started moving. Open the undo
+ *   group -- the edits it is about to make are one thing to undo -- and say
+ *   anything it will supersede, before rather than after. Not on the press:
+ *   the renderer reports nothing for a handle clicked and let go, so a group
+ *   opened then would never be closed, and swallow the next edit made.
  * - `preview(pose)`: a pose reached mid-drag. Returns a promise, settled once
  *   the engine has taken it; the next is not sent until then.
  * - `commit(pose)`: the pose the drag ended on. Record it and close the group.
@@ -63,7 +65,7 @@ export const REDRAW_BUDGET_MS = 8;
  */
 export function watchDrags(host, view) {
   const drawing = view.drawing ?? (() => true);
-  let dragging = null; // { keep, tooSlow } while a handle is held
+  let dragging = null; // { keep, tooSlow, begun } while a handle is held
   let pending = null; // the newest pose not yet sent
   let inFlight = false;
 
@@ -113,12 +115,25 @@ export function watchDrags(host, view) {
     const rebuilt =
       mode === "polarization" ||
       (objectIds.length === 1 && view.patterned().has(objectIds[0]));
-    dragging = { keep: rebuilt ? null : objectIds, tooSlow: false };
-    view.begin({ objectIds, mode });
+    dragging = {
+      keep: rebuilt ? null : objectIds,
+      tooSlow: false,
+      begun: false,
+      objectIds,
+      mode,
+    };
+  }
+
+  /** Open the gesture on its first report, not on the press -- see `begin`. */
+  function begun() {
+    if (!dragging || dragging.begun) return;
+    dragging.begun = true;
+    view.begin({ objectIds: dragging.objectIds, mode: dragging.mode });
   }
 
   function onTransform(event) {
     const pose = event.detail;
+    begun();
     if (pose.preview) {
       // Read out at pointer rate rather than at engine rate: the numbers are
       // already known here, and waiting for the round trip to show them

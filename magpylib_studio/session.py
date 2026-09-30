@@ -4005,22 +4005,57 @@ class MagpylibStudioSession:
 
         Here, not in each view's host, so that every view turns a drag into
         the same edits: the studio's panel does, and so will a notebook's
-        widget. Several calls go as one `batch`, and so one undo step: objects
-        dragged together were one gesture. A batch that fails says why in
-        `error`, as a single call does, rather than only per call.
+        widget. Several calls go as one step to undo (`apply_calls`): objects
+        dragged together were one gesture -- and, if one of them is refused,
+        none of them moves.
         """
         calls = [call for edit in edits for call in _calls_for(edit)]
+        ids = sorted({edit["objectId"] for edit in edits})
+        return self.apply_calls(calls, f"edit {', '.join(ids)}")
+
+    def apply_calls(self, calls, label="edit"):
+        """Several edits as one: all of them, one step to undo -- or, if any
+        is refused, none of them, and what refused it in `error`.
+
+        What a gesture needs. Several objects dragged together, or a pose and
+        a size set together, were one thing the user did: half of it recorded
+        is neither what they did nor what they had. `batch` is the other
+        choice, for a caller that wants to keep what went through.
+
+        `calls` are ``{"method", "params"}``, as `batch` takes them. One call
+        goes as it is, and is recorded under its own name.
+        """
         if not calls:
             return {"ok": True}
         if len(calls) == 1:
             (call,) = calls
             return getattr(self, call["method"])(**call["params"])
-        result = self.batch(calls)
-        if not result["ok"]:
-            result["error"] = "; ".join(
-                r.get("error", "refused") for r in result["results"] if not r["ok"]
-            )
-        return result
+        before = json.loads(json.dumps(self.doc))
+        failed = None
+        self._history_paused = True
+        try:
+            for call in calls:
+                method = call["method"]
+                if method not in _BATCHABLE:
+                    failed = {"ok": False, "error": f"method {method!r} not batchable"}
+                    break
+                try:
+                    result = getattr(self, method)(**(call.get("params") or {}))
+                except Exception as e:  # noqa: BLE001 - reported, and undone
+                    result = {"ok": False, "error": str(e)}
+                if not result.get("ok", True):
+                    failed = result
+                    break
+        finally:
+            self._history_paused = False
+        if failed is not None:
+            if self.doc != before:
+                self.doc = before
+                self._build()
+            return failed
+        if self.doc != before:
+            self._record_state(label, before)
+        return {"ok": True}
         self._replay_frames = {}
         return {"ok": True}
 
