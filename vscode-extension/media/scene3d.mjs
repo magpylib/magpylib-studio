@@ -137,9 +137,29 @@ function ensureRenderer(canvasEl) {
   key.position.set(1, -1, 1);
   scene.add(key);
 
-  renderer.setAnimationLoop(() => renderer.render(scene, camera));
+  // A lost context comes back empty: three rebuilds what it holds, and the
+  // picture has to be drawn again on top.
+  renderer.domElement.addEventListener("webglcontextrestored", redraw);
   watchPicks();
   makeGizmo();
+}
+
+/** Draw the view at the next frame, once however many ask before then.
+ *
+ * On demand rather than every frame: a notebook holds a view per cell, most
+ * of them scrolled away and all of them idle most of the time, and a render
+ * loop apiece keeps the GPU drawing every one of them sixty times a second.
+ * So whatever changes the picture asks for a frame -- the orbit and the
+ * handles as they move, a new size, and every call a host makes (see
+ * `drawingAfter`) -- and nothing else draws. */
+let frameAsked = false;
+function redraw() {
+  if (!renderer || frameAsked) return;
+  frameAsked = true;
+  requestAnimationFrame(() => {
+    frameAsked = false;
+    renderer.render(scene, camera);
+  });
 }
 
 /** A rotation as magpylib writes one: an axis scaled by its angle in degrees. */
@@ -381,6 +401,8 @@ function makeGizmo() {
       from = null;
     }
   });
+  // A handle lit under the pointer, or moved by it.
+  gizmo.addEventListener("change", redraw);
   gizmo.addEventListener("objectChange", () => {
     if (from?.shape) constrainScale(gizmo.object, from.shape.constraint);
     report(true);
@@ -566,6 +588,7 @@ function resize(canvasEl) {
   // left quarter of the scene and calls it the whole view.
   renderer.setSize(w, h);
   applyProjection();
+  redraw(); // a canvas resized is a canvas cleared
 }
 
 /** A magpylib colorscale table as a texture the shader indexes by intensity. */
@@ -988,7 +1011,10 @@ function toggleProjection() {
 /** Orbit controls for the camera now in use, reporting every move of it. */
 function orbit() {
   const made = new OrbitControls(camera, renderer.domElement);
-  made.addEventListener("change", () => cameraMoved?.());
+  made.addEventListener("change", () => {
+    redraw();
+    cameraMoved?.();
+  });
   return made;
 }
 
@@ -1506,6 +1532,29 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   drawHints();
 }
 
+/** `api`, each of whose functions asks for a frame once it has run.
+ *
+ * Done here, once, rather than in each: what a host calls is what changes the
+ * picture, and a function that forgot to ask would leave the view showing the
+ * scene before it -- until something else happened to draw. One that only
+ * reads costs a frame nobody sees, which is cheap beside that. */
+function drawingAfter(api) {
+  const wrapped = {};
+  for (const [name, value] of Object.entries(api)) {
+    wrapped[name] =
+      typeof value === "function"
+        ? (...args) => {
+            try {
+              return value(...args);
+            } finally {
+              redraw();
+            }
+          }
+        : value;
+  }
+  return wrapped;
+}
+
 /** Everything a host may drive the view with.
  *
  * Exported *and* on `window`: the panel's classic script reads the global,
@@ -1513,7 +1562,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
  * it once per view so that two scenes on a page are two scenes -- takes the
  * export and so gets the instance it just made rather than the last one made.
  */
-export const scene3d = {
+export const scene3d = drawingAfter({
   render,
   fitView,
   highlight,
@@ -1543,7 +1592,7 @@ export const scene3d = {
   canResize: (objectId) => Boolean(shapes[objectId]),
   canAim: (objectId) => Boolean(polarizations[objectId]),
   byObjectId,
-};
+});
 
 // The first instance keeps the name. The notebook widget makes one of these
 // per view, from a blob, and the studio's script panel draws that widget
