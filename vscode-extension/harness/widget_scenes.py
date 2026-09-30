@@ -28,6 +28,8 @@ Writes into OUT:
   the scene its session answers `get_scene` with;
 * ``studio.json`` -- what the studio panel's engine answers for that scene:
   ``get_scene`` and ``object_tree``;
+* ``collection.json`` -- an editable view of two magnets held as one
+  collection, and the scene its session answers `get_scene` with;
 * ``expected.json`` -- what the check compares against: the camera, and the
   legend's rows in tree order.
 """
@@ -81,6 +83,19 @@ def scene_to_edit():
     # whether y is sent as it is, or as the box rounds it
     probe = magpy.Sensor(position=(0, 0.00012345, 0.02))
     return SceneWidget(magnet, probe, editable=True)
+
+
+def scene_with_a_collection():
+    """Two magnets held as one collection, editable, named after the
+    variables that hold them here."""
+    left = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(-0.01, 0, 0)
+    )
+    right = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(0.01, 0, 0)
+    )
+    pair = magpy.Collection(left, right)
+    return SceneWidget(pair, editable=True)
 
 
 def main(out):
@@ -188,6 +203,13 @@ def main(out):
     # what the studio panel's engine answers: the scene, and its tree
     (out / "studio.json").write_text(
         json.dumps({"scene": studio.payload, "tree": studio.tree})
+    )
+
+    held = scene_with_a_collection()
+    if held.payload["collections"] != {"pair": ["left", "right"]}:
+        raise SystemExit("collection.json: the pair should hold left and right")
+    (out / "collection.json").write_text(
+        json.dumps({"state": held.get_state(), "scene": held.payload})
     )
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]

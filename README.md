@@ -171,8 +171,10 @@ them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
 swaps the world's axes for the object's own, **S** snaps — and a column down the
 view's right-hand side has the same. The corner reads out the numbers a drag is
 changing, and takes a typed value in their place; the keys button lists every
-key. The variables come later —
-[docs/editable-widget.md](docs/editable-widget.md).
+key. A collection has handles of its own: select it — its row in the legend, or
+**C** from something in it, and **C** again for the one round that — and a drag
+moves and turns it whole, as one edit to the collection. The variables come
+later — [docs/editable-widget.md](docs/editable-widget.md).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`

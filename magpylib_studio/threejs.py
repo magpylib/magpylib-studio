@@ -945,8 +945,8 @@ def view_payload(scene, index=None, traces=None):
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no
-        # shape to resize, no polarization to aim and no path to scrub. The
-        # renderer reads each as empty and skips all four.
+        # shape to resize, no polarization to aim, no path to scrub and no
+        # collection to carry. The renderer reads each as empty and skips them.
         "centroids": {},
         "anchors": {},
         "orientations": {},
@@ -954,6 +954,7 @@ def view_payload(scene, index=None, traces=None):
         "shapes": {},
         "polarizations": {},
         "patterned": [],
+        "collections": {},
     }
 
 
@@ -991,11 +992,17 @@ def scene_payload(objects, live=None, derived=None):
     `patterned` names the sources that have copies. An edit to one of those
     lands at the end of the event log, after the duplication that made the
     copies, so the source moves and the copies stay where they were. A view
-    that offers drag handles has to know not to offer them there.
+    that offers drag handles has to know not to offer them there. It names
+    too the collections that hold only part of a pattern -- see
+    `_collections` -- whose drag a view cannot draw by carrying either.
 
     `readings` names the objects whose drawing is their own reading of the
     field -- see `_reads_the_field` -- which a view redraws while they are
     dragged, rather than carrying the picture along with the handles.
+
+    `collections` gives each Collection what it holds, by the ids above: a
+    collection draws nothing of its own, so a view that puts handles on one
+    makes it a node, and carries these on it while it is dragged.
     """
     scene = _capture(objects, on_behalf_of="studio")
     panel = scene.panel(1, 1)
@@ -1056,6 +1063,7 @@ def scene_payload(objects, live=None, derived=None):
         if polarization is not None:
             polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
+    collections, split = _collections(live, derived, source_of)
     return {
         **_by_kind(_keyed(traces, live, derived)),
         "ranges": None if panel.ranges is None else panel.ranges.tolist(),
@@ -1066,9 +1074,39 @@ def scene_payload(objects, live=None, derived=None):
         "paths": paths,
         "shapes": shapes,
         "polarizations": polarizations,
-        "patterned": sorted(derived),
+        "patterned": sorted({*derived, *split}),
         "readings": sorted(readings),
+        "collections": collections,
     }
+
+
+def _collections(live, derived, source_of):
+    """Each Collection's contents, nested ones included, by the ids a view
+    draws them under -- a copy is drawn on its source's node, so it is held
+    as its source -- and the collections that split a pattern.
+
+    Carried on a collection's node, a pattern moves as one piece with its
+    source: right when the collection holds the source and every copy, and
+    not otherwise -- only the rebuild knows where half a pattern goes. Those
+    collections are listed with the patterned sources, and a view draws their
+    drag from the engine instead.
+    """
+    key_of = {id(obj): key for key, obj in live.items()}
+    collections, split = {}, []
+    for key, obj in live.items():
+        children = getattr(obj, "children_all", None)
+        if children is None or key in source_of:
+            continue
+        held = [key_of[id(child)] for child in children if id(child) in key_of]
+        collections[key] = list(dict.fromkeys(source_of.get(k, k) for k in held))
+        inside = set(held)
+        if any(
+            (k in derived and not set(derived[k]) <= inside)
+            or (k in source_of and source_of[k] not in inside)
+            for k in held
+        ):
+            split.append(key)
+    return collections, split
 
 
 def _reads_the_field(obj):

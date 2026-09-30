@@ -1,0 +1,90 @@
+<!doctype html>
+<!--
+  A collection's own handles: two magnets held as one collection, in an
+  editable view over a fake kernel, as edit.html runs one. The page sets the
+  view up and says `window.ready`; the harness does the rest -- the handles
+  answer only a real pointer.
+
+  `window.page` is what the harness reads: what the view asked the session,
+  its model, where on screen the handles are, what they are on, and which
+  node carries an object.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 80 && !test(); i++) await wait(50);
+        return test();
+      };
+      const { state, scene } = await (
+        await fetch("/out/collection.json")
+      ).json();
+
+      const asked = [];
+      const values = { ...state };
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "rpc") return;
+          asked.push({ method: message.method, edits: message.params?.edits });
+          const result = message.method === "get_scene" ? scene : { ok: true };
+          setTimeout(
+            () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
+            20,
+          );
+        },
+      };
+      const el = document.getElementById("root");
+      widget.render({ model, el });
+      await until(() => el.querySelector("canvas"));
+      await wait(500);
+
+      const nodes = window.scene3d.byObjectId;
+      // the handles, by their helper in the scene: what they are on, and the
+      // camera they are drawn for
+      const handles = () =>
+        nodes
+          .get("left")
+          ?.parent?.children.find((child) => child.isTransformControlsRoot)
+          ?.controls;
+      window.page = {
+        asked,
+        model,
+        /** Where the handles are, in the page's pixels. */
+        handlesAt() {
+          const { object, camera } = handles();
+          const at = object
+            .getWorldPosition(object.position.clone())
+            .project(camera);
+          const box = el.querySelector("canvas").getBoundingClientRect();
+          return {
+            x: box.left + ((at.x + 1) / 2) * box.width,
+            y: box.top + ((1 - at.y) / 2) * box.height,
+          };
+        },
+        on: () => handles()?.object?.userData.objectId ?? null,
+        carriedBy: (objectId) =>
+          nodes.get(objectId)?.parent?.userData.objectId ?? null,
+      };
+      window.ready = true;
+    </script>
+  </body>
+</html>

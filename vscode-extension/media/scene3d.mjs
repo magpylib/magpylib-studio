@@ -82,6 +82,11 @@ let polarizations = {}; // studio id -> its polarization, in its own frame
 //: is what a drag now moves, the engine recording it before the step that
 //: copies it rather than after.
 let patterned = new Set();
+// Studio id -> what a collection holds, nested collections too. A collection
+// draws nothing of its own: it has a node only for handles to go on, and what
+// it holds is hung on that node while it is dragged.
+let collections = {};
+let centroids = {}; // studio id -> where its handles go, for the nodes made here
 // What the polarization handles turn. The object must not turn with them, so
 // they cannot be attached to it: this stands in, and only its rotation is read.
 const proxy = new THREE.Object3D();
@@ -314,7 +319,7 @@ function makeGizmo() {
       // own node carries that one. Either way it is one rigid motion, and the
       // only difference is how many objects come along with it.
       const objectIds =
-        node === rig ? [...selectedIds] : [node.userData.objectId];
+        node === rig ? outermost(selectedIds) : [node.userData.objectId];
       const primary = objectIds[0];
       const orientation = quaternionOf(orientations[primary]);
       const here = node.getWorldPosition(new THREE.Vector3());
@@ -326,17 +331,24 @@ function makeGizmo() {
         );
         turns[objectId] = quaternionOf(orientations[objectId]);
       }
-      if (node === rig) {
-        // `attach` keeps each object where it is while hanging it on the rig,
-        // so the whole selection moves with the handles at pointer rate --
-        // waiting for the model to come back would show nothing moving.
+      // `attach` keeps each object where it is while hanging it on the rig or
+      // on a collection's node, so what is dragged moves with the handles at
+      // pointer rate -- waiting for the model to come back would show nothing
+      // moving. The rig carries the selection, and either carries what a
+      // collection among it holds. A stand-in carries nothing.
+      const carried = [];
+      if (node === rig || node.userData.collection) {
         for (const objectId of objectIds) {
-          const carried = byObjectId.get(objectId);
-          if (carried) rig.attach(carried);
+          carried.push(objectId, ...(collections[objectId] ?? []));
         }
       }
+      const hung = carried
+        .map((objectId) => byObjectId.get(objectId))
+        .filter((each) => each && each !== node);
+      for (const each of hung) node.attach(each);
       from = {
         objectIds,
+        hung,
         quaternion: node.quaternion.clone(),
         orientations: turns,
         placed, // where each object is, as against where the handles are
@@ -363,9 +375,8 @@ function makeGizmo() {
       );
     } else {
       report(false); // the one that gets recorded and redrawn
-      for (const objectId of from.objectIds) {
-        const carried = byObjectId.get(objectId);
-        if (carried && carried.parent === rig) scene.attach(carried);
+      for (const each of from.hung) {
+        if (each.parent === node) scene.attach(each);
       }
       from = null;
     }
@@ -602,11 +613,43 @@ function nodeFor(objectId, centroid) {
   return node;
 }
 
+/** A node for each collection, for its handles: on its centroid, in its own
+ *  frame. Nothing is drawn on it; see `makeGizmo` for what it carries. */
+function placeCollections() {
+  for (const objectId of Object.keys(collections)) {
+    const node = nodeFor(objectId, centroids[objectId]);
+    node.userData.collection = true;
+    node.visible = true;
+  }
+}
+
+/** `objectIds`, with each collection among them as what it holds: what is
+ *  drawn for them, which is what an outline or a frame goes round. */
+function drawnFor(objectIds) {
+  const drawn = new Set();
+  for (const objectId of objectIds) {
+    for (const each of collections[objectId] ?? [objectId]) {
+      if (!collections[each]) drawn.add(each);
+    }
+  }
+  return [...drawn];
+}
+
+/** Those of `objectIds` that no other of them holds: a collection moved
+ *  moves what it holds, and moving that as well would move it twice. */
+function outermost(objectIds) {
+  return objectIds.filter(
+    (objectId) =>
+      !objectIds.some((other) => collections[other]?.includes(objectId)),
+  );
+}
+
 /** Hide these objects, and show every other. */
 function setHidden(objectIds) {
   hiddenIds = new Set(objectIds);
   for (const [objectId, node] of byObjectId) {
-    node.visible = !hiddenIds.has(objectId);
+    // a collection's node draws nothing, and hidden would hide what it carries
+    node.visible = node.userData.collection || !hiddenIds.has(objectId);
   }
   highlight(selectedIds); // an outline round nothing reads as a bug
   drawHints();
@@ -636,7 +679,7 @@ function drawHints() {
   // nothing to point at: no style lookup for a colour no box will wear.
   if (!hintIds.length) return;
   const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
-  for (const objectId of hintIds) {
+  for (const objectId of drawnFor(hintIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     const box = new THREE.BoxHelper(node, accent);
@@ -781,8 +824,7 @@ function buildScatter(item) {
  *  is drawn, round everything that is showing. */
 function sceneSphere(objectIds) {
   const box = new THREE.Box3();
-  const chosen = []
-    .concat(objectIds ?? [])
+  const chosen = drawnFor([].concat(objectIds ?? []))
     .map((objectId) => byObjectId.get(objectId))
     .filter(Boolean);
   if (chosen.length) {
@@ -820,7 +862,7 @@ function highlight(objectIds) {
   outlines = [];
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
-  for (const objectId of selectedIds) {
+  for (const objectId of drawnFor(selectedIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     const box = new THREE.BoxHelper(node, accent);
@@ -1190,6 +1232,7 @@ function renderFrame(payload) {
     node.quaternion.identity(); // the geometry already holds the pose
     node.add(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
+  placeCollections();
   for (const box of outlines) box.update();
   drawHints(); // round the nodes just built, not the ones discarded
 }
@@ -1292,7 +1335,7 @@ function poseEdit(objectId, field, numbers) {
 /** The object after this one, so a keystroke can walk the scene. */
 function nextObject(objectId, step = 1) {
   const drawn = [...byObjectId]
-    .filter(([id, node]) => id && node.visible)
+    .filter(([id, node]) => id && node.visible && !node.userData.collection)
     .map(([id]) => id);
   if (!drawn.length) return undefined;
   const at = drawn.indexOf(objectId);
@@ -1321,6 +1364,7 @@ const VIEW_KEYS = {
   Tab: "next", // shift: the one before
   " ": "play",
   h: "hide", // shift: show only the selection, or everything again
+  c: "parent", // the collection the selection is in; again, the one round it
   Escape: "deselect",
 };
 
@@ -1360,6 +1404,8 @@ function viewKey(event, host = {}) {
       );
     case "hide":
       return ask(host.hide, { isolate: event.shiftKey });
+    case "parent":
+      return selectedIds.length > 0 && ask(host.parent, selectedIds[0]);
     default: // play, deselect
       return ask(host[action]);
   }
@@ -1383,6 +1429,11 @@ function viewKey(event, host = {}) {
  */
 function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const held = new Set([].concat(keep ?? []));
+  // What a dragged collection carries is held with it: rebuilt, it would be
+  // drawn twice, once on the collection's node and once from the payload.
+  for (const objectId of [...held]) {
+    for (const each of collections[objectId] ?? []) held.add(each);
+  }
   ensureRenderer(canvasEl);
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
@@ -1403,6 +1454,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   shapes = payload.shapes || {};
   polarizations = payload.polarizations || {};
   patterned = new Set(payload.patterned || []);
+  collections = payload.collections || {};
+  centroids = payload.centroids || {};
 
   discard(held);
   const readings = new Set(payload.readings ?? []);
@@ -1428,6 +1481,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
       changing.push({ node, built, changes: item.changes });
     }
   }
+  placeCollections();
 
   // Size first: the fit depends on the aspect ratio, and on the very first
   // render the canvas may not have been laid out yet.
@@ -1437,7 +1491,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // example does -- would otherwise keep the camera fitted to the empty one.
   if (!keepCamera || !framed) {
     fitView();
-    framed = byObjectId.size > 0;
+    framed = [...byObjectId.values()].some((node) => !node.userData.collection);
   }
   // Lines and points are hit within a radius of the ray, measured in world
   // units: a fixed one would miss a scene in metres and swallow one in

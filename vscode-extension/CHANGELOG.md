@@ -15,6 +15,10 @@ All notable changes to the Magpylib Studio extension.
 - A re-run of the script redraws the panel as you left it: what you hid, the
   theme you chose and the camera stay. The picture button asks where to save the
   PNG.
+- A collection has handles of its own in the 3D view. Select it in the Scene
+  tree or the legend, or press C on something inside it, and a drag moves and
+  turns the whole collection as one edit to it, rather than one to each object
+  in it.
 
 ### Changed
 
