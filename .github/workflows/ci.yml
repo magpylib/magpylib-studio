@@ -5,7 +5,12 @@
 # was only ever checked by hand), the extension end to end in a real VS
 # Code — which needs the engine installed, since that is what it drives —
 # the notebook widget in a real browser, which is where it has broken before,
-# and the package alone, as pip installs it, with none of this checkout.
+# and the package alone, as it installs from its wheel, with none of this
+# checkout.
+#
+# Python is uv's, with its cache: an install was 21-29 s a job with pip, and
+# is a few with uv. pyproject's [tool.uv.sources] points magpylib at its main
+# branch, so what is meant to be the release says `--no-sources`.
 name: CI
 
 on:
@@ -30,14 +35,21 @@ jobs:
         magpylib: [released, main]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
-      - run: pip install -e ".[dev]"
-      - name: Switch to magpylib main
+          activate-environment: true
+          enable-cache: true
+      - name: Install, with magpylib released
+        if: matrix.magpylib == 'released'
+        run: uv pip install --no-sources -e ".[dev]"
+      - name: Install, with magpylib main
         if: matrix.magpylib == 'main'
-        run:
-          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+        run: |
+          uv pip install -e ".[dev]"
+          uv pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+      - run:
+          python -c "import magpylib; print('magpylib', magpylib.__version__)"
       - run: python -m pytest -q
 
   extension:
@@ -45,17 +57,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
+          activate-environment: true
+          enable-cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: vscode-extension/package-lock.json
-      # The extension spawns `python -m magpylib_studio`; with no .venv here it
-      # falls through to python3 on PATH, which is this one.
-      - run: pip install -e .
+      # The extension spawns `python -m magpylib_studio`; it finds python3 on
+      # PATH, which is the environment uv activated.
+      - run: uv pip install -e .
       # The 3D scene graph needs magpylib's display-backend API, which is not
       # in a release yet. Without it `check:scene` has nothing to measure and
       # says so, and `npm run compile` goes green having skipped the check
@@ -67,7 +81,8 @@ jobs:
       # still covered, by the engine job's other leg.
       - name: Use magpylib main, which the scene graph needs
         run:
-          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+          uv pip install "magpylib @
+          git+https://github.com/magpylib/magpylib@main"
       - name: Install
         working-directory: vscode-extension
         run: npm ci
@@ -84,24 +99,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
+          activate-environment: true
+          enable-cache: true
       # 22 for its WebSocket: the check talks to Chrome itself. Chrome is
       # already on GitHub's Ubuntu runners.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
       # three.js, for the pages that load the panel's own renderer
       - name: Install the extension's packages
         working-directory: vscode-extension
         run: npm ci
-      - run: pip install -e ".[widget]"
       # The widget draws through magpylib's display-backend API, which is
       # not in a release yet.
-      - name: Use magpylib main, which the widget needs
-        run:
-          pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+      - name: Install, with magpylib main, which the widget needs
+        run: |
+          uv pip install -e ".[widget]"
+          uv pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
       - name: Drive the widget in headless Chrome
         working-directory: vscode-extension
         run: node harness/check-widget-browser.mjs
@@ -114,19 +133,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.13"
+          enable-cache: true
       - name: Build the wheel
-        run: pipx run build --wheel
+        run: uv build --wheel
       # A fresh environment with the wheel and nothing of the checkout: no
-      # editable install, no node, no vscode-extension/. The editable widget
-      # has to work with the package alone (docs/editable-widget.md §2).
+      # editable install, no node, no vscode-extension/, and none of the
+      # checkout's uv sources. The editable widget has to work with the
+      # package alone (docs/editable-widget.md §2).
       - name: Install the wheel alone
         run: |
-          python -m venv "$RUNNER_TEMP/alone"
-          "$RUNNER_TEMP/alone/bin/pip" install "$(ls dist/*.whl)[widget]"
-          "$RUNNER_TEMP/alone/bin/pip" install \
+          uv venv "$RUNNER_TEMP/alone"
+          uv pip install --no-sources --python "$RUNNER_TEMP/alone" \
+            "$(ls dist/*.whl)[widget]" \
             "magpylib @ git+https://github.com/magpylib/magpylib@main"
       - name: Edit a scene with it, from outside the checkout
         working-directory: ${{ runner.temp }}
