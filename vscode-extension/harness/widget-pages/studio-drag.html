@@ -1,128 +1,166 @@
 <!doctype html>
 <!--
-  The studio panel's own script -- media/studio.js, or studio.mjs -- taken
-  through a drag the way the renderer takes it through one: by the events it
-  dispatches on the canvas, not by a pointer, so what is checked is the
-  panel's half of a drag and not the renderer's. VS Code and the renderer are
-  stubs. The host answers a preview after a while, as the engine does.
+  The studio panel as scriptViewer's sibling builds it -- the notebook widget
+  run by the panel's own media/studioView.mjs -- against a stub of VS Code
+  that answers the engine's calls from a scene fixed in advance and records
+  what the page tells the host. The host answers a pose after a while, as the
+  engine does.
 
-  `window.result` is what the panel said to its host from the moment the drag
-  began, in order, and what it asked the renderer to keep while it redrew.
+  A drag is the renderer's events on the view, as the renderer sends them;
+  the rest are the keys, the buttons and the host's messages. `window.result`
+  is what the page told the host, in order, what the redraws kept, and what
+  it drew in Chart mode.
 -->
 <html>
   <head>
     <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <link rel="stylesheet" href="/media/studioView.css" />
     <script>
       window.posted = [];
-      window.kept = [];
-      const SCENE = {
-        meshes: [],
-        scatters: [],
-        patterned: [],
-        parametric: {},
-        anchors: { cube: [0, 0, 0] },
-        orientations: {},
-        shapes: {},
-        polarizations: {},
+      window.charted = 0;
+      window.Plotly = {
+        purge() {},
+        react: () => (window.charted += 1),
       };
       const answer = (message, after = 0) =>
         setTimeout(() => window.postMessage(message, "*"), after);
+      window.scenes = fetch("/out/studio.json").then((r) => r.json());
       window.acquireVsCodeApi = () => ({
         postMessage(message) {
           window.posted.push(message);
           if (message.type === "rpcRequest") {
-            answer({ type: "rpcResult", reqId: message.reqId, result: SCENE });
+            window.scenes.then(({ scene, tree }) => {
+              const result =
+                message.method === "object_tree"
+                  ? tree
+                  : message.method === "get_figure"
+                    ? { data: [], layout: {} }
+                    : scene;
+              answer({ type: "rpcResult", reqId: message.reqId, result });
+            });
           } else if (message.type === "previewTransform") {
             answer({ type: "previewDone" }, 30); // the engine taking its time
           }
         },
       });
-      // The renderer, as far as the panel asks of it: a mode is taken as
-      // asked, there is one frame, and a redraw says what it keeps.
-      const RENDERER = {
-        setGizmoMode: (mode) => mode,
-        frameCount: () => 1,
-        spaceOf: () => "world",
-        viewKey: () => false,
-        render: (_el, _payload, options) => window.kept.push(options?.keep),
-      };
-      window.scene3d = new Proxy(RENDERER, {
-        get: (target, name) => target[name] ?? (() => undefined),
-      });
     </script>
   </head>
-  <body>
+  <body data-widget="/static/widget.js" style="height: 640px">
+    <div id="view"></div>
+    <div id="chart" hidden></div>
+    <div id="bar">
+      <span id="mode">
+        <button id="modeEdit" type="button" class="on">Edit</button
+        ><button id="modeChart" type="button">Chart</button>
+      </span>
+      <button id="animate" type="button" hidden>Animate</button>
+      <span id="status"></span>
+    </div>
+    <script type="module" src="/media/studioView.mjs"></script>
     <script type="module">
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const until = async (test) => {
         for (let i = 0; i < 80 && !test(); i++) await wait(50);
         return test();
       };
-      // Every element the panel looks up by id, as a plain element: which
-      // kind it is in the real panel is not what is checked here, and a page
-      // built from the ids cannot fall behind the panel's markup.
-      const name = (await fetch("/media/studio.mjs")).ok
-        ? "studio.mjs"
-        : "studio.js";
-      const source = await (await fetch(`/media/${name}`)).text();
-      for (const [, id] of source.matchAll(/getElementById\("(\w+)"\)/g)) {
-        const el = document.createElement("div");
-        el.id = id;
-        document.body.append(el);
-      }
-      document.getElementById("modeEdit").classList.add("on");
-      document.getElementById("gizmo").value = "translate";
-      const script = document.createElement("script");
-      if (name.endsWith(".mjs")) script.type = "module";
-      script.src = `/media/${name}`;
-      document.body.append(script);
-      await until(() => window.posted.some((m) => m.type === "rpcRequest"));
-      await wait(200);
+      await until(() => document.querySelector("#view canvas"));
+      await wait(600);
+      // the handles' column: the panel edits, though it has no kernel
+      const editing = !document.querySelector(".magpy-scene-edit")?.hidden;
+      // the redraws around a drag, and what they kept
+      const kept = [];
+      const render = window.scene3d.render;
+      window.scene3d.render = (el, payload, options) => {
+        kept.push(options?.keep);
+        return render(el, payload, options);
+      };
 
-      postMessage({ type: "select", objectId: "cube" }, "*");
-      await wait(100);
-      const canvas = document.getElementById("canvas");
+      const from = () => window.posted.length;
+      const since = (at) =>
+        window.posted.slice(at).map((m) => ({
+          type: m.type,
+          method: m.method,
+          objectId: m.objectId,
+          objectIds: m.objectIds,
+          visible: m.visible,
+          x: m.edits?.[0]?.position?.[0],
+        }));
+      const view = document.querySelector(".magpy-scene-view");
+      const stage = document.querySelector(".magpy-scene-stage");
       const fire = (type, detail) =>
-        canvas.dispatchEvent(new CustomEvent(type, { detail }));
+        view.dispatchEvent(new CustomEvent(type, { detail }));
+      const press = (key, extra = {}) =>
+        stage.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, ...extra }),
+        );
+
+      // a pick tells the sidebar, which tells the view back
+      let at = from();
+      fire("objectpick", { objectId: "probe", adding: false });
+      await wait(100);
+      postMessage({ type: "select", objectId: "probe" }, "*");
+      await wait(200);
+      const picked = since(at);
+
+      // a drag
+      at = from();
       const pose = (x, preview = true) => ({
         preview,
-        edits: [{ objectId: "cube", position: [x, 0, 0] }],
+        edits: [{ objectId: "probe", position: [x, 0, 0.02] }],
       });
-      const from = window.posted.length;
-      const keptFrom = window.kept.length;
-      // Waited for by what happens, not by the clock: when a redraw runs is
-      // the browser's to say (a frame of its own), and slower in some.
-      const said = (test) => window.posted.slice(from).findIndex(test);
       const previewed = (x) => (m) =>
         m.type === "previewTransform" && m.edits[0].position[0] === x;
       const settled = async (x) => {
-        await until(() => said(previewed(x)) >= 0);
-        // and the redraw after it, which is when the next may go
+        await until(() => window.posted.slice(at).some(previewed(x)));
+        const i = at + window.posted.slice(at).findIndex(previewed(x));
         await until(() =>
-          window.posted
-            .slice(from + said(previewed(x)))
-            .some((m) => m.method === "get_scene"),
+          window.posted.slice(i).some((m) => m.method === "get_scene"),
         );
         await wait(100);
       };
-      fire("dragstart", { objectIds: ["cube"], mode: "translate" });
-      // A burst, faster than the host answers: the first goes, the newest
-      // waits, and those in between are never sent.
+      fire("dragstart", { objectIds: ["probe"], mode: "translate" });
       for (let x = 1; x <= 10; x++) fire("objecttransform", pose(x));
       await settled(10);
       for (let x = 11; x <= 15; x++) fire("objecttransform", pose(x));
       await settled(15);
       fire("objecttransform", pose(16, false));
       await wait(300);
+      const dragged = since(at);
+      window.scene3d.render = render;
+
+      // H hides, as an edit; Cmd+Z is VS Code's; the undo button asks
+      at = from();
+      press("h");
+      await wait(100);
+      press("z", { metaKey: true });
+      [...document.querySelectorAll(".magpy-icon")]
+        .find((b) => b.title.startsWith("Undo"))
+        .click();
+      await wait(100);
+      const keyed = since(at);
+
+      // the host says the scene changed
+      at = from();
+      postMessage({ type: "refresh" }, "*");
+      await wait(300);
+      const refreshed = since(at);
+
+      // Chart mode
+      document.getElementById("modeChart").click();
+      await until(() => window.charted > 0);
+      const chart = {
+        drawn: window.charted,
+        viewHidden: document.getElementById("view").hidden,
+      };
       window.result = {
-        said: window.posted.slice(from).map((m) => ({
-          type: m.type,
-          method: m.method,
-          objectId: m.objectId,
-          field: m.field,
-          x: m.edits?.[0]?.position?.[0],
-        })),
-        kept: window.kept.slice(keptFrom),
+        editing,
+        picked,
+        dragged,
+        kept,
+        keyed,
+        refreshed,
+        chart,
       };
     </script>
   </body>

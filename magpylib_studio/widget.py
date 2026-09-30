@@ -570,7 +570,7 @@ class SceneWidget(anywidget.AnyWidget):
         first = self._shown is None
         self._shown = doc
         payload = self._session.get_scene()
-        tree = _tree_of(self._session.list_objects(copies="count"))
+        tree = self._session.object_tree()
         ids = {key for key, _ in _positions(tree)}
         with self.hold_sync():
             self.payload = payload
@@ -713,28 +713,6 @@ class SceneWidget(anywidget.AnyWidget):
         self.send({"kind": "rpc", **answer})
         if method in self._SETTLES:
             self._show(edit)
-
-
-def _tree_of(entries):
-    """`list_objects`'s entries as the legend's tree: nodes of ``{id, label,
-    kind, children}``, nested by each entry's parent. An object with no label
-    of its own is listed by its name in the scene -- the variable it came
-    from -- rather than by its type: two sensors are not both "Sensor", and
-    the readout and `objects` call it by that name too."""
-    nodes = {
-        entry["id"]: {
-            "id": entry["id"],
-            "label": entry["id"] if entry["label"] == entry["type"] else entry["label"],
-            "kind": entry["type"].rsplit(".", 1)[-1],
-            "children": [],
-        }
-        for entry in entries
-    }
-    roots = []
-    for entry in entries:
-        parent = nodes.get(entry["parent"])
-        (parent["children"] if parent else roots).append(nodes[entry["id"]])
-    return roots
 
 
 def _same(value, current):

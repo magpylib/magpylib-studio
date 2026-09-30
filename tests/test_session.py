@@ -86,6 +86,31 @@ def session():
     return MagpylibStudioSession(make_scene())
 
 
+def test_the_object_tree_is_what_a_legend_draws():
+    """Nested as the collections are, a pattern's copies left out -- they are
+    drawn on their source -- with whether each is drawn, and an object with
+    no label of its own named by its id rather than its type."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+
+    def walk(nodes):
+        for node in nodes:
+            yield node
+            yield from walk(node["children"])
+
+    tree = s.object_tree()
+    assert [node["id"] for node in tree] == ["halbach", "sensor"]
+    ring = next(node for node in walk(tree) if node["id"] == "ring1")
+    assert ring["kind"] == "Collection" and ring["children"]
+    fields = {"id", "label", "kind", "visible", "children"}
+    assert all(set(node) == fields for node in walk(tree))
+    listed = {e["id"] for e in s.list_objects(copies="count")}
+    assert {node["id"] for node in walk(tree)} == listed  # no copies
+    s.set_visible("ring1", False)
+    hidden = next(n for n in walk(s.object_tree()) if n["id"] == "ring1")
+    assert hidden["visible"] is False
+
+
 def test_list_objects(session):
     objs = session.list_objects()
     assert [o["id"] for o in objs] == ["cube", "cyl"]

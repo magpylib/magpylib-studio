@@ -1,9 +1,10 @@
 # One view — plan
 
-**Status: plan, nothing built.** Tracked in [TASKS.md](../TASKS.md) as W2. The
-follow-up to [docs/editable-widget.md](editable-widget.md): the notebook widget
-edits now, and the VS Code studio panel should be that same widget rather than a
-second interface around the same renderer.
+**Status: built, and the checklist in §5 tried by hand in VS Code.** Tracked in
+[TASKS.md](../TASKS.md) as W2. The follow-up to
+[docs/editable-widget.md](editable-widget.md): the notebook widget edits now,
+and the VS Code studio panel should be that same widget rather than a second
+interface around the same renderer.
 
 ---
 
@@ -89,17 +90,21 @@ notebook's too, or stays a small part of the panel around the widget.
 
 One pull request, in commits that each leave everything working:
 
-1. **The editor seam** in `widget.mjs`, with the kernel's editor as the default.
-   No change in behaviour: the editing browser checks and the real JupyterLab
-   and marimo runs pass unchanged.
-2. **The readout and the key list** into the widget.
-3. **The studio panel draws the widget**: `studioView.mjs`, the panel's page,
-   Chart mode beside it. `studio.mjs` and the old controls deleted.
-4. **Tests**: the studio drag check (`studio-drag.html`) runs the widget with
-   the studio's model and holds it to the same order of host messages as now; a
-   check for selection, hiding and refresh through the host; the message check
-   (`check-messages.js`) over the new file; `npm test`; and a checklist tried by
-   hand in VS Code (§5).
+1. **Done.** The editor seam in `widget.mjs`, with the kernel's editor as the
+   default. No change in behaviour: the editing browser checks and the real
+   JupyterLab and marimo runs pass unchanged.
+2. **Done.** The readout and the key list into the widget.
+3. **Done.** The studio panel draws the widget: `studioView.mjs`, the panel's
+   page, Chart mode in a bar beneath it. `studio.mjs` and the old controls
+   deleted. The legend's tree is the engine's now (`object_tree`), for the panel
+   and the notebook alike; hiding from the view is one host message
+   (`setVisible`) for any number of objects; the view's undo and redo buttons
+   run the extension's commands, and Cmd+Z is left to its keybinding.
+4. **Done.** Tests: the studio drag check (`studio-drag.html`) runs the widget
+   with the studio's model and holds it to the same order of host messages as
+   now; a check for selection, hiding and refresh through the host; the message
+   check (`check-messages.js`) over the new file; `npm test`; and a checklist
+   tried by hand in VS Code (§5).
 
 ## 5. Parity checklist, by hand in VS Code
 
@@ -138,9 +143,20 @@ The legend is lost in the noise; drawing the meshes is the redraw. The widget
 loads its renderer from a blob rather than as files, which the script panel
 already does, once per panel.
 
-Step 3 measures the panel before and after, on the array example at 1000 and one
-big imported scene: from `refresh` to drawn, a drag's frames per second, and the
-panel opening. No worse than today, or it waits until it is.
+Step 3 measured the panel before and after, from the host's `refresh` to the
+scene drawn, median of five, same machine and conditions:
+
+| scene                           | old panel  | new panel, first try | new panel |
+| ------------------------------- | ---------- | -------------------- | --------- |
+| the array example, 1000 cuboids | 468–527 ms | 529–593 ms           | 452 ms    |
+| 1000 separate objects           | 330–350 ms | 398 ms               | 325 ms    |
+
+The first try was slower, and not in the scene: drawing it took the same 23–27
+ms in both. The rest was the browser putting the frame on screen, and the
+widget's floating panels were blurred behind (`backdrop-filter`), which is
+composited again on every frame the scene draws — cheap on a GPU, 15–20% of a
+frame without one. The panels are nearly opaque now and not blurred, in the
+notebook too, and the new panel is no slower than the old.
 
 ## 7. Risks
 

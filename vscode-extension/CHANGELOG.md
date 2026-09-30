@@ -18,6 +18,16 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- **The studio's 3D view is the notebook widget**, as the script panel already
+  was: one view, with the same controls and keys everywhere. The tools show on
+  the view's top-right corner when the pointer is on it; the editing handles
+  (move, turn, resize, aim, the axes) are a column down the right edge, with
+  undo and redo; the numbers a drag changes read out in the bottom-left corner
+  and take a typed value; the keys button lists every key; a path plays from a
+  bar along the foot. The widget's legend starts closed — the Scene tree is the
+  studio's — and is a button away. Chart mode and Animate are in a bar beneath
+  the view. Hiding from the view (H, ⇧H, the legend's eye) is one undoable step
+  however many objects it covers.
 - The package now writes figures as payload version 2, which this extension
   reads along with version 1. An older extension skips them, and its **Magpylib
   Studio Views** output says to update it.
