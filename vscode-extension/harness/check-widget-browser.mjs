@@ -880,15 +880,23 @@ async function studioDrag(port, base) {
     async () => {
       const { result, problem } = await page();
       if (!result) return problem;
-      const { editing, picked, keyed, refreshed, chart } = result;
+      const { editing, picked, keyed, isolated, refreshed, chart } = result;
       if (!editing) return "the panel shows no editing column";
       const picks = picked.filter((m) => m.type === "selectObject");
       if (picks.length !== 1 || picks[0].objectId !== "probe") {
         return `a pick told the host: ${said(picked)}`;
       }
       const hid = keyed.find((m) => m.type === "setVisible");
-      if (hid?.visible !== false || hid.objectIds?.join() !== "probe") {
+      if (hid?.hide?.join() !== "probe" || hid.show?.length) {
         return `H told the host: ${said(keyed)}`;
+      }
+      const told = isolated.filter((m) => m.type === "setVisible");
+      if (
+        told.length !== 1 ||
+        told[0].hide?.join() !== "magnet" ||
+        told[0].show?.join() !== "probe"
+      ) {
+        return `shift+H on the hidden probe told the host: ${said(isolated)}`;
       }
       const undos = keyed.filter((m) => m.type === "undo").length;
       if (undos !== 1) {
@@ -980,12 +988,76 @@ async function editing(port, base) {
       if (!keys.includes("W · E · R · P") || !keys.includes("⌘Z")) {
         return `the key list said ${JSON.stringify(keys.slice(0, 80))}`;
       }
+      const { probeAlone, magnetAlone, everything } = result.isolating;
+      if (
+        probeAlone.join() !== "magnet" ||
+        magnetAlone.join() !== "probe" ||
+        everything.length
+      ) {
+        return `shift+H hid ${JSON.stringify(result.isolating)}`;
+      }
       if (asked.some((a) => a.method.startsWith("kernel:"))) {
         return `a host's editor was passed over for the kernel: ${said}`;
       }
       return problem;
     });
   }
+  await check(
+    "a value typed in the readout is sent once, and Escape sends nothing",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/edit.html?typing`);
+        if (!(await tab.until("return window.ready", 20_000))) {
+          return "never ready";
+        }
+        const BOXES = `document.querySelectorAll(".magpy-scene-readout input")`;
+        const shown = await tab.evaluate(`return ${BOXES}[0]?.value`);
+        if (shown === undefined) return "no readout";
+        /** Typed as a person types it: the keys are the browser's own. */
+        const type = async (text, key) => {
+          await tab.evaluate(
+            `const box = ${BOXES}[0]; box.focus(); box.select();`,
+          );
+          await tab.send("Input.insertText", { text });
+          const code = { Enter: 13, Escape: 27 }[key];
+          await tab.send("Input.dispatchKeyEvent", {
+            type: "keyDown",
+            key,
+            code: key,
+            windowsVirtualKeyCode: code,
+            ...(key === "Enter" ? { text: "\r" } : {}),
+          });
+          await tab.send("Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key,
+            code: key,
+            windowsVirtualKeyCode: code,
+          });
+          await wait(300);
+        };
+        await type("0.5", "Enter");
+        await type("0.7", "Escape");
+        const sent = await tab.evaluate(
+          `return window.asked.filter((a) => a.method === "apply_edits").map((a) => a.position)`,
+        );
+        if (sent.map((position) => position[0]).join() !== "0.5") {
+          return `the readout sent ${JSON.stringify(sent)}`;
+        }
+        // y was left alone: sent as the scene has it, not as the box shows it
+        if (sent[0][1] !== 0.00012345) {
+          return `typing x sent y as ${sent[0][1]}`;
+        }
+        const after = await tab.evaluate(`return ${BOXES}[0].value`);
+        if (after !== shown) {
+          return `Escape left the box at ${after}, not the ${shown} the scene says`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
   await check(
     "a studio's view says when no kernel answers an edit",
     async () => {

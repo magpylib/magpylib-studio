@@ -60,14 +60,16 @@ notebook's too, or stays a small part of the panel around the widget.
    `studio.mjs`), as `scriptView.js` holds one for the script panel:
    - `payload`: `get_scene`, asked again on the host's `refresh`, newest wins,
      as `refreshPaced` does now.
-   - `tree`: from `list_objects`. The Scene tree is the studio's own legend, so
-     the widget's starts closed there, one button away.
+   - `tree`: the engine's `object_tree`, which the notebook's widget uses too.
+     The Scene tree is the studio's own legend, so the widget's starts closed
+     there, one button away.
    - `selected`: a pick is `selectObject` to the host, and the host's `select`
      sets it — the sidebar and the view agree, as now.
    - `hidden`: in the studio, hiding is an edit (saved, undoable), not a view
-     setting. The eye and H go to the host (`toggleVisible`, `isolateObject`);
-     `hidden` is read from what the engine says is not visible, so a hidden
-     object stays in the legend to be shown again.
+     setting. What the eye, H and ⇧H change goes to the host as one `setVisible`
+     message (what to hide, what to show), one step to undo; `hidden` is read
+     from what the engine says is not visible, so a hidden object stays in the
+     legend to be shown again.
    - frames: the widget's frame requests become `get_scene({frame})`.
    - `editable` on; `standalone` on (no kernel to export through).
 
@@ -98,8 +100,9 @@ One pull request, in commits that each leave everything working:
    page, Chart mode in a bar beneath it. `studio.mjs` and the old controls
    deleted. The legend's tree is the engine's now (`object_tree`), for the panel
    and the notebook alike; hiding from the view is one host message
-   (`setVisible`) for any number of objects; the view's undo and redo buttons
-   run the extension's commands, and Cmd+Z is left to its keybinding.
+   (`setVisible`) for any number of objects, hidden or shown; the view's undo
+   and redo buttons run the extension's commands, and Cmd+Z is left to its
+   keybinding.
 4. **Done.** Tests: the studio drag check (`studio-drag.html`) runs the widget
    with the studio's model and holds it to the same order of host messages as
    now; a check for selection, hiding and refresh through the host; the message

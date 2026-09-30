@@ -1450,7 +1450,7 @@ function adoptStudioPanel(
     } else if (message.type === 'previewTransform') {
       void transformFromPanel(context, message, panel);
     } else if (message.type === 'setVisible') {
-      void setVisibleFromPanel(context, message.objectIds, message.visible);
+      void setVisibleFromPanel(context, message.hide, message.show);
     } else if (message.type === 'undo' || message.type === 'redo') {
       // the view's buttons: the same commands the keys and the tree run
       void vscode.commands.executeCommand(`magpylib-studio.${message.type}`);
@@ -1460,7 +1460,7 @@ function adoptStudioPanel(
       // still changing after any of these has stopped being news.
       vscode.window.setStatusBarMessage(`Magpylib Studio: ${message.text}`, 5000);
     } else if (message.type === 'dragStart') {
-      void beginDragFromPanel(context, message);
+      void beginDragFromPanel(context);
     } else if (message.type === 'ready') {
       panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
     }
@@ -1607,30 +1607,19 @@ async function transformFromPanel(
   await finishDrag(context);
 }
 
-/** Open a drag: group what it is about to do, and say what it will supersede.
+/** Open a drag: group what it is about to do.
  *
- * The grouping is the important half. A drag sets a pose every frame so the
- * field and the scene keep up with the pointer, and each of those is a real
- * edit -- without this the undo stack takes one entry per frame and a gesture
- * made once becomes a hundred things to undo.
+ * A drag sets a pose every frame so the field and the scene keep up with the
+ * pointer, and each of those is a real edit -- without this the undo stack
+ * takes one entry per frame and a gesture made once becomes a hundred things
+ * to undo. What the drag takes over from a variable, the view's own readout
+ * says, before the drag rather than after it.
  */
-async function beginDragFromPanel(
-  context: vscode.ExtensionContext,
-  message: { objectId: string; field: string; names?: string[] },
-): Promise<void> {
+async function beginDragFromPanel(context: vscode.ExtensionContext): Promise<void> {
   try {
     await (await getEngine(context)).request('begin_interaction');
   } catch {
     // the drag still works; it just undoes a frame at a time
-  }
-  if (message.names?.length) {
-    // A status message rather than a notification: worth knowing, not worth a
-    // dialog, and said before the first frame rather than after the fact.
-    vscode.window.setStatusBarMessage(
-      `Magpylib Studio: this drag sets ${message.objectId}'s ${message.field} outright — ` +
-        `${message.names.join(', ')} stops deciding it`,
-      6000,
-    );
   }
 }
 
@@ -1648,29 +1637,37 @@ async function finishDrag(context: vscode.ExtensionContext): Promise<void> {
  *
  * Visibility is the document's here, not the view's -- saved, and undone like
  * any edit -- so the view says what it wants and the engine records it, as one
- * step however many objects it covers: shift-H hides everything else in one
- * keystroke, and one undo shows it all again. A hidden object is not drawn;
- * the legend and the Scene tree still list it, to be shown again from either.
+ * step however many objects it covers: shift-H hides everything else, and may
+ * show the one selected, in one keystroke, and one undo puts it all back. A
+ * hidden object is not drawn; the legend and the Scene tree still list it, to
+ * be shown again from either.
  */
 async function setVisibleFromPanel(
   context: vscode.ExtensionContext,
-  objectIds: string[],
-  visible: boolean,
+  hide: string[] = [],
+  show: string[] = [],
 ): Promise<void> {
-  if (!Array.isArray(objectIds) || !objectIds.length) {
+  if (!Array.isArray(hide) || !Array.isArray(show) || !(hide.length || show.length)) {
     return;
   }
   try {
     const engine = await getEngine(context);
     await engine.request('batch', {
-      operations: objectIds.map((objectId) => ({
-        method: 'set_visible',
-        params: { object_id: objectId, visible },
-      })),
+      operations: [
+        ...hide.map((objectId) => ({
+          method: 'set_visible',
+          params: { object_id: objectId, visible: false },
+        })),
+        ...show.map((objectId) => ({
+          method: 'set_visible',
+          params: { object_id: objectId, visible: true },
+        })),
+      ],
     });
-    if (!visible) {
+    if (hide.length) {
+      const which = hide.length > 3 ? `${hide.length} objects` : hide.join(', ');
       vscode.window.setStatusBarMessage(
-        `Magpylib Studio: ${objectIds.join(', ')} hidden — show again from the legend or the Scene tree`,
+        `Magpylib Studio: ${which} hidden — show again from the legend or the Scene tree`,
         5000,
       );
     }

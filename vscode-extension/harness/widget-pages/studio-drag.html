@@ -82,8 +82,8 @@
           type: m.type,
           method: m.method,
           objectId: m.objectId,
-          objectIds: m.objectIds,
-          visible: m.visible,
+          hide: m.hide,
+          show: m.show,
           x: m.edits?.[0]?.position?.[0],
         }));
       const view = document.querySelector(".magpy-scene-view");
@@ -140,6 +140,13 @@
       await wait(100);
       const keyed = since(at);
 
+      // Shift+H on the hidden probe: it alone, shown and the magnet hidden,
+      // told to the host as one step
+      at = from();
+      press("H", { shiftKey: true });
+      await wait(100);
+      const isolated = since(at);
+
       // the host says the scene changed
       at = from();
       postMessage({ type: "refresh" }, "*");
@@ -159,6 +166,7 @@
         dragged,
         kept,
         keyed,
+        isolated,
         refreshed,
         chart,
       };

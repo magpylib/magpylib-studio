@@ -77,7 +77,9 @@ def scene_to_edit():
     """A magnet and a probe, editable -- named, as the view names them, after
     the variables that hold them here."""
     magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
-    probe = magpy.Sensor(position=(0, 0, 0.02))
+    # y off the readout's four decimals: a value typed beside it shows
+    # whether y is sent as it is, or as the box rounds it
+    probe = magpy.Sensor(position=(0, 0.00012345, 0.02))
     return SceneWidget(magnet, probe, editable=True)
 
 

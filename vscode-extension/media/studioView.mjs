@@ -130,19 +130,10 @@ function tell() {
   const hide = [...hidden].filter((id) => !was.has(id));
   const show = [...was].filter((id) => !hidden.has(id));
   told.hidden = [...hidden];
-  if (hide.length) {
-    vscodeApi.postMessage({
-      type: "setVisible",
-      objectIds: hide,
-      visible: false,
-    });
-  }
-  if (show.length) {
-    vscodeApi.postMessage({
-      type: "setVisible",
-      objectIds: show,
-      visible: true,
-    });
+  // One message, so one step to undo: showing only the selection can hide
+  // some objects and show another in the same keystroke.
+  if (hide.length || show.length) {
+    vscodeApi.postMessage({ type: "setVisible", hide, show });
   }
 }
 
