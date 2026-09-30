@@ -151,7 +151,13 @@ studio.set("probe", position=(0, 0, 0.02))  # an edit from code, as a drag makes
 
 `set` and `observe(..., "revision")` keep a notebook control and the view in
 step both ways — `examples/jupyter_demo.ipynb` does it with a slider. A value
-the object already has is no edit, so neither side echoes the other.
+the object already has is no edit, so neither side echoes the other. `revision`
+counts each settled edit — a drag's end, an undo, a redo, a `set` — once, and
+`last_edit` says what it was
+(`{"by": "drag", "objects": ["probe"], "changed": {...}}`, or the step an undo
+took back); the same example logs them under the view, with what was selected
+and hidden. A drag of several objects, or a `set` of several values, is one
+edit: refused in part, none of it is made.
 
 The objects are copied into the session rather than edited in place: the cell
 that made them stays as it was, and running it again does not take the edits

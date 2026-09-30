@@ -210,10 +210,17 @@ class SceneWidget(anywidget.AnyWidget):
     #: of the cell's own objects has nowhere to keep an edit.
     editable = traitlets.Bool(False).tag(sync=True)
     #: Counts the edits the notebook has been told of, in an editable view: a
-    #: drag's end, an undo, a redo. A cell that reads the widget in marimo
-    #: re-runs when it changes, and ``observe(..., "revision")`` hears of each
-    #: in Jupyter. Not the poses in between, which would be once a frame.
+    #: drag's end, an undo, a redo, a `set` -- each that changed something. A
+    #: cell that reads the widget in marimo re-runs when it changes, and
+    #: ``observe(..., "revision")`` hears of each in Jupyter. Not the poses in
+    #: between, which would be once a frame.
     revision = traitlets.Int(0).tag(sync=True)
+    #: What the edit `revision` counted was: ``{"by": "drag" | "set" | "undo" |
+    #: "redo", "objects": [...], "changed": {id: {field: value}}}`` for a drag
+    #: or a `set`, and for an undo or a redo the step it took back or put back,
+    #: by the session's name for it (``"step"``). Set before `revision`, so a
+    #: callback on that reads this one's news.
+    last_edit = traitlets.Dict().tag(sync=True)
 
     #: What an editable view may ask of its session: a drag, and undoing one.
     #: Nothing that runs a file -- a script or a scene to load -- which the
@@ -278,12 +285,20 @@ class SceneWidget(anywidget.AnyWidget):
                 raise TypeError(
                     f"an editable view takes objects and traits, not {given}"
                 )
-            if len(objects) == 1 and isinstance(objects[0], (str, os.PathLike)):
-                self._edit(_session_from(pathlib.Path(objects[0])))
+            given = list(threejs._given(objects))
+            if len(given) == 1 and isinstance(given[0], (str, os.PathLike)):
+                self._edit(_session_from(pathlib.Path(given[0])))
+            elif not given:
+                raise TypeError(
+                    "nothing to edit: SceneWidget(*objects, editable=True), "
+                    "or a script or a saved scene in their place"
+                )
             else:
-                # The caller's names, so the script that comes back out says
-                # `ring` where the cell did.
-                self._edit(_session_of(objects, sys._getframe(1).f_globals))
+                # The caller's names -- its own variables, then its module's --
+                # so the script that comes back out says `ring` where it did.
+                caller = sys._getframe(1)
+                named = {**caller.f_globals, **caller.f_locals}
+                self._edit(_session_of(given, named))
         elif any(isinstance(obj, (str, os.PathLike)) for obj in objects):
             raise TypeError(
                 "a script or a saved scene is opened to edit: "
@@ -459,57 +474,61 @@ class SceneWidget(anywidget.AnyWidget):
         ``dimension=``, ``polarization=``, ``current=``. All of it is one
         step to undo, drawn, and told to the notebook as a drag's end is.
 
-        A value the object already has is no edit at all. That is what lets a
-        slider and the view follow each other: the slider sets a value, the
-        view's `revision` moves the slider to it, and the slider's own echo
-        of that changes nothing and records nothing.
+        A value the object already has -- exactly: a slider hands back the
+        number it was given -- is no edit at all. That is what lets a slider
+        and the view follow each other: the slider sets a value, the view's
+        `revision` moves the slider to it, and the slider's own echo of that
+        changes nothing and records nothing.
+
+        Refused, it changes nothing and raises, saying why.
         """
+        from magpylib_studio.session import _plain
+
         session = self._editing("set")
-        calls = []
-        pose = session.get_transform(object_id)
-        moved = {
-            key: value
-            for key, value in (("position", position), ("orientation", orientation))
-            if value is not None and not _same(value, pose[key])
-        }
-        if moved:
-            calls.append(
-                {"method": "set_transform", "params": {"object_id": object_id, **moved}}
-            )
         obj = session._objs[object_id]
+        now = {
+            "position": np.atleast_2d(obj.position)[-1],
+            "orientation": np.atleast_2d(obj.orientation.as_rotvec(degrees=True))[-1],
+        }
+        changed = {
+            key: _plain(value)
+            for key, value in (("position", position), ("orientation", orientation))
+            if value is not None and not _same(value, now[key])
+        }
+        calls = []
+        if changed:
+            calls.append(
+                {
+                    "method": "set_transform",
+                    "params": {"object_id": object_id, **changed},
+                }
+            )
         for name, value in params.items():
             if not _same(value, getattr(obj, name, None)):
-                calls.append(
-                    {
-                        "method": "set_param",
-                        "params": {
-                            "object_id": object_id,
-                            "name": name,
-                            "value": value,
-                        },
-                    }
-                )
-        if not calls:
-            return
-        result = session.batch(calls) if len(calls) > 1 else _call(session, calls[0])
+                changed[name] = _plain(value)
+                call = {"object_id": object_id, "name": name, "value": _plain(value)}
+                calls.append({"method": "set_param", "params": call})
+        result = session.apply_calls(calls, f"set {object_id}")
         if not result.get("ok", True):
-            refused = result.get("error") or "; ".join(
-                r.get("error", "refused")
-                for r in result.get("results", [])
-                if not r["ok"]
-            )
-            raise ValueError(f"{object_id}: {refused}")
-        self._show()
+            raise ValueError(f"{object_id}: {result.get('error')}")
+        edit = {"by": "set", "objects": [object_id], "changed": {object_id: changed}}
+        self._show(edit)
 
     def undo(self):
-        """Take back an editable view's last edit -- a whole drag at a time."""
-        self._editing("undo").undo()
-        self._show()
+        """Take back an editable view's last edit -- a whole drag at a time.
+        Returns whether there was one."""
+        return self._step("undo")
 
     def redo(self):
-        """Put back what `undo` took."""
-        self._editing("redo").redo()
-        self._show()
+        """Put back what `undo` took. Returns whether there was anything."""
+        return self._step("redo")
+
+    def _step(self, which):
+        session = self._editing(which)
+        waiting = session.get_history()[which]
+        if not getattr(session, which)()["ok"]:
+            return False
+        return self._show({"by": which, "step": waiting[-1] if waiting else None})
 
     def save(self, file):
         """Write an editable view's scene as a ``.magpy.json`` document, as
@@ -532,12 +551,24 @@ class SceneWidget(anywidget.AnyWidget):
     def _edit(self, session):
         """Make this the view of `session`'s scene, with its handles out."""
         self._session = session
+        #: The document as last drawn, to tell an edit from a gesture or an
+        #: undo that changed nothing.
+        self._shown = None
+        #: The edits of the drag in progress, as the view last sent them.
+        self._dragged = None
         self.editable = True
-        self._show()
+        self._show(None)
 
-    def _show(self):
+    def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected
-        and hidden where those objects still are, and tell the notebook."""
+        and hidden where those objects still are, and tell the notebook what
+        `edit` was. Returns whether anything had changed: a drag that ended
+        where it began, or an undo with nothing to undo, is no news."""
+        doc = json.dumps(self._session.doc, sort_keys=True, default=str)
+        if doc == self._shown:
+            return False
+        first = self._shown is None
+        self._shown = doc
         payload = self._session.get_scene()
         tree = _tree_of(self._session.list_objects(copies="count"))
         ids = {key for key, _ in _positions(tree)}
@@ -546,7 +577,10 @@ class SceneWidget(anywidget.AnyWidget):
             self.tree = tree
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
-            self.revision += 1
+            if not first:
+                self.last_edit = edit or {}
+                self.revision += 1
+        return True
 
     def _editing(self, what):
         """The session, for what only an editable view can do."""
@@ -655,17 +689,30 @@ class SceneWidget(anywidget.AnyWidget):
         from magpylib_studio import rpc
 
         method = content.get("method")
-        if self._session is not None and method in self.VIEW_CALLS:
-            answer = rpc.handle(self._session, content)
-            if method in self._SETTLES:
-                self._show()
-        else:
+        if self._session is None or method not in self.VIEW_CALLS:
             refusal = f"the view may not call {method!r}"
             answer = {
                 "id": content.get("id"),
                 "error": {"type": "MethodError", "message": refusal},
             }
+            self.send({"kind": "rpc", **answer})
+            return
+        edit = None
+        if method in ("undo", "redo"):
+            waiting = self._session.get_history()[method]
+            edit = {"by": method, "step": waiting[-1] if waiting else None}
+        elif method == "end_interaction":
+            edit = _drag_news(self._dragged)
+            self._dragged = None
+        answer = rpc.handle(self._session, content)
+        if method == "apply_edits":
+            self._dragged = (content.get("params") or {}).get("edits")
+        # The answer first: telling the notebook runs its callbacks, and one
+        # that takes a while -- or raises -- must not keep the view waiting
+        # for an answer it would give up on.
         self.send({"kind": "rpc", **answer})
+        if method in self._SETTLES:
+            self._show(edit)
 
 
 def _tree_of(entries):
@@ -688,17 +735,35 @@ def _tree_of(entries):
 
 
 def _same(value, current):
-    """Whether `value` is what `current` already is, to rounding."""
+    """Whether `value` is exactly what `current` already is.
+
+    Exactly, not to a tolerance: in SI units a real edit can be a
+    nanometre or a nanoampere-metre, and what this is for -- a control
+    handing back the number it was given -- gives back the very number."""
+    if current is None:
+        return False
     try:
-        return current is not None and np.allclose(
+        return np.array_equal(
             np.asarray(value, dtype=float), np.asarray(current, dtype=float)
         )
     except (TypeError, ValueError):
         return False
 
 
-def _call(session, call):
-    return getattr(session, call["method"])(**call["params"])
+def _drag_news(edits):
+    """What a drag did, from the edits its view sent last: which objects,
+    and what each was left with."""
+    if not edits:
+        return {"by": "drag", "objects": [], "changed": {}}
+    changed = {}
+    for edit in edits:
+        fields = {
+            k: edit[k] for k in ("position", "orientation", "polarization") if k in edit
+        }
+        if edit.get("shape"):
+            fields[edit["shape"]["attr"]] = edit["shape"]["value"]
+        changed[edit["objectId"]] = fields
+    return {"by": "drag", "objects": list(changed), "changed": changed}
 
 
 def _session_of(objects, namespace):
@@ -725,8 +790,13 @@ def _loaded(load, said, what):
     if not loaded.get("ok", True):
         raise ValueError(f"could not load {what}: {loaded.get('error')}")
     # What running a script had to flatten, or naming objects could not
-    # name: said once, where the view was asked for.
-    for text in [*said, *(loaded.get("warnings") or [])]:
+    # name, or a saved step that no longer applies (a mesh file that moved):
+    # said once, where the view was asked for.
+    skipped = [
+        f"a step no longer applies, and is left out: {broken.get('error')}"
+        for broken in loaded.get("broken") or []
+    ]
+    for text in [*said, *(loaded.get("warnings") or []), *skipped]:
         warnings.warn(f"magpylib-studio: {text}", stacklevel=4)
     # The scene as loaded is where editing starts, not an edit: undone, it
     # would leave the view empty.

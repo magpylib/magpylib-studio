@@ -99,9 +99,16 @@ const BACKDROPS = ".cell-output-ipywidget-background";
  *  been drawn yet -- Jupyter renders a box's children one by one -- or
  *  anything else that takes up room. VS Code puts an empty `div.cell-output`
  *  beside every widget, where a plain-text output would go, and an empty
- *  placeholder is no company. */
+ *  placeholder is no company. Nor is another view of a scene -- a second
+ *  `display` of the same one -- which was not drawn for the white as a
+ *  slider is: a box holding one is company only for whatever else it holds.
+ *  A view not drawn yet counts until it is, and the backdrop is looked at
+ *  again when it arrives. */
 const WIDGETS = ".lm-Widget, .jupyter-widgets";
+const SCENE = ".magpy-scene";
 function company(node) {
+  if (node.matches(SCENE)) return false;
+  if (node.querySelector(SCENE)) return [...node.children].some(company);
   if (node.matches(WIDGETS)) return true;
   const box = node.getBoundingClientRect();
   return box.width > 0 && box.height > 0;
@@ -282,8 +289,8 @@ const NO_ANSWER =
 
 /** What a view says when python does not answer an edit. */
 const NO_EDIT_ANSWER =
-  "No answer from Python for this edit: the kernel may be busy or not " +
-  "running. The view shows the scene as Python last sent it.";
+  "No answer from Python for this edit yet: the kernel may be busy or not " +
+  "running. The view catches up if it answers.";
 
 /** The keys that pick the handles, as the studio's panel has them. */
 const HANDLE_KEYS = {
@@ -778,7 +785,7 @@ function render({ model, el }) {
   // Whether the renderer is loaded and still this view's to drive.
   const drawing = () => api !== null && slot.host === view;
   let framed = false; // whether this widget has drawn into the view yet
-  let refit = null; // waits for a first size, when the view was laid out late
+  let refit = null; // frames the view again as its size settles -- see draw
 
   // Where the camera is, told to python once it stops moving, so that a
   // `write_html` from a cell saves the view as it is seen. A message and not
@@ -1043,13 +1050,19 @@ function render({ model, el }) {
   function dressEditing() {
     editBar.hidden = !editable();
     setHandles(handles);
+    if (!editable() && drawing()) api.setGizmoMode("none");
   }
 
+  // Each view numbers its own calls, under a name of its own: python answers
+  // every view of a widget, and two showing the same one -- a second
+  // `display` of it -- would otherwise take each other's answers.
+  const caller = Math.random().toString(36).slice(2, 10);
   let nextCall = 0;
   const calls = new Map(); // id -> { timer, settle }
+  let dragActive = false; // between a drag's first move and its release
   function call(method, params = {}) {
     return new Promise((resolve, reject) => {
-      const id = ++nextCall;
+      const id = `${caller}:${++nextCall}`;
       const timer = setTimeout(() => {
         calls.delete(id);
         unheard();
@@ -1075,12 +1088,15 @@ function render({ model, el }) {
     pending.settle(message);
   }
 
-  /** An edit nobody answered: said, and the picture put back to the last
-   *  scene python sent -- which is what the session holds, as far as this
-   *  view can know. Most often a notebook read without its kernel. */
+  /** An edit nobody answered: said, and -- once no drag is in hand -- the
+   *  picture put back to the last scene python sent, which is what the
+   *  session holds as far as this view can know. Most often a notebook read
+   *  without its kernel. Mid-drag the picture is left alone: redrawn, it
+   *  would take the node the handles hold, and a kernel that is only busy
+   *  still takes the poses when it gets to them, and the view catches up. */
   function unheard() {
     notify(NO_EDIT_ANSWER, { stay: true });
-    if (drawing()) api.render(view, model.get("payload") || {});
+    if (!dragActive && drawing()) api.render(view, model.get("payload") || {});
   }
 
   /** Say what the session refused, or what went wrong asking it. */
@@ -1098,6 +1114,7 @@ function render({ model, el }) {
     drawing: () => drawing() && editable(),
     patterned: () => new Set(model.get("payload")?.patterned ?? []),
     begin({ objectIds, mode }) {
+      dragActive = true;
       if (playing) setPlaying(false); // the pointer is the one being asked
       call("begin_interaction").catch(() => {});
       // A value written in terms of a variable is set outright by a drag,
@@ -1117,6 +1134,7 @@ function render({ model, el }) {
       if (drawing()) api.render(view, payload, { keep });
     },
     commit(pose) {
+      dragActive = false;
       settle(call("apply_edits", { edits: pose.edits }));
       // after the pose, which the session answers in order
       call("end_interaction").catch(() => {});
@@ -1153,6 +1171,7 @@ function render({ model, el }) {
   // ring drawn for a frame before its hiding arrives. So changes are
   // gathered, and the view catches up once, after the last of them.
   const changed = new Set();
+  let echoed = model.get("revision"); // the last edit told back -- see catchUp
   for (const name of [
     "payload",
     "tree",
@@ -1160,6 +1179,8 @@ function render({ model, el }) {
     "hidden",
     "axes",
     "theme",
+    "editable",
+    "revision",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -1172,6 +1193,17 @@ function render({ model, el }) {
     changed.clear(); // first, so a change made while catching up is kept
     if (now.has("axes")) showAxes();
     if (now.has("theme")) retheme();
+    if (now.has("editable")) dressEditing();
+    if (now.has("revision") && model.get("revision") !== echoed) {
+      // An edit python settled. marimo re-runs the cells that read a widget
+      // when the view says the widget changed, not when python does -- so
+      // the view says it, with the value python gave, once: marimo hands the
+      // value back, and echoing that too would re-run them for ever. Jupyter
+      // hears its own value back, which changes nothing.
+      echoed = model.get("revision");
+      model.set("revision", echoed);
+      model.save_changes();
+    }
     const scene = now.has("payload");
     if (scene) {
       // A re-pointed view is a different run. Anything asked for belonged to
@@ -1257,16 +1289,24 @@ function render({ model, el }) {
     // a theme that changed -- would leave the picture at the start while the
     // counter says otherwise. Back to the step that was on screen.
     if (shown > 0) askFor(shown);
-    // The element may still have been unsized when the view framed itself --
-    // a cell that is laid out after its output is made. One refit, once it
-    // has a size, and only if the camera has not been touched since.
-    if (!view.clientHeight && !refit && !saved) {
+    // The view framed itself at whatever size it had then, and a host may
+    // not have laid it out yet: a cell whose output is made before it is
+    // placed, or a second output beside it that narrows the first. So it is
+    // framed again whenever its size changes -- until the camera is touched,
+    // after which where it looks is the user's.
+    if (!refit && !saved) {
+      let size = `${view.clientWidth}x${view.clientHeight}`;
       refit = new ResizeObserver(() => {
-        if (!view.clientHeight) return;
-        refit.disconnect();
-        api.fitView();
+        const now = `${view.clientWidth}x${view.clientHeight}`;
+        if (!view.clientHeight || now === size) return;
+        size = now;
+        if (slot.host === view && api) api.fitView();
       });
       refit.observe(view);
+      const touched = () => refit.disconnect();
+      for (const kind of ["pointerdown", "wheel", "keydown"]) {
+        stage.addEventListener(kind, touched, { once: true, passive: true });
+      }
     }
   }
 
@@ -1322,6 +1362,7 @@ function render({ model, el }) {
     clearTimeout(noticeTimer);
     clearTimeout(cameraTimer);
     stopDrags();
+    refit?.disconnect();
     for (const pending of calls.values()) clearTimeout(pending.timer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     // Only if it is still ours. A view whose element left the page has already
