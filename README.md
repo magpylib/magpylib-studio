@@ -169,7 +169,9 @@ with `write_html` is read only. The handles and their keys are the panel's —
 **W** moves, **E** turns, **R** resizes, **P** aims a polarization, **Q** puts
 them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
 swaps the world's axes for the object's own, **S** snaps — and a column down the
-view's right-hand side has the same. The variables come later —
+view's right-hand side has the same. The corner reads out the numbers a drag is
+changing, and takes a typed value in their place; the keys button lists every
+key. The variables come later —
 [docs/editable-widget.md](docs/editable-widget.md).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —

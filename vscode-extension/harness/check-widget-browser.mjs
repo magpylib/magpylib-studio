@@ -906,18 +906,36 @@ async function editing(port, base) {
       }
       if (buttons.resizing !== "true") return "R did not resize the magnet";
       if (asked[0]?.method !== "begin_interaction") return `it began: ${said}`;
-      const poses = asked
+      // the drag, its release and an undo -- then the value typed in the
+      // readout, sent as a release of its own
+      const typed = asked.findIndex(
+        (a) => a.method === "apply_edits" && a.x === 0.5,
+      );
+      if (typed < 0)
+        return `a value typed in the readout was not sent: ${said}`;
+      const drag = asked.slice(0, typed);
+      const poses = drag
         .filter((a) => a.method === "apply_edits")
         .map((a) => a.x);
       if (poses[0] !== 1 || poses.at(-1) !== 6 || poses.length > 4) {
         return `poses at ${poses.join(", ")}: ${said}`;
       }
-      if (!asked.some((a) => a.method === "get_scene")) {
+      if (!drag.some((a) => a.method === "get_scene")) {
         return `nothing redrawn around the drag: ${said}`;
       }
-      const tail = asked.slice(-3).map((a) => a.method + (a.x ?? ""));
+      const tail = drag.slice(-3).map((a) => a.method + (a.x ?? ""));
       if (tail.join() !== "apply_edits6,end_interaction,undo") {
         return `it ended: ${said}`;
+      }
+      const { readout, keys } = result;
+      if (readout.head !== "probe · position" || readout.boxes !== 3) {
+        return `the readout showed ${JSON.stringify(readout)}`;
+      }
+      if (readout.typedIn !== "true") {
+        return "E typed into the readout changed the handles";
+      }
+      if (!keys.includes("W · E · R · P") || !keys.includes("⌘Z")) {
+        return `the key list said ${JSON.stringify(keys.slice(0, 80))}`;
       }
       if (asked.some((a) => a.method.startsWith("kernel:"))) {
         return `a host's editor was passed over for the kernel: ${said}`;

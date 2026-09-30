@@ -143,6 +143,25 @@
       press("z", { metaKey: true });
       await wait(200);
 
+      // The readout: the probe's position, as boxes that take a typed value
+      // -- and a key typed into one is a character, not a command.
+      await wait(100);
+      const head = el.querySelector(".magpy-scene-readout-head")?.textContent;
+      const boxes = [...el.querySelectorAll(".magpy-scene-readout input")];
+      let typedIn = null;
+      if (boxes.length) {
+        boxes[0].focus();
+        boxes[0].dispatchEvent(
+          new KeyboardEvent("keydown", { key: "e", bubbles: true }),
+        );
+        typedIn = button("Move").getAttribute("aria-pressed");
+        boxes[0].value = "0.5";
+        boxes[0].dispatchEvent(new Event("change"));
+        await wait(200);
+      }
+      button("Keys").click();
+      const keys = el.querySelector(".magpy-scene-keys")?.textContent ?? "";
+
       window.result = {
         asked,
         buttons: {
@@ -155,6 +174,8 @@
           resizing,
         },
         notice: el.querySelector(".magpy-scene-notice.shown")?.textContent,
+        readout: { head, boxes: boxes.length, typedIn },
+        keys,
       };
     </script>
   </body>
