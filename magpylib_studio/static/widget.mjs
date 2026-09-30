@@ -873,6 +873,14 @@ function render({ model, el }) {
   }
   const darkQuery = matchMedia("(prefers-color-scheme: dark)");
   darkQuery.addEventListener("change", retheme);
+  // And when the widget is put on the page, before it is first painted
+  // there. Jupyter renders a widget before attaching it, when there is
+  // nothing behind it to read, and it is dressed from the system's theme
+  // until something looks again. Drawing did -- a renderer loaded a moment
+  // later, and the view went from the system's colours to the page's before
+  // your eyes -- and a view with no renderer to draw with never did at all.
+  const placing = new ResizeObserver(retheme);
+  placing.observe(el);
 
   const stateOf = () => ({
     selected: model.get("selected") || [],
@@ -1877,6 +1885,7 @@ function render({ model, el }) {
     backdropWatch.disconnect();
     legendRoom?.disconnect();
     themeWatch.disconnect();
+    placing.disconnect();
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);
     clearTimeout(silence);

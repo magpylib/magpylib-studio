@@ -1185,20 +1185,29 @@ async function pool(port, base) {
         r.woke &&
         r.after === 8 &&
         r.pictures >= 1,
+      (r) => r.backAs === "perspective",
     ],
     boxed: [
       "a box of views drawn off the page keeps to eight renderers",
       (r) => r.renderers === 8 && r.canvases === 8 && r.shown,
+      // on a white page in a dark system: the views waiting for a renderer
+      // are dressed for the page too, not left on the system's guess
+      (r) => r.light,
     ],
   };
-  for (const [name, [label, holds]] of Object.entries(cases)) {
+  for (const [name, [label, ...holds]] of Object.entries(cases)) {
     await check(label, async () => {
       const tab = await openTab(port);
       try {
+        await tab.send("Emulation.setEmulatedMedia", {
+          features: [{ name: "prefers-color-scheme", value: "dark" }],
+        });
         await tab.navigate(`${base}/pages/pool.html?case=${name}`);
         const result = await tab.until("return window.result");
         if (!result) return "never finished";
-        if (!holds(result)) return `drew ${JSON.stringify(result)}`;
+        if (!holds.every((hold) => hold(result))) {
+          return `drew ${JSON.stringify(result)}`;
+        }
         return thrown(tab);
       } finally {
         await tab.close();

@@ -1047,7 +1047,11 @@ function cameraState() {
 /** Look from where `cameraState` said. Returns the projection now in use. */
 function setCamera(state) {
   if (!camera || !state) return;
-  if ((state.projection === "parallel") !== camera.isOrthographicCamera) {
+  // A perspective camera has no `isOrthographicCamera` at all -- undefined,
+  // not false -- and compared as it stands, every perspective state handed
+  // back to a perspective camera turned it parallel.
+  const parallel = Boolean(camera.isOrthographicCamera);
+  if ((state.projection === "parallel") !== parallel) {
     toggleProjection();
   }
   frustumHeight = state.height;
@@ -1537,6 +1541,11 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // Size first: the fit depends on the aspect ratio, and on the very first
   // render the canvas may not have been laid out yet.
   resize(canvasEl);
+  // The axes before the fit, which frames them with the objects: fitted
+  // first, a renderer's first scene was framed without its box -- or with the
+  // last scene's -- and came up zoomed in, the numbers off the edge, unless
+  // something happened to fit it again.
+  drawAxes(payload.ranges, payload.labels);
   // Refit when there was nothing to look at before. A scene that arrives
   // empty and is filled by a later refresh -- which is what a parametric
   // example does -- would otherwise keep the camera fitted to the empty one.
@@ -1547,7 +1556,6 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // Lines and points are hit within a radius of the ray, measured in world
   // units: a fixed one would miss a scene in metres and swallow one in
   // millimetres, so scale it to what is on screen.
-  drawAxes(payload.ranges, payload.labels);
   const sphere = sceneSphere();
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
