@@ -39,6 +39,9 @@ All notable changes to the Magpylib Studio extension.
   (`apply_edits`), where the extension used to. This needs an engine from the
   same release: with an older one, a drag is refused with "unknown method
   'apply_edits'". Update both together.
+- The 3D view draws only when something in it changes, where it used to draw
+  every frame whether or not anything moved. An idle panel no longer keeps the
+  GPU busy.
 
 ### Fixed
 

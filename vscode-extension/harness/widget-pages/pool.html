@@ -12,11 +12,26 @@
     Setting it must not reach the renderer the next view now holds.
   projection: a renderer handed on keeps its state. The next view must
     start in perspective, with its button saying so.
+  idle: a view nobody touches draws nothing -- it is drawn when it changes,
+    not sixty times a second.
+  cap: more views than the page has renderers for. No more than eight are
+    live, those in sight are, and one reached for takes a renderer back.
 -->
 <html>
   <head>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="/static/widget.css" />
+    <script>
+      // Every frame starts by clearing, so this counts the frames drawn.
+      window.clears = 0;
+      for (const context of [WebGLRenderingContext, WebGL2RenderingContext]) {
+        const clear = context.prototype.clear;
+        context.prototype.clear = function (...args) {
+          window.clears += 1;
+          return clear.apply(this, args);
+        };
+      }
+    </script>
   </head>
   <body style="margin: 12px">
     <div id="page"></div>
@@ -88,6 +103,45 @@
             was,
             now: window.scene3d.cameraState().projection,
             pressed: button.getAttribute("aria-pressed"),
+          };
+        },
+        async idle() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          const drawn = window.clears;
+          await wait(1000);
+          return { drawn, idle: window.clears - drawn };
+        },
+        async cap() {
+          const views = Array.from({ length: 11 }, view);
+          page.append(...views);
+          for (const each of views) {
+            widget.render({ model: localModel(), el: each });
+          }
+          await wait(2500);
+          const pool = Object.getOwnPropertySymbols(globalThis)
+            .filter((key) => key.description.startsWith("magpylib-studio"))
+            .map((key) => globalThis[key].pool)[0];
+          const inSight = (el) => {
+            const box = el.getBoundingClientRect();
+            return box.bottom > 0 && box.top < innerHeight;
+          };
+          const before = {
+            renderers: pool.length,
+            canvases: page.querySelectorAll("canvas").length,
+            inSightLive: views.filter(inSight).every(drawn),
+          };
+          // The last out of sight and at rest: reached for, it wakes.
+          const resting = views.filter((v) => !drawn(v)).at(-1);
+          resting.dispatchEvent(new PointerEvent("pointerenter"));
+          await wait(1000);
+          return {
+            ...before,
+            woke: drawn(resting),
+            after: page.querySelectorAll("canvas").length,
+            pictures: page.querySelectorAll(".magpy-scene-still").length,
           };
         },
       };

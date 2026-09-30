@@ -1172,6 +1172,20 @@ async function pool(port, base) {
         r.now === "perspective" &&
         r.pressed === "false",
     ],
+    idle: [
+      "a view left alone draws nothing",
+      (r) => r.drawn > 0 && r.idle === 0,
+    ],
+    cap: [
+      "past eight views the least wanted rest, and wake when reached for",
+      (r) =>
+        r.renderers === 8 &&
+        r.canvases === 8 &&
+        r.inSightLive &&
+        r.woke &&
+        r.after === 8 &&
+        r.pictures >= 1,
+    ],
   };
   for (const [name, [label, holds]] of Object.entries(cases)) {
     await check(label, async () => {

@@ -23,13 +23,59 @@
  * rather than a new one being made. The fix that would let this be a plain
  * import is `scene3d.mjs` becoming a factory; that is a large change to a file
  * the extension depends on, and this is a small one that does not touch it.
+ *
+ * ## How many
+ *
+ * Each renderer is a WebGL context, and a page gets about sixteen: past that
+ * the browser drops the oldest, and its view goes blank without a word. So
+ * no more than `MOST_RENDERERS` are live at once, as pythreejs does it. A
+ * view that needs one when they are all out takes the one least wanted -- a
+ * view scrolled out of sight before one in it, and the longest untouched
+ * first -- and that view shows a picture of itself until the pointer comes
+ * back to it or it comes back into sight.
+ *
+ * The pool is the page's, not this module's. anywidget imports a widget's
+ * module afresh for each widget, from a blob of its own, so a pool held here
+ * would be one per widget: no limit at all, and a cell re-run leaving its
+ * renderers behind for the collector rather than handing them on.
  */
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
 
-/** Live views: `{ host, api }`, where `api` is a promise of one scene3d. */
-const pool = [];
+/** How many renderers may be live on a page at once: pythreejs's number,
+ *  half what a browser allows, leaving room for anything else drawing in
+ *  WebGL there -- a plotly figure's 3D scene takes a context of its own. */
+const MOST_RENDERERS = 8;
+
+/** Everything the views of this build share on the page. Keyed by the build
+ *  (`WIDGET_BUILD` is stamped in by `tools/build-widget.sh`): a notebook can
+ *  hold the output of an older one, whose renderers need not answer to this
+ *  one's calls.
+ *
+ * - `pool`: live renderers, `{ host, api, freeze, shown, used }` -- `api` a
+ *   promise of one scene3d, `freeze` what its view does when it is taken.
+ * - `inSight`: the views on screen, and `onSighting` what each does when it
+ *   comes back into it. */
+const shared = (globalThis[
+  Symbol.for(`magpylib-studio.widget/${WIDGET_BUILD}`)
+] ??= {
+  pool: [],
+  inSight: new WeakSet(),
+  onSighting: new WeakMap(),
+  sight: null,
+});
+const { pool, inSight, onSighting } = shared;
+shared.sight ??= new IntersectionObserver((entries) => {
+  for (const { target, isIntersecting } of entries) {
+    if (!isIntersecting) {
+      inSight.delete(target);
+      continue;
+    }
+    inSight.add(target);
+    onSighting.get(target)?.();
+  }
+});
 
 function loadRenderer() {
   const url = URL.createObjectURL(
@@ -49,22 +95,50 @@ function loadRenderer() {
  * on the page can have left it: Jupyter renders a widget before attaching it,
  * and a view not yet attached is not a view that has gone. Taken as one, two
  * widgets rendered together shared a renderer, and the first lost its canvas.
+ *
+ * With every renderer out, one is taken from a view that has it -- see "How
+ * many" above -- and `freeze` is what `el` will do when its own is taken.
+ * `anywhere: false` takes one only from a view out of sight, and gives up,
+ * with null, rather than take one from a view on screen: a view waking by
+ * itself must not put out another in plain view, which would wake in turn.
  */
-function acquire(el) {
+function acquire(el, freeze, { anywhere = true } = {}) {
   // Whatever is on the page now has been seen there, whether or not it was
   // drawn after it arrived.
   for (const slot of pool) if (slot.host?.isConnected) slot.shown = true;
-  const free = pool.find(
+  let slot = pool.find(
     (slot) => !slot.host || (slot.shown && !slot.host.isConnected),
   );
-  const slot = free || { host: null, api: null };
-  if (!free) {
-    slot.api = loadRenderer();
+  if (!slot && pool.length >= MOST_RENDERERS) {
+    slot = leastWanted(anywhere);
+    if (!slot && !anywhere) return null;
+    slot?.freeze?.(); // still its view's while it takes its picture
+  }
+  if (!slot) {
+    slot = { api: loadRenderer() };
     pool.push(slot);
   }
   slot.host = el;
+  slot.freeze = freeze;
   slot.shown = false; // until its element is seen on the page
+  slot.used = performance.now();
   return slot;
+}
+
+/** The renderer whose view would miss it least: out of sight before in it,
+ *  then the longest untouched. Never one whose view is not on the page yet
+ *  -- Jupyter draws a widget before attaching it, and a box of them before
+ *  any: those are about to be looked at. Undefined when there is none. */
+function leastWanted(anywhere) {
+  const seen = (slot) => (inSight.has(slot.host) ? 1 : 0);
+  return pool
+    .filter(
+      (slot) =>
+        slot.shown &&
+        slot.host?.isConnected &&
+        (anywhere || !inSight.has(slot.host)),
+    )
+    .sort((a, b) => seen(a) - seen(b) || a.used - b.used)[0];
 }
 
 /** A colour, as the bytes it paints: red, green, blue and alpha. A canvas does
@@ -445,7 +519,7 @@ function render({ model, el }) {
       notify("Writing the file…");
       // The camera with it, so the file opens on what is on screen now
       // rather than on what was last reported.
-      model.send({ kind: "export", camera: api?.cameraState() });
+      model.send({ kind: "export", camera: api?.cameraState() ?? kept });
     },
   );
   exportButton.hidden = Boolean(model.get("standalone"));
@@ -912,12 +986,65 @@ function render({ model, el }) {
     stage.focus({ preventScroll: true }),
   );
 
-  const slot = acquire(view);
+  let slot = acquire(view, freeze);
   let api = null;
   // Whether the renderer is loaded and still this view's to drive.
   const drawing = () => api !== null && slot.host === view;
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // frames the view again as its size settles -- see draw
+
+  // --- resting ----------------------------------------------------------
+  // A view whose renderer was taken for another -- see "How many" at the top
+  // -- shows a picture of itself, and takes one back when it is wanted again.
+  let resting = false;
+  let still = null; // the picture
+  let kept = null; // where the camera was, to look from again
+
+  /** Give up the renderer: called by `acquire` for the view taking it, while
+   *  it is still this one's -- the picture is drawn with it. */
+  function freeze() {
+    const picture = api?.snapshot();
+    if (playing) setPlaying(false);
+    kept = api?.cameraState() ?? kept;
+    api?.watchCamera(null);
+    api = null;
+    resting = true;
+    view.querySelector("canvas")?.remove();
+    // One taken before the renderer had loaded has nothing to show, and
+    // keeps whatever picture it had.
+    if (!picture) return;
+    still?.remove();
+    still = new Image();
+    still.className = "magpy-scene-still";
+    still.alt = "";
+    still.src = picture;
+    view.append(still);
+  }
+
+  /** Take a renderer back, and say whether one was had: always when the
+   *  user reaches for the view; when it wakes of itself, only one that no
+   *  view on screen is using -- or it would put that view to rest in turn. */
+  function wake({ anywhere }) {
+    if (!resting) return true;
+    const taken = acquire(view, freeze, { anywhere });
+    if (!taken) return false;
+    slot = taken;
+    resting = false;
+    return true;
+  }
+
+  /** The user has come to the view: it is wanted, and wanted most. */
+  function touch() {
+    if (resting) {
+      if (wake({ anywhere: true })) draw();
+    } else slot.used = performance.now();
+  }
+  el.addEventListener("pointerenter", touch);
+  stage.addEventListener("focusin", touch);
+  onSighting.set(view, () => {
+    if (resting) draw(); // which wakes it, if a renderer is to be had
+  });
+  shared.sight.observe(view);
 
   // Where the camera is, told to python once it stops moving, so that a
   // `write_html` from a cell saves the view as it is seen. A message and not
@@ -927,7 +1054,7 @@ function render({ model, el }) {
   function tellCamera() {
     clearTimeout(cameraTimer);
     cameraTimer = setTimeout(() => {
-      if (slot.host === view) {
+      if (drawing()) {
         model.send({ kind: "camera", camera: api.cameraState() });
       }
     }, 300);
@@ -1541,6 +1668,11 @@ function render({ model, el }) {
 
   // --- drawing ----------------------------------------------------------
   async function draw() {
+    // A resting view is drawn by waking it, and only if that does not put a
+    // view on screen to rest: a scene or a theme that changed under a
+    // picture is caught up when the view is next looked at or pointed to.
+    if (resting && !(inSight.has(view) && wake({ anywhere: false }))) return;
+    slot.used = performance.now();
     try {
       api = await slot.api;
     } catch (error) {
@@ -1579,13 +1711,19 @@ function render({ model, el }) {
       // or its projection button would say the opposite of what it shows.
       if (api.cameraState()?.projection === "parallel") api.toggleProjection();
       showProjection("perspective");
-      api.hint([]);
     }
+    if (!framed || kept) api.hint([]);
+    still?.remove(); // the canvas takes its place in the same frame
+    still = null;
     api.render(view, payload, { keepCamera: framed });
-    // A saved view opens where it was looking when it was saved. A live one
-    // has no camera to start from, and frames the scene.
-    const saved = framed ? null : model.get("camera");
+    // A saved view opens where it was looking when it was saved, and a woken
+    // one where it was looking when it was put to rest. A live one has no
+    // camera to start from, and frames the scene.
+    const saved = kept ?? (framed ? null : model.get("camera"));
     if (saved) showProjection(api.setCamera(saved));
+    // The renderer's step is the last view's, and a woken one had its own.
+    if (kept) api.setSnapping(snapping);
+    kept = null;
     framed = true;
     api.highlight(model.get("selected") || []);
     if (editable()) setHandles(handles);
@@ -1669,12 +1807,16 @@ function render({ model, el }) {
     refit?.disconnect();
     for (const pending of calls.values()) clearTimeout(pending.timer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
+    shared.sight.unobserve(view);
+    inSight.delete(view);
+    onSighting.delete(view);
     // Only if it is still ours. A view whose element left the page has already
     // had its slot taken by the next cell that asked, and freeing it here --
     // late, on a teardown that comes after -- would hand that cell's renderer
-    // to a third.
+    // to a third. So has a resting one.
     if (slot.host === view) {
       slot.host = null; // back to the pool
+      slot.freeze = null;
       api?.watchCamera(null);
     }
   };

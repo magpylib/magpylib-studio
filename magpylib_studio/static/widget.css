@@ -72,6 +72,14 @@
   background: var(--vscode-editor-background);
 }
 
+/* A view resting while another has its renderer: the picture it took of
+   itself, where the canvas was and the size it was. */
+.magpy-scene-still {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* ---- controls -------------------------------------------------------------
    Panels floating over the view, in the legend's material. Nearly opaque, and
    not blurred behind: a `backdrop-filter` is composited again on every frame
