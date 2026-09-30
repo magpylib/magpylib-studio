@@ -101,6 +101,7 @@
           "description": "magpylib style, as a dotted or nested tree."
         },
         "hidden_style": { "type": "object" },
+        "overridden": { "$ref": "#/definitions/overridden" },
         "visible": {
           "type": "boolean",
           "description": "false hides the object in the 3D view. Hidden sources still contribute to the field."
@@ -111,6 +112,10 @@
         }
       },
       "additionalProperties": true
+    },
+    "overridden": {
+      "description": "Constructor parameters a value was written over while they were expressions, as they were, so the variables they named can be restored. Not part of the script.",
+      "type": "object"
     },
     "objectType": {
       "description": "A magpylib class, dotted from the magpylib root.",
@@ -171,6 +176,7 @@
               "type": { "$ref": "#/definitions/objectType" },
               "params": { "type": "object" },
               "style": { "type": "object" },
+              "overridden": { "$ref": "#/definitions/overridden" },
               "visible": { "type": "boolean" },
               "parent": {
                 "type": "string",

@@ -162,6 +162,19 @@ function where(shadowed) {
     : first;
 }
 
+/** What ↺ will do about it: drop a later step, or put back an expression a
+ * value was written over in the create step (a resize, an aim) -- or both. */
+function how(shadowed) {
+  const undo = [];
+  if (shadowed.some((s) => s.events)) {
+    undo.push("dropping the step that states it outright");
+  }
+  if (shadowed.some((s) => "overridden" in s)) {
+    undo.push("putting back the expression a value was written over");
+  }
+  return undo.join(" and ");
+}
+
 /** Read off the engine's own allow-list, so it cannot go stale. */
 async function loadHelp() {
   const help = await rpc("expression_help", {});
@@ -244,7 +257,7 @@ async function load() {
     if (v.inert) {
       name.title += v.shadowed
         ? ` — nothing follows it any more: ${where(v.shadowed)} is stated` +
-          ` outright by a later step, and \u21ba drops that step`
+          ` outright, and \u21ba gives it back by ${how(v.shadowed)}`
         : " — nothing in the scene is written in terms of it yet";
     }
     if (isExpression) {
@@ -332,8 +345,8 @@ async function load() {
         ? [
             button(
               "\u21ba",
-              `Let ${v.name} decide ${where(v.shadowed)} again, by dropping the ` +
-                `step that states it outright`,
+              `Let ${v.name} decide ${where(v.shadowed)} again, by ` +
+                how(v.shadowed),
               "restore",
               v.name,
             ),

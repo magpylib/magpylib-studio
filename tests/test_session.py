@@ -3340,6 +3340,21 @@ def test_every_example_validates_against_the_published_schema():
         assert not errors, f"{example['name']} does not validate: {errors[:3]}"
 
 
+def test_an_expression_set_aside_validates_against_the_published_schema():
+    """The one field a resize over an expression adds to a create step, which
+    no example carries."""
+    validator = _scene_schema()
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    s.set_param("magnet", "dimension", [0.04, 0.04, 0.02])
+    doc = s.to_dict()
+    assert any(e.get("overridden") for e in doc["events"])
+    assert not [e.message for e in validator.iter_errors(doc)]
+    create = next(e for e in doc["events"] if e.get("overridden"))
+    create["overridden"] = ["=width"]
+    assert list(validator.iter_errors(doc))
+
+
 def test_the_schema_catches_the_mistakes_it_exists_for():
     """A schema that accepts everything is worse than none, because it is
     believed. Each of these is a real bug shape — `axis: "zx"` shipped twice
@@ -4629,6 +4644,109 @@ def test_a_variable_nothing_refers_to_is_inert_with_nothing_to_restore():
     assert spare["inert"] is True
     assert "shadowed" not in spare
     assert s.restore_variable("spare")["ok"] is False
+
+
+def test_a_resize_over_an_expression_keeps_it_to_give_back():
+    """A resize has no later step to stand in front of the variable: what an
+    object is lives on its create step, so the value is written over the
+    expression itself. It used to leave `width` inert with no restore and
+    undo the only way back (magpylib-studio#21). The expression is set aside
+    instead, the panel offers it, and the script never hears of it.
+    """
+    import numpy as np
+
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    named = lambda: {v["name"]: v for v in s.get_variables()["variables"]}  # noqa: E731
+    was = s._create_event("magnet")["params"]["dimension"]
+    assert "=width" in was
+
+    assert s.set_param("magnet", "dimension", [0.04, 0.04, 0.02]) == {"ok": True}
+    width = named()["width"]
+    assert width["inert"] is True
+    assert width["shadowed"] == [
+        {"object_id": "magnet", "field": "dimension", "overridden": was}
+    ]
+    # a second resize is still over the same expression, not over the first
+    assert s.set_param("magnet", "dimension", [0.05, 0.05, 0.02]) == {"ok": True}
+    assert named()["width"]["shadowed"][0]["overridden"] == was
+    magnet = next(
+        line for line in s.to_script().splitlines() if line.startswith("magnet =")
+    )
+    assert "width" not in magnet and "dimension=(0.05, 0.05, 0.02)" in magnet
+
+    result = s.restore_variable("width")
+    assert result["ok"] is True
+    assert result["restored"] == [{"object_id": "magnet", "field": "dimension"}]
+    assert s._create_event("magnet")["params"]["dimension"] == was
+    assert "overridden" not in s._create_event("magnet")
+    assert "inert" not in named()["width"] and "shadowed" not in named()["width"]
+    assert s.set_variable("width", 0.03) == {"ok": True}
+    assert np.allclose(s._objs["magnet"].dimension, [0.01, 0.03, 0.01])
+
+
+def test_what_is_set_aside_is_what_is_out_of_play():
+    """Kept while a variable it names decides nothing, and no longer."""
+    s = MagpylibStudioSession()
+    s.set_variable("a", 1)
+    s.set_variable("b", 2)
+    s.add_object(
+        "m", "magnet.Cuboid", {"polarization": [0, 0, 1], "dimension": [1, 1, 1]}
+    )
+    create = lambda: s._create_event("m")  # noqa: E731
+    shadowed = lambda: {  # noqa: E731
+        v["name"] for v in s.get_variables()["variables"] if v.get("shadowed")
+    }
+
+    # typed back in, it has nothing left to give back
+    s.set_param("m", "dimension", ["=a", "=b", 1])
+    s.set_param("m", "dimension", [1, 2, 3])
+    assert shadowed() == {"a", "b"}
+    s.set_param("m", "dimension", ["=a", "=b", 3])
+    assert "overridden" not in create() and shadowed() == set()
+
+    # written over in one place, it still follows the rest
+    s.set_param("m", "dimension", ["=a", 4, 3])
+    assert shadowed() == {"b"}
+    s.set_param("m", "dimension", ["=a", 5, 3])  # and a later edit keeps it
+    assert create()["overridden"] == {"dimension": ["=a", "=b", 3]}
+
+    # restoring over another variable sets that one aside in turn
+    s.set_param("m", "dimension", ["=2 * a", 1, 1])
+    s.set_param("m", "dimension", [1, 1, 1])
+    assert create()["overridden"] == {"dimension": ["=2 * a", 1, 1]}
+    s.set_param("m", "dimension", ["=b", 1, 1])
+    assert shadowed() == {"a"}
+    assert s.restore_variable("a")["ok"] is True
+    assert create()["params"]["dimension"] == ["=2 * a", 1, 1]
+    assert create()["overridden"] == {"dimension": ["=b", 1, 1]}
+
+    # a renamed variable is renamed in it; a removed one leaves nothing
+    assert s.rename_variable("b", "c") == {"ok": True}
+    assert create()["overridden"] == {"dimension": ["=c", 1, 1]}
+    assert s.remove_variable("c") == {"ok": True}
+    assert "overridden" not in create()
+
+
+def test_a_script_edit_keeps_an_expression_set_aside():
+    """The script says what a value is, not what it was: an edit to any line
+    of it must not take the way back to a variable with it, as it once took
+    a hidden object's visibility."""
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    was = s._create_event("magnet")["params"]["dimension"]
+    s.set_param("magnet", "dimension", [0.04, 0.04, 0.02])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "scene.py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(s.to_script())
+        assert s.apply_script(path)["mode"] == "parsed"
+        assert s._create_event("magnet")["overridden"] == {"dimension": was}
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(s.to_script().replace("(0.04, 0.04, 0.02)", "(0.01, width, 0.01)"))
+        assert s.apply_script(path)["mode"] == "parsed"
+        assert s._create_event("magnet")["params"]["dimension"] == was
+        assert "overridden" not in s._create_event("magnet")
 
 
 def test_a_variable_lives_through_the_variable_that_uses_it():

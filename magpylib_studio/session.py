@@ -898,6 +898,37 @@ _DRAG_WRITES = {
 _ABSOLUTE_OPS = frozenset({"position", "orientation"})
 
 
+def _overwrite_param(create, name, value):
+    """Write a constructor parameter on its create event, setting aside the
+    expression it writes over.
+
+    A pose a drag states outright is recorded as a step after the create, so
+    the expression it overrules stays where it was and can be given back by
+    dropping the step. A resize, an aim or a number typed in the Inspector
+    has nowhere else to go: what an object *is* lives on the create, and the
+    value is written over the expression itself. Without this the variable
+    went quiet with nothing to restore, and undo was the only way back.
+
+    So the value written over is kept under `overridden`, as it was, for as
+    long as a variable it named is out of play: the most recent one that
+    named something, or an older one still waiting. Writing a value that
+    names them all again drops it, having nothing left to give back.
+    """
+    params = create.setdefault("params", {})
+    aside = dict(create.get("overridden") or {})
+    current = params.get(name)
+    names = set(expressions.referenced_names([value]))
+    if set(expressions.referenced_names([current])) - names:
+        aside[name] = current
+    elif not set(expressions.referenced_names([aside.get(name)])) - names:
+        aside.pop(name, None)
+    params[name] = value
+    if aside:
+        create["overridden"] = aside
+    else:
+        create.pop("overridden", None)
+
+
 # A mirror borrows the body's own z-flip symmetry, so only shapes that have
 # one can be reflected; the rest would need their vertices mirrored, which is
 # a different object rather than the same one placed differently.
@@ -1203,6 +1234,7 @@ _CREATE_KEYS = (
     "params",
     "style",
     "hidden_style",
+    "overridden",
     "parent",
     "visible",
 )
@@ -1212,6 +1244,7 @@ _SPEC_KEYS = (
     "params",
     "style",
     "hidden_style",
+    "overridden",
     "visible",
     "children",
     "transforms",
@@ -1325,6 +1358,11 @@ def _migrate_events(doc):
                         "type": spec["type"],
                         **({"params": spec["params"]} if spec.get("params") else {}),
                         **({"style": spec["style"]} if spec.get("style") else {}),
+                        **(
+                            {"overridden": spec["overridden"]}
+                            if spec.get("overridden")
+                            else {}
+                        ),
                         **({"parent": parent} if parent else {}),
                         **({"visible": False} if spec.get("visible") is False else {}),
                         **unknown,
@@ -2183,7 +2221,7 @@ class MagpylibStudioSession:
         def spec_of(object_id):
             event = creates[object_id]
             spec = {"id": object_id, "type": event["type"]}
-            for key in ("params", "style", "hidden_style"):
+            for key in ("params", "style", "hidden_style", "overridden"):
                 if event.get(key):
                     spec[key] = event[key]
             if event.get("visible") is False:
@@ -4160,9 +4198,10 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             # What an object *is* lives on its create event, so this edits
-            # that rather than appending — see _create_event.
+            # that rather than appending — see _create_event. Over an
+            # expression, which it keeps: see _overwrite_param.
             create = self._create_event(object_id)
-            create.setdefault("params", {})[name] = expressions.normalized(value)
+            _overwrite_param(create, name, expressions.normalized(value))
 
         return self._mutate_doc(mutate, f"set {object_id}.{name}")
 
@@ -4417,6 +4456,38 @@ class MagpylibStudioSession:
                 if spec["id"] in hidden:
                     spec["visible"] = False
 
+        # And so is an expression a resize wrote over (see _overwrite_param):
+        # the script says what the value is, not what it used to be. Kept
+        # while a variable it names is still defined and still out of play —
+        # a script edit that writes the expression back has nothing left for
+        # it to restore.
+        aside = {
+            event["target"]: event["overridden"]
+            for event in before.get("events") or []
+            if event.get("op") == "create" and event.get("overridden")
+        }
+        defined = set(doc.get("variables") or {})
+
+        def carry(holder, object_id):
+            params = holder.get("params") or {}
+            kept = {}
+            for param, was in (aside.get(object_id) or {}).items():
+                names = set(expressions.referenced_names([was]))
+                now = set(expressions.referenced_names([params.get(param)]))
+                if names <= defined and names - now:
+                    kept[param] = was
+            if kept:
+                holder["overridden"] = kept
+
+        if aside:
+            # both, as with `visible`: a parsed script has create events, an
+            # executed one only the objects they will be made from
+            for event in doc.get("events") or []:
+                if event.get("op") == "create":
+                    carry(event, event["target"])
+            for spec in _walk_specs(doc.get("objects") or []):
+                carry(spec, spec["id"])
+
         # And so is what a mesh file held. A script says which file a mesh
         # comes from; it has no way to say what was in it when this scene was
         # saved, which is the only thing the hash is for. So it is carried
@@ -4647,12 +4718,26 @@ class MagpylibStudioSession:
 
         This is the answer to "why does my slider do nothing": not that the
         variable is gone — it is still written in the create step — but that a
-        later step states the same field outright and wins on replay.
+        later step states the same field outright and wins on replay. Those
+        entries name the `events` in the way.
+
+        Or that a value was written over it in the create step itself, and
+        the expression set aside (see _overwrite_param). Those entries carry
+        it as `overridden`, and name the parameter as their field.
         """
         events = self.doc.get("events") or []
         out = {}
         for spec, _ in self._iter_specs():
             params = spec.get("params") or {}
+            for param, was in (spec.get("overridden") or {}).items():
+                # only what the value now there no longer names: a vector
+                # written over in one place still follows the rest of it
+                now = set(expressions.referenced_names([params.get(param)]))
+                for name in expressions.referenced_names([was]):
+                    if name not in now:
+                        out.setdefault(name, []).append(
+                            {"object_id": spec["id"], "field": param, "overridden": was}
+                        )
             mine = [e for e in events if e.get("target") == spec["id"]]
             for field, (keys, ops) in _DRAG_WRITES.items():
                 names = expressions.referenced_names([params.get(key) for key in keys])
@@ -4679,9 +4764,9 @@ class MagpylibStudioSession:
         """The document's variables, as written, as resolved, and as heeded.
 
         `inert` marks one nothing in the scene follows any more, and
-        `shadowed` says where it is being overruled and by which steps —
-        enough for a view to explain a slider that moves nothing, and to offer
-        the way back. See `restore_variable`.
+        `shadowed` says where it is being overruled, by which steps or by
+        which value written over it — enough for a view to explain a slider
+        that moves nothing, and to offer the way back. See `restore_variable`.
         """
         variables = self.doc.get("variables") or {}
         bounds = self.doc.get("variable_bounds") or {}
@@ -4709,6 +4794,10 @@ class MagpylibStudioSession:
         was lost and nothing is wrong — but a slider that moves and changes
         nothing is a poor way to find that out, and hunting the step down in
         the history is a poor way to undo it.
+
+        A resize or an aim writes over the expression instead, which was set
+        aside for this: it is put back, and the value it replaces set aside in
+        turn if that named a variable of its own.
         """
         shadowed = self._shadowed_variable_sources().get(name)
         if not shadowed:
@@ -4716,14 +4805,22 @@ class MagpylibStudioSession:
                 "ok": False,
                 "error": f"nothing is standing in front of {name!r}",
             }
-        dropped = {i for entry in shadowed for i in entry["events"]}
+        dropped = {i for entry in shadowed for i in entry.get("events", ())}
+        restored = [entry for entry in shadowed if "overridden" in entry]
 
         def mutate(doc):
             doc["events"] = [e for e in doc["events"] if e["id"] not in dropped]
+            for entry in restored:
+                create = self._create_event(entry["object_id"])
+                _overwrite_param(create, entry["field"], entry["overridden"])
 
         result = self._edit_log(mutate, f"restore {name}")
         if result.get("ok"):
             result["removed"] = sorted(dropped)
+            if restored:
+                result["restored"] = [
+                    {"object_id": e["object_id"], "field": e["field"]} for e in restored
+                ]
         return result
 
     def expression_help(self):
@@ -4907,6 +5004,17 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             del doc["variables"][name]
+            # An expression set aside over it names a variable that no longer
+            # exists, so there is nothing left to give back.
+            for event in doc.get("events") or []:
+                aside = event.get("overridden")
+                if event.get("op") != "create" or not aside:
+                    continue
+                for param, was in list(aside.items()):
+                    if name in expressions.referenced_names([was]):
+                        del aside[param]
+                if not aside:
+                    del event["overridden"]
 
         result = self._mutate_doc(mutate, f"remove {name}")
         if not result["ok"] and f"unknown variable {name!r}" in result["error"]:
