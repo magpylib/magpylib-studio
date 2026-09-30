@@ -54,12 +54,13 @@ let cameraMoved = null; // a host's, told whenever the camera has moved
  * while a polarization is *stored* in the object's frame and a dimension only
  * means anything along the object's own axes -- three forces that one anyway.
  */
-const SPACES = {
+const DEFAULT_SPACES = {
   translate: "world",
   rotate: "world",
   polarization: "local",
   scale: "local",
 };
+const SPACES = { ...DEFAULT_SPACES };
 let orientations = {}; // studio id -> the rotation baked into its vertices
 let anchors = {}; // studio id -> where the object is
 let paths = {}; // studio id -> every frame it passes through, when it has one
@@ -501,6 +502,15 @@ function setSpace(space) {
 
 function toggleSpace() {
   return setSpace(spaceOf() === "world" ? "local" : "world");
+}
+
+/** Every mode's axes at once: the defaults, but for `chosen` -- mode to
+ *  space. For a host handing this renderer to a view of its own, which
+ *  brings the choices it made and none of the last view's. */
+function setSpaces(chosen = {}) {
+  Object.assign(SPACES, DEFAULT_SPACES, chosen);
+  SPACES.scale = "local"; // a size has no other
+  setGizmoMode(gizmoMode);
 }
 
 /** Look down an axis, from where the camera already is. */
@@ -1064,6 +1074,21 @@ function snapshot() {
   return renderer.domElement.toDataURL("image/png");
 }
 
+/** The view copied onto a canvas of its own, drawn again for it as the
+ *  snapshot is: for a host to show in its place while this renderer draws
+ *  something else. A copy rather than a PNG, which would be encoded on the
+ *  spot, only to be decoded again to be shown. */
+function still() {
+  if (!renderer) return null;
+  renderer.render(scene, camera);
+  const source = renderer.domElement;
+  const copy = document.createElement("canvas");
+  copy.width = source.width;
+  copy.height = source.height;
+  copy.getContext("2d").drawImage(source, 0, 0);
+  return copy;
+}
+
 /** Tell `listener` whenever the camera moves: a drag, a zoom, a key, a fit.
  *  One at a time -- the host this renderer is drawing for. */
 function watchCamera(listener) {
@@ -1577,6 +1602,7 @@ export const scene3d = drawingAfter({
   setCamera,
   watchCamera,
   snapshot,
+  still,
   setPlaying,
   renderFrame,
   poseFrame,
@@ -1586,6 +1612,7 @@ export const scene3d = drawingAfter({
   setSpace,
   spaceOf,
   toggleSpace,
+  setSpaces,
   axisView,
   viewKey,
   poseEdit,
