@@ -389,6 +389,7 @@ install it by hand.
 | How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
 | How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
 | How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
+| Why is there one view?               | [docs/one-view.md](docs/one-view.md)               |
 
 The three at the root are the state, the work and the front door; `docs/` holds
 the long-form thinking behind them.
