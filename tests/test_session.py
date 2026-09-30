@@ -94,7 +94,7 @@ def make_scene():
 
 def exec_script(script):
     """Run a generated script without its final show(), return its namespace
-    (which is also what apply_script imports the scene back from)."""
+    (which is also what load_script imports a scene from)."""
     body = "\n".join(
         line for line in script.splitlines() if not line.startswith("magpy.show(")
     )
@@ -2736,7 +2736,7 @@ def test_a_script_that_names_its_own_linspace_is_not_read_as_a_formula(tmp_path)
     `to_script` only ever assigns a linspace as the sample of a formula, so
     the parser took every such assignment for one — and `pts = np.linspace(
     (0,0,0), (1,1,1), 5)` became a template of itself. The object failed to
-    build and `apply_script` reported success over a scene that had lost it,
+    build and the import reported success over a scene that had lost it,
     which is the worst way for an importer to be wrong.
 
     A sample runs between two numbers. A pair of points is a script holding
@@ -4528,27 +4528,6 @@ def test_what_is_set_aside_is_what_is_out_of_play():
     assert create()["overridden"] == {"dimension": ["=c", 1, 1]}
     assert s.remove_variable("c") == {"ok": True}
     assert "overridden" not in create()
-
-
-def test_a_script_edit_keeps_an_expression_set_aside():
-    """The script says what a value is, not what it was: an edit to any line
-    of it must not take the way back to a variable with it, as it once took
-    a hidden object's visibility."""
-    s = MagpylibStudioSession()
-    s.load_example("quiver")
-    was = s._create_event("magnet")["params"]["dimension"]
-    s.set_param("magnet", "dimension", [0.04, 0.04, 0.02])
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "scene.py")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(s.to_script())
-        assert s.apply_script(path)["mode"] == "parsed"
-        assert s._create_event("magnet")["overridden"] == {"dimension": was}
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(s.to_script().replace("(0.04, 0.04, 0.02)", "(0.01, width, 0.01)"))
-        assert s.apply_script(path)["mode"] == "parsed"
-        assert s._create_event("magnet")["params"]["dimension"] == was
-        assert "overridden" not in s._create_event("magnet")
 
 
 def test_a_variable_lives_through_the_variable_that_uses_it():
