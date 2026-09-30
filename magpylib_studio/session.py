@@ -4085,8 +4085,6 @@ class MagpylibStudioSession:
         if self.doc != before:
             self._record_state(label, before)
         return {"ok": True}
-        self._replay_frames = {}
-        return {"ok": True}
 
     def set_visible(self, object_id, visible=True):
         """Show/hide an object in the 3D view. Implemented with magpylib's own

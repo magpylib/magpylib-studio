@@ -808,14 +808,21 @@ function render({ model, el }) {
       const chosen = model.get("selected") || [];
       const hidden = new Set(model.get("hidden") || []);
       if (isolate) {
-        // Show only the selection -- or, with something already hidden,
+        // Show only the selection -- or, when it is all that shows already,
         // everything again: the one key narrows the view and restores it.
-        if (!hidden.size && !chosen.length) return false;
-        const drawn = drawnIn(model.get("payload"));
-        commit(
-          "hidden",
-          hidden.size ? [] : [...drawn].filter((id) => !chosen.includes(id)),
+        // Whatever else is hidden stays hidden: in the studio, hiding is
+        // saved with the scene, and a hidden object is not drawn at all.
+        const others = [...drawnIn(model.get("payload"))].filter(
+          (id) => !chosen.includes(id),
         );
+        if (!chosen.length || others.every((id) => hidden.has(id))) {
+          if (!hidden.size) return false;
+          commit("hidden", []);
+          return;
+        }
+        const isolated = new Set([...hidden, ...others]);
+        for (const id of chosen) isolated.delete(id);
+        commit("hidden", [...isolated]);
         return;
       }
       if (!chosen.length) return false;
@@ -1281,22 +1288,29 @@ function render({ model, el }) {
     box.inputMode = "decimal";
     box.dataset.index = String(index);
     box.title = "Type a value, or drag the handles";
+    // Enter needs nothing of its own: the browser fires `change` for it, and
+    // a second commit of the same value is a second step to undo.
     box.addEventListener("change", commitReadout);
     box.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") commitReadout();
-      else if (event.key === "Escape") {
-        showReadout(); // back to what the scene says
-        box.blur();
+      if (event.key !== "Escape") return;
+      // Back to what the scene says, this box too -- before the blur, whose
+      // `change` would otherwise send what was typed.
+      const shown = readable();
+      if (shown) {
+        fillReadout(shown.numbers, shown.decimals, { typedOver: true });
       }
+      box.blur();
     });
     return box;
   }
 
-  function fillReadout(numbers, decimals) {
+  function fillReadout(numbers, decimals, { typedOver = false } = {}) {
     for (const box of readoutFields.querySelectorAll("input")) {
-      if (box === box.getRootNode().activeElement) continue; // being typed in
+      // the box being typed in keeps what is typed, until it is given up
+      if (!typedOver && box === box.getRootNode().activeElement) continue;
       const value = numbers[Number(box.dataset.index)];
       box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
+      box.dataset.shown = box.value; // to tell a typed value from a shown one
     }
   }
 
@@ -1325,10 +1339,15 @@ function render({ model, el }) {
   function commitReadout() {
     const shown = readable();
     if (!shown || !drawing()) return;
+    // A box left as it was shown sends the value itself, not the rounding
+    // it is shown at: typing x must not round y and z to four decimals. So
+    // does one emptied, or holding something that is not a number.
     const typed = [...readoutFields.querySelectorAll("input")].map(
       (box, index) => {
-        const value = Number(box.value);
-        return Number.isFinite(value) ? value : shown.numbers[index];
+        const value = box.value.trim() ? Number(box.value) : NaN;
+        return box.value === box.dataset.shown || !Number.isFinite(value)
+          ? shown.numbers[index]
+          : value;
       },
     );
     if (typed.every((value, index) => value === shown.numbers[index])) {

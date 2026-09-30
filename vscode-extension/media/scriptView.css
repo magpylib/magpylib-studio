@@ -46,7 +46,7 @@ body {
 /* `hidden` is only `[hidden] { display: none }` in the browser's own sheet,
    which any rule here outranks -- and the button below sets `display`, so
    hiding it by the attribute would do nothing at all. Same trap as
-   studio.css, stated with the specificity to win. */
+   studioView.css, stated with the specificity to win. */
 #bar [hidden],
 #overlay[hidden] {
   display: none;

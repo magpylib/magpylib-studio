@@ -7,7 +7,11 @@
 
   `?silent` answers nothing, as a notebook read without its kernel does.
   `?editor` hands the view an editor of the host's own on the model, as the
-  VS Code studio panel will: the view's edits go to it, not to the kernel.
+  VS Code studio panel does: the view's edits go to it, not to the kernel.
+  `?typing` stops once the probe is selected, with `window.asked` to watch:
+  the harness types into the readout itself, since only its keys are real
+  keys, and a key sent from the page does what the page says, not what the
+  browser would.
 
   `window.result` is what the view asked the session, in order, what its
   editing buttons showed along the way -- the handles, the axes, a resize
@@ -31,6 +35,7 @@
       const { state, scene } = await (await fetch("/out/edit.json")).json();
       const silent = new URLSearchParams(location.search).has("silent");
       const ownEditor = new URLSearchParams(location.search).has("editor");
+      const typing = new URLSearchParams(location.search).has("typing");
 
       const asked = [];
       const values = { ...state };
@@ -52,10 +57,8 @@
             asked.push({ method: `kernel:${message.method}` }); // must not happen
             return;
           }
-          asked.push({
-            method: message.method,
-            x: message.params?.edits?.[0]?.position?.[0],
-          });
+          const position = message.params?.edits?.[0]?.position;
+          asked.push({ method: message.method, x: position?.[0], position });
           if (silent) return;
           const result = message.method === "get_scene" ? scene : { ok: true };
           setTimeout(
@@ -96,6 +99,11 @@
       await wait(500);
       model.set("selected", ["probe"]); // the handles go to the selection
       await wait(200);
+      if (typing) {
+        window.asked = asked;
+        window.ready = true;
+        await new Promise(() => {}); // the rest is the harness's
+      }
 
       const button = (start) =>
         [...el.querySelectorAll(".magpy-icon")].find((b) =>
@@ -162,6 +170,18 @@
       button("Keys").click();
       const keys = el.querySelector(".magpy-scene-keys")?.textContent ?? "";
 
+      // Shift+H: the probe alone; then the magnet alone, though something is
+      // hidden already; then, the magnet being all that shows, everything
+      const isolate = () => press("H", { shiftKey: true });
+      model.set("selected", ["probe"]);
+      isolate();
+      const probeAlone = [...(values.hidden || [])];
+      model.set("selected", ["magnet"]);
+      isolate();
+      const magnetAlone = [...(values.hidden || [])];
+      isolate();
+      const everything = [...(values.hidden || [])];
+
       window.result = {
         asked,
         buttons: {
@@ -176,6 +196,7 @@
         notice: el.querySelector(".magpy-scene-notice.shown")?.textContent,
         readout: { head, boxes: boxes.length, typedIn },
         keys,
+        isolating: { probeAlone, magnetAlone, everything },
       };
     </script>
   </body>
