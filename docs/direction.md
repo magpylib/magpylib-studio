@@ -1,11 +1,11 @@
 # Direction — what magpylib-studio is for, and what follows for the model
 
 **Status.** §1 (positioning) is settled. §5 (the architectural proposal) follows
-from the evidence in §4 and is not implemented. §7 records the alternative that
-was argued first and rejected — kept because the reasoning is worth having, and
-because it is how this file's conclusion arrived. Companion to `CONTINUE.md`
-(what is built), `docs/fem.md` (where validation goes) and `TASKS.md` (what to
-do).
+from the evidence in §4; §5.1 is implemented, the rest is not. §7 records the
+alternative that was argued first and rejected — kept because the reasoning is
+worth having, and because it is how this file's conclusion arrived. Companion to
+`CONTINUE.md` (what is built), `docs/fem.md` (where validation goes) and
+`TASKS.md` (what to do).
 
 ---
 
@@ -192,8 +192,11 @@ This is what every project in §4 does, and it is the whole of §2's problem. Th
 document remains the artifact; the script stops pretending to be a second one.
 
 Cost, stated because it is a UI decision and not only a deletion: the script tab
-stops being applied on save. `load_script` and `apply_script` keep working by
-execution, which is what they already fall back to.
+stops being applied on save. `load_script` keeps working by execution.
+`apply_script` went too, which was not the plan: applying by execution resolved
+every expression to a number, flattened every pattern and dropped the slider
+limits, even on a save that changed nothing. Saving the tab offers "Build a new
+scene from this" instead, which is the same import, asked for.
 
 ### 5.2 Parameterised instancing
 

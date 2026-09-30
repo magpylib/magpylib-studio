@@ -413,9 +413,8 @@ and drives it.
     would miss. Soft `soft_min`/`soft_max` constrain nothing; they are the range
     worth dragging or sweeping through, must lie inside the hard ones, and are
     what a slider spans (falling back to the hard range). Bounds are editor
-    metadata: a script has nowhere to put them, so `apply_script` carries them
-    across for variables that survived the edit rather than dropping them on
-    every save, and `_canonical` deletes any whose variable is gone.
+    metadata: a script states them in a comment for whoever reads it, and
+    `_canonical` deletes any whose variable is gone.
   - **The history lives in the Scene tree, under the object it happened to.**
     Each object expands to its own steps ("created", "orbit 36° about z") before
     its children, so reading the tree is reading how the scene was built.

@@ -299,16 +299,15 @@ it, as GitHub already does.
   forward compatibility a document can actually have. A script is an export, not
   a save: it loses slider bounds and hidden flags, and nothing else — measured,
   not assumed.
-- **Document canonical, script generated — and read back two ways.**
-  `to_script()` emits runnable magpylib code, patterns included (as the loops
-  they mean), **folding the log in order** rather than declaring everything up
-  front: where an object is created relative to the steps around it is part of
-  the scene, and an object added to an already-patterned group must not end up
-  inside every copy. `apply_script()` **parses** it when it is still in that
-  shape, so variables, event order and arrangements survive and the whole
-  document round-trips byte-identically; anything else — a loop of your own, a
-  helper, numpy — is _executed_ with `show()` intercepted, as `load_script()`
-  always did, and what that flattens is reported.
+- **Document canonical, script generated — one way.** `to_script()` emits
+  runnable magpylib code, patterns included (as the loops they mean), **folding
+  the log in order** rather than declaring everything up front: where an object
+  is created relative to the steps around it is part of the scene, and an object
+  added to an already-patterned group must not end up inside every copy. Nothing
+  reads it back: the script is an export and the document stays the artifact
+  (`docs/direction.md` §5.1). `load_script()` imports any script, this one
+  included, by _executing_ it with `show()` intercepted, and reports what that
+  flattens.
 
 ## JSON-RPC protocol (stdio)
 
@@ -333,7 +332,7 @@ line — no ports, no framework.
 | view      | `get_figure` (3D) · `get_field_figure` (along a sensor path) · `get_field_map` (plane heatmap) · `get_sweep_figure`                                             |
 | field     | `get_field` — summed B/H at points or along a sensor · `sweep` — the field against a variable                                                                   |
 | undo      | `undo` · `redo` · `goto_history`                                                                                                                                |
-| I/O       | `load_scene` · `set_base_dir` · `load_script` · `apply_script` · `load_captured` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script`   |
+| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script`                    |
 | bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                          |
 
 Mutating methods return `{"ok": bool, "error"?: str}`. Everything is
