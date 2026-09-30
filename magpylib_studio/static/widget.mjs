@@ -436,10 +436,10 @@ function render({ model, el }) {
   };
   const spaceButton = iconButton("world", "", () => toggleSpace());
   const undoButton = iconButton("undo", "Undo (⌘Z / Ctrl+Z)", () =>
-    settle(call("undo")),
+    settle(editor.undo()),
   );
   const redoButton = iconButton("redo", "Redo (⇧⌘Z / Ctrl+Shift+Z)", () =>
-    settle(call("redo")),
+    settle(editor.redo()),
   );
   const rule = () => {
     const line = document.createElement("div");
@@ -762,7 +762,7 @@ function render({ model, el }) {
     if (!editable() || event.altKey) return false;
     const key = event.key.toLowerCase();
     if ((event.metaKey || event.ctrlKey) && key === "z") {
-      settle(call(event.shiftKey ? "redo" : "undo"));
+      settle(event.shiftKey ? editor.redo() : editor.undo());
       return true;
     }
     if (event.metaKey || event.ctrlKey || event.shiftKey) return false;
@@ -1110,13 +1110,33 @@ function render({ model, el }) {
       });
   }
 
+  /** What the view edits through: `begin`, `preview`, `commit`, `scene`,
+   *  `undo`, `redo`, each a promise of the answer. A notebook's is the
+   *  session in its kernel, over this widget's own connection. A host with
+   *  its own way to the session -- the VS Code studio panel, whose edits go
+   *  through the extension host so that its sidebar and field view keep up --
+   *  hands one over on the model, and the view does not need to know which. */
+  const editor = model.editor ?? {
+    begin: () => call("begin_interaction"),
+    preview: (edits) => call("apply_edits", { edits }),
+    commit(edits) {
+      const done = call("apply_edits", { edits });
+      // after the pose, which the session answers in order
+      call("end_interaction").catch(() => {});
+      return done;
+    },
+    scene: () => call("get_scene"),
+    undo: () => call("undo"),
+    redo: () => call("redo"),
+  };
+
   const stopDrags = watchDrags(view, {
     drawing: () => drawing() && editable(),
     patterned: () => new Set(model.get("payload")?.patterned ?? []),
     begin({ objectIds, mode }) {
       dragActive = true;
       if (playing) setPlaying(false); // the pointer is the one being asked
-      call("begin_interaction").catch(() => {});
+      editor.begin({ objectIds, mode }).catch(() => {});
       // A value written in terms of a variable is set outright by a drag,
       // and the variable stops deciding it: worth saying before, not after.
       const field = DRAG_WRITES[mode];
@@ -1128,16 +1148,14 @@ function render({ model, el }) {
         );
       }
     },
-    preview: (pose) => call("apply_edits", { edits: pose.edits }),
-    scene: () => call("get_scene"),
+    preview: (pose) => editor.preview(pose.edits),
+    scene: () => editor.scene(),
     render(payload, { keep }) {
       if (drawing()) api.render(view, payload, { keep });
     },
     commit(pose) {
       dragActive = false;
-      settle(call("apply_edits", { edits: pose.edits }));
-      // after the pose, which the session answers in order
-      call("end_interaction").catch(() => {});
+      settle(editor.commit(pose.edits));
     },
   });
 

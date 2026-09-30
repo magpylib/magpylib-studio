@@ -6,6 +6,8 @@
   renderer's events on the view, as in studio-drag.html; the keys are keys.
 
   `?silent` answers nothing, as a notebook read without its kernel does.
+  `?editor` hands the view an editor of the host's own on the model, as the
+  VS Code studio panel will: the view's edits go to it, not to the kernel.
 
   `window.result` is what the view asked the session, in order, what its
   editing buttons showed along the way -- the handles, the axes, a resize
@@ -28,6 +30,7 @@
       };
       const { state, scene } = await (await fetch("/out/edit.json")).json();
       const silent = new URLSearchParams(location.search).has("silent");
+      const ownEditor = new URLSearchParams(location.search).has("editor");
 
       const asked = [];
       const values = { ...state };
@@ -45,6 +48,10 @@
         off() {},
         send(message) {
           if (message.kind !== "rpc") return;
+          if (ownEditor) {
+            asked.push({ method: `kernel:${message.method}` }); // must not happen
+            return;
+          }
           asked.push({
             method: message.method,
             x: message.params?.edits?.[0]?.position?.[0],
@@ -58,6 +65,31 @@
         },
       };
 
+      if (ownEditor) {
+        // the host's editor: what it was asked, in the kernel's words
+        const answered = (method, x) => {
+          asked.push({ method, x });
+          return new Promise((resolve) =>
+            setTimeout(
+              () => resolve(method === "get_scene" ? scene : { ok: true }),
+              20,
+            ),
+          );
+        };
+        const at = (edits) => edits?.[0]?.position?.[0];
+        model.editor = {
+          begin: () => answered("begin_interaction"),
+          preview: (edits) => answered("apply_edits", at(edits)),
+          async commit(edits) {
+            const done = await answered("apply_edits", at(edits));
+            asked.push({ method: "end_interaction" });
+            return done;
+          },
+          scene: () => answered("get_scene"),
+          undo: () => answered("undo"),
+          redo: () => answered("redo"),
+        };
+      }
       const el = document.getElementById("root");
       widget.render({ model, el });
       await until(() => el.querySelector("canvas"));
