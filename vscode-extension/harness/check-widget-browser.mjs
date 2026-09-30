@@ -1186,6 +1186,10 @@ async function pool(port, base) {
         r.after === 8 &&
         r.pictures >= 1,
     ],
+    boxed: [
+      "a box of views drawn off the page keeps to eight renderers",
+      (r) => r.renderers === 8 && r.canvases === 8 && r.shown,
+    ],
   };
   for (const [name, [label, holds]] of Object.entries(cases)) {
     await check(label, async () => {

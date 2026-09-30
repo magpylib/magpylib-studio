@@ -16,6 +16,8 @@
     not sixty times a second.
   cap: more views than the page has renderers for. No more than eight are
     live, those in sight are, and one reached for takes a renderer back.
+  boxed: and drawn before they are on the page, which is how a box of them
+    arrives. Still no more than eight, and each shows something.
 -->
 <html>
   <head>
@@ -40,7 +42,13 @@
 
       const page = document.getElementById("page");
       const view = () => document.createElement("div");
-      const drawn = (el) => Boolean(el.querySelector("canvas"));
+      // The renderer's canvas: a resting view's picture is a canvas too.
+      const LIVE = "canvas:not(.magpy-scene-still)";
+      const drawn = (el) => Boolean(el.querySelector(LIVE));
+      const livePool = () =>
+        Object.getOwnPropertySymbols(globalThis)
+          .filter((key) => key.description.startsWith("magpylib-studio"))
+          .map((key) => globalThis[key].pool)[0];
 
       const CASES = {
         async detached() {
@@ -121,27 +129,43 @@
             widget.render({ model: localModel(), el: each });
           }
           await wait(2500);
-          const pool = Object.getOwnPropertySymbols(globalThis)
-            .filter((key) => key.description.startsWith("magpylib-studio"))
-            .map((key) => globalThis[key].pool)[0];
+          const pool = livePool();
           const inSight = (el) => {
             const box = el.getBoundingClientRect();
             return box.bottom > 0 && box.top < innerHeight;
           };
           const before = {
             renderers: pool.length,
-            canvases: page.querySelectorAll("canvas").length,
+            canvases: page.querySelectorAll(LIVE).length,
             inSightLive: views.filter(inSight).every(drawn),
           };
           // The last out of sight and at rest: reached for, it wakes.
           const resting = views.filter((v) => !drawn(v)).at(-1);
-          resting.dispatchEvent(new PointerEvent("pointerenter"));
+          resting.dispatchEvent(new PointerEvent("pointerdown"));
           await wait(1000);
           return {
             ...before,
             woke: drawn(resting),
-            after: page.querySelectorAll("canvas").length,
-            pictures: page.querySelectorAll(".magpy-scene-still").length,
+            after: page.querySelectorAll(LIVE).length,
+            pictures: page.querySelectorAll("canvas.magpy-scene-still").length,
+          };
+        },
+        async boxed() {
+          // A box of views, all drawn before any is on the page.
+          const views = Array.from({ length: 11 }, view);
+          for (const each of views) {
+            widget.render({ model: localModel(), el: each });
+          }
+          await wait(0);
+          page.append(...views);
+          await wait(2500);
+          return {
+            renderers: livePool().length,
+            canvases: page.querySelectorAll(LIVE).length,
+            // every view shows something: its scene, or how to have it
+            shown: views.every(
+              (v) => drawn(v) || v.querySelector(".magpy-scene-still"),
+            ),
           };
         },
       };
