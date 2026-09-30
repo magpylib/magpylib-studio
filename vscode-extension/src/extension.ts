@@ -53,7 +53,6 @@ const SCENE_JSON_URI = vscode.Uri.parse('magpylib-studio:/scene.json');
 let scriptFile: vscode.Uri | undefined;
 /** Re-render the script tab from the scene; set during activation. */
 let refreshScript: (() => void) | undefined;
-/** The tab holds text the engine rejected: leave it alone until it applies. */
 /** What we last put in that file — the scene changes far more often than its
  *  script does (a style edit renders identically), and rewriting it on every
  *  mutation would reload the editor under the user for nothing. */
@@ -2912,6 +2911,10 @@ export function activate(context: vscode.ExtensionContext): void {
    * and stops it being something a reflexive Cmd+S does to you.
    */
   const offerScriptImport = async (doc: vscode.TextDocument) => {
+    // The file is the user's text now, not ours. Left stale, it would still
+    // match the rendering the scene gives, and putting that back would be
+    // skipped as a write that changes nothing.
+    scriptOnDisk = doc.getText();
     const build = 'Build a new scene from this';
     const choice = await vscode.window.showWarningMessage(
       'The script tab renders the scene — edits here are not applied back to it.',
