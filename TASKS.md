@@ -12,6 +12,7 @@ lives in the plan it came from — this file stays thin enough to work from.
 | How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
 | How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
 | How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
+| Why is there one view?               | [docs/one-view.md](docs/one-view.md)               |
 
 **Track F (foundation) is primary.** It is what studio _is_ under the
 positioning in `docs/direction.md` §1, and everything else is an application of
@@ -164,6 +165,18 @@ ship in the Python package: a notebook can have it with nothing else installed.
 
 **Done when.** The first slice works in Jupyter and marimo from the wheel alone,
 and the VS Code panel uses the same drag code.
+
+### W2 — One view
+
+**What.** The VS Code studio panel draws the notebook widget, as the script
+panel does, so there is one set of controls. Plan in
+[docs/one-view.md](docs/one-view.md).
+
+**Why.** Two interfaces around one renderer: every control and fix is made
+twice, or the two drift — and they have.
+
+**Done when.** `studio.mjs` and the panel's own controls are gone, and the
+checklist in `docs/one-view.md` §5 passes by hand in VS Code.
 
 ---
 
