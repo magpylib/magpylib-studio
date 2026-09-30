@@ -879,41 +879,52 @@ async function editing(port, base) {
       await tab.close();
     }
   };
-  await check("a studio's view edits through its kernel", async () => {
-    const { result, problem } = await run("");
-    if (!result) return problem;
-    const { asked, buttons } = result;
-    const said = asked.map((a) => a.method + (a.x ?? "")).join(" ");
-    if (!buttons.shown) return "no editing buttons";
-    if (buttons.turned !== "true" || buttons.moved !== "true") {
-      return `E and W left the buttons at ${buttons.turned}, ${buttons.moved}`;
-    }
-    if (!buttons.local.includes("object's own (L")) {
-      return `L left the axes button saying ${buttons.local}`;
-    }
-    if (!buttons.world.includes("world's (L")) {
-      return `L again left the axes button saying ${buttons.world}`;
-    }
-    if (!buttons.refused.notice?.includes("no single size")) {
-      return `resizing a sensor said ${JSON.stringify(buttons.refused.notice)}`;
-    }
-    if (buttons.resizing !== "true") return "R did not resize the magnet";
-    if (asked[0]?.method !== "begin_interaction") return `it began: ${said}`;
-    const poses = asked
-      .filter((a) => a.method === "apply_edits")
-      .map((a) => a.x);
-    if (poses[0] !== 1 || poses.at(-1) !== 6 || poses.length > 4) {
-      return `poses at ${poses.join(", ")}: ${said}`;
-    }
-    if (!asked.some((a) => a.method === "get_scene")) {
-      return `nothing redrawn around the drag: ${said}`;
-    }
-    const tail = asked.slice(-3).map((a) => a.method + (a.x ?? ""));
-    if (tail.join() !== "apply_edits6,end_interaction,undo") {
-      return `it ended: ${said}`;
-    }
-    return problem;
-  });
+  for (const [query, name] of [
+    ["", "a studio's view edits through its kernel"],
+    ["?editor", "a studio's view edits through a host's own editor"],
+  ]) {
+    await editsThrough(query, name);
+  }
+  async function editsThrough(query, name) {
+    await check(name, async () => {
+      const { result, problem } = await run(query);
+      if (!result) return problem;
+      const { asked, buttons } = result;
+      const said = asked.map((a) => a.method + (a.x ?? "")).join(" ");
+      if (!buttons.shown) return "no editing buttons";
+      if (buttons.turned !== "true" || buttons.moved !== "true") {
+        return `E and W left the buttons at ${buttons.turned}, ${buttons.moved}`;
+      }
+      if (!buttons.local.includes("object's own (L")) {
+        return `L left the axes button saying ${buttons.local}`;
+      }
+      if (!buttons.world.includes("world's (L")) {
+        return `L again left the axes button saying ${buttons.world}`;
+      }
+      if (!buttons.refused.notice?.includes("no single size")) {
+        return `resizing a sensor said ${JSON.stringify(buttons.refused.notice)}`;
+      }
+      if (buttons.resizing !== "true") return "R did not resize the magnet";
+      if (asked[0]?.method !== "begin_interaction") return `it began: ${said}`;
+      const poses = asked
+        .filter((a) => a.method === "apply_edits")
+        .map((a) => a.x);
+      if (poses[0] !== 1 || poses.at(-1) !== 6 || poses.length > 4) {
+        return `poses at ${poses.join(", ")}: ${said}`;
+      }
+      if (!asked.some((a) => a.method === "get_scene")) {
+        return `nothing redrawn around the drag: ${said}`;
+      }
+      const tail = asked.slice(-3).map((a) => a.method + (a.x ?? ""));
+      if (tail.join() !== "apply_edits6,end_interaction,undo") {
+        return `it ended: ${said}`;
+      }
+      if (asked.some((a) => a.method.startsWith("kernel:"))) {
+        return `a host's editor was passed over for the kernel: ${said}`;
+      }
+      return problem;
+    });
+  }
   await check(
     "a studio's view says when no kernel answers an edit",
     async () => {
