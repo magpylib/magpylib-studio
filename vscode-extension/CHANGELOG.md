@@ -52,6 +52,10 @@ All notable changes to the Magpylib Studio extension.
   first move.
 - A drag of several objects that the engine refused in part moved the others. It
   is now all or nothing.
+- A resize, an aim, or a number typed in the Inspector over a value written in
+  terms of a variable greyed the variable out with no ↺ to restore it, leaving
+  undo as the only way back. The expression is now kept on the object, and ↺ in
+  the Variables panel puts it back. The script is unchanged.
 
 ## [0.4.1]
 
