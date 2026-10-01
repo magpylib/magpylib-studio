@@ -1005,6 +1005,36 @@ def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
 
 
 @needs_scene_graph
+def test_a_scene_written_in_code_is_edited_as_it_is():
+    """Its own session, not a copy: what a drag does is in the scene after."""
+    from magpylib_studio.build import Scene
+
+    s = Scene()
+    r = s.variable("r", 0.02)
+    s.magnet.Cuboid(
+        id="cube",
+        polarization=(0, 0, 1),
+        dimension=(0.01, 0.01, 0.01),
+        position=(r, 0, 0),
+    )
+    studio = widget.SceneWidget(s, editable=True)
+    assert studio._session is s.session
+    assert list(studio.objects) == ["cube"]
+    with pytest.raises(TypeError, match=r"SceneWidget\(scene, editable=True\)"):
+        widget.SceneWidget(s)
+
+    # A variable set from the notebook moves what is written in it, as the
+    # panel's slider does, and is one step to take back.
+    revision = studio.revision
+    studio.set_variable("r", 0.03)
+    assert studio.objects["cube"].position == pytest.approx([0.03, 0, 0])
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {"by": "set_variable", "variable": "r", "value": 0.03}
+    assert studio.undo()
+    assert studio.objects["cube"].position == pytest.approx([0.02, 0, 0])
+
+
+@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()
