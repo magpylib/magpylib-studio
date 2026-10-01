@@ -1,8 +1,10 @@
 # Writing a scene in code — design
 
-**Status: design, not implemented.** Written on the one-way branch (#12) because
-#12 removes the only way to write parametric code and get a document back, and
-this is what replaces it. #12 should be judged with it, not without.
+**Status: B1 is built** (`magpylib_studio/build.py`, `tests/test_build.py`,
+`examples/builder_demo.py`); B2 and B3 are not. Written on the one-way branch
+(#12) because #12 removes the only way to write parametric code and get a
+document back, and this is what replaces it. #12 should be judged with it, not
+without.
 
 ---
 
@@ -249,19 +251,27 @@ exists, placing one is one more builder call.
 
 ---
 
-## 8. Open questions
+## 8. Open questions, and what B1 chose for now
+
+Each has a provisional answer in B1, to revisit with use.
 
 - **Ids.** An explicit `id=`, or generated from the label or type? The tree and
-  the exported script both show them.
+  the exported script both show them. _B1:_ `id=` if given, else the label, else
+  the class (`cuboid`, `cuboid_2`), reserved at construction so a clash is
+  reported at that line.
 - **Lazy create (§3) or an explicit `parent=`.** Lazy keeps magpylib's spelling;
-  explicit is harder to get wrong.
+  explicit is harder to get wrong. _B1:_ lazy, with `Collection(*children)` and
+  `.add()`, and a warning on the one reparent it cannot avoid.
 - **Live or detached.** Calls against a live session are mutations with undo, so
   a builder script run in the panel's engine lands in its history. A `Scene()`
   of its own builds a document in memory. Probably both, with detached as the
-  default.
+  default. _B1:_ both — `Scene()` and `Scene(session)` — and a notebook view of
+  a `Scene` edits its session rather than a copy.
 - **Coverage.** Editor state such as `overridden`, mesh stamps and hidden
   styles: builder calls, or out of scope and carried some other way? B2's
-  property test forces the answer.
+  property test forces the answer. _B1:_ out of scope.
 - **numpy.** Support `np.sin(handle)` through `__array_ufunc__`, or refuse numpy
-  on handles entirely and keep one way to say it?
+  on handles entirely and keep one way to say it? _B1:_ numpy's arithmetic and
+  the functions an expression has are written as expressions (so `np.pi * r` and
+  `np.sin(tilt)` work); every other numpy function refuses.
 - **Names.** `magpylib_studio.build` and `Scene` are placeholders.
