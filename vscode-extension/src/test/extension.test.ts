@@ -196,6 +196,89 @@ function answering({
   };
 }
 
+/** What saving the script tab says, since it no longer applies the edit. */
+const SCRIPT_OFFER = /edits here are not applied back/;
+const BUILD_FROM_SCRIPT = 'Build a new scene from this';
+
+/**
+ * Answer the warnings a test expects, and hear what they said. A warning with
+ * no answer here goes on to the suite's spy, so one nobody expected still
+ * fails the run.
+ */
+function answeringWarnings(...answers: [RegExp, string | undefined][]): {
+  said: string[];
+  restore: () => void;
+} {
+  const window = vscode.window as unknown as Record<string, unknown>;
+  const spied = window.showWarningMessage as (...a: unknown[]) => unknown;
+  const said: string[] = [];
+  window.showWarningMessage = async (message: string, ...rest: unknown[]) => {
+    const found = answers.find(([pattern]) => pattern.test(message));
+    if (!found) {
+      return spied(message, ...rest);
+    }
+    said.push(message);
+    return found[1];
+  };
+  return {
+    said,
+    restore: () => {
+      window.showWarningMessage = spied;
+    },
+  };
+}
+
+/** Poll an open document's text, the way sceneWhere polls the scene. */
+async function textWhere(
+  doc: vscode.TextDocument,
+  predicate: (text: string) => boolean,
+  what: string,
+  timeoutMs = 20000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate(doc.getText())) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return doc.getText();
+}
+
+/**
+ * Open the script tab, once it shows what the extension last wrote. The file
+ * is written on the extension's schedule and the tab reloads from it on VS
+ * Code's, so a tab left open by an earlier test can lag its file — and an edit
+ * made then is an edit to a stale tab, which the reload it was racing turns
+ * into a save conflict.
+ */
+async function openScriptTab(): Promise<vscode.TextDocument> {
+  await vscode.commands.executeCommand('magpylib-studio.viewScript');
+  const tab = vscode.workspace.textDocuments.find((d) => d.fileName.endsWith('scene.py'));
+  assert.ok(tab, 'no scene.py document is open');
+  const onDisk = async () =>
+    Buffer.from(await vscode.workspace.fs.readFile(tab.uri)).toString('utf8');
+  const deadline = Date.now() + 20000;
+  while (tab.getText() !== (await onDisk())) {
+    if (Date.now() > deadline) {
+      throw new Error('timed out waiting for the script tab to show its file');
+    }
+    await pause(50);
+  }
+  return tab;
+}
+
+/** Edit the script tab the way a user would, and save it. */
+async function editAndSave(tab: vscode.TextDocument, edit: (text: string) => string) {
+  const edited = edit(tab.getText());
+  assert.notStrictEqual(edited, tab.getText(), 'the edit changed nothing');
+  const editor = await vscode.window.showTextDocument(tab);
+  await editor.edit((builder) => {
+    builder.replace(new vscode.Range(0, 0, tab.lineCount, 0), edited);
+  });
+  await tab.save();
+}
+
 /** A closed cube as a binary STL, in the file's own units — the shape of what
  *  a CAD tool hands over, header word and all. */
 function binaryCubeStl(size: number): Buffer {
@@ -303,41 +386,55 @@ suite('magpylib-studio', () => {
     assert.ok(present.has('r2'), 'the other ring should be untouched');
   });
 
-  test('the script tab renders the scene and applies on save', async function () {
+  test('saving the script tab applies nothing, and puts the rendering back', async function () {
+    this.timeout(60000);
+    const before = await loadExample('halbach', 'halbach');
+    const tab = await openScriptTab();
+    const rendered = tab.getText();
+    assert.match(rendered, /^import magpylib as magpy/m);
+    assert.match(rendered, /for i in range\(1, n\)/, 'the pattern should export as a loop');
+
+    // Generation is one-way: the edit is not applied, the save says so, and
+    // declining the import it offers hands the tab back to the scene.
+    const answers = answeringWarnings([SCRIPT_OFFER, undefined]);
+    try {
+      await editAndSave(tab, (text) => text.replace(/^radius = [\d.]+/m, 'radius = 0.0325'));
+      await textWhere(tab, (text) => text === rendered, 'the rendering to be put back');
+    } finally {
+      answers.restore();
+    }
+    assert.strictEqual(answers.said.length, 1, 'the save should offer an import once');
+
+    await pause(500); // an apply would land after the tab, not before it
+    assert.deepStrictEqual(await scene(), before, 'the save changed the scene');
+  });
+
+  test('a saved script tab builds a new scene when asked to', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
-    await vscode.commands.executeCommand('magpylib-studio.viewScript');
+    const tab = await openScriptTab();
 
-    const tab = vscode.workspace.textDocuments.find((d) => d.fileName.endsWith('scene.py'));
-    assert.ok(tab, 'no scene.py document is open');
-    assert.match(tab.getText(), /^import magpylib as magpy/m);
-    assert.match(tab.getText(), /for i in range\(1, n\)/, 'the pattern should export as a loop');
-
-    // Saving it rebuilds the scene from what it says: change a variable in
-    // the text, save, and the document should come back with the new value.
-    // The number only: a variable's line now carries its limits in a trailing
-    // comment, and that comment is where they are read back from — replacing
-    // the whole line would quietly strip the bounds off radius and test a
-    // different thing than it says it does.
-    const edited = tab.getText().replace(/^radius = [\d.]+/m, 'radius = 0.0325');
-    assert.notStrictEqual(edited, tab.getText(), 'radius assignment not found');
-    const editor = await vscode.window.showTextDocument(tab);
-    await editor.edit((builder) => {
-      builder.replace(new vscode.Range(0, 0, tab.lineCount, 0), edited);
-    });
-    await tab.save();
-
-    // The save is applied and the scene rebuilt asynchronously, so wait for
-    // the value to arrive rather than for a length of time.
-    const doc = await sceneWhere(
-      (d) =>
-        (d as unknown as { variables: Record<string, number> }).variables?.radius ===
-        0.0325,
-      'the saved script to reach the document',
-    );
-    assert.strictEqual(
-      (doc as unknown as { variables: Record<string, number> }).variables.radius,
-      0.0325,
+    const flattened = /^Magpylib Studio import: .*without a variable of their own/;
+    const answers = answeringWarnings([SCRIPT_OFFER, BUILD_FROM_SCRIPT], [flattened, undefined]);
+    try {
+      await editAndSave(tab, (text) => text.replace(/^radius = [\d.]+/m, 'radius = 0.0325'));
+      // The edit arrives as a number where the scene had `=radius`: this is
+      // a new scene run from the text, not the old one edited.
+      type Step = { op: string; target: string; params?: { position?: unknown[] } };
+      const placed = (e: Step) =>
+        e.op === 'create' && e.target === 'r1' && e.params?.position?.[0] === 0.0325;
+      await sceneWhere(
+        (d) => (d.events as Step[]).some(placed),
+        'the edited script to build a new scene',
+      );
+    } finally {
+      answers.restore();
+    }
+    // What running the script could not keep, the import says: the ring's
+    // pattern comes back as separate copies.
+    assert.ok(
+      answers.said.some((m) => flattened.test(m)),
+      `the import did not say what it flattened; saw ${JSON.stringify(answers.said)}`,
     );
   });
 

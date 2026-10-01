@@ -10,6 +10,7 @@ lives in the plan it came from — this file stays thin enough to work from.
 | **What do I do next?**               | **this file**                                      |
 | Why is it going that way?            | [docs/direction.md](docs/direction.md)             |
 | How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
+| How is a scene written in code?      | [docs/builder.md](docs/builder.md)                 |
 | How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
 | How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
 | Why is there one view?               | [docs/one-view.md](docs/one-view.md)               |
@@ -25,7 +26,7 @@ it is today in a notebook.
 
 ## Track F — Foundation
 
-### F1 — Kill the round trip
+### F1 — Kill the round trip ✅
 
 **What.** `parse_script` goes, with the matched emitter/parser idiom pairs
 (`_mirror`, `_superquadric`, the `for i in range(1, n)` loop shape, the
@@ -36,13 +37,36 @@ recording only.
 generates one-way. This is a deletion with a known shape and it shrinks the
 surface F2 has to work in.
 
-**The decision inside it.** The script tab stops being applied on save. That is
-a UI change, not only a deletion, and it should be decided rather than
-discovered. `load_script` and `apply_script` keep working by execution, which is
-already their fallback.
+**Decided while doing it.** Applying by execution was tried first and is worse
+than the cliff: running an edited script recovers only the objects it leaves
+behind, so a save that changed nothing still resolved every expression to a
+number, flattened every pattern into its copies and dropped the slider limits —
+silent degradation on `Cmd+S`. So `apply_script` is gone too, and saving the tab
+offers "Build a new scene from this" instead: the same capability, explicit and
+opt-in. `load_script` is unchanged.
 
-**Done when.** The round trip is gone, import still works by execution, and the
-two-tier cliff is unreachable.
+**Done.** `importer.py` 1133 → 372 lines, `apply_script` and
+`_round_trip_warnings` removed, the extension rewired, 261 tests green and ruff
+clean.
+
+### F1b — Write a scene in code (B1 ✅)
+
+**What.** `magpylib_studio.build`: magpylib's spelling, with variables that stay
+variables, recording through the session operations the GUI uses. Design in
+[docs/builder.md](docs/builder.md).
+
+**Why.** F1 removed the only way to write parametric code and get a document
+back. Without this, code reaches the document only by execution, which keeps the
+objects and loses the variables — and a scene with no variables has no design
+variables to export to Maxwell.
+
+**Done (B1).** `Scene`, variables as handles that refuse to be evaluated, lazy
+creates so `.add()` never reparents, `SceneWidget(scene, editable=True)` and
+`SceneWidget.set_variable`. The halbach example written with it has the
+example's variables, bounds and field. Demo: `examples/builder_demo.py`.
+
+**Next.** B2, `to_builder_script` and the property test over every example; B3,
+what the script tab shows and whether its save applies.
 
 ### F2 — Parameterised instancing
 

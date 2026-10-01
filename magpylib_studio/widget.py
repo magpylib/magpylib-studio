@@ -210,16 +210,17 @@ class SceneWidget(anywidget.AnyWidget):
     #: of the cell's own objects has nowhere to keep an edit.
     editable = traitlets.Bool(False).tag(sync=True)
     #: Counts the edits the notebook has been told of, in an editable view: a
-    #: drag's end, an undo, a redo, a `set` -- each that changed something. A
-    #: cell that reads the widget in marimo re-runs when it changes, and
-    #: ``observe(..., "revision")`` hears of each in Jupyter. Not the poses in
-    #: between, which would be once a frame.
+    #: drag's end, an undo, a redo, a `set` or a `set_variable` -- each that
+    #: changed something. A cell that reads the widget in marimo re-runs when
+    #: it changes, and ``observe(..., "revision")`` hears of each in Jupyter.
+    #: Not the poses in between, which would be once a frame.
     revision = traitlets.Int(0).tag(sync=True)
     #: What the edit `revision` counted was: ``{"by": "drag" | "set" | "undo" |
     #: "redo", "objects": [...], "changed": {id: {field: value}}}`` for a drag
     #: or a `set`, and for an undo or a redo the step it took back or put back,
-    #: by the session's name for it (``"step"``). Set before `revision`, so a
-    #: callback on that reads this one's news.
+    #: by the session's name for it (``"step"``); for a `set_variable`,
+    #: ``{"by": "set_variable", "variable": name, "value": value}``. Set
+    #: before `revision`, so a callback on that reads this one's news.
     last_edit = traitlets.Dict().tag(sync=True)
 
     #: What an editable view may ask of its session: a drag, and undoing one.
@@ -259,7 +260,8 @@ class SceneWidget(anywidget.AnyWidget):
         running it again does not take the edits away. `objects` are the
         objects as edited, and `to_script` what was done. One path in place of
         the objects is a magpylib script, run to find its objects, or a
-        ``.magpy.json`` scene the studio saved.
+        ``.magpy.json`` scene the studio saved. A scene written in code
+        (`magpylib_studio.build.Scene`) is edited as it is, not copied.
         """
         traits, kwargs = self._split(kwargs)
         editable = traits.pop("editable", False)
@@ -288,6 +290,10 @@ class SceneWidget(anywidget.AnyWidget):
             given = list(threejs._given(objects))
             if len(given) == 1 and isinstance(given[0], (str, os.PathLike)):
                 self._edit(_session_from(pathlib.Path(given[0])))
+            elif len(given) == 1 and _is_built(given[0]):
+                # Its own session, not a copy: the scene the code wrote is the
+                # one the view edits, so a drag shows in `to_dict()` after.
+                self._edit(given[0].session)
             elif not given:
                 raise TypeError(
                     "nothing to edit: SceneWidget(*objects, editable=True), "
@@ -299,6 +305,11 @@ class SceneWidget(anywidget.AnyWidget):
                 caller = sys._getframe(1)
                 named = {**caller.f_globals, **caller.f_locals}
                 self._edit(_session_of(given, named))
+        elif any(_is_built(obj) for obj in threejs._given(objects)):
+            raise TypeError(
+                "a scene written in code is shown to edit: "
+                "SceneWidget(scene, editable=True)"
+            )
         elif any(isinstance(obj, (str, os.PathLike)) for obj in objects):
             raise TypeError(
                 "a script or a saved scene is opened to edit: "
@@ -513,6 +524,19 @@ class SceneWidget(anywidget.AnyWidget):
             raise ValueError(f"{object_id}: {result.get('error')}")
         edit = {"by": "set", "objects": [object_id], "changed": {object_id: changed}}
         self._show(edit)
+
+    def set_variable(self, name, value):
+        """Change a variable of an editable view's scene, as the studio's
+        Variables panel does: everything written in it follows, and it is one
+        step to undo. A slider wired here drives the scene the way the
+        panel's does. Refused, it changes nothing and raises, saying why."""
+        from magpylib_studio.session import _plain
+
+        session = self._editing("set_variable")
+        result = session.set_variable(name, _plain(value))
+        if not result.get("ok", True):
+            raise ValueError(f"{name}: {result.get('error')}")
+        self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
@@ -745,6 +769,13 @@ def _drag_news(edits):
             fields[edit["shape"]["attr"]] = edit["shape"]["value"]
         changed[edit["objectId"]] = fields
     return {"by": "drag", "objects": list(changed), "changed": changed}
+
+
+def _is_built(obj):
+    """Whether `obj` is a scene written in code (`magpylib_studio.build`)."""
+    from magpylib_studio.build import Scene
+
+    return isinstance(obj, Scene)
 
 
 def _session_of(objects, namespace):
