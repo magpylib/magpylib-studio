@@ -10,6 +10,7 @@ lives in the plan it came from — this file stays thin enough to work from.
 | **What do I do next?**               | **this file**                                      |
 | Why is it going that way?            | [docs/direction.md](docs/direction.md)             |
 | How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
+| How is a scene written in code?      | [docs/builder.md](docs/builder.md)                 |
 | How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
 | How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
 | Why is there one view?               | [docs/one-view.md](docs/one-view.md)               |
@@ -47,6 +48,25 @@ opt-in. `load_script` is unchanged.
 **Done.** `importer.py` 1133 → 372 lines, `apply_script` and
 `_round_trip_warnings` removed, the extension rewired, 261 tests green and ruff
 clean.
+
+### F1b — Write a scene in code (B1 ✅)
+
+**What.** `magpylib_studio.build`: magpylib's spelling, with variables that stay
+variables, recording through the session operations the GUI uses. Design in
+[docs/builder.md](docs/builder.md).
+
+**Why.** F1 removed the only way to write parametric code and get a document
+back. Without this, code reaches the document only by execution, which keeps the
+objects and loses the variables — and a scene with no variables has no design
+variables to export to Maxwell.
+
+**Done (B1).** `Scene`, variables as handles that refuse to be evaluated, lazy
+creates so `.add()` never reparents, `SceneWidget(scene, editable=True)` and
+`SceneWidget.set_variable`. The halbach example written with it has the
+example's variables, bounds and field. Demo: `examples/builder_demo.py`.
+
+**Next.** B2, `to_builder_script` and the property test over every example; B3,
+what the script tab shows and whether its save applies.
 
 ### F2 — Parameterised instancing
 
