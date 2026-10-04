@@ -2306,6 +2306,35 @@ def test_load_script_says_what_running_it_flattened(tmp_path):
     assert "Collection" not in warning and "Sphere" not in warning
 
 
+@pytest.mark.parametrize(
+    ("example", "lost", "kept"),
+    [
+        ("quiver", ["lift", "width", "density"], []),
+        # `to_script`'s patterns leave their loop index behind; it is not one
+        ("halbach", ["n", "radius", "gap", "stagger", "tilt"], ["i"]),
+    ],
+)
+def test_load_script_names_the_variables_it_turned_into_numbers(
+    tmp_path, example, lost, kept
+):
+    """An exported scene, run back in, has no variables -- and used to say
+    nothing about it when there was no loop to complain of. The script's
+    own numbers are named; a loop's index, left holding its last value, is
+    not one of them."""
+    s = MagpylibStudioSession()
+    s.load_example(example)
+    path = tmp_path / "scene.py"
+    path.write_text(s.to_script(), encoding="utf-8")
+    back = MagpylibStudioSession()
+    result = back.load_script(str(path))
+    assert result["ok"] is True
+    assert not back.to_dict().get("variables")
+    (said,) = [w for w in result["warnings"] if "came back as the numbers" in w]
+    assert said.startswith(", ".join(lost) + " came back")
+    for name in kept:
+        assert f" {name}," not in said and not said.startswith(f"{name},")
+
+
 def test_a_moved_path_stays_a_move(tmp_path):
     """An animation is a move that was made, not a hundred-pose constructor.
 

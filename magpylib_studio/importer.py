@@ -11,6 +11,7 @@ imports as 10 concrete objects).
 
 from __future__ import annotations
 
+import dis
 import keyword
 import re
 
@@ -254,21 +255,51 @@ def document_from_objects(objects, namespace):
     return _document_from_named(named, names)
 
 
-# --- reading a script back by parsing it ---------------------------------
-#
-# Executing a script tells you what it built; parsing tells you how it was
-# written. Only the latter can recover a variable or the order of a transform
-# sequence, because both are gone by the time the objects exist. So the shape
-# `to_script` emits — assignments and calls, no control flow — is parsed
-# instead, and anything outside that shape falls back to running it.
+def _loop_names(code):
+    """The names a top-level `for` binds: a loop's index, left behind holding
+    its last value, which nobody meant as a variable. Read off the compiled
+    script -- the target is what is stored straight after `FOR_ITER` -- so
+    nothing is parsed, and a tuple target (`for a, b in ...`) gives both."""
+    names, binding = set(), False
+    for instruction in dis.get_instructions(code):
+        if instruction.opname == "FOR_ITER":
+            binding = True
+        elif binding and instruction.opname in ("UNPACK_SEQUENCE", "UNPACK_EX"):
+            continue
+        elif binding and instruction.opname == "STORE_NAME":
+            names.add(instruction.argval)
+        else:
+            binding = False
+    return names
 
 
-#: The reverse of session._VECTORISED: `np.cos` is how a template is written
-#: over a whole sample, `cos` is how the document holds it.
+def variables_lost(namespace, code):
+    """The script's own numbers, said as what they became.
 
-
-#: The classmethods a mesh source is written with, and the keyword each one
-#: carries its source in. See session._mesh_source_lit for the other half.
+    `lift = 0.01` at the top of a script is a variable to whoever wrote it,
+    and running the script cannot tell: what it leaves behind is a magnet
+    0.01 up, not a name for that. Imported without a word, a scene with
+    sliders came back with none and said nothing -- so the names are said.
+    A loop's index is not one of them (see `_loop_names`): `to_script`'s
+    patterns leave an `i`, and a script's own loops their own.
+    """
+    loops = _loop_names(code)
+    names = [
+        name
+        for name, value in namespace.items()
+        if not name.startswith("_")
+        and name not in loops
+        and isinstance(value, int | float | np.integer | np.floating)
+        and not isinstance(value, bool)
+    ]
+    if not names:
+        return []
+    return [
+        f"{', '.join(names)} came back as the numbers they held: running a "
+        "script keeps what it built, not how it was written, so nothing here "
+        "follows them any more. A scene written with magpylib_studio.build "
+        "keeps its variables."
+    ]
 
 
 def _number_text(value):
@@ -344,10 +375,11 @@ def _flatten_show_args(args):
 def run_script(path):
     """Execute a magpylib script with show() intercepted.
 
-    Returns (namespace, captured) where captured holds the objects of each
-    show() call — every call the script makes is a scene candidate. Note:
-    docs are built AFTER execution, so objects shown mid-script import with
-    their final state.
+    Returns (namespace, captured, code) where captured holds the objects of
+    each show() call — every call the script makes is a scene candidate —
+    and code is what ran, for what can be read off it without running it
+    again (`variables_lost`). Note: docs are built AFTER execution, so
+    objects shown mid-script import with their final state.
     """
     with open(path, encoding="utf-8") as f:
         source = f.read()
@@ -363,9 +395,10 @@ def run_script(path):
     originals = [getattr(owner, name) for owner, name in targets]
     for owner, name in targets:
         setattr(owner, name, _capture_show)
+    code = compile(source, str(path), "exec")
     try:
-        exec(compile(source, str(path), "exec"), namespace)  # noqa: S102 - the point
+        exec(code, namespace)  # noqa: S102 - the point
     finally:
         for (owner, name), original in zip(targets, originals, strict=True):
             setattr(owner, name, original)
-    return namespace, captured
+    return namespace, captured, code

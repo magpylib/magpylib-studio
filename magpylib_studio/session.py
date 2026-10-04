@@ -4267,7 +4267,7 @@ class MagpylibStudioSession:
 
         candidates = []
         try:
-            namespace, captured = importer.run_script(path)
+            namespace, captured, code = importer.run_script(path)
             for i, objects in enumerate(captured):
                 try:
                     doc, warnings = importer.document_from_objects(objects, namespace)
@@ -4296,6 +4296,10 @@ class MagpylibStudioSession:
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
         if not candidates:
             return {"ok": False, "error": "script produced no magpylib objects"}
+        # Whichever scene is taken, the script's numbers are numbers in it.
+        lost = importer.variables_lost(namespace, code)
+        for candidate in candidates:
+            candidate["warnings"] = candidate["warnings"] + lost
         self._captured_scenes = candidates
         return self.load_captured(scene)
 
