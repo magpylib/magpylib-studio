@@ -538,6 +538,77 @@ class SceneWidget(anywidget.AnyWidget):
             raise ValueError(f"{name}: {result.get('error')}")
         self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
+    def variable_sliders(self):
+        """A control for each variable of an editable view's scene, as the
+        studio's Variables panel lays them out, bound both ways: moving one
+        sets the variable, and an edit in the view -- an undo, say -- moves it
+        back. Returned as one `ipywidgets.VBox`, to show beside the view.
+
+        A number slides across its slider range, or its limits without one,
+        widened to take in where it is now: a slider clamps what it is given,
+        and clamping would be an edit nobody made. A whole number slides in
+        whole steps, a variable with options is a dropdown, and one written as
+        an expression has no control -- it follows the others. A number with
+        no range at all has nowhere to slide to, and is left out.
+        """
+        import ipywidgets as widgets
+
+        from magpylib_studio import expressions
+
+        session = self._editing("variable_sliders")
+
+        def values():
+            return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
+
+        controls = {}
+        for variable in session.get_variables()["variables"]:
+            name, value = variable["name"], variable["value"]
+            limits = variable.get("bounds") or {}
+            if expressions.is_expression(variable["expression"]):
+                continue
+            if "options" in limits:
+                control = widgets.Dropdown(options=limits["options"], value=value)
+            else:
+                low = limits.get("soft_min", limits.get("min"))
+                high = limits.get("soft_max", limits.get("max"))
+                if low is None or high is None or isinstance(value, str):
+                    continue
+                low, high = min(low, value), max(high, value)
+                if limits.get("integer"):
+                    control = widgets.IntSlider(value, min=low, max=high)
+                else:
+                    control = widgets.FloatSlider(
+                        value,
+                        min=low,
+                        max=high,
+                        step=(high - low) / 200 or 1,
+                        readout_format=".4g",
+                    )
+            control.description = name
+            controls[name] = control
+
+        def from_control(name):
+            def moved(change):
+                if values().get(name) != change["new"]:  # an echo is no edit
+                    self.set_variable(name, change["new"])
+
+            return moved
+
+        def from_view(_change):
+            now = values()
+            for name, control in controls.items():
+                if name not in now or now[name] == control.value:
+                    continue
+                if hasattr(control, "max"):  # never clamp what the scene holds
+                    control.min = min(control.min, now[name])
+                    control.max = max(control.max, now[name])
+                control.value = now[name]
+
+        for name, control in controls.items():
+            control.observe(from_control(name), "value")
+        self.observe(from_view, "revision")
+        return widgets.VBox(list(controls.values()))
+
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
         Returns whether there was one."""

@@ -26,6 +26,7 @@ implementation of what an edit means. A call the session refuses raises
 
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import warnings
@@ -34,7 +35,12 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import expressions
-from magpylib_studio.session import MagpylibStudioSession
+from magpylib_studio.session import (
+    _HIDE_STYLE,
+    MagpylibStudioSession,
+    _arange_lit,
+    _linspace_lit,
+)
 
 
 class BuildError(Exception):
@@ -265,7 +271,7 @@ class Sampled:
         self._spec = spec
 
     def __repr__(self):
-        return f"<sampled {self._spec['of']} over {self._spec['over']}>"
+        return f"<sampled {self._spec['of']} over {self._spec.get('over', [0, 1])}>"
 
 
 def _value(value):
@@ -327,13 +333,18 @@ class Object:
                 return
         self._scene._create(self, parent)
 
-    def move(self, displacement, start="auto"):
-        """As magpylib's `move`, recorded as a step."""
+    def move(self, displacement, start="auto", spacing=None):
+        """As magpylib's `move`, recorded as a step. `spacing="arange"` says
+        a path was built from a step, as the script will write it."""
         self._enter()
-        self._scene._call("move", self.id, _arg(displacement), start=start)
+        self._scene._call(
+            "move", self.id, _arg(displacement), start=start, spacing=spacing
+        )
         return self
 
-    def rotate_from_angax(self, angle, axis, anchor=None, start="auto", degrees=True):
+    def rotate_from_angax(
+        self, angle, axis, anchor=None, start="auto", degrees=True, spacing=None
+    ):
         """As magpylib's `rotate_from_angax`, recorded as a step."""
         if not degrees:
             angle = Scene.degrees(angle)
@@ -345,7 +356,62 @@ class Object:
             axis=_arg(axis),
             anchor=_arg(anchor),
             start=start,
+            spacing=spacing,
         )
+        return self
+
+    def rotate_from_rotvec(self, rotvec, anchor=None, start="auto", degrees=True):
+        """As magpylib's `rotate_from_rotvec`, recorded as a step."""
+        if not degrees:
+            rotvec = [Scene.degrees(component) for component in rotvec]
+        op = {"op": "rotate_from_rotvec", "rotvec": _arg(rotvec)}
+        if anchor is not None:
+            op["anchor"] = _arg(anchor)
+        if start != "auto":
+            op["start"] = start
+        self._enter()
+        self._scene._call("_append_ops", self.id, [op], f"rotate {self.id}")
+        return self
+
+    def set_transform(self, position=None, orientation=None):
+        """Put it at `position` and turn it to `orientation`, in world
+        coordinates -- the studio's own step for a pose stated outright, which
+        is what a drag records. `orientation` is a rotation vector in degrees,
+        or a scipy `Rotation`."""
+        if hasattr(orientation, "as_rotvec"):
+            orientation = orientation.as_rotvec(degrees=True).tolist()
+        self._enter()
+        self._scene._call(
+            "set_transform",
+            self.id,
+            position=_arg(position),
+            orientation=_arg(orientation),
+        )
+        return self
+
+    def reparent(self, parent):
+        """Move it into `parent` -- or to the scene's root, given None --
+        keeping where it is in the world, as the studio's tree does. Unlike
+        `parent.add(it)` for something already in the scene, this is what it
+        says, so it does not warn."""
+        self._enter()
+        if parent is not None:
+            parent._enter()
+        self._scene._call(
+            "move_object", self.id, parent=None if parent is None else parent.id
+        )
+        return self
+
+    def remove(self):
+        """Take it out of the scene, as a step: what happened while it was
+        there still happened."""
+        self._enter()
+        self._scene._call("remove_object", self.id)
+
+    def hide(self):
+        """Hide it in the 3D view. It still counts in the field."""
+        self._enter()
+        self._scene._call("set_visible", self.id, False)
         return self
 
     def duplicate_around(self, count, axis="z", anchor=0, spin=0):
@@ -476,6 +542,16 @@ class Scene:
     # one per name in the allow-list, so the two cannot drift.
     pi = Expression("pi")
     tau = Expression("tau")
+    e = Expression("e")
+
+    def add(self, *objects):
+        """Put these in the scene at its root, now. Most never need it --
+        an object enters when it is first used, or when the scene is read --
+        but a script that wants one created at this point in the log says
+        so, which is what `to_builder_script` writes."""
+        for obj in objects:
+            obj._enter()
+        return self
 
     def variable(
         self,
@@ -504,10 +580,15 @@ class Scene:
             value = self._values[name]
         self._call("set_variable", name, _value(value))
         limits = {}
-        if bounds is not None:
-            limits["min"], limits["max"] = _value(bounds)
-        if slider is not None:
-            limits["soft_min"], limits["soft_max"] = _value(slider)
+        # Either end may be open: `bounds=(0, None)` is a floor and no ceiling.
+        for pair, (low, high) in (
+            (bounds, ("min", "max")),
+            (slider, ("soft_min", "soft_max")),
+        ):
+            if pair is not None:
+                for key, end in zip((low, high), _value(pair), strict=True):
+                    if end is not None:
+                        limits[key] = end
         if integer is not None:
             limits["integer"] = integer
         if options is not None:
@@ -516,9 +597,10 @@ class Scene:
             self._call("set_variable_bounds", name, **limits)
         return Variable(name)
 
-    def sampled(self, of, *, count, over=(0, 1)):
+    def sampled(self, of, *, count=None, over=None):
         """A run of points as a formula: `of(t)`, for `t` running across
-        `over` in `count` steps. Where a value is a run of points -- a
+        `over` in `count` steps (the document's defaults, given neither: two,
+        across 0 to 1). Where a value is a run of points -- a
         sensor's pixels, a path, a mesh's vertices -- this keeps it a formula
         of the variables, count included, which `np.linspace` over a variable
         cannot (it would need the count now):
@@ -534,13 +616,13 @@ class Scene:
         numpy would, so `min` and `max` -- not elementwise -- are refused."""
         sample = Expression(expressions.SAMPLE)
         made = of(sample)
-        return Sampled(
-            {
-                "count": _arg(count),
-                "over": _arg(list(over)),
-                "of": _arg(list(made) if isinstance(made, tuple) else made),
-            }
-        )
+        spec = {}
+        if count is not None:
+            spec["count"] = _arg(count)
+        if over is not None:
+            spec["over"] = _arg(list(over))
+        spec["of"] = _arg(list(made) if isinstance(made, tuple) else made)
+        return Sampled(spec)
 
     def Collection(self, *children, id=None, style=None, **kwargs):  # noqa: A002
         """magpylib's `Collection`, as the scene's."""
@@ -641,3 +723,286 @@ class Scene:
 for _name in expressions._FUNCTIONS:
     setattr(Scene, _name, _function(_name))
 del _name
+
+
+# --- the other way: a document as a builder script ----------------------------
+
+
+def script_of(session):
+    """`session`'s scene as a builder script which, run, builds it again.
+
+    One call per step of the log, in its order, so what comes back is the
+    same document -- variables, formulas and patterns included -- and not
+    the flattened scene running a plain magpylib export gives. Nothing reads
+    this back: it is executed, through the operations the panel uses (see
+    `docs/builder.md` §5). Editor state with no call of its own -- an
+    expression a resize set aside -- is named in a comment at the top rather
+    than written.
+    """
+    return _ScriptWriter(session.to_dict()).write()
+
+
+class _ScriptWriter:
+    def __init__(self, doc):
+        self.doc = doc
+        self.variables = doc.get("variables") or {}
+        self.limits = doc.get("variable_bounds") or {}
+        self.events = doc.get("events") or []
+        self.numpy = False
+        self.unwritten = []
+        from magpylib_studio import importer
+
+        taken = {*self.variables, "np", "Scene"}
+        self.scene = next(
+            name for name in ("s", "scene", "studio") if name not in taken
+        )
+        taken.add(self.scene)
+        self.names = {}
+        for event in self.events:
+            if event.get("op") == "create" and event["target"] not in self.names:
+                self.names[event["target"]] = importer._unique_id(
+                    event["target"], taken
+                )
+
+    # -- values
+
+    def expression(self, source):
+        """Document expression text as builder code: the variables are the
+        script's own, and a function or a constant is the scene's."""
+        tree = ast.parse(source, mode="eval")
+        variables, scene = self.variables, self.scene
+
+        class Builderise(ast.NodeTransformer):
+            def visit_Call(self, node):
+                self.generic_visit(node)
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id in expressions._FUNCTIONS
+                ):
+                    node.func = ast.Attribute(
+                        value=ast.Name(scene, ast.Load()),
+                        attr=node.func.id,
+                        ctx=ast.Load(),
+                    )
+                return node
+
+            def visit_Name(self, node):
+                if node.id in expressions._CONSTANTS and node.id not in variables:
+                    return ast.Attribute(
+                        value=ast.Name(scene, ast.Load()), attr=node.id, ctx=ast.Load()
+                    )
+                return node
+
+        return ast.unparse(Builderise().visit(tree).body)
+
+    def value(self, value, table=False):
+        """A document value as builder code. `table` lets a run of points be
+        written as the call that made it, as `to_script` does -- never a
+        vector: `(1, 1, 1)` is one box, not a ramp from 1 to 1."""
+        if expressions.is_expression(value):
+            return self.expression(expressions.source_of(value))
+        if expressions.is_sampled(value):
+            return self.sampled(value[expressions.SAMPLED])
+        if isinstance(value, dict):
+            items = ", ".join(
+                f"{key!r}: {self.value(item)}" for key, item in value.items()
+            )
+            return "{" + items + "}"
+        if isinstance(value, list):
+            if table and value and isinstance(value[0], list):
+                ramp = _linspace_lit(value)
+                if ramp:
+                    self.numpy = True
+                    return ramp
+            inner = ", ".join(self.value(item) for item in value)
+            return f"({inner},)" if len(value) == 1 else f"({inner})"
+        return repr(value)
+
+    def path(self, value, spacing=None):
+        """A step's argument, which may be a path made by one call."""
+        ramp = None
+        if isinstance(value, list) and value:
+            ramp = (
+                _arange_lit(value) if spacing == "arange" else None
+            ) or _linspace_lit(value)
+        if ramp:
+            self.numpy = True
+            return ramp
+        return self.value(value)
+
+    def sampled(self, spec):
+        of = spec.get("of")
+        body = self.value(of)
+        parts = [f"lambda {expressions.SAMPLE}: {body}"]
+        for key in ("count", "over"):
+            if key in spec:
+                parts.append(f"{key}={self.value(spec[key])}")
+        return f"{self.scene}.sampled({', '.join(parts)})"
+
+    @staticmethod
+    def keywords(pairs):
+        return ", ".join(f"{key}={code}" for key, code in pairs)
+
+    # -- the script
+
+    def write(self):
+        lines = [f"{self.scene} = Scene()"]
+        lines += self.write_variables()
+        body, hides = self.write_events()
+        lines += ["", *body]
+        if hides:
+            lines += ["", "# hidden in the view, as the scene was saved", *hides]
+        header = ["from magpylib_studio.build import Scene"]
+        if self.numpy:
+            header.insert(0, "import numpy as np\n")
+        notes = [f"# not written: {what}" for what in self.unwritten]
+        return "\n".join([*notes, *([""] if notes else []), *header, "", *lines]) + "\n"
+
+    def write_variables(self):
+        lines, done = [], set()
+
+        def visit(name, seen=()):
+            if name in done or name not in self.variables or name in seen:
+                return
+            for needed in expressions.referenced_names([self.variables[name]]):
+                visit(needed, (*seen, name))
+            done.add(name)
+            limits = self.limits.get(name) or {}
+            parts = [repr(name), self.value(self.variables[name])]
+            for keyword, (low, high) in (
+                ("bounds", ("min", "max")),
+                ("slider", ("soft_min", "soft_max")),
+            ):
+                if low in limits or high in limits:
+                    pair = (limits.get(low), limits.get(high))
+                    parts.append(f"{keyword}={self.value(list(pair))}")
+            if "integer" in limits:
+                parts.append(f"integer={limits['integer']!r}")
+            if "options" in limits:
+                parts.append(f"options={self.value(limits['options'])}")
+            lines.append(f"{name} = {self.scene}.variable({', '.join(parts)})")
+
+        for name in self.variables:
+            visit(name)
+        return lines
+
+    def write_events(self):
+        lines, hides = [], []
+        events = self.events
+        index = 0
+        while index < len(events):
+            event = events[index]
+            op, name = event.get("op"), self.names.get(event.get("target"))
+            if op == "create":
+                lines += self.write_create(event, name)
+                if event.get("visible") is False:
+                    hides.append(f"{name}.hide()")
+            elif op in ("position", "orientation"):
+                # A pose stated outright is one step of the studio's, and one
+                # call: written as two, the second would not merge into a pin
+                # the way the panel's did, and the log would differ.
+                pose = {op: event}
+                following = events[index + 1] if index + 1 < len(events) else {}
+                if (
+                    op == "position"
+                    and following.get("op") == "orientation"
+                    and following.get("target") == event.get("target")
+                ):
+                    pose["orientation"] = following
+                    index += 1
+                parts = []
+                if "position" in pose:
+                    parts.append(("position", self.path(pose["position"]["value"])))
+                if "orientation" in pose:
+                    parts.append(
+                        ("orientation", self.value(pose["orientation"]["rotvec"]))
+                    )
+                lines.append(f"{name}.set_transform({self.keywords(parts)})")
+            else:
+                lines.append(self.write_step(event, name))
+            index += 1
+        return lines, hides
+
+    def write_create(self, event, name):
+        kind = event["type"]
+        call = f"{self.scene}.{kind}"
+        style = dict(event.get("style") or {})
+        # Hidden, its style holds the switches that hide it, and what they
+        # replaced is set aside: written as it was, and hidden at the end.
+        aside = event.get("hidden_style")
+        if aside is not None:
+            for path in _HIDE_STYLE:
+                if path in aside:
+                    style[path] = aside[path]
+                else:
+                    style.pop(path, None)
+        for key in event:
+            if key not in (
+                "id",
+                "op",
+                "target",
+                "type",
+                "params",
+                "style",
+                "parent",
+                "visible",
+                "hidden_style",
+            ):
+                self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
+        parts = [("id", repr(event["target"]))]
+        if style:
+            parts.append(("style", repr(style)))
+        parts += [
+            (key, self.value(value, table=True))
+            for key, value in (event.get("params") or {}).items()
+        ]
+        lines = [f"{name} = {call}({self.keywords(parts)})"]
+        parent = event.get("parent")
+        lines.append(
+            f"{self.names[parent]}.add({name})"
+            if parent
+            else f"{self.scene}.add({name})"
+        )
+        return lines
+
+    def write_step(self, event, name):
+        op = event.get("op")
+        given = {
+            key: item
+            for key, item in event.items()
+            if key not in ("id", "op", "target")
+        }
+        if op == "move":
+            parts = [self.path(given.pop("displacement"), given.get("spacing"))]
+        elif op == "rotate_from_angax":
+            parts = [
+                self.path(given.pop("angle"), given.get("spacing")),
+                self.value(given.pop("axis", "z")),
+            ]
+        elif op == "rotate_from_rotvec":
+            parts = [self.path(given.pop("rotvec"))]
+        elif op == "duplicate_around":
+            parts = [self.value(given.pop("count"))]
+        elif op == "duplicate_along":
+            parts = [self.value(given.pop("count")), self.value(given.pop("step"))]
+        elif op == "mirror":
+            parts = []
+        elif op == "reparent":
+            parent = given.pop("parent", None)
+            return f"{name}.reparent({self.names[parent] if parent else None})"
+        elif op == "remove":
+            return f"{name}.remove()"
+        else:
+            self.unwritten.append(f"a {op} step on {event.get('target')}")
+            return f"# {op} on {name}: no call says this yet"
+        rest = [
+            (
+                key,
+                repr(item)
+                if key in ("start", "spacing", "plane")
+                else self.value(item),
+            )
+            for key, item in given.items()
+        ]
+        arguments = ", ".join([*parts, *(f"{key}={code}" for key, code in rest)])
+        return f"{name}.{op}({arguments})"

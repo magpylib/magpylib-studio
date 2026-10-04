@@ -8,7 +8,7 @@ from sliders, and a sensor sweeping past a magnet.
 | -------------------- | ---------------------------------------------------------- |
 | `marimo_demo.py`     | `marimo edit examples/marimo_demo.py`                      |
 | `jupyter_demo.ipynb` | VS Code, or `jupyter lab examples/jupyter_demo.ipynb`      |
-| `builder_demo.py`    | `python examples/builder_demo.py`, or its cells in VS Code |
+| `builder_demo.py`    | VS Code: **Open in Magpylib Studio** (title bar), or run its cells |
 
 Both need the widget extra, and magpylib's main branch — the display-backend API
 they draw through is in no release yet:

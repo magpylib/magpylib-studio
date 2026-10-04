@@ -68,10 +68,15 @@ halbach and quiver examples written with it are the examples' own documents.
 `load_script` names the variables it turned into numbers. Demo:
 `examples/builder_demo.py`.
 
-**Next.** B2, `to_builder_script` and the property test over every example; B3,
-what the script tab shows and whether its save applies. Structure kept in sync
-as a layer of GUI steps over a script's (`docs/builder.md` §7, level 2) is
-designed, not started.
+**Done (B2).** `to_builder_script()`: the scene as builder code which, run,
+builds the same document -- tested over every example and a panel-edited scene.
+A builder script opens in the studio as the scene it built (`load_script`), and
+`SceneWidget.variable_sliders()` gives a notebook the Variables panel's
+controls. `examples/builder_demo.py` is written for all three ways in.
+
+**Next.** B3, what the script tab shows and whether its save applies. Structure
+kept in sync as a layer of GUI steps over a script's (`docs/builder.md` §7,
+level 2) is designed, not started.
 
 ### F2 — Parameterised instancing
 
