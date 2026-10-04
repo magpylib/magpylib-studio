@@ -30,13 +30,17 @@ Writes into OUT:
   ``get_scene`` and ``object_tree``;
 * ``collection.json`` -- an editable view of two magnets held as one
   collection, and the scene its session answers `get_scene` with;
-* ``expected.json`` -- what the check compares against: the camera, and the
-  legend's rows in tree order.
+* ``small.html`` -- a ring of centimetre magnets, edited (so drawn in metres,
+  as a session draws), saved never drawn: the page frames it itself, as a
+  notebook's first look does;
+* ``expected.json`` -- what the check compares against: the camera, the
+  legend's rows in tree order, and the small ring's span.
 """
 
 import json
 import pathlib
 import sys
+import warnings
 
 import magpylib as magpy
 import numpy as np
@@ -72,6 +76,22 @@ def ring(label, z):
             for i in range(4)
         ],
         style_label=label,
+    )
+
+
+def small_ring():
+    """Six 1 cm magnets on a 2.3 cm ring: an assembly's real size, in metres,
+    which is a long way below the unit cube a three.js helper starts as."""
+    return magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(1, 0, 0),
+                dimension=(0.01, 0.01, 0.01),
+                position=(0.023, 0, 0),
+            ).rotate_from_angax(60 * i, "z", anchor=0)
+            for i in range(6)
+        ],
+        style_label="small",
     )
 
 
@@ -212,8 +232,19 @@ def main(out):
         json.dumps({"state": held.get_state(), "scene": held.payload})
     )
 
+    # Edited, so its session draws it in metres -- magpylib's own display would
+    # pick millimetres, where 56 of them are nothing like small. Never drawn,
+    # so no camera: the page frames it, with its axes on.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the ring's magnets have no names
+        small = SceneWidget(small_ring(), editable=True)
+    if small._camera is not None or not small.axes:
+        raise SystemExit("small.html: a view never drawn, with its axes on")
+    small.write_html(out / "small.html")
+    span = max(high - low for low, high in small.payload["ranges"])
+
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
-    expected = {"camera": CAMERA, "rows": rows}
+    expected = {"camera": CAMERA, "rows": rows, "small_span": span}
     (out / "expected.json").write_text(json.dumps(expected))
 
 

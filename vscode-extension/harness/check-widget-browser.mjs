@@ -446,6 +446,39 @@ async function lateCompany(port, base) {
 /** The legend's first look, by the room the view has. The scene is a stack
  *  of two rings of four and a probe: twelve rows open in full, four with
  *  the rings folded, two with everything folded. */
+/** A scene in centimetres, framed by the page itself: it fills the view.
+ *
+ * The first fit frames the axes with the objects, and comes before any frame
+ * is drawn. Measured then, the axes' box was the unit cube a Box3Helper is
+ * built as -- placed on its box only when a render calls for it -- so a scene
+ * a few centimetres across opened as a speck in two metres of nothing. */
+async function firstLook(port, base, expected) {
+  await check("a scene in centimetres fills its first look", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/small.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.cameraState()`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      await wait(300);
+      const camera = await tab.evaluate("return window.scene3d.cameraState()");
+      const distance = Math.hypot(
+        ...camera.position.map((p, i) => p - camera.target[i]),
+      );
+      // fitted, the camera stands about three spans off; framed round the
+      // unit cube it stood nearly ninety away
+      const spans = distance / expected.small_span;
+      return spans < 5
+        ? thrown(tab)
+        : `the camera is ${spans.toFixed(0)} spans away`;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 async function room(port, base, expected) {
   const all = expected.rows;
   const rings = ["stack", "upper", "lower", "probe"];
@@ -1453,6 +1486,7 @@ try {
   await editing(browser.port, base);
   await collection(browser.port, base);
   await savedView(browser.port, base, out, expected);
+  await firstLook(browser.port, base, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {
   browser.proc.kill("SIGKILL"); // a renderer that is locked up ignores less

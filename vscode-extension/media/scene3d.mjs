@@ -1227,6 +1227,12 @@ function drawAxes(ranges, labels) {
   }
   axes.visible = axesShown;
   scene.add(axes);
+  // Placed now, not at the first frame. A Box3Helper is the unit cube it is
+  // built as until `updateMatrixWorld` fits it to its box, which a render
+  // calls and a measurement does not -- and the first fit, which frames the
+  // axes with the objects, comes before any render. Measured unplaced, a
+  // scene in centimetres was framed as two metres of nothing round a speck.
+  axes.updateMatrixWorld(true);
 }
 
 /** Drop every node but the ones held, freeing what they hold on the GPU.
