@@ -2,10 +2,10 @@
 
 **Status: B1 is built**, with formulas (`s.sampled`) and saved values
 (`Scene(values=…)`) (`magpylib_studio/build.py`, `tests/test_build.py`,
-`examples/builder_demo.py`); B2 and B3 are not. Written on the one-way branch
-(#12) because #12 removes the only way to write parametric code and get a
-document back, and this is what replaces it. #12 should be judged with it, not
-without.
+`examples/builder_demo.py`), and so is B2 (`to_builder_script`); B3 is not.
+Written on the one-way branch (#12) because #12 removes the only way to write
+parametric code and get a document back, and this is what replaces it. #12
+should be judged with it, not without.
 
 ---
 
@@ -192,15 +192,18 @@ would read almost line for line alike.
 - **`to_script` stays the plain magpylib export.** A script anyone can run
   without studio is worth keeping as it is.
 - **The save flow is provisional.** #12's "Build a new scene from this" imports
-  by executing plain magpylib, which flattens. A `to_builder_script()` that
-  emits one builder call per event would make that import lossless for
-  everything the builder covers, and would let the script tab show builder code.
+  by executing plain magpylib, which flattens. `to_builder_script()` emits one
+  builder call per step instead, which makes that import lossless, and would let
+  the script tab show builder code.
 
 That last one is a round trip, but through execution rather than parsing. The
-emitter has one call per operation to produce. Whether
-`exec(to_builder_script(doc))` rebuilds `doc` is a property you can test over
-every example, not an idiom-by-idiom agreement between an emitter and a parser
-(`direction.md` §2). Whether the tab shows builder code, and whether its save
+emitter has one call per operation to produce, and whether
+`exec(to_builder_script(doc))` rebuilds `doc` is a property tested over every
+example and over a scene edited the way the panel edits one -- not an
+idiom-by-idiom agreement between an emitter and a parser (`direction.md` §2).
+Poses are the one subtlety: the panel merges a pin into the pin it follows, so a
+pose is written as one `set_transform` with both halves, and a reparent replays
+through the same merge. Whether the tab shows builder code, and whether its save
 then applies, is the decision to make here: before #12 merges, or with #12
 shipped as is and this revisiting it.
 
@@ -216,8 +219,10 @@ use). Byte equality would also pin where root-level creates fall, which §3 says
 does not matter. The dict-building functions behind `EXAMPLES` could then become
 those scripts, and the repo would stop writing scenes in the protocol.
 
-**B2 — `to_builder_script`.** One call per event, and the property test above
-over every example.
+**B2 — `to_builder_script` ✅.** One call per step, and the property test above:
+every example, and a scene edited in the panel's ways (drags pinned in front of
+a pattern, moves, turns, a reparent, a hidden ring, an object made and removed),
+come back as the same document.
 
 **B3 — the script tab.** Builder code or plain magpylib, and apply-on-save or
 explicit import (§5).
@@ -272,11 +277,17 @@ that, three levels:
    because the script is machine-owned: helpers, loops and comments are
    normalized away at the next GUI edit.
 
-**And the one way back that is not a builder script says what it lost.**
-`load_script` runs a script and keeps what it built; its top-level numbers come
-back as numbers. The import now names them (a loop's index, read off the
-compiled script, excepted), where before a scene with sliders could come back
-with none and say nothing.
+**A builder script opens whole.** `load_script` -- Open in Magpylib Studio, and
+the script tab's "Build a new scene from this" -- runs a script; one that left a
+`Scene` behind made a document, and that document is what opens: variables,
+formulas and patterns, with nothing to guess and nothing to warn about. In a
+notebook, `SceneWidget(scene, editable=True).variable_sliders()` is the
+Variables panel's controls for the same scene, bound both ways.
+
+**Any other script says what it lost.** `load_script` keeps what a plain
+magpylib script built; its top-level numbers come back as numbers. The import
+now names them (a loop's index, read off the compiled script, excepted), where
+before a scene with sliders could come back with none and say nothing.
 
 ---
 
@@ -314,7 +325,10 @@ Each has a provisional answer in B1, to revisit with use.
   a `Scene` edits its session rather than a copy.
 - **Coverage.** Editor state such as `overridden`, mesh stamps and hidden
   styles: builder calls, or out of scope and carried some other way? B2's
-  property test forces the answer. _B1:_ out of scope.
+  property test forces the answer. _B2:_ everything a person or an agent can
+  make is written -- a hidden object as its style before hiding, then `hide()`
+  -- and the one piece of editor state with no call, an expression a resize set
+  aside (`overridden`), is named in a comment at the top of the script.
 - **numpy.** Support `np.sin(handle)` through `__array_ufunc__`, or refuse numpy
   on handles entirely and keep one way to say it? _B1:_ numpy's arithmetic and
   the functions an expression has are written as expressions (so `np.pi * r` and

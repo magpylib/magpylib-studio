@@ -1,166 +1,137 @@
 # %% [markdown]
-# # A scene written in code
+# # A Halbach ring, written in code
 #
-# The studio's halbach example, written with `magpylib_studio.build`:
-# magpylib's spelling, with variables that stay variables.
+# Two stacked rings of magnets whose polarization turns twice for every turn
+# round the ring, which is what makes the field in the bore nearly uniform,
+# and a grid of arrows across the bore that shows it. Written with
+# `magpylib_studio.build`: magpylib's spelling, with variables that stay
+# variables, so the scene is one parametric document wherever it opens.
 #
-# **Run its cells** to see it: in VS Code, _Run Cell_ above each `# %%` (or
-# _Jupyter: Run All Cells_), with the repo's `.venv` as the kernel. The last
-# cell is the 3D view with sliders on the variables. Run as a script
-# (`python examples/builder_demo.py`) there is no kernel to draw a widget in,
-# so it prints, and opens a still copy of the view in your browser.
+# Three ways to see it:
+#
+# - **Open in Magpylib Studio** -- the button in the editor's title bar, or
+#   right-click the file. The studio runs this file and opens the scene it
+#   built, whole: every variable is a slider in its Variables panel.
+# - **As a notebook** -- run its cells. The last one is the 3D view of this
+#   scene, with a slider per variable.
+# - **`python examples/builder_demo.py`** -- what it built, in words.
+#
+# Save the scene beside this file from the studio (Save Scene As…,
+# `builder_demo.magpy.json`), and the next run starts where you left the
+# sliders: the numbers below are defaults, and the saved ones win.
 
 # %%
 import pathlib
-import tempfile
-import webbrowser
-
-import ipywidgets as widgets
-import numpy as np
-from IPython import get_ipython
-from IPython.display import display
 
 from magpylib_studio.build import Scene
-from magpylib_studio.widget import SceneWidget
 
-# The variables' values come from the scene this file saves, once it has saved
-# one: drag a slider in the studio panel, save, run this again, and the script
-# rebuilds the scene where you left the slider.
-saved = pathlib.Path(tempfile.gettempdir()) / "halbach-built.magpy.json"
-s = Scene(values=saved)
-n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
-radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), slider=(0.016, 0.04))
-gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03))
-stagger = s.variable("stagger", 360 / (2 * n))  # half a magnet step, always
-tilt = s.variable("tilt", 0.0, bounds=(-180, 180), slider=(-90, 90))
-tilt_axis = s.variable("tilt_axis", "z", options=("x", "y", "z"))
+here = pathlib.Path(globals().get("__file__", "builder_demo.py")).resolve().parent
+s = Scene(values=here / "builder_demo.magpy.json")
 
-halbach = s.Collection(id="halbach", style_label="Halbach stack")
-rings, magnets = {}, {}
-for number, z in ((1, 0.0), (2, gap)):  # a loop over fixed things is plain Python
+n = s.variable("n", 12, bounds=(4, 48), slider=(6, 24), integer=True)
+radius = s.variable("radius", 0.025, bounds=(0.01, 0.1), slider=(0.018, 0.04))
+gap = s.variable("gap", 0.012, bounds=(0.006, 0.05), slider=(0.009, 0.03))
+stagger = s.variable("stagger", 180 / n)  # half a magnet step, whatever n is
+density = s.variable("density", 7, bounds=(2, 25), slider=(3, 15), integer=True)
+
+# %% [markdown]
+# Each ring is one magnet and one step that patterns it round the axis, not
+# `n` magnets written out: change `n` and both rings follow. Each copy is
+# carried round the ring *and* spun by as much again, so its polarization
+# turns twice per revolution -- a Halbach dipole. A loop over fixed things
+# (the two rings) is plain Python.
+
+# %%
+stack = s.Collection(id="stack", style_label="Halbach stack")
+rings = {}
+for number, z in ((1, -gap / 2), (2, gap / 2)):
     rings[number] = s.Collection(id=f"ring{number}", style_label=f"Ring {number}")
-    halbach.add(rings[number])
-    magnets[number] = s.magnet.Cuboid(
-        id=f"r{number}",
+    stack.add(rings[number])  # the outermost first: see docs/builder.md §3
+    magnet = s.magnet.Cuboid(
+        id=f"magnet{number}",
         style_label=f"Magnet {number}",
-        dimension=(0.01, 0.01, 0.01),
+        dimension=(0.008, 0.008, 0.008),
         polarization=(1, 0, 0),
         position=(radius, 0, z),
     )
-    rings[number].add(magnets[number])
-s.Sensor(
-    id="sensor",
-    style_label="Sensor",
-    style_size=0.005,
-    position=np.linspace((0, 0, -0.015), (0, 0, 0.03), 25),
-)
-for magnet in magnets.values():
-    magnet.duplicate_around(count=n, axis="z", spin=360 / n)  # a pattern, not copies
+    rings[number].add(magnet)
+    magnet.duplicate_around(count=n, axis="z", spin=360 / n)
+
+# Interleaved: the upper ring sits half a step round from the lower one.
 rings[2].rotate_from_angax(stagger, "z", anchor=0)
-halbach.rotate_from_angax(tilt, tilt_axis, anchor=0)
 
 # %% [markdown]
-# The document keeps what the code said: `"=radius"` where running a script
-# would have kept 0.023, and each ring as the one step that patterns it.
+# The field in the bore, as arrows: a `density` × `density` grid across the
+# middle half of the ring. It is a formula of `t`, the sample, so it follows
+# `radius` and `density` -- which `np.linspace` over a variable could not,
+# since it needs the count now.
+
+# %%
+reach = radius / 2  # plain Python holding an expression, not a variable
+s.Sensor(
+    id="bore",
+    pixel=s.sampled(
+        lambda t: (
+            -reach + 2 * reach * (t % density) / (density - 1),
+            -reach + 2 * reach * (t // density) / (density - 1),
+            0,
+        ),
+        count=density**2,
+        over=(0, density**2 - 1),
+    ),
+    style={
+        "label": "Field in the bore",
+        "size": 0.004,
+        "pixel.field.source": "B",
+        "pixel.field.symbol": "arrow3d",
+        "pixel.field.colormap": "Viridis",
+    },
+)
+
+# %% [markdown]
+# What the document keeps: the variables as written, and each magnet at
+# `"=radius"` rather than at the number it is today.
 
 # %%
 doc = s.to_dict()
 print("variables:", doc["variables"])
 for event in doc["events"]:
-    if event["target"] == "r1":
-        print(event["op"], {k: v for k, v in event.items() if k not in ("id", "op")})
+    if event["op"] == "create" and event["target"] == "magnet1":
+        print("magnet1 is at", event["params"]["position"])
 
 # %% [markdown]
-# So the scene follows its variables. Here from Python; the sliders below and
-# the studio's Variables panel do the same.
+# And two ways out. `to_script()` is plain magpylib, for anyone without the
+# studio; `to_builder_script()` writes this scene as builder code again,
+# which run builds the same document.
 
 # %%
-session = s.session
-written = session.get_transform("r1")["written_position"]
-print("r1 is written at", written, "and is at", session.get_transform("r1")["position"])
-session.set_variable("radius", 0.03)
-print("with radius 0.03 it is at", session.get_transform("r1")["position"])
-session.undo()
+plain = s.to_script().splitlines()
+print("\n".join([*plain[:14], "…"]))
 
 # %% [markdown]
-# Plain magpylib, for anyone without the studio: the export.
+# In a notebook: a view of this very scene -- not a copy -- with a control
+# per variable. Drag a magnet, or move a slider; undo in the view takes either
+# back, and the sliders follow. Outside one, the way in is the studio.
 
 # %%
-print(s.to_script())
+try:
+    from IPython import get_ipython
 
-# %% [markdown]
-# Saved as the studio saves a scene. In VS Code, open it with **Magpylib
-# Studio: Open Scene…**, drag `radius`, `n` or `tilt` in the Variables panel
-# and save: the next run of this file starts from there.
+    kernel = getattr(get_ipython(), "kernel", None)
+except ImportError:
+    kernel = None
 
-# %%
-s.save(saved)
-print("saved to", saved)
+if kernel is not None:
+    import ipywidgets as widgets
+    from IPython.display import display
 
-# %% [markdown]
-# In a notebook: a view of this very scene -- not a copy -- with sliders on
-# its variables. Drag a magnet, or move a slider; undo in the view (Cmd/Ctrl+Z)
-# takes either back, and the sliders follow.
+    from magpylib_studio.widget import SceneWidget
 
-# %%
-view = SceneWidget(s, editable=True, height=460)
-
-
-def values():
-    return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
-
-
-now = values()  # where the sliders were left, if the saved scene said
-sliders = {
-    "n": widgets.IntSlider(now["n"], min=4, max=20, description="n"),
-    "radius": widgets.FloatSlider(
-        now["radius"],
-        min=0.016,
-        max=0.04,
-        step=0.001,
-        readout_format=".3f",
-        description="radius",
-    ),
-    "gap": widgets.FloatSlider(
-        now["gap"],
-        min=0.01,
-        max=0.03,
-        step=0.001,
-        readout_format=".3f",
-        description="gap",
-    ),
-    "tilt": widgets.FloatSlider(
-        now["tilt"], min=-90, max=90, step=5, description="tilt °"
-    ),
-}
-
-
-def from_slider(name):
-    def moved(change):
-        if values()[name] != change["new"]:  # a slider's echo of the view is no edit
-            view.set_variable(name, change["new"])
-
-    return moved
-
-
-def from_view(change):
-    now = values()
-    for name, slider in sliders.items():
-        slider.value = now[name]
-
-
-for name, slider in sliders.items():
-    slider.observe(from_slider(name), "value")
-view.observe(from_view, "revision")
-
-if getattr(get_ipython(), "kernel", None) is not None:
-    display(widgets.VBox([*sliders.values(), view]))
+    view = SceneWidget(s, editable=True, height=480)
+    display(widgets.VBox([view.variable_sliders(), view]))
 else:
-    # `python builder_demo.py`: nothing here can draw a widget, and nothing
-    # would answer its sliders. The view as a page still orbits, picks and
-    # shows the legend; the sliders are for the cells.
-    page = pathlib.Path(tempfile.gettempdir()) / "halbach-built.html"
-    view.write_html(page, title="Halbach stack, written in code")
-    print(f"no kernel to draw the view in, so it opens in your browser: {page}")
-    print("for the sliders, run this file's cells (VS Code: Run Cell)")
-    webbrowser.open(page.as_uri())
+    print(
+        "\nTo see it and drag its variables: Open in Magpylib Studio (the "
+        "editor's title bar, or right-click this file), or run its cells as "
+        "a notebook."
+    )

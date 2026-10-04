@@ -3,6 +3,7 @@
 
 import json
 import math
+import pathlib
 
 import magpylib as magpy
 import numpy as np
@@ -12,6 +13,7 @@ from magpylib_studio.build import BuildError, Scene
 from magpylib_studio.session import MagpylibStudioSession
 
 CUBE = {"dimension": (0.01, 0.01, 0.01), "polarization": (0, 0, 1)}
+CUBE_POL = {"polarization": [0, 0, 1]}
 
 
 def halbach():
@@ -301,3 +303,127 @@ def test_a_saved_value_is_kept_across_runs_and_a_definition_is_not(tmp_path):
     mapped = Scene(values={"n": 4})
     mapped.variable("n", 10)
     assert mapped.to_dict()["variables"] == {"n": 4}
+
+
+# --- the other way: a scene as a builder script (B2) -------------------------
+
+
+def rebuilt(session):
+    """Run `session`'s builder script; the scene it builds."""
+    namespace = {}
+    exec(compile(session.to_builder_script(), "<builder>", "exec"), namespace)  # noqa: S102
+    (scene,) = [v for v in namespace.values() if isinstance(v, Scene)]
+    return scene
+
+
+def same_document(a, b):
+    """The same scene, step for step -- event ids aside, which are only the
+    log's own numbering."""
+    steps = lambda doc: [  # noqa: E731
+        {k: v for k, v in e.items() if k != "id"} for e in doc.get("events", [])
+    ]
+    keys = ("variables", "variable_bounds", "objects")
+    return steps(a) == steps(b) and all(a.get(k) == b.get(k) for k in keys)
+
+
+@pytest.mark.parametrize(
+    "example", [e["name"] for e in MagpylibStudioSession().list_examples()["examples"]]
+)
+def test_an_example_run_from_its_builder_script_is_the_same_document(example):
+    """Patterns stay patterns, formulas stay formulas, the slider limits stay
+    -- what running a plain magpylib export cannot give back."""
+    session = MagpylibStudioSession()
+    session.load_example(example)
+    assert same_document(rebuilt(session).to_dict(), session.to_dict())
+
+
+def test_a_scene_edited_in_the_panel_comes_back_from_its_script():
+    """A drag pinned in front of a pattern, a move, a turn, a reparent and the
+    pose that keeps it in place, an object made and removed, a hidden ring and
+    a slider moved: each the step the panel recorded."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    for method, args, kwargs in [
+        ("set_transform", ("sensor",), {"position": [0.001, 0.0, 0.0]}),
+        ("move", ("r2", [0, 0, 0.002]), {}),
+        ("rotate", ("ring1", 15), {"axis": "x"}),
+        (
+            "set_transform",
+            ("r1",),
+            {"position": [0.024, 0.001, 0], "orientation": [0, 0, 10]},
+        ),
+        ("move_object", ("sensor",), {"parent": "ring2"}),
+        ("set_visible", ("ring2", False), {}),
+        ("add_object", ("probe", "Sensor"), {"params": {"position": [0, 0, 0.05]}}),
+        ("remove_object", ("probe",), {}),
+        ("set_variable", ("radius", 0.027), {}),
+    ]:
+        assert getattr(session, method)(*args, **kwargs).get("ok", True)
+    script = session.to_builder_script()
+    assert "sensor.reparent(ring2)" in script
+    assert "ring2.hide()" in script
+    assert same_document(rebuilt(session).to_dict(), session.to_dict())
+
+
+def test_an_expressions_functions_and_constants_are_the_scenes():
+    session = MagpylibStudioSession()
+    assert session.set_variable("r", 0.02)["ok"]
+    assert session.set_variable("w", "=sin(pi / 4) * r")["ok"]
+    assert session.add_object(
+        "m", "magnet.Cuboid", params={"dimension": ["=w", 0.01, 0.01], **CUBE_POL}
+    )["ok"]
+    script = session.to_builder_script()
+    assert "w = s.variable('w', s.sin(s.pi / 4) * r)" in script
+    assert same_document(rebuilt(session).to_dict(), session.to_dict())
+
+
+def test_what_no_call_can_say_is_named_not_dropped():
+    """A resize over an expression keeps the expression aside, for the
+    Variables panel to give back -- editor state, which the script names at
+    the top rather than writing or losing without a word."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    assert session.set_param("r1", "position", [0.03, 0, 0])["ok"]
+    script = session.to_builder_script()
+    assert script.startswith("# not written: overridden on r1")
+    rebuilt(session)  # and it still runs
+
+
+def test_a_builder_script_opens_in_the_studio_as_the_scene_it_built(tmp_path, capsys):
+    """Open in Magpylib Studio runs the script, and a script that built a
+    Scene is that scene: nothing to guess from objects, nothing lost, and
+    nothing to warn about. What it prints is its own, on stderr -- stdout is
+    the channel the engine answers on."""
+    path = tmp_path / "ring.py"
+    path.write_text(
+        "from magpylib_studio.build import Scene\n"
+        "s = Scene()\n"
+        "n = s.variable('n', 6, bounds=(2, 20), integer=True)\n"
+        "r = s.variable('r', 0.02)\n"
+        "m = s.magnet.Cuboid(id='m', dimension=(0.005,) * 3, polarization=(1, 0, 0),\n"
+        "                    position=(r, 0, 0))\n"
+        "s.Collection(m, id='ring')\n"
+        "m.duplicate_around(count=n, axis='z', spin=360 / n)\n"
+        "print('built it')\n",
+        encoding="utf-8",
+    )
+    studio = MagpylibStudioSession()
+    result = studio.load_script(str(path))
+    assert result["ok"] is True
+    assert "warnings" not in result
+    printed = capsys.readouterr()
+    assert "built it" in printed.err and "built it" not in printed.out
+    namespace = {}
+    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102
+    assert same_document(studio.to_dict(), namespace["s"].to_dict())
+
+
+def test_the_demo_opens_in_the_studio():
+    """What the demo's first line promises, kept true: no notebook, no
+    browser, nothing a kernel-less engine cannot run."""
+    demo = pathlib.Path(__file__).parent.parent / "examples" / "builder_demo.py"
+    studio = MagpylibStudioSession()
+    assert studio.load_script(str(demo))["ok"] is True
+    variables = studio.to_dict()["variables"]
+    assert {"n", "radius", "gap", "stagger", "density"} <= set(variables)
+    assert studio.get_scene()["readings"] == ["bore"]

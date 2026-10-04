@@ -1035,6 +1035,42 @@ def test_a_scene_written_in_code_is_edited_as_it_is():
 
 
 @needs_scene_graph
+def test_a_views_variables_get_controls_bound_both_ways():
+    """A slider per variable with a range, a dropdown for one with options,
+    nothing for one that follows the others or has nowhere to slide; moved,
+    they set the variable, and an undo in the view moves them back."""
+    from magpylib_studio.build import Scene
+
+    s = Scene()
+    n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
+    r = s.variable("r", 0.02, bounds=(0.005, 0.08))
+    s.variable("half", r / 2)
+    axis = s.variable("axis", "z", options=("x", "y", "z"))
+    s.variable("free", 3.0)
+    magnet = s.magnet.Cuboid(
+        id="m", dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
+    )
+    s.Collection(magnet, id="ring")
+    magnet.duplicate_around(count=n, axis=axis)
+    studio = widget.SceneWidget(s, editable=True)
+    controls = {c.description: c for c in studio.variable_sliders().children}
+    assert {name: type(c).__name__ for name, c in controls.items()} == {
+        "n": "IntSlider",
+        "r": "FloatSlider",
+        "axis": "Dropdown",
+    }
+    assert (controls["n"].min, controls["n"].max) == (4, 20)  # the slider range
+
+    controls["r"].value = 0.03
+    assert studio.objects["m"].position == pytest.approx([0.03, 0, 0])
+    controls["axis"].value = "x"
+    assert studio.undo()
+    assert controls["axis"].value == "z"
+    assert studio.undo()
+    assert controls["r"].value == pytest.approx(0.02)
+
+
+@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()

@@ -4268,6 +4268,27 @@ class MagpylibStudioSession:
         candidates = []
         try:
             namespace, captured, code = importer.run_script(path)
+            # A script written with the builder made a document, not objects
+            # to guess one from: that is the scene, whole -- variables,
+            # formulas and patterns -- and nothing has to be said about what
+            # running it lost, because nothing was.
+            from magpylib_studio.build import Scene
+
+            built = [
+                (name, value)
+                for name, value in namespace.items()
+                if not name.startswith("_") and isinstance(value, Scene)
+            ]
+            if built:
+                self._captured_scenes = [
+                    {
+                        "label": f"{name} (the scene the script built)",
+                        "doc": written.to_dict(),
+                        "warnings": [],
+                    }
+                    for name, written in built
+                ]
+                return self.load_captured(scene)
             for i, objects in enumerate(captured):
                 try:
                     doc, warnings = importer.document_from_objects(objects, namespace)
@@ -5093,6 +5114,15 @@ class MagpylibStudioSession:
         body.append("    _copies.append(_copy)")
         body.append(f"{self._parent_at(event.get('id'), target)}.add(*_copies)")
         return body
+
+    def to_builder_script(self):
+        """The scene as a `magpylib_studio.build` script which, run, builds
+        this document again -- variables, formulas and patterns included.
+        `to_script` is for anyone with magpylib; this is for whoever keeps
+        the scene as code. See `docs/builder.md`."""
+        from magpylib_studio import build
+
+        return build.script_of(self)
 
     def to_script(self):
         """The document as runnable magpylib, folded in log order.

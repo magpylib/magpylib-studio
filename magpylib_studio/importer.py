@@ -11,9 +11,11 @@ imports as 10 concrete objects).
 
 from __future__ import annotations
 
+import contextlib
 import dis
 import keyword
 import re
+import sys
 
 import magpylib as magpy
 import numpy as np
@@ -397,7 +399,11 @@ def run_script(path):
         setattr(owner, name, _capture_show)
     code = compile(source, str(path), "exec")
     try:
-        exec(code, namespace)  # noqa: S102 - the point
+        # What the script prints is the script's to say, on stderr: stdout is
+        # the channel the engine answers on, and a print there is a line the
+        # editor has to read past.
+        with contextlib.redirect_stdout(sys.stderr):
+            exec(code, namespace)  # noqa: S102 - the point
     finally:
         for (owner, name), original in zip(targets, originals, strict=True):
             setattr(owner, name, original)
