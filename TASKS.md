@@ -62,11 +62,16 @@ variables to export to Maxwell.
 
 **Done (B1).** `Scene`, variables as handles that refuse to be evaluated, lazy
 creates so `.add()` never reparents, `SceneWidget(scene, editable=True)` and
-`SceneWidget.set_variable`. The halbach example written with it has the
-example's variables, bounds and field. Demo: `examples/builder_demo.py`.
+`SceneWidget.set_variable`, `s.sampled` for a run of points as a formula, and
+`Scene(values=…)` so a slider left in a saved scene survives a re-run. The
+halbach and quiver examples written with it are the examples' own documents.
+`load_script` names the variables it turned into numbers. Demo:
+`examples/builder_demo.py`.
 
 **Next.** B2, `to_builder_script` and the property test over every example; B3,
-what the script tab shows and whether its save applies.
+what the script tab shows and whether its save applies. Structure kept in sync
+as a layer of GUI steps over a script's (`docs/builder.md` §7, level 2) is
+designed, not started.
 
 ### F2 — Parameterised instancing
 

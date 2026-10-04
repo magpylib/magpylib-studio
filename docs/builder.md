@@ -1,6 +1,7 @@
 # Writing a scene in code — design
 
-**Status: B1 is built** (`magpylib_studio/build.py`, `tests/test_build.py`,
+**Status: B1 is built**, with formulas (`s.sampled`) and saved values
+(`Scene(values=…)`) (`magpylib_studio/build.py`, `tests/test_build.py`,
 `examples/builder_demo.py`); B2 and B3 are not. Written on the one-way branch
 (#12) because #12 removes the only way to write parametric code and get a
 document back, and this is what replaces it. #12 should be judged with it, not
@@ -103,10 +104,10 @@ drift.
 **2. Anything the document cannot hold fails at its line.** `if radius > 0.01:`,
 `range(n)`, `float(radius)`, `math.sin(radius)` and `np.linspace(0, radius)` all
 raise, and the message names the alternative: `duplicate_around(count=n)` for a
-loop, `s.sin` for a function. Never evaluate silently. A silent evaluation is
-the cliff come back: a script that runs fine and loses its parametrisation
-without a word. Python control flow over _literals_ stays ordinary, as the ring
-loop above shows.
+loop, `s.sin` for a function, `s.sampled` for a run of points (§7). Never
+evaluate silently. A silent evaluation is the cliff come back: a script that
+runs fine and loses its parametrisation without a word. Python control flow over
+_literals_ stays ordinary, as the ring loop above shows.
 
 **3. Names follow magpylib.** `s.magnet.Cuboid`, `s.Collection`, `s.Sensor`,
 `style_label=`, `.rotate_from_angax(angle, axis, anchor)`,
@@ -143,7 +144,7 @@ example: `halbach.add(ring)` before `ring.add(magnet)`, or the ring would enter
 the scene at the root and have to be moved.
 
 That keeps magpylib's spelling. Whether it is too clever next to a plain
-`parent=` keyword is open (§8).
+`parent=` keyword is open (§9).
 
 ---
 
@@ -167,7 +168,7 @@ and nothing to keep in agreement with it.
 - §7 traced what magpylib built, which is numbers after evaluation. Handles
   record the expressions, and that is what keeps the result parametric.
 - §7's worry about a small unfamiliar Python API still stands. Rule 3 is the
-  answer offered, and §7 below says how to find out whether it is enough.
+  answer offered, and §8 below says how to find out whether it is enough.
 
 **Every system that records a program by running it refuses to branch on what it
 is recording.** JAX raises when a traced value reaches an `if` under `jit`.
@@ -235,7 +236,51 @@ exists, placing one is one more builder call.
 
 ---
 
-## 7. What would make this wrong
+## 7. Formulas, and keeping a script and a scene in sync
+
+**A run of points is a formula.** The document can say "the quiver's arrows are
+`density²` points, laid out by this formula of `t`" (a `sampled` node), which
+`np.linspace` over a variable cannot: it needs the count now.
+`s.sampled(of, count=…, over=…)` calls `of` once with a symbolic `t` and writes
+the node, so the quiver written with the builder is the example's own document,
+and `density` still decides how many arrows there are.
+
+**The document is the source of truth.** A builder script produces it once, when
+it runs; after that the two are independent. That allows two ways of working,
+one upstream per scene: the document first (the GUI and agents edit it, scripts
+are exports), or the script first (it is in git, the document is rebuilt from
+it, and the GUI is for exploring). What breaks is treating both as upstream of
+the same scene.
+
+**How much can be kept in sync without parsing.** Writing a GUI edit back into
+hand-written code means finding and rewriting text, which is parsing. Short of
+that, three levels:
+
+1. **Values — built.** `Scene(values=path)`: the script declares the variables,
+   the saved scene holds their values, and the next run takes them. A number in
+   the script is a default and the file wins; an expression is a definition and
+   the script wins. OpenSCAD's Customizer is the same split (`direction.md` §4,
+   finding 6), and it covers the commonest edit: a slider.
+2. **Structure, as a layer — designed, not built.** The scene file records which
+   steps the script made; GUI edits are a layer of steps on top, by object id; a
+   re-run swaps the script's steps and replays the layer, reporting any that no
+   longer apply (which the session already does for a scene it opens). Nothing
+   is parsed or rewritten. It is an override layer, though, and `instancing.md`
+   warns that Godot's override bugs live exactly there.
+3. **The script as a generated view — B3.** Regenerate the builder script from
+   the document on every edit and apply its save by execution. Always in sync,
+   because the script is machine-owned: helpers, loops and comments are
+   normalized away at the next GUI edit.
+
+**And the one way back that is not a builder script says what it lost.**
+`load_script` runs a script and keeps what it built; its top-level numbers come
+back as numbers. The import now names them (a loop's index, read off the
+compiled script, excepted), where before a scene with sliders could come back
+with none and say nothing.
+
+---
+
+## 8. What would make this wrong
 
 1. **Nobody writes scenes in code.** If the GUI, and agents over the LM tools,
    cover it, the builder is surface for nobody and `direction.md` §1's tax for
@@ -251,7 +296,7 @@ exists, placing one is one more builder call.
 
 ---
 
-## 8. Open questions, and what B1 chose for now
+## 9. Open questions, and what B1 chose for now
 
 Each has a provisional answer in B1, to revisit with use.
 
