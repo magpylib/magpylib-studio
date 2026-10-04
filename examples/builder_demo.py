@@ -2,23 +2,32 @@
 # # A scene written in code
 #
 # The studio's halbach example, written with `magpylib_studio.build`:
-# magpylib's spelling, with variables that stay variables. Run the file as a
-# script to see the document it builds, the magpylib it exports, and where it
-# saved the scene. Run its cells in VS Code's interactive window, or a
-# notebook, to drag it and to drive its variables from sliders.
+# magpylib's spelling, with variables that stay variables.
+#
+# **Run its cells** to see it: in VS Code, _Run Cell_ above each `# %%` (or
+# _Jupyter: Run All Cells_), with the repo's `.venv` as the kernel. The last
+# cell is the 3D view with sliders on the variables. Run as a script
+# (`python examples/builder_demo.py`) there is no kernel to draw a widget in,
+# so it prints, and opens a still copy of the view in your browser.
 
 # %%
 import pathlib
 import tempfile
+import webbrowser
 
 import ipywidgets as widgets
 import numpy as np
+from IPython import get_ipython
 from IPython.display import display
 
 from magpylib_studio.build import Scene
 from magpylib_studio.widget import SceneWidget
 
-s = Scene()
+# The variables' values come from the scene this file saves, once it has saved
+# one: drag a slider in the studio panel, save, run this again, and the script
+# rebuilds the scene where you left the slider.
+saved = pathlib.Path(tempfile.gettempdir()) / "halbach-built.magpy.json"
+s = Scene(values=saved)
 n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
 radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), slider=(0.016, 0.04))
 gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03))
@@ -81,10 +90,11 @@ print(s.to_script())
 
 # %% [markdown]
 # Saved as the studio saves a scene. In VS Code, open it with **Magpylib
-# Studio: Open Scene…** and drag `radius`, `n` or `tilt` in the Variables panel.
+# Studio: Open Scene…**, drag `radius`, `n` or `tilt` in the Variables panel
+# and save: the next run of this file starts from there.
 
 # %%
-saved = s.save(pathlib.Path(tempfile.gettempdir()) / "halbach-built.magpy.json")
+s.save(saved)
 print("saved to", saved)
 
 # %% [markdown]
@@ -94,10 +104,17 @@ print("saved to", saved)
 
 # %%
 view = SceneWidget(s, editable=True, height=460)
+
+
+def values():
+    return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
+
+
+now = values()  # where the sliders were left, if the saved scene said
 sliders = {
-    "n": widgets.IntSlider(10, min=4, max=20, description="n"),
+    "n": widgets.IntSlider(now["n"], min=4, max=20, description="n"),
     "radius": widgets.FloatSlider(
-        0.023,
+        now["radius"],
         min=0.016,
         max=0.04,
         step=0.001,
@@ -105,14 +122,17 @@ sliders = {
         description="radius",
     ),
     "gap": widgets.FloatSlider(
-        0.015, min=0.01, max=0.03, step=0.001, readout_format=".3f", description="gap"
+        now["gap"],
+        min=0.01,
+        max=0.03,
+        step=0.001,
+        readout_format=".3f",
+        description="gap",
     ),
-    "tilt": widgets.FloatSlider(0.0, min=-90, max=90, step=5, description="tilt °"),
+    "tilt": widgets.FloatSlider(
+        now["tilt"], min=-90, max=90, step=5, description="tilt °"
+    ),
 }
-
-
-def values():
-    return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
 
 
 def from_slider(name):
@@ -132,4 +152,15 @@ def from_view(change):
 for name, slider in sliders.items():
     slider.observe(from_slider(name), "value")
 view.observe(from_view, "revision")
-display(widgets.VBox([*sliders.values(), view]))
+
+if getattr(get_ipython(), "kernel", None) is not None:
+    display(widgets.VBox([*sliders.values(), view]))
+else:
+    # `python builder_demo.py`: nothing here can draw a widget, and nothing
+    # would answer its sliders. The view as a page still orbits, picks and
+    # shows the legend; the sliders are for the cells.
+    page = pathlib.Path(tempfile.gettempdir()) / "halbach-built.html"
+    view.write_html(page, title="Halbach stack, written in code")
+    print(f"no kernel to draw the view in, so it opens in your browser: {page}")
+    print("for the sliders, run this file's cells (VS Code: Run Cell)")
+    webbrowser.open(page.as_uri())

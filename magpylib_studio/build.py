@@ -255,11 +255,26 @@ def _function(name):
     return staticmethod(function)
 
 
+class Sampled:
+    """A run of points stated as a formula of a sample: the document's
+    sampled node, as `Scene.sampled` makes it."""
+
+    __slots__ = ("_spec",)
+
+    def __init__(self, spec):
+        self._spec = spec
+
+    def __repr__(self):
+        return f"<sampled {self._spec['of']} over {self._spec['over']}>"
+
+
 def _value(value):
     """`value` as the document writes it: an expression as `=` text, a
     vector as a list, a numpy number as a Python one."""
     if isinstance(value, Expression):
         return expressions.PREFIX + value._source
+    if isinstance(value, Sampled):
+        return {expressions.SAMPLED: value._spec}
     if isinstance(value, np.ndarray):
         return _value(value.tolist())
     if isinstance(value, list | tuple):
@@ -432,10 +447,23 @@ class Scene:
     `Scene()` builds one of its own; `Scene(session)` writes into a session
     that already holds a scene, as another way to edit it. Read it with
     `to_dict`, `to_script` or `save`, or show it: `SceneWidget(s, editable=True)`.
+
+    `values` is where the variables' values come from when there are some: a
+    saved scene, or a mapping of names to values. The script says what the
+    scene is; a slider dragged in the panel and saved says what a variable is
+    set to, and the next run keeps it -- see `variable`. A path to a file not
+    there yet is no values, so a script can read the file it is about to save.
     """
 
-    def __init__(self, session=None):
+    def __init__(self, session=None, *, values=None):
         self._session = session if session is not None else MagpylibStudioSession()
+        if isinstance(values, str | pathlib.PurePath):
+            path = pathlib.Path(values)
+            saved = (
+                json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            )
+            values = saved.get("variables") or {}
+        self._values = dict(values or {})
         #: Constructed, in order, for the ones never added or touched: they
         #: enter at the root when the scene is read.
         self._objects = []
@@ -463,9 +491,17 @@ class Scene:
 
         `value` is a number, a name (for a variable like an axis, with its
         `options`), or an expression over earlier variables. `bounds` are
-        the hard limits, `slider` the range worth dragging through."""
+        the hard limits, `slider` the range worth dragging through.
+
+        With `values` given to the scene, a number or a name here is a
+        default, and the saved value wins: that is a slider's position, kept
+        across runs. An expression is not a default but what the variable
+        *is*, so the script's wins -- a definition changed in the script
+        must not be undone by the file it last saved."""
         if any(v["name"] == name for v in self._session.get_variables()["variables"]):
             raise BuildError(f"there is already a variable {name!r}")
+        if name in self._values and not isinstance(value, Expression):
+            value = self._values[name]
         self._call("set_variable", name, _value(value))
         limits = {}
         if bounds is not None:
@@ -479,6 +515,32 @@ class Scene:
         if limits:
             self._call("set_variable_bounds", name, **limits)
         return Variable(name)
+
+    def sampled(self, of, *, count, over=(0, 1)):
+        """A run of points as a formula: `of(t)`, for `t` running across
+        `over` in `count` steps. Where a value is a run of points -- a
+        sensor's pixels, a path, a mesh's vertices -- this keeps it a formula
+        of the variables, count included, which `np.linspace` over a variable
+        cannot (it would need the count now):
+
+            grid = s.sampled(
+                lambda t: (t % n / (n - 1), t // n / (n - 1), 0),
+                count=n**2, over=(0, n**2 - 1),
+            )
+
+        `of` is called once, with `t` a variable like the others, and
+        returns one value for a run of numbers or one per component for a
+        run of points. Each is computed for the whole sample at once, as
+        numpy would, so `min` and `max` -- not elementwise -- are refused."""
+        sample = Expression(expressions.SAMPLE)
+        made = of(sample)
+        return Sampled(
+            {
+                "count": _arg(count),
+                "over": _arg(list(over)),
+                "of": _arg(list(made) if isinstance(made, tuple) else made),
+            }
+        )
 
     def Collection(self, *children, id=None, style=None, **kwargs):  # noqa: A002
         """magpylib's `Collection`, as the scene's."""

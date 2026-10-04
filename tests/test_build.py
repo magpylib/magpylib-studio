@@ -1,6 +1,7 @@
 """The builder: a scene written in code, with variables that stay variables
 (`docs/builder.md`)."""
 
+import json
 import math
 
 import magpylib as magpy
@@ -231,3 +232,72 @@ def test_the_script_of_a_scene_written_in_code_is_plain_magpylib():
     assert "import magpylib as magpy" in script
     assert "radius = 0.023" in script
     assert "for i in range(1, n):" in script
+
+
+def test_a_formula_over_a_variable_stays_one():
+    """The quiver's grid, written as the formula it is: `density` decides how
+    many arrows there are, which `np.linspace` over a variable cannot say."""
+    s = Scene()
+    lift = s.variable("lift", 0.01, bounds=(0.001, 0.1), slider=(0.005, 0.03))
+    width = s.variable("width", 0.03, bounds=(0.001, 0.1), slider=(0.01, 0.05))
+    density = s.variable("density", 12, bounds=(2, 40), slider=(4, 20), integer=True)
+    magnet = s.magnet.Cuboid(
+        id="magnet",
+        style_label="Turning magnet",
+        polarization=(0, 0, 1),
+        dimension=(0.01, width, 0.01),
+    )
+    grid = s.sampled(
+        lambda t: (
+            -0.02 + 0.04 * (t % density) / (density - 1),
+            -0.02 + 0.04 * (t // density) / (density - 1),
+            0,
+        ),
+        count=density**2,
+        over=(0, density**2 - 1),
+    )
+    s.Sensor(id="field", position=(0, 0, lift), pixel=grid, style_size=0.005)
+    magnet.rotate_from_angax(np.linspace(0, 360, 51), "y", start=0)
+
+    example = MagpylibStudioSession()
+    example.load_example("quiver")
+
+    def pixel(doc):
+        (create,) = [
+            e for e in doc["events"] if e["op"] == "create" and e["target"] == "field"
+        ]
+        return create["params"]["pixel"]
+
+    assert pixel(s.to_dict()) == pixel(example.to_dict())
+    assert np.allclose(field(s.session), field(example), rtol=1e-9, atol=1e-15)
+    session = s.session
+    assert np.asarray(session._objs["field"].pixel).reshape(-1, 3).shape[0] == 144
+    assert session.set_variable("density", 5) == {"ok": True}
+    assert np.asarray(session._objs["field"].pixel).reshape(-1, 3).shape[0] == 25
+
+
+def test_a_saved_value_is_kept_across_runs_and_a_definition_is_not(tmp_path):
+    """The script says what the scene is; the file says where its sliders
+    were left. A number in the script is a default, an expression is what the
+    variable *is* -- so a slider survives a re-run, and a definition the
+    script changes is not undone by the file it saved last."""
+    path = tmp_path / "scene.magpy.json"
+
+    def run(half_is="=n / 2"):
+        s = Scene(values=path)  # not there on the first run: the defaults
+        n = s.variable("n", 10)
+        s.variable("half", n / 2 if half_is == "=n / 2" else n / 3)
+        s.save(path)
+        return s.to_dict()["variables"]
+
+    assert run() == {"n": 10, "half": "=n / 2"}
+    # the panel drags both, and saves
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["variables"].update(n=14, half=3)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert run() == {"n": 14, "half": "=n / 2"}
+    assert run(half_is="=n / 3") == {"n": 14, "half": "=n / 3"}
+    # and a mapping does as a file does
+    mapped = Scene(values={"n": 4})
+    mapped.variable("n", 10)
+    assert mapped.to_dict()["variables"] == {"n": 4}
