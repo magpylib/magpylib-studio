@@ -426,4 +426,6 @@ def test_the_demo_opens_in_the_studio():
     assert studio.load_script(str(demo))["ok"] is True
     variables = studio.to_dict()["variables"]
     assert {"n", "radius", "gap", "stagger", "density"} <= set(variables)
-    assert studio.get_scene()["readings"] == ["bore"]
+    # the arrows, built from their formula: density 7, so a 7 × 7 grid -- asked
+    # of the object rather than the view, which needs a newer magpylib
+    assert np.asarray(studio._objs["bore"].pixel).reshape(-1, 3).shape[0] == 49
