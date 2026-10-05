@@ -319,6 +319,12 @@ strictly worse than having no tool at all, because it is believed. Building the
 Ansys emitter first means the translation is only ever validated by eyeball —
 and eyeball validation of a plausible-looking field is not validation.
 
+**Amended 2026-10-05, pending a yes** (`docs/roadmap.md` R7): tier 0's oracle is
+magpylib itself, exact for μr = 1, so the AEDT export can be checked numerically
+against it on the Maxwell seat before the open solver exists. That answers this
+section's concern — validation by eye — at the cost of keeping tier-0 validation
+manual (§8.6) until the open solver puts it in CI.
+
 Doing the open path first means that by the time the AEDT script exists, its
 physics layer has already been checked against an exact analytic solution and an
 independent numerical one.
