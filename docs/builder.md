@@ -225,7 +225,8 @@ a pattern, moves, turns, a reparent, a hidden ring, an object made and removed),
 come back as the same document.
 
 **B3 — the script tab.** Builder code or plain magpylib, and apply-on-save or
-explicit import (§5).
+explicit import (§5). Proposed (`docs/roadmap.md` R1): builder code, applied on
+a deliberate save, with an export for code someone keeps.
 
 **Independent of FEM.** `fem.md` M6 consumes the document, not the builder, so
 neither waits for the other. B1 is what makes "write it in code, export it to

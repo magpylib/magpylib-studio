@@ -8,6 +8,7 @@ lives in the plan it came from — this file stays thin enough to work from.
 | What is this?                        | [README.md](README.md)                             |
 | What is built?                       | [CONTINUE.md](CONTINUE.md)                         |
 | **What do I do next?**               | **this file**                                      |
+| In what order, and why that order?   | [docs/roadmap.md](docs/roadmap.md)                 |
 | Why is it going that way?            | [docs/direction.md](docs/direction.md)             |
 | How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
 | How is a scene written in code?      | [docs/builder.md](docs/builder.md)                 |
@@ -20,7 +21,12 @@ positioning in `docs/direction.md` §1, and everything else is an application of
 it. M runs in parallel because its lead time is upstream review rather than
 ours. V is downstream of F except for V1, which is orthogonal — a different repo
 that touches none of this. W is independent of all three: it puts the engine as
-it is today in a notebook.
+it is today in a notebook. A (agents) builds on F1b's builder.
+
+**The order across tracks is in [docs/roadmap.md](docs/roadmap.md) §4**: B3
+(R1), units (R2), the agent tools and their evaluation (R3–R4), then FEM with
+tier 0 checked on the Maxwell seat before the open solver (R7), then several
+scenes open at once — a project is a folder, a scene a file (R9).
 
 ---
 
@@ -74,9 +80,10 @@ A builder script opens in the studio as the scene it built (`load_script`), and
 `SceneWidget.variable_sliders()` gives a notebook the Variables panel's
 controls. `examples/builder_demo.py` is written for all three ways in.
 
-**Next.** B3, what the script tab shows and whether its save applies. Structure
-kept in sync as a layer of GUI steps over a script's (`docs/builder.md` §7,
-level 2) is designed, not started.
+**Next.** B3: the tab shows builder code and its save applies — designed in
+[docs/roadmap.md](docs/roadmap.md) R1, waiting on a yes. Then #12 merges.
+Structure kept in sync as a layer of GUI steps over a script's
+(`docs/builder.md` §7, level 2) is designed, not started.
 
 ### F2 — Parameterised instancing
 
@@ -143,6 +150,11 @@ identical table, so a new magnet class in core would fall silently through
 
 Full plan and its gates in [docs/fem.md](docs/fem.md). Only V1 is orthogonal to
 Track F; the rest build on the foundation and should follow it.
+
+**Order amended** ([docs/roadmap.md](docs/roadmap.md) R7, pending a yes): units,
+the physics layer, then the pyAEDT emitter checked at tier 0 on the Maxwell seat
+against magpylib, and the open solver after. Back from Ansys: design variable
+values and the field at the sensors, never geometry (R8).
 
 ### V1 — The physics layer (orthogonal — start any time)
 
@@ -213,6 +225,32 @@ twice, or the two drift — and they have.
 checklist in `docs/one-view.md` §5 passes by hand in VS Code.
 
 ---
+
+## Track A — Agents
+
+Plan in [docs/roadmap.md](docs/roadmap.md) R3–R6. The guideline it follows:
+consolidate tools, return high-signal results, and evaluate with agents.
+
+### A1 — Four tools on the builder (R3)
+
+`read_scene` (builder code), `run_builder` (code against the open scene, one
+undo step), `field` (summaries), and later `validate` — served as an MCP server
+in the package, in place of the 24 one-per-operation LM tools. Decide the trust
+model for agent-written code first.
+
+### A2 — An agent evaluation set (R4)
+
+About twenty magnetics tasks with checkable targets, run with the old tools and
+the new; success, tokens, turns and refusals recorded and kept.
+
+### A3 — The view as an MCP App (R5)
+
+The 3D view interactive in the chat, its sliders calling back into the tools.
+
+### A4 — A skill (R6)
+
+`SKILL.md` with a reference generated from the builder and tested against it;
+current capability only.
 
 ## Not scheduled, and why
 
