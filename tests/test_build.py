@@ -642,6 +642,16 @@ def _note_on(op, target, note="from another tool"):
     return edit
 
 
+def _two_path_poses(doc):
+    """Two path poses in a row for one object, as a studio wrote them before
+    a pose stated outright superseded the one it follows for paths too."""
+    ramp = lambda z0, z1: [[0.0, 0.0, z0 + (z1 - z0) * i / 4] for i in range(5)]  # noqa: E731
+    doc["events"] += [
+        {"id": "e90", "target": "sensor", "op": "position", "value": ramp(-0.01, 0.02)},
+        {"id": "e91", "target": "sensor", "op": "position", "value": ramp(-0.02, 0.03)},
+    ]
+
+
 def _limits(doc):
     doc["variable_bounds"]["radius"]["unit"] = "m"
     doc["variable_bounds"]["n"]["integer"] = False
@@ -665,6 +675,7 @@ AS_THE_PANEL_LEAVES_THEM = {
         ("move_object", ("sensor", "ring1"), {}),
         ("move_object", ("sensor", None), {}),
     ],
+    "a move put after the pattern": _move_after_pattern,
 }
 
 #: And ones it cannot say exactly, or at all: a save that changes nothing
@@ -683,13 +694,13 @@ AS_THE_TAB_CANNOT_SAY_THEM = {
     "a resize over an expression": [
         ("set_param", ("r1", "position", [0.03, 0, 0]), {})
     ],
-    "a move put after the pattern": _move_after_pattern,
     "a step that no longer applies": _remove_ring2s_create,
     "a key on an object the engine does not know": _opened(_note_on("create", "r1")),
     "a key on a step the engine does not know": _opened(
         _note_on("duplicate_around", "r1")
     ),
     "limits the builder does not write": _opened(_limits),
+    "two path poses in a row, from an older studio": _opened(_two_path_poses),
 }
 
 
@@ -730,11 +741,12 @@ def test_a_reflexive_save_changes_nothing_whatever_the_tab_cannot_say(tmp_path, 
 
 
 def test_a_save_that_would_change_more_than_its_edit_is_refused(tmp_path):
-    """The tab cannot write a step after the pattern it used to precede:
-    built from the tab, the move comes back in front of the pattern and
-    carries every copy. An edit saved there would take that with it, so the
-    save is refused and says where; the panel can still make the edit."""
-    session = _halbach_as(_move_after_pattern)
+    """A document an older studio wrote can hold two path poses in a row for
+    one object; built from the tab today, the second replaces the first and
+    one step is gone. Nothing anyone edited, so an edit saved there would
+    take that with it: the save is refused and says where, and the panel can
+    still make the edit."""
+    session = _halbach_as(_opened(_two_path_poses))
     before = json.loads(json.dumps(session.to_dict()))
     edited = session.to_builder_script().replace(
         "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
@@ -743,9 +755,37 @@ def test_a_save_that_would_change_more_than_its_edit_is_refused(tmp_path):
     result = session.apply_builder_script(tab(tmp_path, edited))
 
     assert result["ok"] is False
-    assert "differs at `r1.move((0, 0, 0.002))`" in result["error"]
+    assert "differs at `sensor.set_transform(position=np.linspace(" in result["error"]
     assert "change more than you edited" in result["error"]
     assert session.to_dict() == before
+
+
+def test_a_step_written_after_a_pattern_comes_after_it():
+    """In the order written, as magpylib reads it: a move after a pattern
+    moves the magnet it names, and its copies stay where they were made. The
+    panel's drag goes in front of the pattern instead, so the copies follow
+    -- the same operation, asked for by a gesture rather than a line."""
+    s = Scene()
+    ring = s.Collection(id="ring")
+    m = s.magnet.Cuboid(id="m", **CUBE, position=(0.02, 0, 0))
+    ring.add(m)
+    m.duplicate_around(count=4, axis="z")
+    m.move((0, 0, 0.002))
+
+    ops = [(e["op"], e["target"]) for e in s.to_dict()["events"]]
+    assert ops[-2:] == [("duplicate_around", "m"), ("move", "m")]
+    heights = sorted(
+        round(float(np.asarray(source.position)[2]), 6)
+        for source in s.session.scene.sources_all
+    )
+    assert heights == [0.0, 0.0, 0.0, 0.002]
+
+    dragged = MagpylibStudioSession(s.to_dict())
+    events = dragged.to_dict()["events"]
+    dragged.load_scene({**dragged.to_dict(), "events": events[:-1]})
+    assert dragged.move("m", [0, 0, 0.002])["ok"]  # the panel's way
+    ops = [(e["op"], e["target"]) for e in dragged.to_dict()["events"]]
+    assert ops[-2:] == [("move", "m"), ("duplicate_around", "m")]
 
 
 def test_a_save_changing_only_a_slider_range_applies(tmp_path):

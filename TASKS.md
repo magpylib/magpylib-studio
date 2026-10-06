@@ -88,10 +88,11 @@ that builds the scene already open records nothing; a script that fails, builds
 no `Scene` or is plain magpylib is refused and changes nothing, and the tab
 keeps its text until it runs. The edit is compared with the open scene built
 back from its own tab, so a save that would change more than its edit is refused
-too; a review before pushing found such gaps in B2 and closed them, bar one left
-open as a decision (roadmap §6, step order). Auto-save still does not apply.
-**Export as Builder Script…** writes code to keep. Why apply-on-save returned:
-`docs/direction.md` §5.1, `docs/builder.md` §5.
+too; a review before pushing found such gaps in B2 and closed them, the last by
+recording a builder script's steps in the order written (decided 2026-10-06).
+Auto-save still does not apply. **Export as Builder Script…** writes code to
+keep. Why apply-on-save returned: `docs/direction.md` §5.1, `docs/builder.md`
+§5.
 
 **Next.** #12 merges. Structure kept in sync as a layer of GUI steps over a
 script's (`docs/builder.md` §7, level 2) is designed, not started.

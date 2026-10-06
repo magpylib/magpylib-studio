@@ -170,8 +170,9 @@ Sources:
   either, the save compares the edited script with the open scene built back
   from its own tab: the same, nothing happens (a reflexive save is free,
   always); different while the tab does not build the open scene back exactly,
-  the save is refused and names the line. One such gap stays, guarded: a step
-  the History panel moved after its pattern (open question below).
+  the save is refused and names the line. The last gap the review found, a step
+  the History panel moved after its pattern, closed when builder steps went in
+  the order written (decided 2026-10-06, §6).
 - A relative mesh path in the tab resolves against the scene's folder, and in an
   opened builder script against the script's; auto-save (on a delay or on
   leaving the tab) does not apply and holds the text; a save asks first when the
@@ -440,14 +441,6 @@ which works on plain magpylib objects; studio adds the parametric half.
 
 - **#12 merged**, now that R1 is built on it (R1 itself was approved as
   described).
-- **Step order in a builder script.** The panel puts a move or a turn of a
-  patterned object _in front of_ its pattern, so a drag moves the whole ring;
-  builder calls go through the same operation, so `m.duplicate_around(…)` then
-  `m.move(…)` moves every copy, where magpylib's own reading of those two lines
-  moves `m` alone. It is also why the tab cannot write a step the History panel
-  put after a pattern (R1 refuses that save rather than carry the difference).
-  Recording a script's steps in the order they are written would close both; it
-  changes what such a hand-written script means (`builder.md` §9).
 - **#12 as a draft** until then, so it reads as a proposal.
 - **The §7 amendment** (R7): tier 0 on the Maxwell seat before the open solver.
 - **Removing the 24 LM tools** in R3 (the package is a preview, so breaking is
@@ -458,12 +451,18 @@ which works on plain magpylib objects; studio adds the parametric half.
 - **The trust model for agent-written code** (R3).
 - **R5's order:** pointing at the scene (marimo-lens targets in a notebook, the
   same channel in VS Code) before the view in the chat.
-- **The name.** `marimo-studio` ("Custom views for marimo notebooks", on PyPI
-  since 30 July 2026, announced 1 October) now names a product in the notebook
-  ecosystem the widget is for, and `magpylib-studio` reached PyPI a day later.
-  Keep the name, or change it while the users are few.
 - **A project is a folder of scene files** (R9), rather than a container format;
   and whether variants are named value sets inside a scene.
+
+**Decided** (2026-10-06):
+
+- **Step order in a builder script: as written.** A step written after a pattern
+  comes after it, as magpylib reads it; the panel's drag still goes in front of
+  the pattern so the copies follow. It closed R1's last gap (`builder.md` §9).
+- **The name stays `magpylib-studio`**, `marimo-studio` notwithstanding (§3):
+  the package, extension and import names differ, the prefix matches the org's
+  other packages, and a rename would touch PyPI, the marketplace id, the repo
+  and every doc.
 
 ---
 

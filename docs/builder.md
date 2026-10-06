@@ -116,7 +116,10 @@ _literals_ stays ordinary, as the ring loop above shows.
 `variable`, `duplicate_around`, `duplicate_along`, `mirror`. It reads as
 magpylib with variables, not a new vocabulary. That keeps `direction.md` §1's
 "every invented concept is a tax" low, and keeps agents in the part of their
-training data that is dense (§8).
+training data that is dense (§8). Order follows magpylib too: a step written
+after a pattern comes after it, so `m.duplicate_around(…)` then `m.move(…)`
+moves `m` alone, where the panel's drag goes in front of the pattern so the
+copies follow (§9).
 
 **Errors are raised, not reported.** Every call goes through the session method
 the GUI uses, and a `{"ok": False}` comes back as an exception at the call.
@@ -222,8 +225,10 @@ say. Different, while the tab does not build the open scene back exactly: the
 save is refused and names the first line that differs, because the edit would
 carry every such difference with it and nobody made those. That is a guard for
 gaps not found yet; the ones a review found are closed (hide and `show()`, a
-reparented path, a step that no longer applies), except a step the History panel
-moved after its pattern (§9). What it costs, said in the tab's header:
+reparented path, a step that no longer applies, and a step the History panel
+moved after its pattern, now that builder steps go in the order written, §9).
+What it still catches is a document an older studio wrote, with two path poses
+in a row that the builder now merges. What it costs, said in the tab's header:
 
 - **The tab is the studio's view.** It is regenerated from the scene after a
   save, so a helper or a loop typed into it comes back as the steps it made, and
@@ -382,12 +387,14 @@ Each has a provisional answer in B1, to revisit with use.
   not know or a step that no longer applies, is named in a comment at the top of
   the script.
 - **Step order.** The panel puts an edit to a patterned object in front of its
-  pattern, so that a drag moves the whole ring, and builder calls go through the
-  same operation: `m.duplicate_around(…)` then `m.move(…)` moves every copy,
-  where magpylib's reading of those lines moves `m` alone. It is also why a step
-  the History panel moved after a pattern cannot be written back, which R1's
-  save refuses rather than carry. _Open:_ recording a script's steps in the
-  order written closes both, and changes what such a script means.
+  pattern, so that a drag moves the whole ring. Builder calls went through the
+  same operation, so `m.duplicate_around(…)` then `m.move(…)` moved every copy,
+  where magpylib's reading of those lines moves `m` alone, and a step the
+  History panel moved after a pattern could not be written back. _Decided
+  (2026-10-06):_ in the order written. A builder call records its step where it
+  is written (`session._in_order`, set around each call); the panel's own edits
+  still go in front of the pattern. An agent that means the ring moves the
+  ring's collection, or edits the magnet's parameters.
 - **numpy.** Support `np.sin(handle)` through `__array_ufunc__`, or refuse numpy
   on handles entirely and keep one way to say it? _B1:_ numpy's arithmetic and
   the functions an expression has are written as expressions (so `np.pi * r` and
