@@ -21,7 +21,10 @@ that looks right and has lost its variables, which is the cliff this replaces.
 
 Every call goes through the session operation the panel uses, so there is one
 implementation of what an edit means. A call the session refuses raises
-`BuildError` with the session's own message. See `docs/builder.md`.
+`BuildError` with the session's own message. Steps go where they are written:
+`magnet.move(...)` after `magnet.duplicate_around(...)` moves that magnet alone,
+as magpylib reads it, where the panel puts a drag in front of the pattern so the
+copies follow. See `docs/builder.md`.
 """
 
 from __future__ import annotations
@@ -726,7 +729,14 @@ class Scene:
                 obj.add(*waiting)
 
     def _call(self, method, *args, **kwargs):
-        result = getattr(self._session, method)(*args, **kwargs)
+        # In the order written: a step after a pattern comes after it, as in
+        # magpylib, where the panel's drag goes in front so the copies follow.
+        session = self._session
+        before, session._in_order = session._in_order, True
+        try:
+            result = getattr(session, method)(*args, **kwargs)
+        finally:
+            session._in_order = before
         if isinstance(result, dict) and result.get("ok") is False:
             raise BuildError(result.get("error"))
         return result

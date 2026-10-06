@@ -1937,6 +1937,9 @@ class MagpylibStudioSession:
         self._inherited: dict[str, list] = {}
         self._broken: list[dict] = []  # events the last fold could not apply
         self._rollback: int | None = None  # view only: fold up to here
+        #: Steps go where they are written, not in front of a pattern: set
+        #: while a builder script's call runs (see `_pattern_step_at`).
+        self._in_order = False
         self._objects_view: list = []  # the tree that is actually built
         # In-session undo/redo (durable history stays in git via to_script):
         # each entry is {"label", "doc"} — the doc state BEFORE the change.
@@ -3723,11 +3726,15 @@ class MagpylibStudioSession:
         and the row into a grid is two steps, and an edit to the magnet
         belongs before the first of them or only part of the grid follows.
 
-        Two cases go to the end instead, and both are edits that would
-        otherwise be silently undone:
+        Three cases go to the end instead, and each is an edit that would
+        otherwise be silently undone or turned into another:
 
         * A rolled-back history. The bar is an explicit answer to this very
           question, and an explicit answer beats an inferred one.
+        * Code (`_in_order`). A builder script says where each of its steps
+          goes by writing it there: `m.duplicate_around(…)` then `m.move(…)`
+          moves `m` alone, as magpylib reads those lines, and a script written
+          back from a log has to build that log again, step for step.
         * A log that already *pins* this object after the step. An absolute
           pose recorded later replaces whatever this one says rather than
           carrying it, so there is nothing to solve for: better the old
@@ -3738,7 +3745,7 @@ class MagpylibStudioSession:
         whatever is recorded here, and `_replay_frame` measures exactly that,
         so the pose can be written in the frame it will be replayed from.
         """
-        if self._rollback is not None:
+        if self._rollback is not None or self._in_order:
             return None
         family = set()
         walk = object_id
