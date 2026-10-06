@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import dis
+import io
 import keyword
 import re
 import sys
@@ -393,18 +394,33 @@ def run_script(path):
         if objects:
             captured.append(objects)
 
+    # Compiled before show() is patched, not after: a syntax error raised
+    # between the patch and the `try` that undoes it left magpylib's show()
+    # capturing into a dead list for the rest of the engine's life.
+    code = compile(source, str(path), "exec")
     targets = _show_patch_targets()
     originals = [getattr(owner, name) for owner, name in targets]
     for owner, name in targets:
         setattr(owner, name, _capture_show)
-    code = compile(source, str(path), "exec")
+    # And stdin is the channel the engine is asked on: a script's input()
+    # would swallow the editor's next request, and exit() and quit() close
+    # stdin on their way out, which left the engine nothing to read.
+    asked_on, sys.stdin = sys.stdin, io.StringIO()
     try:
         # What the script prints is the script's to say, on stderr: stdout is
         # the channel the engine answers on, and a print there is a line the
         # editor has to read past.
         with contextlib.redirect_stdout(sys.stderr):
             exec(code, namespace)  # noqa: S102 - the point
+    except SystemExit as stop:
+        # exit() ends the script, not the engine running it: let through, it
+        # left the editor with no engine and no answer. A clean exit is a
+        # script that finished; any other is one that failed, at its line.
+        if stop.code not in (None, 0):
+            error = RuntimeError(f"the script exited with {stop.code!r}")
+            raise error.with_traceback(stop.__traceback__) from None
     finally:
+        sys.stdin = asked_on
         for (owner, name), original in zip(targets, originals, strict=True):
             setattr(owner, name, original)
     return namespace, captured, code

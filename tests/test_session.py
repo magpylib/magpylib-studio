@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import sys
 import tempfile
 
 import magpylib as magpy
@@ -2978,16 +2979,67 @@ magpy.show(a, b)
 
 
 def test_load_script_errors(tmp_path):
+    from magpylib_studio import importer
+
+    shows = [getattr(owner, name) for owner, name in importer._show_patch_targets()]
     s = MagpylibStudioSession()
     bad = tmp_path / "bad.py"
     bad.write_text("this is not python", encoding="utf-8")
     assert s.load_script(str(bad))["ok"] is False
+    unclosed = tmp_path / "unclosed.py"
+    unclosed.write_text("x = (\n", encoding="utf-8")
+    assert "SyntaxError" in s.load_script(str(unclosed))["error"]
+    # and magpylib's show() is magpylib's again: a syntax error once left it
+    # capturing for whatever drew next in the process
+    assert [
+        getattr(owner, name) for owner, name in importer._show_patch_targets()
+    ] == shows
     empty = tmp_path / "empty.py"
     empty.write_text("x = 1\n", encoding="utf-8")
     res = s.load_script(str(empty))
     assert res["ok"] is False and "no magpylib objects" in res["error"]
     assert s.load_script(str(tmp_path / "missing.py"))["ok"] is False
     assert s.list_objects() == []  # scene untouched by failed imports
+
+
+@pytest.mark.parametrize(
+    ("ending", "imported"),
+    [
+        ("exit()", True),
+        ("quit()", True),
+        ("import sys; sys.exit(0)", True),
+        ("import sys; sys.exit(2)", False),
+    ],
+)
+def test_an_import_does_not_take_the_engine_with_it(
+    tmp_path, monkeypatch, ending, imported
+):
+    """exit() raises SystemExit, which is not an Exception, so it went past
+    every handler and ended serve() itself; exit() and quit() also close
+    stdin, which is the channel the engine is asked on. A clean exit is a
+    script that finished, and imports; another is a failure. Either way the
+    engine answers the next request."""
+    path = tmp_path / "script.py"
+    path.write_text(
+        "import magpylib as magpy\n"
+        "cube = magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 1))\n"
+        f"{ending}\n",
+        encoding="utf-8",
+    )
+    requests = [
+        {"id": 1, "method": "load_script", "params": {"path": str(path)}},
+        {"id": 2, "method": "list_objects"},
+    ]
+    asked = io.StringIO("\n".join(json.dumps(r) for r in requests) + "\n")
+    monkeypatch.setattr(sys, "stdin", asked)  # as `python -m magpylib_studio` is asked
+    out = io.StringIO()
+    serve(session=MagpylibStudioSession(), inp=asked, out=out)
+    first, second = (json.loads(line) for line in out.getvalue().splitlines())
+
+    assert first["result"]["ok"] is imported
+    if not imported:
+        assert first["result"]["error"] == "RuntimeError: the script exited with 2"
+    assert [o["id"] for o in second["result"]] == (["cube"] if imported else [])
 
 
 def test_apply_script_runs_what_it_cannot_parse(tmp_path):
