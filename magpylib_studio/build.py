@@ -27,8 +27,11 @@ implementation of what an edit means. A call the session refuses raises
 from __future__ import annotations
 
 import ast
+import contextlib
+import inspect
 import json
 import pathlib
+import sys
 import warnings
 
 import magpylib as magpy
@@ -414,6 +417,13 @@ class Object:
         self._scene._call("set_visible", self.id, False)
         return self
 
+    def show(self):
+        """Show it again in the 3D view, after `hide` -- its own, or that of a
+        collection it sits in."""
+        self._enter()
+        self._scene._call("set_visible", self.id, True)
+        return self
+
     def duplicate_around(self, count, axis="z", anchor=0, spin=0):
         """`count` of it about `axis` through `anchor`, each copy turned by
         `spin` degrees more than the last: one step, which stays a pattern."""
@@ -522,7 +532,10 @@ class Scene:
     """
 
     def __init__(self, session=None, *, values=None):
-        self._session = session if session is not None else MagpylibStudioSession()
+        if session is None:
+            session = MagpylibStudioSession()
+            session._base_dir = _base_dir
+        self._session = session
         if isinstance(values, str | pathlib.PurePath):
             path = pathlib.Path(values)
             saved = (
@@ -725,6 +738,37 @@ for _name in expressions._FUNCTIONS:
 del _name
 
 
+#: What a relative mesh path in a `Scene()` of its own is relative to; see
+#: `resolving_against`. None is the session's default, the working directory.
+_base_dir = None
+
+
+@contextlib.contextmanager
+def resolving_against(base_dir):
+    """Scenes made from scratch inside this resolve a relative mesh path
+    against `base_dir`, as the document they stand for does. The script tab
+    is a file in the editor's storage and the engine runs wherever the editor
+    started it; neither is where the scene's STL sits."""
+    global _base_dir  # a module's, not a thread's: the engine runs one thing at a time
+    previous, _base_dir = _base_dir, base_dir
+    try:
+        yield
+    finally:
+        _base_dir = previous
+
+
+def scenes_in(namespace):
+    """The scenes a script left behind, as (name, scene), each once however
+    many names it has."""
+    found = []
+    for name, value in namespace.items():
+        if name.startswith("_") or not isinstance(value, Scene):
+            continue
+        if all(value is not scene for _, scene in found):
+            found.append((name, value))
+    return found
+
+
 # --- the other way: a document as a builder script ----------------------------
 
 
@@ -735,19 +779,49 @@ def script_of(session):
     same document -- variables, formulas and patterns included -- and not
     the flattened scene running a plain magpylib export gives. Nothing reads
     this back: it is executed, through the operations the panel uses (see
-    `docs/builder.md` §5). Editor state with no call of its own -- an
-    expression a resize set aside -- is named in a comment at the top rather
-    than written.
+    `docs/builder.md` §5). What has no call of its own -- an expression a
+    resize set aside, a key this engine does not know, a step that no longer
+    applies -- is named in a comment at the top rather than written.
     """
-    return _ScriptWriter(session.to_dict()).write()
+    return _ScriptWriter(session.to_dict(), session._broken).write()
+
+
+def not_written(session):
+    """What `script_of` names at the top of the script rather than writing:
+    what a scene built from that script will not have."""
+    writer = _ScriptWriter(session.to_dict(), session._broken)
+    writer.write()
+    return writer.unwritten
+
+
+def rebuilt(session):
+    """`session`'s scene built again from its own builder script, as a
+    session: what the script tab says the scene is, to set beside what it
+    is. Raises whatever running the script raises."""
+    namespace = {"__name__": "__main__"}
+    code = compile(script_of(session), "<the scene's builder script>", "exec")
+    with (
+        resolving_against(session._base_dir),
+        contextlib.redirect_stdout(sys.stderr),
+    ):
+        exec(code, namespace)  # noqa: S102 - code this module wrote
+    ((_, scene),) = scenes_in(namespace)
+    return scene.session
+
+
+#: A variable's limits as `Scene.variable` takes them.
+_LIMITS = ("min", "max", "soft_min", "soft_max", "integer", "options")
 
 
 class _ScriptWriter:
-    def __init__(self, doc):
+    def __init__(self, doc, broken=()):
         self.doc = doc
         self.variables = doc.get("variables") or {}
         self.limits = doc.get("variable_bounds") or {}
         self.events = doc.get("events") or []
+        #: Steps the last build could not apply, by event id: written as a
+        #: note, since run they would fail the whole script at their line.
+        self.broken = {entry["id"]: entry for entry in broken}
         self.numpy = False
         self.unwritten = []
         from magpylib_studio import importer
@@ -848,10 +922,11 @@ class _ScriptWriter:
     def write(self):
         lines = [f"{self.scene} = Scene()"]
         lines += self.write_variables()
-        body, hides = self.write_events()
+        body, creates = self.write_events()
         lines += ["", *body]
-        if hides:
-            lines += ["", "# hidden in the view, as the scene was saved", *hides]
+        shown = self.write_visibility(creates)
+        if shown:
+            lines += ["", "# hidden in the view, as the scene was saved", *shown]
         header = ["from magpylib_studio.build import Scene"]
         if self.numpy:
             header.insert(0, "import numpy as np\n")
@@ -868,6 +943,9 @@ class _ScriptWriter:
                 visit(needed, (*seen, name))
             done.add(name)
             limits = self.limits.get(name) or {}
+            for key, item in limits.items():
+                if key not in _LIMITS:
+                    self.unwritten.append(f"{key} on {name}'s limits ({item!r})")
             parts = [repr(name), self.value(self.variables[name])]
             for keyword, (low, high) in (
                 ("bounds", ("min", "max")),
@@ -876,8 +954,8 @@ class _ScriptWriter:
                 if low in limits or high in limits:
                     pair = (limits.get(low), limits.get(high))
                     parts.append(f"{keyword}={self.value(list(pair))}")
-            if "integer" in limits:
-                parts.append(f"integer={limits['integer']!r}")
+            if limits.get("integer"):  # not a whole number is what not saying so says
+                parts.append("integer=True")
             if "options" in limits:
                 parts.append(f"options={self.value(limits['options'])}")
             lines.append(f"{name} = {self.scene}.variable({', '.join(parts)})")
@@ -887,16 +965,20 @@ class _ScriptWriter:
         return lines
 
     def write_events(self):
-        lines, hides = [], []
+        lines, creates = [], {}
         events = self.events
         index = 0
         while index < len(events):
             event = events[index]
             op, name = event.get("op"), self.names.get(event.get("target"))
-            if op == "create":
+            if event.get("id") in self.broken:
+                broken = self.broken[event["id"]]
+                self.unwritten.append(
+                    f"{broken['source']}, which no longer applies ({broken['error']})"
+                )
+            elif op == "create":
                 lines += self.write_create(event, name)
-                if event.get("visible") is False:
-                    hides.append(f"{name}.hide()")
+                creates[event["target"]] = event
             elif op in ("position", "orientation"):
                 # A pose stated outright is one step of the studio's, and one
                 # call: written as two, the second would not merge into a pin
@@ -921,7 +1003,56 @@ class _ScriptWriter:
             else:
                 lines.append(self.write_step(event, name))
             index += 1
-        return lines, hides
+        return lines, creates
+
+    def write_visibility(self, creates):
+        """What is hidden, as calls at the end. Hiding a collection hides every
+        leaf in it at the time, and a leaf can be shown again on its own or
+        join the collection later, so the collections that were hidden are
+        hidden first and each leaf is then put the way the scene has it:
+        shown where it is shown, hidden (and marked hidden) where it is. What
+        is in what is read at the end of the log, where these calls run."""
+        parent = {}
+        for event in self.events:
+            if event.get("id") in self.broken:
+                continue
+            op, target = event.get("op"), event.get("target")
+            if op in ("create", "reparent"):
+                parent[target] = event.get("parent")
+            elif op == "remove":  # and everything in it
+                gone = {target}
+                while True:
+                    inside = {k for k, v in parent.items() if v in gone} - gone
+                    if not inside:
+                        break
+                    gone |= inside
+                for name in gone:
+                    parent.pop(name, None)
+
+        def ancestors(target):
+            seen, up = set(), parent.get(target)
+            while up is not None and up not in seen:
+                seen.add(up)
+                yield up
+                up = parent.get(up)
+
+        there = {target: event for target, event in creates.items() if target in parent}
+        groups = [
+            target
+            for target, event in there.items()
+            if event.get("type") == "Collection" and event.get("visible") is False
+        ]
+        lines = [f"{self.names[target]}.hide()" for target in groups]
+        for target, event in there.items():
+            if event.get("type") == "Collection":
+                continue
+            hidden = "hidden_style" in event
+            by_group = any(up in groups for up in ancestors(target))
+            if hidden and (event.get("visible") is False or not by_group):
+                lines.append(f"{self.names[target]}.hide()")
+            elif not hidden and by_group:
+                lines.append(f"{self.names[target]}.show()")
+        return lines
 
     def write_create(self, event, name):
         kind = event["type"]
@@ -995,6 +1126,13 @@ class _ScriptWriter:
         else:
             self.unwritten.append(f"a {op} step on {event.get('target')}")
             return f"# {op} on {name}: no call says this yet"
+        # A key the call does not take is one this engine does not know: as a
+        # keyword it would fail the whole script at this line.
+        accepted = inspect.signature(getattr(Object, op)).parameters
+        for key in [key for key in given if key not in accepted]:
+            self.unwritten.append(
+                f"{key} on a {op} step on {event.get('target')} ({given.pop(key)!r})"
+            )
         rest = [
             (
                 key,

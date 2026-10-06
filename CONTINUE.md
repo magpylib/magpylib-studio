@@ -522,30 +522,44 @@ and drives it.
     ($(code) icon on the Scene view), Save Scene As… (.py or .json via
     extension), Load Scene from File… (JSON; also linked in the empty-view
     welcome).
-  - **The script tab renders the scene; it does not read back.** It is a real
-    file in extension storage (a content provider has no write side),
+  - **The script tab is builder code, and a deliberate save applies it.** It is
+    a real file in extension storage (a content provider has no write side),
+    holding `to_builder_script()` under a header that says what a save does,
     regenerated from the scene on every edit. Edits are never clobbered while
-    the buffer is dirty. `to_script` deliberately emits no wrapper Collection
-    (`magpy.show(a, b, …)`), and the importer names nested children from script
-    variables.
+    the buffer is dirty or while it holds text the scene has not taken (a
+    refused save, or an auto-save on a delay or on leaving the tab, which does
+    not apply: `scriptHeld`). Text kept that way was written against the scene
+    as it was then (`scriptRendered`); a save after the scene moved on — a drag,
+    an agent's edit, an undo — would undo that, so it asks first.
     - **Generation is one-way** (`docs/direction.md` §5.1). `parse_script` and
       `apply_script` are gone, and with them the matched emitter/parser idiom
       pairs and the two-tier cliff: a structured tier defined by whatever
       `to_script` happened to emit, which one helper function or one scipy call
       dropped you out of silently. `importer.py` went from 1133 lines to 372.
-    - **Why the tab is not editable-both-ways any more.** Applying by execution
-      was tried and is worse than the cliff. Running an edited script recovers
-      only the objects it leaves behind — so a save that changed _nothing_ still
-      resolved every expression to a number (`=360/(2*n)` → `18.0`), flattened
-      every pattern into its copies, and dropped the slider limits. Silent
-      degradation on `Cmd+S`. Saving now offers **"Build a new scene from
-      this"**, which runs `importScript` — the same capability, made explicit
-      and opt-in rather than something a reflexive save does to you.
-    - Consequence worth knowing: **variables and duplicate events have no
-      text-editing UI any more**. They have panels; the script is no longer a
-      way in. Being a real file, VS Code restores its tab across a window reload
-      — so the path is fixed at activation (not when the tab is first opened)
-      and `adoptRestoredScriptTab` re-renders whatever was restored against the
+    - **Why plain magpylib does not apply.** Applying it by execution was tried
+      and is worse than the cliff. Running an edited script recovers only the
+      objects it leaves behind — so a save that changed _nothing_ still resolved
+      every expression to a number (`=360/(2*n)` → `18.0`), flattened every
+      pattern into its copies, and dropped the slider limits. Silent degradation
+      on `Cmd+S`. Builder code has none of that: running `to_builder_script()`
+      rebuilds the same document, tested over every example and a panel-edited
+      scene. So the session's `apply_builder_script(path)` runs the tab, takes
+      the `Scene` it built and replaces the document as one undo step labelled
+      "apply builder script". It compares that with the open scene built back
+      from its own tab (`build.rebuilt`), not with the scene: the same, and it
+      records nothing, so a reflexive save is free whatever the tab cannot say;
+      different while the tab does not build the open scene back exactly, and it
+      refuses, naming the line, rather than carry a change nobody made. Plain
+      magpylib saved in the tab is refused with a pointer to Open in Magpylib
+      Studio; a script that raises is refused with its line (a clean `exit()` is
+      a script that finished), and the tab keeps the text until it runs, or
+      until another scene is opened. A relative mesh path in the tab resolves
+      against the scene's folder (`build.resolving_against`), and in a builder
+      script opened in the studio against the script's. Code to keep is **Export
+      as Builder Script…**, which nothing regenerates.
+    - Being a real file, VS Code restores its tab across a window reload — so
+      the path is fixed at activation (not when the tab is first opened) and
+      `adoptRestoredScriptTab` re-renders whatever was restored against the
       scene the engine has _now_; otherwise the tab silently shows the previous
       window's project until it is closed and reopened. That is also why the
       extension activates on `onStartupFinished`: a tab it owns can be on screen

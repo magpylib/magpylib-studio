@@ -1,15 +1,18 @@
 """The builder: a scene written in code, with variables that stay variables
 (`docs/builder.md`)."""
 
+import io
 import json
 import math
 import pathlib
+import sys
 
 import magpylib as magpy
 import numpy as np
 import pytest
 
 from magpylib_studio.build import BuildError, Scene
+from magpylib_studio.rpc import serve
 from magpylib_studio.session import MagpylibStudioSession
 
 CUBE = {"dimension": (0.01, 0.01, 0.01), "polarization": (0, 0, 1)}
@@ -429,3 +432,451 @@ def test_the_demo_opens_in_the_studio():
     # the arrows, built from their formula: density 7, so a 7 × 7 grid -- asked
     # of the object rather than the view, which needs a newer magpylib
     assert np.asarray(studio._objs["bore"].pixel).reshape(-1, 3).shape[0] == 49
+
+
+# --- the script tab: builder code, applied on save (B3) ----------------------
+
+
+def tab(tmp_path, text):
+    """The script tab's file, holding `text` as a save leaves it."""
+    path = tmp_path / "scene.py"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_saving_the_script_tab_applies_it_as_one_step(tmp_path):
+    """Edit `radius` in the tab, save, and the scene follows: the number
+    changes and nothing else does -- `r1` still sits at `=radius`, the ring is
+    still a pattern -- which is what a plain magpylib script could not give."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    before = json.loads(json.dumps(session.to_dict()))
+    steps = len(session.get_history()["entries"])
+    edited = session.to_builder_script().replace(
+        "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
+    )
+    assert "0.0325" in edited
+
+    result = session.apply_builder_script(tab(tmp_path, edited))
+
+    assert result == {"ok": True}
+    after = session.to_dict()
+    # the whole document, not the parts expected to move: a save that also
+    # dropped a style or a step would pass a narrower check
+    assert same_document(
+        after, {**before, "variables": {**before["variables"], "radius": 0.0325}}
+    )
+    (r1,) = [e for e in after["events"] if e["op"] == "create" and e["target"] == "r1"]
+    assert r1["params"]["position"][0] == "=radius"
+    history = session.get_history()["entries"]
+    assert len(history) == steps + 1
+    assert history[-1]["label"] == "apply builder script"
+    assert session.undo()["ok"]
+    assert same_document(session.to_dict(), before)
+
+
+def test_a_save_that_changes_nothing_records_nothing(tmp_path):
+    """A reflexive Cmd+S, or an edit that builds the same scene another way,
+    is not a step -- and keeps what the script could not have said."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    assert session.set_param("r1", "position", [0.03, 0, 0])["ok"]  # sets one aside
+    before = json.loads(json.dumps(session.to_dict()))
+    steps = len(session.get_history()["entries"])
+
+    script = session.to_builder_script() + "# a comment the tab will not keep\n"
+    assert session.apply_builder_script(tab(tmp_path, script)) == {
+        "ok": True,
+        "unchanged": True,
+    }
+    assert session.to_dict() == before
+    assert len(session.get_history()["entries"]) == steps
+
+
+def test_what_a_save_cannot_keep_it_says(tmp_path):
+    """An expression a resize set aside has no builder call. A save that
+    changes the scene loses it -- said, not done quietly."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    assert session.set_param("r1", "position", [0.03, 0, 0])["ok"]
+    edited = session.to_builder_script().replace(
+        "s.variable('gap', 0.015,", "s.variable('gap', 0.02,"
+    )
+
+    result = session.apply_builder_script(tab(tmp_path, edited))
+
+    assert result["ok"] is True
+    (warning,) = result["warnings"]
+    assert "overridden on r1" in warning
+    assert session.to_dict()["variables"]["gap"] == 0.02
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "said"),
+    [
+        # a name the scene does not have: Python's own error, at its line
+        ("s.Collection(", "s.Group(", "AttributeError"),
+        # what the builder refuses: its message, at the script's line
+        ("s.variable('gap'", "s.variable('n'", "already a variable 'n'"),
+        # not Python at all
+        ("s = Scene()", "s = Scene(", "SyntaxError"),
+    ],
+)
+def test_a_script_that_fails_leaves_the_scene_alone(tmp_path, old, new, said):
+    """The tab keeps its text until it runs, so the refusal says where to
+    look: the line in the script, not in the builder below it."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    before = json.loads(json.dumps(session.to_dict()))
+    steps = len(session.get_history()["entries"])
+    script = session.to_builder_script()
+    line = 1 + next(i for i, text in enumerate(script.splitlines()) if old in text)
+
+    result = session.apply_builder_script(tab(tmp_path, script.replace(old, new, 1)))
+
+    assert result["ok"] is False
+    assert result["line"] == line
+    assert result["error"].startswith(f"line {line}: ")
+    assert said in result["error"]
+    assert session.to_dict() == before
+    assert len(session.get_history()["entries"]) == steps
+
+
+def test_plain_magpylib_in_the_tab_is_refused_not_flattened(tmp_path):
+    """Running plain magpylib keeps the objects and loses how they were
+    made. That is an import, asked for by name; a save does not do it."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    before = json.loads(json.dumps(session.to_dict()))
+
+    result = session.apply_builder_script(tab(tmp_path, session.to_script()))
+
+    assert result["ok"] is False
+    assert "plain magpylib" in result["error"]
+    assert "Open in Magpylib Studio" in result["error"]
+    assert session.to_dict() == before
+
+
+def test_a_script_must_build_one_scene(tmp_path):
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    before = json.loads(json.dumps(session.to_dict()))
+    importing = "from magpylib_studio.build import Scene\n"
+
+    none = session.apply_builder_script(tab(tmp_path, "x = 1\n"))
+    assert none["ok"] is False and "built no Scene" in none["error"]
+    two = session.apply_builder_script(
+        tab(tmp_path, importing + "a = Scene()\nb = Scene()\n")
+    )
+    assert two["ok"] is False and "2 scenes (a, b)" in two["error"]
+    # one scene with two names is one scene
+    one = session.apply_builder_script(tab(tmp_path, importing + "a = b = Scene()\n"))
+    assert one["ok"] is True
+    assert session.to_dict()["objects"] == []
+    assert session.undo()["ok"]
+    assert session.to_dict() == before
+
+
+def test_the_script_tab_is_reachable_over_the_wire(tmp_path):
+    """The extension renders the tab and applies it through the RPC, which
+    refuses any method it does not list."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    path = tab(tmp_path, session.to_builder_script())
+    requests = [
+        {"id": 1, "method": "to_builder_script"},
+        {"id": 2, "method": "apply_builder_script", "params": {"path": path}},
+    ]
+    out = io.StringIO()
+    serve(
+        session=session,
+        inp=io.StringIO("\n".join(json.dumps(r) for r in requests) + "\n"),
+        out=out,
+    )
+    responses = [json.loads(line) for line in out.getvalue().splitlines()]
+
+    assert responses[0]["result"].startswith("import numpy as np")
+    assert responses[1]["result"] == {"ok": True, "unchanged": True}
+
+
+# --- what a save must not change on its own -----------------------------------
+
+
+def _move_after_pattern(session):
+    """A step the History panel put after the pattern it used to precede: it
+    moves the one magnet, not the ring of them."""
+    assert session.move("r1", [0, 0, 0.002])["ok"]
+    events = session.get_events()["events"]
+    move = next(e for e in events if e["source"].startswith("r1.move"))
+    pattern = next(e for e in events if e["target"] == "r1" and "×" in e["source"])
+    assert session.move_event(move["id"], pattern["index"])["ok"]
+
+
+def _remove_ring2s_create(session):
+    """A step removed from the history, leaving later ones nothing to act on."""
+    create = next(
+        e
+        for e in session.to_dict()["events"]
+        if e["op"] == "create" and e["target"] == "ring2"
+    )
+    assert session.remove_event(create["id"])["ok"]
+
+
+def _opened(edit):
+    """A document edited by hand, or written by another tool, then opened."""
+
+    def setup(session):
+        doc = json.loads(json.dumps(session.to_dict()))
+        edit(doc)
+        assert session.load_scene(doc)["ok"]
+
+    return setup
+
+
+def _note_on(op, target, note="from another tool"):
+    def edit(doc):
+        next(e for e in doc["events"] if e["op"] == op and e["target"] == target)[
+            "note"
+        ] = note
+
+    return edit
+
+
+def _limits(doc):
+    doc["variable_bounds"]["radius"]["unit"] = "m"
+    doc["variable_bounds"]["n"]["integer"] = False
+
+
+EXTRA = {"params": {"dimension": [0.01] * 3, "polarization": [0, 0, 1]}}
+
+#: Scenes the panel leaves that the tab has to build back exactly.
+AS_THE_PANEL_LEAVES_THEM = {
+    "a ring hidden, then one magnet in it shown": [
+        ("set_visible", ("ring2", False), {}),
+        ("set_visible", ("r2", True), {}),
+    ],
+    "a ring hidden, then a magnet added to it": [
+        ("set_visible", ("ring2", False), {}),
+        ("add_object", ("extra", "magnet.Cuboid"), {**EXTRA, "parent": "ring2"}),
+    ],
+    "the whole stack hidden": [("set_visible", ("halbach", False), {})],
+    "the sensor, a path, moved into a ring": [("move_object", ("sensor", "ring1"), {})],
+    "... and out again": [
+        ("move_object", ("sensor", "ring1"), {}),
+        ("move_object", ("sensor", None), {}),
+    ],
+}
+
+#: And ones it cannot say exactly, or at all: a save that changes nothing
+#: must still change nothing.
+AS_THE_TAB_CANNOT_SAY_THEM = {
+    **AS_THE_PANEL_LEAVES_THEM,
+    "a magnet hidden, then its ring hidden and shown": [
+        ("set_visible", ("r1", False), {}),
+        ("set_visible", ("ring1", False), {}),
+        ("set_visible", ("ring1", True), {}),
+    ],
+    "a magnet hidden, then removed": [
+        ("set_visible", ("r1", False), {}),
+        ("remove_object", ("r1",), {}),
+    ],
+    "a resize over an expression": [
+        ("set_param", ("r1", "position", [0.03, 0, 0]), {})
+    ],
+    "a move put after the pattern": _move_after_pattern,
+    "a step that no longer applies": _remove_ring2s_create,
+    "a key on an object the engine does not know": _opened(_note_on("create", "r1")),
+    "a key on a step the engine does not know": _opened(
+        _note_on("duplicate_around", "r1")
+    ),
+    "limits the builder does not write": _opened(_limits),
+}
+
+
+def _halbach_as(steps):
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    if callable(steps):
+        steps(session)
+    else:
+        for method, args, kwargs in steps:
+            assert getattr(session, method)(*args, **kwargs).get("ok", True), method
+    return session
+
+
+@pytest.mark.parametrize("scene", list(AS_THE_PANEL_LEAVES_THEM))
+def test_the_tab_builds_back_what_the_panel_made(scene):
+    """A collection hidden after a magnet in it was shown again, or before
+    one joined it, came back with every magnet in it hidden; a reparented
+    path added its pose again on every run."""
+    session = _halbach_as(AS_THE_PANEL_LEAVES_THEM[scene])
+    assert same_document(rebuilt(session).to_dict(), session.to_dict())
+
+
+@pytest.mark.parametrize("scene", list(AS_THE_TAB_CANNOT_SAY_THEM))
+def test_a_reflexive_save_changes_nothing_whatever_the_tab_cannot_say(tmp_path, scene):
+    """What the tab is compared with is the scene built back from its own
+    text, so saving it unedited is the same scene again: no step, and the
+    document as it was, to the last key."""
+    session = _halbach_as(AS_THE_TAB_CANNOT_SAY_THEM[scene])
+    before = json.loads(json.dumps(session.to_dict()))
+    steps = len(session.get_history()["entries"])
+
+    result = session.apply_builder_script(tab(tmp_path, session.to_builder_script()))
+
+    assert result == {"ok": True, "unchanged": True}
+    assert session.to_dict() == before
+    assert len(session.get_history()["entries"]) == steps
+
+
+def test_a_save_that_would_change_more_than_its_edit_is_refused(tmp_path):
+    """The tab cannot write a step after the pattern it used to precede:
+    built from the tab, the move comes back in front of the pattern and
+    carries every copy. An edit saved there would take that with it, so the
+    save is refused and says where; the panel can still make the edit."""
+    session = _halbach_as(_move_after_pattern)
+    before = json.loads(json.dumps(session.to_dict()))
+    edited = session.to_builder_script().replace(
+        "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
+    )
+
+    result = session.apply_builder_script(tab(tmp_path, edited))
+
+    assert result["ok"] is False
+    assert "differs at `r1.move((0, 0, 0.002))`" in result["error"]
+    assert "change more than you edited" in result["error"]
+    assert session.to_dict() == before
+
+
+def test_a_save_changing_only_a_slider_range_applies(tmp_path):
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    script = session.to_builder_script()
+    edited = script.replace("slider=(0.016, 0.04)", "slider=(0.02, 0.04)")
+    assert edited != script
+
+    assert session.apply_builder_script(tab(tmp_path, edited)) == {"ok": True}
+    assert session.to_dict()["variable_bounds"]["radius"]["soft_min"] == 0.02
+
+
+def test_what_the_engine_does_not_know_is_named_or_carried(tmp_path):
+    """A key from a newer format or another tool: on an object, a step or a
+    variable's limits it is named at the top of the tab -- as code it would
+    fail the whole script -- and a save that changes something lets it go,
+    saying so. One beside the scene itself no script could touch, and stays."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    doc = json.loads(json.dumps(session.to_dict()))
+    doc["layout"] = {"written by": "another tool"}
+    _note_on("create", "r1")(doc)
+    _note_on("duplicate_around", "r1")(doc)
+    _limits(doc)
+    assert session.load_scene(doc)["ok"]
+    script = session.to_builder_script()
+    notes = [line for line in script.splitlines() if line.startswith("# not written:")]
+    assert len(notes) == 3
+    assert "note=" not in script
+
+    edited = script.replace(
+        "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
+    )
+    result = session.apply_builder_script(tab(tmp_path, edited))
+
+    assert result["ok"] is True
+    assert len(result["warnings"]) == 3
+    assert session.to_dict()["layout"] == {"written by": "another tool"}
+
+
+def test_a_step_that_no_longer_applies_is_named_not_written(tmp_path):
+    """Run, it would fail the whole tab at its line -- or, before, stop the
+    tab rendering at all. Named at the top instead, and let go of, with a
+    word, by the first save that changes something."""
+    session = _halbach_as(_remove_ring2s_create)
+    script = session.to_builder_script()
+    code = [line for line in script.splitlines() if not line.startswith("#")]
+    assert not any("ring2" in line or "r2" in line for line in code)
+    assert script.startswith("# not written: r2 = magpy.magnet.Cuboid(")
+
+    edited = script.replace(
+        "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
+    )
+    result = session.apply_builder_script(tab(tmp_path, edited))
+
+    assert result["ok"] is True
+    assert len(result["warnings"]) == 3
+    assert all("no longer applies" in warning for warning in result["warnings"])
+    assert session._broken == []
+
+
+def test_a_save_in_a_rolled_back_history_keeps_the_scripts_order(tmp_path):
+    """Rolled back, an edit goes in at the bar. A script says where each of
+    its steps goes, though, and a move written at its end went in at the bar
+    -- in front of the sensor it moves, which the regenerated tab then
+    created after moving it, and could no longer run."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    assert session.set_rollback(2)["ok"]
+    script = session.to_builder_script() + "sensor.move((0, 0, 0.01))\n"
+
+    result = session.apply_builder_script(tab(tmp_path, script))
+
+    assert result == {"ok": True}
+    last = session.to_dict()["events"][-1]
+    assert (last["op"], last["target"]) == ("move", "sensor")
+    assert session.get_events()["rollback"] is None
+    again = session.apply_builder_script(tab(tmp_path, session.to_builder_script()))
+    assert again == {"ok": True, "unchanged": True}
+
+
+@pytest.mark.parametrize(
+    "ending", ["exit()", "import sys; sys.exit(0)", "raise SystemExit"]
+)
+def test_a_clean_exit_ends_the_script_not_the_save(tmp_path, ending):
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    edited = session.to_builder_script().replace(
+        "s.variable('radius', 0.023,", "s.variable('radius', 0.0325,"
+    )
+
+    result = session.apply_builder_script(tab(tmp_path, edited + ending + "\n"))
+
+    assert result == {"ok": True}
+    assert session.to_dict()["variables"]["radius"] == 0.0325
+
+
+@pytest.mark.parametrize(
+    ("script", "said"),
+    [
+        (
+            "import sys\n\nsys.exit('done')\n",
+            "line 3: RuntimeError: the script exited with 'done'",
+        ),
+        # site's exit() and quit() also close stdin on their way out
+        ("exit()\n", "the script built no Scene"),
+        ("quit()\n", "the script built no Scene"),
+        # and input() reads it: the request channel, while a script runs
+        ("name = input()\n", "line 1: EOFError"),
+    ],
+)
+def test_a_script_cannot_take_the_engine_with_it(tmp_path, monkeypatch, script, said):
+    """SystemExit is not an Exception, so a script's exit() went past every
+    handler and ended serve() itself. And the engine is asked on stdin, which
+    exit() and quit() close and input() reads: either way the next request
+    went unanswered. A script runs with a stdin of its own now."""
+    requests = [
+        {
+            "id": 1,
+            "method": "apply_builder_script",
+            "params": {"path": tab(tmp_path, script)},
+        },
+        {"id": 2, "method": "list_examples"},
+    ]
+    asked = io.StringIO("\n".join(json.dumps(r) for r in requests) + "\n")
+    monkeypatch.setattr(sys, "stdin", asked)  # as `python -m magpylib_studio` is asked
+    out = io.StringIO()
+    serve(session=MagpylibStudioSession(), inp=asked, out=out)
+    first, second = (json.loads(line) for line in out.getvalue().splitlines())
+
+    assert first["result"]["ok"] is False
+    assert first["result"]["error"].startswith(said)
+    assert second["result"]["examples"]

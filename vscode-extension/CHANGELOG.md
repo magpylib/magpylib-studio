@@ -22,6 +22,19 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- **The script tab is builder code, and saving it applies it.** _Edit Python
+  Script_ shows the scene written with `magpylib_studio.build`, and a save
+  replaces the scene with the one it builds, as one undo step, keeping every
+  variable, formula and pattern. A save that changes nothing records nothing,
+  and one that would change more than you edited is refused, naming the line
+  where the tab cannot say the scene exactly. A script that fails is refused
+  with the line it failed at and stays in the tab; plain magpylib is refused
+  rather than flattened (open it with **Open in Magpylib Studio**). If the scene
+  changed after the tab was written — an edit in the panel, an agent's, an undo
+  — a save asks first, since applying the tab would undo those changes.
+  Auto-save does not apply the tab, and the text it saves is not written over by
+  an edit elsewhere. **Export as Builder Script…** writes the builder code to a
+  file of its own, and opening that file finds the meshes beside it.
 - **The studio's 3D view is the notebook widget**, as the script panel already
   was: one view, with the same controls and keys everywhere. The tools show on
   the view's top-right corner when the pointer is on it; the editing handles

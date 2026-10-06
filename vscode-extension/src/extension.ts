@@ -43,9 +43,10 @@ let sceneDocEmitter: vscode.EventEmitter<vscode.Uri> | undefined;
 // document out of the engine, through the same API an editor tab would.
 const SCENE_JSON_URI = vscode.Uri.parse('magpylib-studio:/scene.json');
 
-// The script tab, unlike scene.json, is editable and applied back on save, so
-// it is a real file (a content provider has no write side) kept in extension
-// storage — scratch space, not something to litter the user's workspace with.
+// The script tab, unlike scene.json, is editable — builder code, applied on a
+// deliberate save — so it is a real file (a content provider has no write
+// side) kept in extension storage: scratch space, not something to litter the
+// user's workspace with.
 // Being a real file, VS Code restores its tab across a window reload, which is
 // why the path is fixed at activation and the restored tab re-rendered: see
 // adoptRestoredScriptTab. (That is also why the extension activates on
@@ -60,6 +61,26 @@ let scriptOnDisk: string | undefined;
 /** Why the script tab was last saved, from onWillSave — auto-save on a typing
  *  delay must not run half-written code through the engine. */
 let scriptSaveReason: vscode.TextDocumentSaveReason | undefined;
+/** The tab holds text the scene has not taken: the engine refused it, or
+ *  auto-save wrote it before anyone asked for it to run. Saved, so not dirty,
+ *  but no more the scene's than unsaved text is — and someone is presumably
+ *  still working on it, so a scene change must not write over it. */
+let scriptHeld = false;
+/** The script last rendered into the tab: what the text being edited there
+ *  started from. When the scene has moved on since -- an edit in the panel, an
+ *  agent's, an undo -- applying the tab would undo that, so a save asks. */
+let scriptRendered: string | undefined;
+
+/** What the script tab says before the code: what it is, and what a save does
+ *  to it, said where it happens rather than in a notification. */
+const SCRIPT_TAB_HEADER = [
+  '# The scene as builder code. Save to apply it: the scene becomes what this',
+  '# builds, as one step to undo. The tab is regenerated from the scene after',
+  '# a save, so a helper or a loop written here comes back as the steps it',
+  '# made, and comments go. Code to keep belongs in a file of its own:',
+  '# Magpylib Studio: Export as Builder Script...',
+  '',
+].join('\n');
 
 /** The file this scene is saved to and from, and whether it has changed since.
  *  The engine holds one scene with no name of its own, so the name lives here:
@@ -2135,7 +2156,9 @@ export function activate(context: vscode.ExtensionContext): void {
     if (pick === undefined) {
       return;
     }
-    await mutateFromTree('load_captured', { scene: importedScenes.indexOf(pick) });
+    if (await mutateFromTree('load_captured', { scene: importedScenes.indexOf(pick) })) {
+      followNewScene();
+    }
     openStudioPanel(context);
   };
 
@@ -2154,6 +2177,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       importedScenes = result.scenes ?? [];
+      followNewScene();
       if (result.warnings?.length) {
         vscode.window.showWarningMessage(
           `Magpylib Studio import: ${result.warnings.join('; ')}`,
@@ -2841,10 +2865,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.textDocuments.find((d) => d.uri.fsPath === scriptFile!.fsPath);
 
   /**
-   * Write the scene's script into the tab. Unsaved edits are never clobbered:
-   * a scene change while the user is mid-edit leaves their text alone.
-   * `force` re-renders anyway — used when opening the tab, and after a save
-   * the user declined to import, where the engine's rendering is the truth.
+   * Write the scene's builder script into the tab. Edits are never clobbered:
+   * a scene change while the user is mid-edit leaves their text alone, unsaved
+   * or held (see scriptHeld). `force` re-renders anyway — used when opening
+   * the tab, and after a save the engine applied, where the scene is by
+   * definition the truth and the tab is regenerated from it.
    */
   const writeScriptFile = async (force = false) => {
     if (!scriptFile) {
@@ -2854,13 +2879,15 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!open && !force) {
       return; // no tab to keep in sync; opening one renders it fresh
     }
-    if (!force && open?.isDirty) {
+    if (!force && (open?.isDirty || scriptHeld)) {
       return;
     }
-    const text = (await (await getEngine(context)).request<string>('to_script')) + '\n';
+    const builder = await (await getEngine(context)).request<string>('to_builder_script');
+    const text = SCRIPT_TAB_HEADER + builder;
     // Identical: don't churn the editor (it would move the cursor). What we
     // last wrote is only a safe stand-in for the file while the file is still
     // there — storage gets cleaned up, and openTextDocument would then fail.
+    scriptRendered = text;
     if (text === scriptOnDisk && (await exists(scriptFile))) {
       return;
     }
@@ -2868,8 +2895,27 @@ export function activate(context: vscode.ExtensionContext): void {
     await vscode.workspace.fs.createDirectory(scriptDir);
     await vscode.workspace.fs.writeFile(scriptFile, Buffer.from(text, 'utf8'));
   };
+  /** The tab could not be rendered or applied for a reason of the engine's
+   *  own -- it died, or answered with an error -- which is said where engine
+   *  trouble is said, not left as an unhandled rejection. */
+  const reportScriptTabError = (err: unknown) => {
+    engineOutput?.appendLine(`script tab: ${err instanceof Error ? err.message : err}`);
+  };
   refreshScript = () => {
-    void writeScriptFile();
+    writeScriptFile().catch(reportScriptTabError);
+  };
+
+  /**
+   * The scene was replaced as a whole: opened, emptied, an example, an
+   * import. Text the tab holds was written against the scene before, and a
+   * save would put that one back over this one, so the tab lets go of it and
+   * follows. Unsaved text is still never written over.
+   */
+  const followNewScene = () => {
+    if (scriptHeld) {
+      scriptHeld = false;
+      refreshScript?.();
+    }
   };
 
   /**
@@ -2902,29 +2948,130 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /**
-   * Saving the script tab does not apply the edit, because generation is
-   * one-way (`docs/direction.md` §5.1). Running an edited script can only
-   * recover the objects it leaves behind, so applying it silently resolved
-   * every expression to a number, flattened every pattern into its copies and
-   * dropped the slider limits — a save that changed nothing still degraded the
-   * scene. Offering the same thing as an explicit *import* keeps the capability
-   * and stops it being something a reflexive Cmd+S does to you.
+   * Saving the script tab applies it: the engine runs the builder code and the
+   * scene it builds replaces this one, as one undo step (`docs/roadmap.md` R1).
+   * Nothing is read back — the code is executed through the operations the
+   * panel uses — and builder code is lossless, so a number edited here comes
+   * back as that number with every variable and pattern intact. That is what
+   * plain magpylib could not do, and why #12 took apply-on-save away
+   * (`docs/direction.md` §5.1); the engine refuses plain magpylib for the same
+   * reason. A refused script stays in the tab, held, to be fixed and saved
+   * again; an applied one is regenerated from the scene it made.
    */
-  const offerScriptImport = async (doc: vscode.TextDocument) => {
-    // The file is the user's text now, not ours. Left stale, it would still
-    // match the rendering the scene gives, and putting that back would be
-    // skipped as a write that changes nothing.
+  const applyScriptFile = async (doc: vscode.TextDocument) => {
+    // The file is the user's text now, not ours. Left stale, it could still
+    // match the scene's rendering, and putting that back would be skipped as
+    // a write that changes nothing (44c9529).
     scriptOnDisk = doc.getText();
-    const build = 'Build a new scene from this';
-    const choice = await vscode.window.showWarningMessage(
-      'The script tab renders the scene — edits here are not applied back to it.',
-      { modal: false },
-      build,
-    );
-    if (choice === build) {
-      await importScript(doc.uri);
+    // Written against a scene that has moved on since -- a drag in the panel,
+    // an agent's edit, an undo, while this text sat unsaved or held -- the
+    // tab would put that scene back, undoing whatever moved it, and nothing
+    // about the text says so. Not knowing what it was written against (a tab
+    // a reload restored with its unsaved text) is the same question.
+    const now =
+      SCRIPT_TAB_HEADER +
+      (await (await getEngine(context)).request<string>('to_builder_script'));
+    if (now !== scriptRendered && doc.getText() !== now) {
+      const apply = 'Apply Anyway';
+      const choice = await vscode.window.showWarningMessage(
+        'Magpylib Studio: the scene changed after the script tab was written, so ' +
+          'applying the tab would undo those changes. Apply it anyway?',
+        { modal: true },
+        apply,
+      );
+      if (choice !== apply) {
+        scriptHeld = true; // kept, to carry over by hand or to apply later
+        return;
+      }
+    }
+    let result: {
+      ok: boolean;
+      error?: string;
+      line?: number;
+      unchanged?: boolean;
+      warnings?: string[];
+    };
+    try {
+      result = await (await getEngine(context)).request('apply_builder_script', {
+        path: doc.uri.fsPath,
+      });
+    } catch (err) {
+      result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    if (!result.ok) {
+      scriptHeld = true;
+      const goTo = 'Go to Line';
+      void vscode.window
+        .showErrorMessage(
+          `Magpylib Studio: the script was not applied, and the scene is as it was — ${result.error}`,
+          ...(result.line ? [goTo] : []),
+        )
+        .then(async (choice) => {
+          if (choice === goTo && result.line) {
+            const at = new vscode.Position(result.line - 1, 0);
+            // By its file: the tab may have been closed while the message
+            // stood, and a closed document cannot be shown again.
+            await vscode.window.showTextDocument(doc.uri, {
+              selection: new vscode.Selection(at, at),
+            });
+          }
+        });
+      return;
+    }
+    scriptHeld = false;
+    if (!result.unchanged) {
+      broadcastMutation();
+    }
+    await writeScriptFile(true);
+    if (result.warnings?.length) {
+      void vscode.window.showWarningMessage(
+        `Magpylib Studio: script applied — ${result.warnings.join('; ')}`,
+      );
     } else {
-      await writeScriptFile(true); // put the rendering back
+      vscode.window.setStatusBarMessage(
+        result.unchanged
+          ? 'Magpylib Studio: the script builds the scene as it is'
+          : 'Magpylib Studio: scene updated from the script',
+        3000,
+      );
+    }
+  };
+
+  /**
+   * Export, not save: neither script is what Save writes, and neither becomes
+   * the scene's file. Plain magpylib is for anyone, studio or not, and carries
+   * no slider bounds and no hidden flags. The builder script is for whoever
+   * keeps the scene as code: it builds the same document, variables and
+   * patterns included, and unlike the script tab nothing regenerates it.
+   */
+  const exportScript = async (kind: 'magpylib' | 'builder') => {
+    const folder = sceneFile
+      ? vscode.Uri.joinPath(sceneFile, '..')
+      : vscode.workspace.workspaceFolders?.[0]?.uri;
+    const name = sceneFile ? basename(sceneFile).replace(/\.magpy\.json$/, '') : 'scene';
+    // Beside the scene and sorted next to it, without taking the plain
+    // export's name: a folder may well hold both.
+    const file = kind === 'builder' ? `${name}_build.py` : `${name}.py`;
+    const target = await vscode.window.showSaveDialog({
+      filters: { 'Python script': ['py'] },
+      defaultUri: folder && vscode.Uri.joinPath(folder, file),
+      saveLabel: kind === 'builder' ? 'Export Builder Script' : 'Export Script',
+    });
+    if (!target) {
+      return;
+    }
+    const engine = await getEngine(context);
+    const script =
+      kind === 'builder'
+        ? await engine.request<string>('to_builder_script')
+        : (await engine.request<string>('to_script')) + '\n';
+    await vscode.workspace.fs.writeFile(target, Buffer.from(script, 'utf8'));
+    const open = await vscode.window.showInformationMessage(
+      `Magpylib Studio: exported ${basename(target)}`,
+      'Open',
+    );
+    if (open === 'Open') {
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target));
     }
   };
 
@@ -3120,6 +3267,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!loaded) {
       return false; // the engine said why (wrong format, or a newer version)
     }
+    followNewScene();
     await setSceneFile(uri);
     if (reveal) {
       // Opening a scene *you asked to open* should show it. Reopening one at
@@ -3340,8 +3488,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.workspace.registerTextDocumentContentProvider('magpylib-studio', sceneDocProvider),
     vscode.commands.registerCommand('magpylib-studio.viewScript', async () => {
-      await writeScriptFile(!scriptDoc()?.isDirty); // never over unsaved edits
-      const doc = await vscode.workspace.openTextDocument(scriptFile!);
       // Reuse the group it is already in, the way the Studio and Field panels
       // reveal themselves. `Beside` is relative to whatever is focused, so
       // running this from the script's own column opens another one each time.
@@ -3352,6 +3498,13 @@ export function activate(context: vscode.ExtensionContext): void {
             tab.input instanceof vscode.TabInputText &&
             tab.input.uri.fsPath === scriptFile!.fsPath,
         );
+      // A tab still on screen keeps the text it holds; closing it let go of
+      // that text, and opening one again starts from the scene.
+      if (!open) {
+        scriptHeld = false;
+      }
+      await writeScriptFile(!scriptDoc()?.isDirty && !scriptHeld); // never over edits
+      const doc = await vscode.workspace.openTextDocument(scriptFile!);
       await vscode.window.showTextDocument(doc, {
         viewColumn: open?.group.viewColumn ?? vscode.ViewColumn.Beside,
         preview: false,
@@ -3368,48 +3521,37 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const reason = scriptSaveReason;
       scriptSaveReason = undefined;
-      // Only a deliberate save asks. With files.autoSave on a delay, a save
-      // lands between keystrokes, and prompting mid-edit would be noise.
-      if (reason === vscode.TextDocumentSaveReason.AfterDelay) {
+      // Only a deliberate save applies. files.autoSave saves between
+      // keystrokes on a delay, or when focus leaves the tab or the window, and
+      // running half-written code would be at best an error and at worst a
+      // scene it never meant. The text is held instead, so a scene change
+      // meanwhile does not write over it, and Cmd+S applies it.
+      if (
+        reason === vscode.TextDocumentSaveReason.AfterDelay ||
+        reason === vscode.TextDocumentSaveReason.FocusOut
+      ) {
+        scriptHeld ||= doc.getText() !== scriptOnDisk;
+        scriptOnDisk = doc.getText();
         return;
       }
-      await offerScriptImport(doc);
+      await applyScriptFile(doc).catch(reportScriptTabError);
     }),
     vscode.commands.registerCommand('magpylib-studio.saveScene', () => saveScene()),
     vscode.commands.registerCommand('magpylib-studio.saveSceneAs', () =>
       saveScene({ prompt: true }),
     ),
-    vscode.commands.registerCommand('magpylib-studio.exportScript', async () => {
-      // Export, not save: the script is runnable magpylib anyone can use
-      // without the studio, but it carries no slider bounds and no hidden
-      // flags, so it is not what Save writes and does not become the file.
-      const folder = sceneFile
-        ? vscode.Uri.joinPath(sceneFile, '..')
-        : vscode.workspace.workspaceFolders?.[0]?.uri;
-      const name = sceneFile ? basename(sceneFile).replace(/\.magpy\.json$/, '') : 'scene';
-      const target = await vscode.window.showSaveDialog({
-        filters: { 'Python script': ['py'] },
-        defaultUri: folder && vscode.Uri.joinPath(folder, `${name}.py`),
-        saveLabel: 'Export Script',
-      });
-      if (!target) {
-        return;
-      }
-      const script = await (await getEngine(context)).request<string>('to_script');
-      await vscode.workspace.fs.writeFile(target, Buffer.from(script + '\n', 'utf8'));
-      const open = await vscode.window.showInformationMessage(
-        `Magpylib Studio: exported ${basename(target)}`,
-        'Open',
-      );
-      if (open === 'Open') {
-        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(target));
-      }
-    }),
+    vscode.commands.registerCommand('magpylib-studio.exportScript', () =>
+      exportScript('magpylib'),
+    ),
+    vscode.commands.registerCommand('magpylib-studio.exportBuilderScript', () =>
+      exportScript('builder'),
+    ),
     vscode.commands.registerCommand('magpylib-studio.newScene', async (options?: Discard) => {
       if (!(await confirmDiscard('starting a new scene', options))) {
         return;
       }
       if (await mutateFromTree('clear_scene', {})) {
+        followNewScene();
         await setSceneFile(undefined);
       }
     }),
@@ -3426,6 +3568,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (await mutateFromTree('clear_scene', {})) {
+        followNewScene();
         await setSceneFile(undefined);
         currentPanel?.dispose();
         fieldPanel?.dispose();
@@ -3545,6 +3688,7 @@ export function activate(context: vscode.ExtensionContext): void {
           chosen = pick.e.name;
         }
         if (await mutateFromTree('load_example', { name: chosen })) {
+          followNewScene();
           // An example is a starting point, not a document: it has no file of
           // its own, and nothing in it is yours until you change something.
           // Marked unsaved on arrival it asked to be saved on the way out of

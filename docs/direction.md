@@ -192,11 +192,26 @@ This is what every project in §4 does, and it is the whole of §2's problem. Th
 document remains the artifact; the script stops pretending to be a second one.
 
 Cost, stated because it is a UI decision and not only a deletion: the script tab
-stops being applied on save. `load_script` keeps working by execution.
+stopped being applied on save. `load_script` keeps working by execution.
 `apply_script` went too, which was not the plan: applying by execution resolved
 every expression to a number, flattened every pattern and dropped the slider
-limits, even on a save that changed nothing. Saving the tab offers "Build a new
-scene from this" instead, which is the same import, asked for.
+limits, even on a save that changed nothing. For a while saving the tab offered
+"Build a new scene from this" instead, which is the same import, asked for.
+
+**Apply-on-save came back, as builder code** (`roadmap.md` R1). The tab shows
+`to_builder_script()`, and a deliberate save runs it and replaces the document
+with the `Scene` it built, as one undo step. The degradation above was what
+plain magpylib cannot say, and builder code says it: that running
+`to_builder_script()` rebuilds the same document is tested over every example
+and the scenes the panel leaves (`builder.md` §5). Where it does not -- a gap
+not found yet -- the save is refused rather than carried: it compares the edit
+with the open scene built back from its own tab, so a degradation cannot ride
+along with an edit unnoticed, and a reflexive save never changes anything. It is
+still not a round trip. Nothing is parsed; the tab is executed through the
+panel's own operations; and the tab is the studio's view, regenerated after a
+save, so a helper or a loop typed into it comes back as the steps it made. Plain
+magpylib saved in the tab is refused with a pointer to Open in Magpylib Studio,
+never flattened.
 
 ### 5.2 Parameterised instancing
 
@@ -351,13 +366,13 @@ Nothing here requires migrating a document. The artifact does not change; what
 changes is that one direction of a two-way arrow is removed and a feature is
 added.
 
-| Survives                               | Retires                          |
-| -------------------------------------- | -------------------------------- |
-| the document, `to_dict`, `DOC_VERSION` | `parse_script`                   |
-| `to_script`, as export and recording   | the matched emitter/parser pairs |
-| field, figures, field maps, sweeps     | the two-tier cliff               |
-| `expressions.py` — and §5.4 grows it   | the script tab applying on save  |
-| the whole of `docs/fem.md`             |                                  |
+| Survives                               | Retires                                        |
+| -------------------------------------- | ---------------------------------------------- |
+| the document, `to_dict`, `DOC_VERSION` | `parse_script`                                 |
+| `to_script`, as export and recording   | the matched emitter/parser pairs               |
+| field, figures, field maps, sweeps     | the two-tier cliff                             |
+| `expressions.py` — and §5.4 grows it   | the script tab applying plain magpylib on save |
+| the whole of `docs/fem.md`             |                                                |
 
 `docs/fem.md` is unaffected in particular: §12.1 already assumes the document
 stays the artifact, keys its cache on source-affecting events, and treats `undo`

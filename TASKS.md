@@ -23,8 +23,8 @@ ours. V is downstream of F except for V1, which is orthogonal — a different re
 that touches none of this. W is independent of all three: it puts the engine as
 it is today in a notebook. A (agents) builds on F1b's builder.
 
-**The order across tracks is in [docs/roadmap.md](docs/roadmap.md) §4**: B3
-(R1), units (R2), the agent tools and their evaluation (R3–R4), then FEM with
+**The order across tracks is in [docs/roadmap.md](docs/roadmap.md) §4**: B3 (R1,
+done), units (R2), the agent tools and their evaluation (R3–R4), then FEM with
 tier 0 checked on the Maxwell seat before the open solver (R7), then several
 scenes open at once — a project is a folder, a scene a file (R9).
 
@@ -49,13 +49,14 @@ behind, so a save that changed nothing still resolved every expression to a
 number, flattened every pattern into its copies and dropped the slider limits —
 silent degradation on `Cmd+S`. So `apply_script` is gone too, and saving the tab
 offers "Build a new scene from this" instead: the same capability, explicit and
-opt-in. `load_script` is unchanged.
+opt-in. `load_script` is unchanged. (Since replaced: the tab is builder code
+now, and its save applies again — F1b, B3.)
 
 **Done.** `importer.py` 1133 → 372 lines, `apply_script` and
 `_round_trip_warnings` removed, the extension rewired, 261 tests green and ruff
 clean.
 
-### F1b — Write a scene in code (B1 ✅)
+### F1b — Write a scene in code (B1, B2, B3 ✅)
 
 **What.** `magpylib_studio.build`: magpylib's spelling, with variables that stay
 variables, recording through the session operations the GUI uses. Design in
@@ -80,10 +81,20 @@ A builder script opens in the studio as the scene it built (`load_script`), and
 `SceneWidget.variable_sliders()` gives a notebook the Variables panel's
 controls. `examples/builder_demo.py` is written for all three ways in.
 
-**Next.** B3: the tab shows builder code and its save applies — designed in
-[docs/roadmap.md](docs/roadmap.md) R1, waiting on a yes. Then #12 merges.
-Structure kept in sync as a layer of GUI steps over a script's
-(`docs/builder.md` §7, level 2) is designed, not started.
+**Done (B3).** The script tab shows builder code, and a deliberate save applies
+it ([docs/roadmap.md](docs/roadmap.md) R1): `apply_builder_script` runs the tab
+and replaces the document with the `Scene` it built, as one undo step. A save
+that builds the scene already open records nothing; a script that fails, builds
+no `Scene` or is plain magpylib is refused and changes nothing, and the tab
+keeps its text until it runs. The edit is compared with the open scene built
+back from its own tab, so a save that would change more than its edit is refused
+too; a review before pushing found such gaps in B2 and closed them, bar one left
+open as a decision (roadmap §6, step order). Auto-save still does not apply.
+**Export as Builder Script…** writes code to keep. Why apply-on-save returned:
+`docs/direction.md` §5.1, `docs/builder.md` §5.
+
+**Next.** #12 merges. Structure kept in sync as a layer of GUI steps over a
+script's (`docs/builder.md` §7, level 2) is designed, not started.
 
 ### F2 — Parameterised instancing
 

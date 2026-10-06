@@ -42,6 +42,10 @@ Protocol surface (all JSON-serializable in/out):
   load_scene(scene | path, base_dir?)  -> {"ok": bool, "error"?: str}
   load_script(path, scene?)            -> {"ok", "scene", "scenes": [labels], ...}
   load_captured(scene)                 -> same (switch between captured scenes)
+  apply_builder_script(path)           -> {"ok", "unchanged"?, "warnings"?, "line"?}
+                                          the scene a builder script builds
+                                          replaces this one (1 undo step);
+                                          plain magpylib is refused
   list_examples()                      -> {"examples": [{name, label, description}]}
   load_example(name?)                  -> {"ok": bool, "error"?: str}
   clear_scene()                        -> {"ok": bool, "error"?: str}
@@ -65,14 +69,17 @@ Protocol surface (all JSON-serializable in/out):
   move_event(event_id, index)          -> {"ok": bool, "error"?: str}
   to_dict()                            -> the scene document
   to_script()                          -> equivalent magpylib Python code
+  to_builder_script()                  -> the scene as magpylib_studio.build code
 """
 
 from __future__ import annotations
 
 import ast
+import difflib
 import json
 import os
 import re
+import traceback
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
 
@@ -1862,6 +1869,52 @@ def _nest(flat):
     return root
 
 
+def _script_failure(error, path):
+    """A script that raised, as a refusal that says where: the line in the
+    script, not in the builder or magpylib below it, because the script is
+    what the person reading this can change."""
+    if isinstance(error, SyntaxError) and error.filename == str(path):
+        line, message = error.lineno, f"SyntaxError: {error.msg}"
+    else:
+        frames = traceback.extract_tb(error.__traceback__)
+        mine = [frame.lineno for frame in frames if frame.filename == str(path)]
+        line, message = (mine[-1] if mine else None), f"{type(error).__name__}: {error}"
+    if line is None:
+        return {"ok": False, "error": message}
+    return {"ok": False, "error": f"line {line}: {message}", "line": line}
+
+
+def _said(doc):
+    """A document built by a builder script, as the script can say it: the
+    log without its own numbering, and the variables with their limits."""
+    steps = [
+        {key: value for key, value in event.items() if key != "id"}
+        for event in doc.get("events") or []
+    ]
+    return steps, doc.get("variables"), doc.get("variable_bounds")
+
+
+def _drift(written, back, width=100):
+    """Where a builder script does not build its scene back: the first line of
+    code at which `written` and `back` -- the script of what it built --
+    differ, or None. Comments are notes about the scene, not part of it."""
+
+    def code(text):
+        return [
+            line
+            for line in text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    ours, theirs = code(written), code(back)
+    matcher = difflib.SequenceMatcher(a=ours, b=theirs, autojunk=False)
+    for tag, i1, i2, j1, _ in matcher.get_opcodes():
+        if tag != "equal":
+            line = ours[i1] if i1 < i2 else theirs[j1]
+            return line if len(line) <= width else line[: width - 1] + "…"
+    return None
+
+
 class MagpylibStudioSession:
     """A live magpylib scene plus the document it was built from."""
 
@@ -3575,7 +3628,6 @@ class MagpylibStudioSession:
         orientation it happens to have" is not a no-op; it is a decision that
         this object no longer takes part in what turns the rest.
         """
-        events = self.doc.setdefault("events", [])
         at = self._pattern_step_at(object_id) if insert else None
         if at is not None:
             frame = self._replay_frame_for(object_id, at)
@@ -3599,14 +3651,25 @@ class MagpylibStudioSession:
                     "rotvec": np.round(world_rot.as_rotvec(degrees=True), 9).tolist(),
                 }
             )
-        if not ops:
-            return
-        # A pin supersedes the pin it directly follows. Nudging a position
-        # field is one act of placing an object, not a dozen — and a log that
-        # grew by two entries per nudge would be unreadable, which is the
-        # thing it most needs not to be. Only where this pin belongs: once
-        # anything else has happened after that point, order matters and a
-        # fresh pair goes in rather than one being written over.
+        if ops:
+            self._pin(object_id, ops, at=at)
+
+    def _pin(self, object_id, ops, at=None):
+        """Record a pose stated outright: `position`/`orientation` ops, at the
+        end of the log or at `at`.
+
+        A pin supersedes the pin it directly follows. Nudging a position
+        field is one act of placing an object, not a dozen — and a log that
+        grew by two entries per nudge would be unreadable, which is the
+        thing it most needs not to be. Only where this pin belongs: once
+        anything else has happened after that point, order matters and a
+        fresh pair goes in rather than one being written over.
+
+        A path is a pose stated outright too. It used to be appended always,
+        so a reparent (which pins where the object is) followed by its own
+        path, written back as builder code, added both again on every run.
+        """
+        events = self.doc.setdefault("events", [])
         end = len(events) if at is None else at
         tail = events[max(0, end - len(ops)) : end]
         if (
@@ -3614,11 +3677,8 @@ class MagpylibStudioSession:
             and all(e.get("target") == object_id for e in tail)
             and [e.get("op") for e in tail] == [op["op"] for op in ops]
         ):
-            for offset, op in enumerate(ops):
-                events[end - len(ops) + offset] = {
-                    **tail[offset],
-                    **_plain(op),
-                }
+            for offset, op in enumerate(expressions.normalized(_plain(ops))):
+                events[end - len(ops) + offset] = {**tail[offset], **op}
         else:
             self._log(object_id, ops, at=at)
 
@@ -3803,7 +3863,7 @@ class MagpylibStudioSession:
                     ops.append({"op": "position", "value": position})
                 if orientation is not None:
                     ops.append({"op": "orientation", "rotvec": orientation})
-                self._log(object_id, ops)
+                self._pin(object_id, ops)
             else:
                 # What was asked for, and nothing else: see `_set_world_pose`.
                 self._set_world_pose(
@@ -4109,6 +4169,8 @@ class MagpylibStudioSession:
                             style[path] = restore[path]
                         else:
                             style.pop(path, None)
+                    if not style:  # shown as it was, not with an empty style
+                        del event["style"]
                 else:
                     if "hidden_style" not in event:
                         event["hidden_style"] = {
@@ -4263,28 +4325,29 @@ class MagpylibStudioSession:
         scene"), plus an "all script objects" fallback when it differs.
         Loads candidate `scene` (default: the first show() call); the rest
         stay cached for load_captured(). Parametric structure flattens."""
-        from magpylib_studio import importer
+        from magpylib_studio import build, importer
 
         candidates = []
+        # Where the script is, a relative mesh path in it is: an exported
+        # builder script sits beside its scene and the parts the scene names.
+        # Not the engine's working directory, which is wherever the editor
+        # happened to start it.
+        folder = os.path.dirname(os.path.abspath(path))
         try:
-            namespace, captured, code = importer.run_script(path)
+            with build.resolving_against(folder):
+                namespace, captured, code = importer.run_script(path)
             # A script written with the builder made a document, not objects
             # to guess one from: that is the scene, whole -- variables,
             # formulas and patterns -- and nothing has to be said about what
             # running it lost, because nothing was.
-            from magpylib_studio.build import Scene
-
-            built = [
-                (name, value)
-                for name, value in namespace.items()
-                if not name.startswith("_") and isinstance(value, Scene)
-            ]
+            built = build.scenes_in(namespace)
             if built:
                 self._captured_scenes = [
                     {
                         "label": f"{name} (the scene the script built)",
                         "doc": written.to_dict(),
                         "warnings": [],
+                        "base_dir": folder,
                     }
                     for name, written in built
                 ]
@@ -4334,7 +4397,9 @@ class MagpylibStudioSession:
                 "error": f"scene must be 0..{len(self._captured_scenes) - 1}",
             }
         entry = self._captured_scenes[scene]
-        result = self.load_scene(json.loads(json.dumps(entry["doc"])))
+        result = self.load_scene(
+            json.loads(json.dumps(entry["doc"])), base_dir=entry.get("base_dir")
+        )
         if result["ok"]:
             if not self._history_paused and self._undo:
                 self._undo[-1]["label"] = f"import {entry['label']}"
@@ -4343,6 +4408,135 @@ class MagpylibStudioSession:
             if entry["warnings"]:
                 result["warnings"] = entry["warnings"]
         return result
+
+    def apply_builder_script(self, path):
+        """Replace the scene with the one a builder script builds: what saving
+        the script tab does (`docs/roadmap.md` R1).
+
+        The script is run, as `load_script` runs one, and the `Scene` it left
+        is the new document, in one undo step. Nothing is read back: builder
+        code is executed through the operations the panel uses, so a number
+        edited in the tab and saved changes that number and keeps every
+        variable, formula and pattern.
+
+        What it is compared with is the open scene built again from its own
+        tab (`build.rebuilt`), not the open scene itself:
+
+        - the same scene: nothing changes and no undo step is added
+          (`unchanged`), so a reflexive save costs nothing, whatever the tab
+          could or could not say;
+        - a different one, while the tab does not build the open scene back
+          exactly: refused, naming the first line that differs. The edit
+          would carry each such difference with it, and nobody made those --
+          a save changes what it was asked to and nothing else.
+
+        Refused as well, with the scene left as it was: a script that raises
+        (with the line it raised at, `line`); one that builds no `Scene`, or
+        more than one; and plain magpylib, which would come back flattened.
+        Importing that is `load_script`, asked for by name, never something a
+        save does.
+
+        What no builder call writes -- an expression a resize set aside, a
+        step that no longer applies -- is named at the top of the tab, does
+        not survive a save that changes something, and `warnings` names it.
+        A relative mesh path means what it does in the document: relative to
+        the scene's directory, not the script's or the engine's.
+        """
+        from magpylib_studio import build
+
+        edited = self._builder_scene(path)
+        if not edited["ok"]:
+            return edited
+        edited = edited["session"]
+        unchecked = None
+        try:
+            rendered = build.rebuilt(self)
+        except Exception as e:  # noqa: BLE001 - nothing to compare with, not a refusal
+            rendered, unchecked = None, f"{type(e).__name__}: {e}"
+        if rendered is not None:
+            if _said(edited.to_dict()) == _said(rendered.to_dict()):
+                return {"ok": True, "unchanged": True}
+            drift = _drift(build.script_of(self), build.script_of(rendered))
+            if drift:
+                return {
+                    "ok": False,
+                    "error": "the script tab does not build this scene back "
+                    f"exactly -- it differs at `{drift}` -- so saving it would "
+                    "change more than you edited. Make this change in the panel",
+                }
+        lost = build.not_written(self)
+        # Keys this engine does not know were carried rather than dropped when
+        # the document was opened; no script can say them, so none takes them.
+        written = json.loads(json.dumps(edited.to_dict()))
+        for key, value in self.doc.items():
+            if key not in _DOC_KEYS:
+                written[key] = json.loads(json.dumps(value))
+        # The script says where each step goes. A rolled-back history would
+        # put them at its bar instead (`_reposition_for_rollback`): ahead of
+        # the objects they move, as often as not.
+        rollback, self._rollback = self._rollback, None
+        result = self.load_scene(written)
+        if not result["ok"]:
+            if rollback is not None:
+                self._rollback = rollback
+                self._build()
+            return result
+        if not self._history_paused and self._undo:
+            self._undo[-1]["label"] = "apply builder script"
+        warnings = [f"not kept, as no builder call writes it: {what}" for what in lost]
+        if unchecked:
+            warnings.append(
+                "the open scene could not be built from its own script "
+                f"({unchecked}), so what the save kept was not checked"
+            )
+        if warnings:
+            result["warnings"] = warnings
+        return result
+
+    def _builder_scene(self, path):
+        """Run a builder script for the one scene it builds, as
+        {"ok": True, "session": ...}, or the refusal to report."""
+        from magpylib_studio import build, importer
+
+        try:
+            with build.resolving_against(self._base_dir):
+                namespace, captured, _ = importer.run_script(path)
+        except Exception as e:  # noqa: BLE001 - report script errors, don't crash
+            return _script_failure(e, path)
+        built = build.scenes_in(namespace)
+        if not built:
+            plain = captured or any(
+                not name.startswith("_") and importer._is_scene_object(value)
+                for name, value in namespace.items()
+            )
+            if plain:
+                return {
+                    "ok": False,
+                    "error": "this is plain magpylib, which would come back "
+                    "flattened: every variable a number and every pattern its "
+                    "copies. Saving applies builder code, a script that builds a "
+                    "Scene (from magpylib_studio.build import Scene). To bring "
+                    "plain magpylib in, save it as a file of its own and use "
+                    "Open in Magpylib Studio",
+                }
+            return {
+                "ok": False,
+                "error": "the script built no Scene "
+                "(from magpylib_studio.build import Scene; s = Scene())",
+            }
+        if len(built) > 1:
+            names = ", ".join(name for name, _ in built)
+            return {
+                "ok": False,
+                "error": f"the script built {len(built)} scenes ({names}), "
+                "and there is one scene to replace",
+            }
+        try:
+            # Objects nothing touched enter the scene here, so a refusal can
+            # come this late -- with no line to point at, having none.
+            return {"ok": True, "session": built[0][1].session}
+        except Exception as e:  # noqa: BLE001 - report it like any other refusal
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     def list_examples(self):
         """The built-in scenes. Each leans on a different feature, which is
