@@ -10,6 +10,7 @@ import {
   incrementRamp,
   meaning,
   sceneFileState,
+  splitTerms,
   stopEngineForTest,
 } from '../extension';
 import { SceneObject, SceneOperation, SceneTreeProvider } from '../sceneTree';
@@ -726,6 +727,111 @@ suite('magpylib-studio', () => {
     )) as unknown as Doc;
     assert.strictEqual(after.variables.lift2, 0.012, '12 mm typed for a length is 0.012 m');
     assert.strictEqual(after.variable_bounds.lift2?.unit, 'length');
+  });
+
+  test('a box splits at commas, so a term may hold a unit or a formula', () => {
+    assert.deepStrictEqual(splitTerms('0, 0, 5 mm'), ['0', '0', '5 mm']);
+    assert.deepStrictEqual(splitTerms('0, 0, max(a, b)'), ['0', '0', 'max(a, b)']);
+    assert.deepStrictEqual(splitTerms('0, 0, gap * 2'), ['0', '0', 'gap * 2']);
+    // the sampled-curve editor's own example, which spaces used to split
+    assert.deepStrictEqual(splitTerms('radius * cos(tau * turns * t)'), [
+      'radius * cos(tau * turns * t)',
+    ]);
+    assert.deepStrictEqual(splitTerms('[1 2 3]'), ['1', '2', '3']); // as it always was
+    assert.strictEqual(splitTerms('0, (1'), undefined);
+  });
+
+  test('the boxes show and read lengths in the scene\'s length unit', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    type Doc = {
+      model_unit?: string;
+      events: { target: string; op?: string; value?: unknown }[];
+    };
+    // Units... -> Length -> mm
+    const units = answering({
+      pick: (items) => items.find((i) => i.label === 'Length' || i.label === 'mm'),
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setUnits');
+    } finally {
+      units.restore();
+    }
+    await sceneWhere((d) => (d as unknown as Doc).model_unit === 'mm', 'the scene in mm');
+
+    // Set Position...: asked in mm, prefilled in mm; a bare number is mm, one
+    // with a unit is in its own, and an expression is as written
+    const window = vscode.window as unknown as Record<string, unknown>;
+    const real = window.showInputBox;
+    const asked: vscode.InputBoxOptions[] = [];
+    window.showInputBox = async (options: vscode.InputBoxOptions) => {
+      asked.push(options);
+      return '10, 2 cm, radius';
+    };
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setPosition', {
+        id: 'sensor',
+        type: 'Sensor',
+        label: 'Sensor',
+        parent: null,
+        visible: true,
+      });
+    } finally {
+      window.showInputBox = real;
+    }
+    assert.match(String(asked[0]?.prompt), /as x, y, z \(mm\)$/);
+    assert.match(String(await asked[0]?.validateInput?.('0, 0, 5 kg')), /'kg' is not a unit of length/);
+    const placed = (await sceneWhere(
+      (d) =>
+        (d as unknown as Doc).events.some((e) => e.target === 'sensor' && e.op === 'position'),
+      'the sensor to be placed',
+    )) as unknown as Doc;
+    const position = placed.events.find((e) => e.target === 'sensor' && e.op === 'position');
+    assert.deepStrictEqual(position?.value, [0.01, 0.02, '=radius']);
+  });
+
+  test('a field is shown and typed in the scene\'s field unit', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    type Doc = {
+      field_unit?: string;
+      variables: Record<string, unknown>;
+      variable_bounds: Record<string, Record<string, unknown>>;
+    };
+    const units = answering({
+      pick: (items) => items.find((i) => i.label === 'Field' || i.label === 'mT'),
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setUnits');
+    } finally {
+      units.restore();
+    }
+    await sceneWhere((d) => (d as unknown as Doc).field_unit === 'mT', 'the scene in mT');
+
+    // New Variable -> Field: a bare 800 is 800 mT, and no range
+    const prompts = answering({
+      input: ['bfield', '800', ''],
+      pick: (items) => items.find((i) => i.label === 'Field'),
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.addVariable');
+    } finally {
+      prompts.restore();
+    }
+    const made = (await sceneWhere(
+      (d) => (d as unknown as Doc).variables.bfield !== undefined,
+      'bfield to be created',
+    )) as unknown as Doc;
+    assert.strictEqual(made.variables.bfield, 0.8);
+    assert.deepStrictEqual(made.variable_bounds.bfield, { unit: 'field' });
+
+    // its value and what it measures are one step: one undo takes both
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    const undone = (await sceneWhere(
+      (d) => (d as unknown as Doc).variables.bfield === undefined,
+      'bfield to be undone',
+    )) as unknown as Doc;
+    assert.strictEqual(undone.variable_bounds.bfield, undefined);
   });
 
   test('a scene saved to a file opens again as the same scene', async function () {

@@ -288,9 +288,9 @@ message).
 neither waits for the other. B1 is what makes "write it in code, export it to
 Maxwell with its design variables" true end to end.
 
-**Units** go on `variable(…, unit="length")`, and the length unit a scene is
-shown in on `Scene(model_unit="cm")` (`fem.md` §6, roadmap R2); the values stay
-SI, and the builder invents no units of its own.
+**Units** go on `variable(…, unit="length")`, and the units a scene is shown in
+on `Scene(model_unit="cm", field_unit="mT")` (`fem.md` §6, roadmap R2); the
+values stay SI, and the builder invents no units of its own.
 
 **Instancing** (`instancing.md`) is compatible. A Python function over the
 builder, like the `ring` loop above, is reuse at authoring time: the document

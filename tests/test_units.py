@@ -249,6 +249,13 @@ def test_units_are_reachable_over_the_wire():
         {"id": 2, "method": "set_variable_unit", "params": {"name": "n", "unit": None}},
         {"id": 3, "method": "set_model_unit", "params": {"unit": "cm"}},
         {"id": 4, "method": "unit_kinds"},
+        {"id": 5, "method": "set_field_unit", "params": {"unit": "mT"}},
+        {"id": 6, "method": "get_units"},
+        {
+            "id": 7,
+            "method": "read_values",
+            "params": {"terms": ["2 cm"], "unit": "length"},
+        },
     ]
     out = io.StringIO()
     serve(
@@ -261,6 +268,9 @@ def test_units_are_reachable_over_the_wire():
     assert responses[1]["result"]["ok"] and responses[2]["result"]["ok"]
     kinds = {k["kind"]: k["units"] for k in responses[3]["result"]["kinds"]}
     assert kinds["length"] == ["m", "cm", "mm", "µm"]
+    assert responses[4]["result"]["ok"]
+    assert responses[5]["result"]["field_unit"] == "mT"
+    assert responses[6]["result"] == {"ok": True, "values": [0.02]}
 
 
 def test_a_sweep_is_plotted_along_the_variables_unit():
@@ -358,3 +368,189 @@ def test_a_new_variables_value_is_read_in_the_unit_it_will_have():
     # not defined yet and no unit said: a plain number, as New Variable asks
     assert session.quantity("lift", "12") == {"ok": True, "value": 12}
     assert session.quantity("lift", "12 mm")["ok"] is False
+
+
+# --- the scene's units, everywhere a value is shown -------------------------------
+
+
+def test_a_field_is_shown_in_the_scenes_field_unit():
+    """Tesla unless the scene says otherwise; then a field variable is shown
+    and typed in it, and the document still holds tesla."""
+    session = halbach()
+    assert session.set_variable("b", 1.2, unit="field")["ok"]
+    shown = {v["name"]: v.get("shown") for v in session.get_variables()["variables"]}
+    assert shown["b"] == {"symbol": "T", "scale": 1.0}
+    assert session.set_field_unit("mT")["ok"]
+    listed = session.get_variables()
+    assert listed["field_unit"] == "mT"
+    shown = {v["name"]: v.get("shown") for v in listed["variables"]}
+    assert shown["b"] == {"symbol": "mT", "scale": 1000.0}
+    assert session.quantity("b", "800") == {"ok": True, "value": 0.8}
+    assert session.quantity("b", "1.4 T") == {"ok": True, "value": 1.4}
+    assert session.to_dict()["variables"]["b"] == 1.2
+    assert session.set_field_unit("gauss")["ok"] is False
+    assert session.undo()["ok"]
+    assert "field_unit" not in session.to_dict()
+
+
+def test_a_field_unit_the_studio_does_not_know_is_carried_not_shown_in():
+    session = halbach()
+    doc = session.to_dict()
+    doc["field_unit"] = "G"
+    assert session.load_scene(doc)["ok"]
+    assert session.get_units()["field_unit"] == "T"
+    assert session.to_dict()["field_unit"] == "G"
+    assert "# not written: field_unit ('G')" in session.to_builder_script()
+
+
+def test_a_variable_is_created_measuring_something_in_one_step():
+    """What the assistant's set-variable tool does: a value and its unit,
+    undone together."""
+    session = halbach()
+    assert session.set_variable("lift", 0.002, unit="length")["ok"]
+    assert session.to_dict()["variable_bounds"]["lift"] == {"unit": "length"}
+    assert session.undo()["ok"]
+    assert "lift" not in session.to_dict()["variables"]
+    assert "lift" not in session.to_dict()["variable_bounds"]
+    assert session.set_variable("lift", 0.002, unit="mass")["ok"] is False
+    assert session.set_variable("tilt_axis", "x", unit="angle")["ok"] is False
+    # without a unit, what it measures stays as it was
+    assert session.set_variable("gap", 0.02)["ok"]
+    assert session.to_dict()["variable_bounds"]["gap"]["unit"] == "length"
+
+
+def test_a_box_reads_its_terms_in_the_scenes_unit():
+    """`0, 0, 5 mm` typed into a position: each term a number, perhaps with a
+    unit, or an expression. A whole number typed as one stays one."""
+    session = halbach()
+    assert session.set_model_unit("mm")["ok"]
+    read = session.read_values(["0", "0", "5 mm", "gap*2", "1.5"], "length")
+    assert read == {"ok": True, "values": [0, 0, 0.005, "=gap*2", 0.0015]}
+    assert session.read_values(["1", "2.5"]) == {"ok": True, "values": [1, 2.5]}
+    refused = session.read_values(["0", "5 kg"], "length")
+    assert refused["ok"] is False and refused["error"].startswith("5 kg: ")
+    assert session.read_values(["90", "1.5707963267948966 rad"], "angle")["values"] == [
+        90,
+        pytest.approx(90),
+    ]
+
+
+def test_an_objects_parameters_and_pose_say_how_they_are_shown():
+    session = halbach()
+    assert session.set_model_unit("mm")["ok"]
+    assert session.set_field_unit("mT")["ok"]
+    params = {p["name"]: p for p in session.get_params("r1")}
+    assert params["dimension"]["shown"] == {
+        "unit": "length",
+        "symbol": "mm",
+        "scale": 1000.0,
+    }
+    assert params["polarization"]["shown"]["symbol"] == "mT"
+    assert "shown" not in params["magnetization"]  # A/m, which no kind measures
+    assert params["dimension"]["unit"] == "m"  # what the numbers are in
+    pose = session.get_transform("r1")["shown"]
+    assert pose["position"]["symbol"] == "mm"
+    assert pose["orientation"]["symbol"] == "°"
+
+    # a segment's dimension is three lengths and two angles
+    added = session.add_object(
+        "seg",
+        "magnet.CylinderSegment",
+        {"dimension": [0.01, 0.02, 0.01, 0, 90], "polarization": [0, 0, 1]},
+    )
+    assert added["ok"], added
+    segment = {p["name"]: p for p in session.get_params("seg")}
+    symbols = [s["symbol"] for s in segment["dimension"]["shown"]]
+    assert symbols == ["mm", "mm", "mm", "°", "°"]
+
+
+def test_a_step_is_labelled_and_edited_in_the_scenes_length_unit():
+    session = halbach()
+    assert session.move("r1", [0, 0, 0.005])["ok"]
+
+    def moved():
+        return next(e for e in session.get_events()["events"] if e["op"] == "move")
+
+    assert moved()["label"] == "moved by (0, 0, 0.005) m"
+    assert session.set_model_unit("mm")["ok"]
+    assert moved()["label"] == "moved by (0, 0, 5) mm"
+    assert moved()["shown"]["displacement"]["symbol"] == "mm"
+    turned = [
+        e for e in session.get_events()["events"] if e["op"] == "duplicate_around"
+    ]
+    assert turned[0]["shown"]["spin"]["symbol"] == "°"
+
+
+def _plotted(values):
+    """A plotly array, plain or binary-packed."""
+    if isinstance(values, dict):
+        import base64
+
+        import numpy as np
+
+        return np.frombuffer(base64.b64decode(values["bdata"]), dtype=values["dtype"])
+    return values
+
+
+def test_field_plots_are_in_the_scenes_units():
+    session = halbach()
+    in_si = session.get_field_map(plane="xy", resolution=5)
+    sweep_si = session.get_sweep_figure("gap", [0.01, 0.02], points=[[0, 0, 0]])
+    assert in_si["layout"]["xaxis"]["title"]["text"] == "x (m)"
+    assert session.set_model_unit("mm")["ok"]
+    assert session.set_field_unit("mT")["ok"]
+
+    shown = session.get_field_map(plane="xy", resolution=5)
+    assert shown["layout"]["xaxis"]["title"]["text"] == "x (mm)"
+    assert shown["data"][0]["colorbar"]["title"]["text"] == "|B| (mT)"
+    assert _plotted(shown["data"][0]["x"]) == pytest.approx(
+        [1000 * x for x in _plotted(in_si["data"][0]["x"])]
+    )
+    assert shown["data"][0]["z"][2][2] == pytest.approx(
+        1000 * in_si["data"][0]["z"][2][2]
+    )
+    # H is in A/m, which the field unit does not touch
+    h = session.get_field_map(plane="xy", resolution=5, field="H")
+    assert h["data"][0]["colorbar"]["title"]["text"] == "|H| (A/m)"
+
+    sweep = session.get_sweep_figure("gap", [0.01, 0.02], points=[[0, 0, 0]])
+    assert sweep["layout"]["yaxis"]["title"]["text"] == "|B| (mT)"
+    assert _plotted(sweep["data"][0]["y"]) == pytest.approx(
+        1000 * _plotted(sweep_si["data"][0]["y"])
+    )
+
+
+def test_the_sensor_plot_is_in_the_scenes_field_unit():
+    session = MagpylibStudioSession()
+    session.load_example()
+    tesla = session.get_field_figure()
+    assert session.set_field_unit("mT")["ok"]
+    milli = session.get_field_figure()
+    assert milli["layout"]["yaxis"]["title"]["text"] == "B (mT)"
+    assert _plotted(milli["data"][0]["y"]) == pytest.approx(
+        1000 * _plotted(tesla["data"][0]["y"])
+    )
+    assert (
+        session.get_field_figure(output="Hx")["layout"]["yaxis"]["title"]["text"]
+        == "Hx (A/m)"
+    )
+
+
+def test_the_field_unit_comes_back_from_builder_code():
+    s = Scene(model_unit="mm", field_unit="mT")
+    script = s.session.to_builder_script()
+    assert "s = Scene(model_unit='mm', field_unit='mT')" in script
+    namespace = {}
+    exec(compile(script, "<builder>", "exec"), namespace)  # noqa: S102
+    back = namespace["s"].to_dict()
+    assert (back["model_unit"], back["field_unit"]) == ("mm", "mT")
+
+
+def test_a_tab_save_that_changes_only_the_field_unit_applies(tmp_path):
+    session = halbach()
+    tab = tmp_path / "scene.py"
+    tab.write_text(
+        session.to_builder_script().replace("s = Scene()", "s = Scene(field_unit='mT')")
+    )
+    assert session.apply_builder_script(str(tab)) == {"ok": True}
+    assert session.to_dict()["field_unit"] == "mT"

@@ -59,10 +59,11 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   variable can also say what it measures — length, angle, field, current. It is
   shown in SI (`gap m` holds 0.015) and reads a unit when one is typed: `20 mm`
   and `2 cm` mean what they say, and the box says what a value means as it is
-  typed (`1` for a field: `= 1 T`). **Length Unit…** shows a scene's lengths in
-  mm instead, where a bare number then means mm; the scene itself stays in
-  metres. **Sweep a Variable…** plots the field against one in the Field view,
-  along its unit.
+  typed (`1` for a field: `= 1 T`). **Units…** shows a scene's lengths in mm and
+  its fields in mT instead — in the Variables view, the Inspector, every box
+  that asks for one, the step labels and the field plots — where a bare number
+  then means mm or mT; the scene itself stays in metres and tesla. **Sweep a
+  Variable…** plots the field against one in the Field view, along its unit.
 - **Undo view** — the session's checkpoints, newest first: click any to jump the
   scene there, backwards or forwards. This is _not_ the construction history
   above; it is document snapshots, and it is gone on reload.

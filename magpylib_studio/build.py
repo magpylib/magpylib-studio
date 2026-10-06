@@ -536,16 +536,20 @@ class Scene:
     `model_unit` is the length unit the scene is shown in (`"m"`, the
     default, `"cm"`, `"mm"` or `"µm"`): what a view shows a length variable
     in, and what an export to a CAD or FEM tool writes. The numbers written
-    here stay metres either way.
+    here stay metres either way. `field_unit` is the unit a field is shown
+    in (`"T"`, the default, `"mT"` or `"µT"`): a polarization, a field
+    variable, the field plots. The numbers stay tesla.
     """
 
-    def __init__(self, session=None, *, values=None, model_unit=None):
+    def __init__(self, session=None, *, values=None, model_unit=None, field_unit=None):
         if session is None:
             session = MagpylibStudioSession()
             session._base_dir = _base_dir
         self._session = session
         if model_unit is not None:
             self._call("set_model_unit", model_unit)
+        if field_unit is not None:
+            self._call("set_field_unit", field_unit)
         if isinstance(values, str | pathlib.PurePath):
             path = pathlib.Path(values)
             saved = (
@@ -945,11 +949,17 @@ class _ScriptWriter:
     # -- the script
 
     def write(self):
-        model = self.doc.get("model_unit")
-        drawn = f"model_unit={model!r}" if model in units.MODEL_UNITS else ""
-        if model is not None and not drawn:
-            self.unwritten.append(f"model_unit ({model!r})")
-        lines = [f"{self.scene} = Scene({drawn})"]
+        drawn = []
+        for key, known in (
+            ("model_unit", units.MODEL_UNITS),
+            ("field_unit", units.FIELD_UNITS),
+        ):
+            unit = self.doc.get(key)
+            if unit in known:
+                drawn.append(f"{key}={unit!r}")
+            elif unit is not None:
+                self.unwritten.append(f"{key} ({unit!r})")
+        lines = [f"{self.scene} = Scene({', '.join(drawn)})"]
         lines += self.write_variables()
         body, creates = self.write_events()
         lines += ["", *body]

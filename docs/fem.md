@@ -321,13 +321,17 @@ double-convert.
   document holds them — until a scene is set to be shown otherwise, and a unit
   typed (`15 mm`) is always read as itself. "mm typical" above was the guess for
   an Ansys model; it is now a choice per scene, not the default.
+- **The field unit** (2026-10-07): `"field_unit"` on the document (`T`, `mT`,
+  `µT`), tesla when absent, set with `set_field_unit`. A field variable and a
+  polarization are shown and typed in it, and the field plots — the map, the
+  sweep, the sensor plot — are drawn in it. H and M stay A/m.
 - **Views:** `get_variables` says how each value is shown (`shown`: a symbol and
   a scale), and `quantity(name, text)` reads what was typed — `15` in the shown
   unit, `15 mm` or `1.5 cm` in its own — in decimal, so 1.1 mm is 0.0011 and not
   1.1 × 0.001. The Variables panel, Edit Variable, both ranges in Variable
   Properties and the sweep's range read through it; the notebook sliders slide
   in the shown unit; the sweep plot's axis is `gap (m)`, or `gap (mm)` in a
-  scene shown in mm; **Length Unit…** sets the model unit. While a value is
+  scene shown in mm; **Units…** sets the model and field units. While a value is
   typed, the box says what it means in the unit the scene holds it in: `1` for a
   field is `= 1 T`, `15 mm` for a length `= 0.015 m`. New Variable asks what the
   variable holds — a length, an angle, a field, a current, a plain number, a
@@ -343,10 +347,25 @@ double-convert.
   does (`field_units`): it is created a length, and its value is asked for as
   one ("a length, in m"). Only a box holding the variable itself; `360 / n` in
   an angle says nothing about `n`.
+- **Everywhere a value is shown** (2026-10-07), not only the Variables panel.
+  The Inspector shows and reads an object's parameters, its pose and a step's
+  values in the scene's units: `get_params`, `get_transform` and `get_events`
+  say how each is `shown`, a segment's dimension per component (three lengths,
+  two angles). Every box the extension asks a length in — a position, a move, an
+  anchor, a mirror point, a step, a size, a pixel grid, the point editors — and
+  every polarization reads through `read_values`, one engine call a box, so
+  `0, 0, 5` is 5 mm in a scene shown in mm and `0, 0, 2 cm` says so outright. A
+  box's terms are split at commas, which leaves room for `5 mm` and for a
+  formula with spaces in it. Step labels are in the length unit
+  (`moved by (0, 0, 5) mm`), and a field map's axes too. The assistant's
+  set-variable tool takes a `unit`, and the value and its unit are one undo step
+  there and in New Variable.
 - **G5 holds:** a document that never said a unit loads, lists and saves exactly
   as before (`tests/test_units.py`).
-- **Not yet:** emitters (M6 converts at that boundary); the Inspector shows an
-  object's parameters in SI, with the unit in the tooltip.
+- **Not yet:** emitters (M6 converts at that boundary). A magnetization and a
+  moment stay A/m and A·m², which no setting covers, and the numbers inside a
+  formula are SI whatever the scene is shown in: `gap + 0.001` adds a millimetre
+  as 0.001.
 
 ---
 

@@ -218,7 +218,10 @@ shows or reads a variable's value doing it in that unit — the Variables panel,
 its properties, the sweep, the notebook sliders. The builder takes
 `variable(…, unit=…)` and `Scene(model_unit=…)`; the examples say what their
 variables measure; documents without units are unchanged. The emitter's side of
-the boundary waits for M6.
+the boundary waits for M6. Then (2026-10-07) everywhere else a value is shown:
+the Inspector, every box that asks for a length, step labels, and the field
+plots in a field unit (`field_unit`, T unless the scene says mT or µT); the
+assistant's set-variable tool takes a unit.
 
 **What.** `fem.md` §6 as written: a unit kind per variable, a model unit per
 document, conversion at the boundary, the UI showing `gap: 5 mm`. The builder

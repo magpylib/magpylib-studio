@@ -1097,6 +1097,22 @@ def test_a_length_slides_in_the_unit_it_is_shown_in():
 
 
 @needs_scene_graph
+def test_a_field_slides_in_the_scenes_field_unit():
+    """`j (mT)` from 800 to 1400 in a scene shown in mT, setting tesla."""
+    from magpylib_studio.build import Scene
+
+    s = Scene(field_unit="mT")
+    j = s.variable("j", 1.2, slider=(0.8, 1.4), unit="field")
+    s.magnet.Cuboid(id="m", dimension=(0.01, 0.01, 0.01), polarization=(0, 0, j))
+    studio = widget.SceneWidget(s, editable=True)
+    (control,) = studio.variable_sliders().children
+    assert control.description == "j (mT)"
+    assert (control.min, control.value, control.max) == pytest.approx((800, 1200, 1400))
+    control.value = 1100
+    assert studio._session.to_dict()["variables"]["j"] == 1.1
+
+
+@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()

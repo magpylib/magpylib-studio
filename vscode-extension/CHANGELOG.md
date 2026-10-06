@@ -15,11 +15,24 @@ All notable changes to the Magpylib Studio extension.
   and reads a unit when one is typed: `20 mm` and `2 cm` mean what they say.
   While a value is typed, the box says what it means: `1` for a field is
   `= 1 T`. Its ranges, Edit Variable and a sweep's range are read the same way,
-  and a sweep is plotted along `gap (m)`. **Length Unit…** shows a scene's
-  lengths in mm (or cm, µm) instead, and a bare number then means mm; the scene
-  itself stays in metres, so nothing that was saved changes. A variable created
-  by typing its name into a box takes that box's unit: `gap` typed as a position
-  is a length. The examples say what their variables measure.
+  and a sweep is plotted along `gap (m)`. **Units…** (the ruler on the Variables
+  view) shows a scene's lengths in mm (or cm, µm) and its fields in mT (or µT)
+  instead, and a bare number then means mm or mT; the scene itself stays in
+  metres and tesla, so nothing that was saved changes. A variable created by
+  typing its name into a box takes that box's unit: `gap` typed as a position is
+  a length, and it is created with its unit in one undo step. The examples say
+  what their variables measure.
+- **The scene's units everywhere.** The Inspector shows an object's dimension,
+  polarization, pose and steps in the scene's units — `dimension (mm)` holding
+  10 — and reads what is typed the same way: `12` is 12 mm, `1.5 cm` is 15 mm.
+  So does every box that asks for a length — Set Position…, Move By…, an anchor,
+  a mirror point, a step, a size, a pixel grid, the point editors — and every
+  polarization. Steps read `moved by (0, 0, 5) mm`, field maps have their axes
+  in mm, and the field plots are in mT. Copilot can say what a variable it
+  creates measures, so it shows in the scene's units too.
+- A box's values are split at commas: `0, 0, gap * 2` and the sampled curve's
+  own example, `radius * cos(tau * turns * t)`, used to be split at their spaces
+  and refused.
 - A figure a script draws with `magpy.show(..., backend="studio")`, or with
   **Draw scripts here** on, is now the notebook widget: the legend nesting the
   objects as their collections do, the tools and the keys. `animation=True`

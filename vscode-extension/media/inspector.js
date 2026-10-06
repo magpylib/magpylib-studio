@@ -24,6 +24,43 @@ function rpc(method, params) {
   });
 }
 
+/** A number, then perhaps a unit and nothing else -- `15`, `15 mm`, `-90°`
+ *  -- which the engine reads in the unit the field is shown in. */
+const QUANTITY =
+  /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*[A-Za-zµμ°]*\s*$/;
+
+/** How component `i` of a field is shown, where the engine says it per
+ *  component: a segment's dimension is three lengths and two angles. */
+function shownAt(shown, i) {
+  return Array.isArray(shown) ? shown[i] : shown;
+}
+
+/** The unit a field's label names: the one it is shown in, "mm, °" for a
+ *  vector of both, or the engine's SI unit where it is shown as it is. */
+function symbolOf(shown, fallback) {
+  if (!shown) return fallback;
+  const symbols = (Array.isArray(shown) ? shown : [shown])
+    .map((s) => s && s.symbol)
+    .filter(Boolean);
+  return [...new Set(symbols)].join(", ") || fallback;
+}
+
+/** Typed text -> document value. A number, perhaps with a unit, is read by
+ *  the engine in the unit the field is shown in: `5` in a position shown in
+ *  mm is 0.005, and `2 cm` says so outright. Anything else is an expression,
+ *  as it always was. Rejects with the engine's reason. */
+async function readTyped(text, shown) {
+  if (!shown || !QUANTITY.test(text)) return asValue(text);
+  const read = await rpc("read_values", { terms: [text], unit: shown.unit });
+  if (!read.ok) throw new Error(read.error);
+  return read.values[0];
+}
+
+/** Tell the user why what they typed was not taken. */
+function refused(err) {
+  statusEl.textContent = err && err.message ? err.message : String(err);
+}
+
 function leafPaths(props, prefix, out) {
   for (const [name, spec] of Object.entries(props)) {
     const path = prefix ? prefix + "." + name : name;
@@ -345,6 +382,12 @@ async function loadStep() {
       });
   };
 
+  // how each value is shown and typed: a create step's as its object's
+  // parameter, any other step's as the engine says for its arguments
+  const unitOf = (name) =>
+    isCreate
+      ? described[name] && described[name].shown
+      : (shown.shown || {})[name];
   for (const name of Object.keys(values)) {
     if (STEP_SKIP.includes(name)) continue;
     const value = values[name];
@@ -352,7 +395,9 @@ async function loadStep() {
     row.className = "row";
     const label = document.createElement("label");
     label.append(document.createTextNode(name + " "));
-    label.appendChild(unitTag(described[name] && described[name].unit));
+    label.appendChild(
+      unitTag(symbolOf(unitOf(name), described[name] && described[name].unit)),
+    );
     if (described[name]) label.title = described[name].doc;
     const wrap = document.createElement("div");
     wrap.className = "widget";
@@ -364,7 +409,14 @@ async function loadStep() {
         STEP_COMPONENTS[name] ||
         value.map((_, i) => String(i + 1));
       wrap.appendChild(
-        vecRow(parts, resolved, (v) => commit(name, v), undefined, value),
+        vecRow(
+          parts,
+          resolved,
+          (v) => commit(name, v),
+          undefined,
+          value,
+          unitOf(name),
+        ),
       );
     } else if (STEP_CHOICES[name] && STEP_CHOICES[name].includes(value)) {
       // a field whose values are named and countable: pick, don't type
@@ -384,7 +436,9 @@ async function loadStep() {
         described_ && typeof described_.value === "number"
           ? described_.value
           : value;
-      wrap.appendChild(numberInput(value, resolved, (v) => commit(name, v)));
+      wrap.appendChild(
+        numberInput(value, resolved, (v) => commit(name, v), unitOf(name)),
+      );
     } else {
       const fixed = document.createElement("span");
       fixed.className = "hint";
@@ -441,12 +495,13 @@ async function loadParams() {
       row.className = "row";
       const label = document.createElement("label");
       label.append(document.createTextNode(p.name + " "));
-      label.appendChild(unitTag(p.unit));
+      label.appendChild(unitTag(symbolOf(p.shown, p.unit)));
       label.title = p.doc;
       const input = numberInput(
         p.written === undefined ? p.value : p.written,
         p.value,
         commit,
+        p.shown,
       );
       const wrap = document.createElement("div");
       wrap.className = "widget";
@@ -459,7 +514,7 @@ async function loadParams() {
       row.className = "row";
       const label = document.createElement("label");
       label.append(document.createTextNode(p.name + " "));
-      label.appendChild(unitTag(p.unit));
+      label.appendChild(unitTag(symbolOf(p.shown, p.unit)));
       label.title = p.doc;
       const wrap = document.createElement("div");
       wrap.className = "widget";
@@ -471,6 +526,7 @@ async function loadParams() {
           commit,
           undefined,
           p.written,
+          p.shown,
         ),
       );
       row.append(label, wrap, document.createElement("span"));
@@ -611,19 +667,24 @@ async function loadParams() {
       const table = document.createElement("details");
       table.className = "matrix";
       const shape = document.createElement("summary");
+      const symbol = symbolOf(p.shown, p.unit);
       shape.textContent =
-        p.name + " — " + shapeOf(p.value) + (p.unit ? " (" + p.unit + ")" : "");
+        p.name + " — " + shapeOf(p.value) + (symbol ? " (" + symbol + ")" : "");
       shape.title = p.doc;
       const area = document.createElement("textarea");
       area.rows = Math.min(8, p.value.length + 1);
       area.spellcheck = false;
-      // one row of numbers per line
-      area.value = p.value.map((r) => JSON.stringify(r)).join(",\n");
-      area.addEventListener("change", () => {
+      // one row of numbers per line, in the unit the table is shown in
+      const scale = p.shown && !Array.isArray(p.shown) ? p.shown.scale : 1;
+      area.value = p.value
+        .map((r) => JSON.stringify(scale === 1 ? r : scaledTable(r, scale)))
+        .join(",\n");
+      area.addEventListener("change", async () => {
         try {
-          commit(JSON.parse("[" + area.value + "]"));
+          const typed = JSON.parse("[" + area.value + "]");
+          commit(scale === 1 ? typed : await tableInDocument(typed, p.shown));
         } catch (err) {
-          statusEl.textContent = p.name + ": " + err;
+          statusEl.textContent = p.name + ": " + (err.message || err);
         }
       });
       table.append(shape, area);
@@ -650,10 +711,41 @@ function short(value) {
     .replace(/\.?0+$/, "");
 }
 
-/** Document value -> what to show in the field. */
-function asWritten(value, resolved) {
+/** Document value -> what to show in the field, in the unit it is shown in:
+ *  0.015 is 15 for a length shown in mm. An expression is as written. */
+function asWritten(value, resolved, shown) {
   if (typeof value === "string" && value.startsWith("=")) return value.slice(1);
-  return short(resolved);
+  return short(shown ? Number(resolved) * shown.scale : resolved);
+}
+
+/** A table's numbers as they are shown: 0.0234 m is 23.4 mm, not
+ *  23.400000000000002. Expressions and names are as written. */
+function scaledTable(value, scale) {
+  if (Array.isArray(value)) return value.map((v) => scaledTable(v, scale));
+  return typeof value === "number"
+    ? Number((value * scale).toPrecision(12))
+    : value;
+}
+
+/** A table typed in the unit it is shown in, back in the document's: every
+ *  number read by the engine in one call, so 23.4 mm is 0.0234 exactly. */
+async function tableInDocument(typed, shown) {
+  const numbers = [];
+  const collect = (v) =>
+    Array.isArray(v)
+      ? v.forEach(collect)
+      : typeof v === "number" && numbers.push(String(v));
+  collect(typed);
+  const read = await rpc("read_values", { terms: numbers, unit: shown.unit });
+  if (!read.ok) throw new Error(read.error);
+  let next = 0;
+  const rebuild = (v) =>
+    Array.isArray(v)
+      ? v.map(rebuild)
+      : typeof v === "number"
+        ? read.values[next++]
+        : v;
+  return rebuild(typed);
 }
 
 /** Field text -> document value: a number if it is one, else "=expr". */
@@ -671,7 +763,7 @@ function isName(value) {
   return typeof value === "string" && !value.startsWith("=");
 }
 
-function numberInput(value, resolved, onCommit) {
+function numberInput(value, resolved, onCommit, shown) {
   const input = document.createElement("input");
   input.type = "text";
   input.spellcheck = false;
@@ -683,7 +775,7 @@ function numberInput(value, resolved, onCommit) {
     input.addEventListener("change", () => onCommit(input.value.trim()));
     return input;
   }
-  input.value = asWritten(value, resolved);
+  input.value = asWritten(value, resolved, shown);
   // What makes it an expression is the leading '=', not a mismatch with the
   // resolved value: a step's own fields have no resolved value to compare
   // against, and comparing against one anyway is what produced "currently
@@ -692,15 +784,20 @@ function numberInput(value, resolved, onCommit) {
     input.classList.add("expr");
     const current = Number(resolved);
     input.title = Number.isFinite(current)
-      ? "expression — currently " + short(current)
+      ? "expression — currently " +
+        short(shown ? current * shown.scale : current) +
+        (shown && shown.symbol ? " " + shown.symbol : "")
       : "expression";
   }
-  input.addEventListener("change", () => onCommit(asValue(input.value)));
+  // `5`, `5 mm` or `gap*2`, read in the unit the field is shown in
+  input.addEventListener("change", () =>
+    readTyped(input.value, shown).then(onCommit, refused),
+  );
   return input;
 }
 
 // --- transform section: absolute pose, relative ops, path tools -------
-function vecRow(labels, values, onCommit, readonly, written) {
+function vecRow(labels, values, onCommit, readonly, written, shown) {
   const row = document.createElement("div");
   row.className = "vec" + (readonly ? " readonly" : "");
   const inputs = [];
@@ -710,21 +807,28 @@ function vecRow(labels, values, onCommit, readonly, written) {
   // show: a position of 795774.715564545 came back as 795774.7156, and every
   // fifth decimal in the scene went that way one sibling edit at a time.
   const originals = [];
-  const shown = [];
+  const texts = [];
   const commitAll = () =>
-    onCommit(
+    Promise.all(
       inputs.map((el, i) =>
-        el.value === shown[i] ? originals[i] : asValue(el.value),
+        el.value === texts[i]
+          ? originals[i]
+          : readTyped(el.value, shownAt(shown, i)),
       ),
-    );
+    ).then(onCommit, refused);
   labels.forEach((name, i) => {
     const tag = document.createElement("span");
     tag.textContent = name;
     const original =
       written && written[i] !== undefined ? written[i] : values[i];
-    const input = numberInput(original, values[i], commitAll);
+    const input = numberInput(
+      original,
+      values[i],
+      commitAll,
+      shownAt(shown, i),
+    );
     originals.push(original);
-    shown.push(input.value);
+    texts.push(input.value);
     if (readonly) {
       input.readOnly = true;
       input.tabIndex = -1;
@@ -755,7 +859,12 @@ async function loadTransform() {
   const box = document.createElement("details");
   box.open = true;
   const summary = document.createElement("summary");
-  summary.textContent = "pose";
+  const units = t.shown || {};
+  const said = [units.position, units.orientation]
+    .map((s) => s && s.symbol)
+    .filter(Boolean);
+  summary.textContent =
+    "pose" + (said.length ? " (" + said.join(", ") + ")" : "");
   box.appendChild(summary);
 
   // With a path there is no single pose to edit: the fields show the
@@ -779,6 +888,7 @@ async function loadTransform() {
       (v) => transformOp("set_transform", { position: v }),
       pathed,
       t.written_position,
+      units.position,
     ),
   );
   box.appendChild(
@@ -788,6 +898,7 @@ async function loadTransform() {
       (v) => transformOp("set_transform", { orientation: v }),
       pathed,
       t.written_orientation,
+      units.orientation,
     ),
   );
 

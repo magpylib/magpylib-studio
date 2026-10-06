@@ -601,7 +601,9 @@ class SceneWidget(anywidget.AnyWidget):
             0.0234, not 23.4 * 0.001."""
             if name not in scales:
                 return value
-            return units.to_document(value, kinds[name], listed["model_unit"])
+            return units.to_document(
+                value, kinds[name], listed["model_unit"], listed["field_unit"]
+            )
 
         def from_control(name):
             def moved(change):
