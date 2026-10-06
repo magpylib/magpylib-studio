@@ -6,7 +6,7 @@ import { PythonExtension } from '@vscode/python-extension';
 import { EngineClient } from './engineClient';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import { mediaUri, nonce as webviewNonce } from './webview';
-import { Variable, VariableBounds, VariablesViewProvider } from './variablesView';
+import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
   activateScriptViewer,
@@ -123,16 +123,167 @@ const KIND_LABEL: Record<VariableKind, string> = {
   choice: 'One of a few choices',
 };
 
-/** "0 … 10", "from 0", "up to 10" — or undefined when neither end is set. */
-function rangeLabel(low?: number, high?: number): string | undefined {
+/** What a variable may measure (`docs/fem.md` §6), as the picker offers it.
+ *  The value stays SI whichever it is; the unit is how it is shown and read. */
+const UNIT_KINDS: {
+  unit: string | null;
+  label: string;
+  detail: string;
+  /** The unit the scene holds it in. */
+  si: string;
+  /** What a value typed with a unit looks like, and a range typed so. */
+  example: string;
+  range: string;
+  /** What variables of this kind are, to recognise one by. */
+  such: string;
+}[] = [
+  {
+    unit: 'length',
+    label: 'Length',
+    detail: "metres, or the scene's length unit",
+    si: 'm',
+    example: '15 mm, 2 cm',
+    range: '10 mm, 30 mm',
+    such: 'a gap, a radius, a pitch',
+  },
+  {
+    unit: 'angle',
+    label: 'Angle',
+    detail: 'degrees, as magpylib turns',
+    si: '°',
+    example: '1.57 rad',
+    range: '-1.57 rad, 1.57 rad',
+    such: 'a tilt, a stagger',
+  },
+  {
+    unit: 'field',
+    label: 'Field',
+    detail: 'tesla: a polarization, a flux density',
+    si: 'T',
+    example: '800 mT',
+    range: '500 mT, 1.4 T',
+    such: 'a polarization, a flux density',
+  },
+  {
+    unit: 'current',
+    label: 'Current',
+    detail: 'amperes',
+    si: 'A',
+    example: '2 kA',
+    range: '0, 2 kA',
+    such: 'a coil current',
+  },
+  {
+    unit: 'dimensionless',
+    label: 'Dimensionless',
+    detail: 'a pure number',
+    si: '',
+    example: '',
+    range: '0, 10',
+    such: 'a ratio, a factor',
+  },
+  {
+    unit: null,
+    label: 'No unit',
+    detail: 'shown as the bare number it is',
+    si: '',
+    example: '',
+    range: '0, 10',
+    such: '',
+  },
+];
+
+/** The rule a value box states under itself: "a field, in T unless you type
+ *  a unit". Empty for a variable that measures nothing. */
+function unitRule(unit?: string | null, symbol?: string): string {
+  const kind = UNIT_KINDS.find((u) => u.unit === unit);
+  if (!kind?.example) {
+    return '';
+  }
+  const article = /^[aeiou]/i.test(kind.label) ? 'an' : 'a';
+  const shownIn = kind.unit === 'angle' ? 'degrees' : symbol || kind.si;
+  return `${article} ${kind.label.toLowerCase()}, in ${shownIn} unless you type a unit`;
+}
+
+/** What a value box shows inside itself until something is typed: a bare
+ *  number, one with a unit, an expression -- "e.g. 1.2   or   800 mT   or
+ *  an expression like b * 2". A bare number is in the unit it is shown in,
+ *  so a length's example follows the scene's length unit and a field's its
+ *  field unit. */
+function valueExamples(unit?: string | null, symbol?: string): string {
+  const LENGTH: Record<string, [string, string]> = {
+    m: ['0.015', '15 mm'],
+    cm: ['1.5', '15 mm'],
+    mm: ['15', '2 cm'],
+    µm: ['15000', '15 mm'],
+  };
+  const FIELD: Record<string, [string, string]> = {
+    T: ['1.2', '800 mT'],
+    mT: ['800', '1.2 T'],
+    µT: ['50', '1.2 T'],
+  };
+  const EXAMPLES: Record<string, [string, string]> = {
+    length: LENGTH[symbol ?? 'm'] ?? LENGTH.m,
+    angle: ['90', '1.57 rad'],
+    field: FIELD[symbol ?? 'T'] ?? FIELD.T,
+    current: ['3', '2 kA'],
+  };
+  const [bare, typed] = EXAMPLES[unit ?? ''] ?? ['2.5', ''];
+  return ['e.g. ' + bare, typed, 'an expression like b * 2'].filter(Boolean).join('   or   ');
+}
+
+/** "min, max" as a range of this kind is typed, for a placeholder. */
+function rangeHint(unit?: string | null, symbol?: string): string {
+  const kind = UNIT_KINDS.find((u) => u.unit === unit);
+  return kind?.example
+    ? `min, max in ${kind.unit === 'angle' ? 'degrees' : symbol || kind.si}, or with units: ${kind.range}`
+    : 'min, max — e.g. 0, 10';
+}
+
+/** What a typed value means, said under the box as it is typed: `1` for a
+ *  field is 1 T, `15 mm` for a length is 0.015 m -- the number the scene
+ *  will hold, in the unit it holds it in. */
+export function meaning(
+  value: number,
+  unit?: string | null,
+): vscode.InputBoxValidationMessage {
+  const si = UNIT_KINDS.find((u) => u.unit === unit)?.si ?? '';
+  return {
+    message: `= ${inUnit(value)}${si ? (si === '°' ? si : ` ${si}`) : ''}`,
+    severity: vscode.InputBoxValidationSeverity.Info,
+  };
+}
+
+/** The length units a scene may be shown in; its numbers stay metres. */
+const LENGTH_UNITS = ['m', 'cm', 'mm', 'µm'];
+
+/** The units a field may be shown in; its numbers stay tesla. */
+const FIELD_UNITS = ['T', 'mT', 'µT'];
+
+/** "0 … 10", "from 0", "up to 10" — or undefined when neither end is set.
+ *  With `shown`, the ends in the unit the variable is shown in: "10 … 30 mm". */
+function rangeLabel(low?: number, high?: number, shown?: Shown): string | undefined {
+  const as = (value: number) => inUnit(value, shown);
+  const unit = shown?.symbol ? ` ${shown.symbol}` : '';
   if (low !== undefined && high !== undefined) {
-    return `${low} … ${high}`;
+    return `${as(low)} … ${as(high)}${unit}`;
   }
   if (low !== undefined) {
-    return `from ${low}`;
+    return `from ${as(low)}${unit}`;
   }
-  return high === undefined ? undefined : `up to ${high}`;
+  return high === undefined ? undefined : `up to ${as(high)}${unit}`;
 }
+
+/** A number as a variable is shown: 0.015 is "15" for one shown in mm. Six
+ *  significant figures, so 0.0234 shown in mm is 23.4 and not 23.400000000000002. */
+function inUnit(value: number, shown?: Shown): string {
+  const scaled = shown ? value * shown.scale : value;
+  return Number.isInteger(scaled) ? String(scaled) : String(Number(scaled.toPrecision(6)));
+}
+
+/** A number, then perhaps a unit and nothing else — `15`, `15 mm`, `1.5cm`,
+ *  `-90°` — which the engine reads (`quantity`). `2*gap` is an expression. */
+const QUANTITY = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*[A-Za-zµμ°]*\s*$/;
 
 /** "x, y, z" -> ["x","y","z"], keeping numbers as numbers so a choice between
  *  4, 8 and 16 stays a choice between numbers. */
@@ -559,6 +710,9 @@ interface PointRowsRequest {
   width: number;
   min: number;
   max?: number;
+  /** What a row's numbers measure, read in the unit the scene shows it in:
+   *  "length", "angle". Without it they are read as they are. */
+  unit?: string;
 }
 
 /** "at least two vertices", "exactly four vertices" — said once, so the
@@ -628,21 +782,25 @@ async function askPointRows(
       resolve(points);
     };
     listeners.push(
-      vscode.workspace.onDidSaveTextDocument((saved) => {
+      vscode.workspace.onDidSaveTextDocument(async (saved) => {
         if (saved.uri.toString() !== uri.toString()) {
           return;
         }
         const points: (number | string)[][] = [];
+        const shape = (line: string) =>
+          `is not ${width} value${width === 1 ? '' : 's'} — "${line}"`;
         for (const [n, raw] of saved.getText().split('\n').entries()) {
           const line = raw.split('#')[0].trim();
           if (!line) {
             continue;
           }
-          const point = parseVector(line, width);
-          if (!point) {
+          const point = request.unit
+            ? await readTerms(context, line, width, request.unit, shape(line))
+            : (parseVector(line, width) ?? shape(line));
+          if (typeof point === 'string') {
             vscode.window.showErrorMessage(
-              `Magpylib Studio: line ${n + 1} is not ${width} ` +
-                `value${width === 1 ? '' : 's'} — "${line}". Fix it and save again.`,
+              `Magpylib Studio: line ${n + 1} ${point.startsWith('is not') ? point : `— ${point}`}. ` +
+                'Fix it and save again.',
             );
             return; // stay open: the document is the thing being corrected
           }
@@ -771,14 +929,24 @@ const MUTATING_WITH_VALUES = new Set([
   'edit_event',
 ]);
 
-/** Units shown in the Add Object prompts. A parameter asked for in an editor
- *  is not here: its header says the same thing with room to say it. */
-const PARAM_UNITS: Record<string, string> = {
-  polarization: ' (T), as Jx, Jy, Jz',
-  dimension: ' (m) — Cuboid a,b,c · Cylinder d,h · Segment r1,r2,h,phi1,phi2',
-  diameter: ' (m)',
-  current: ' (A)',
-  moment: ' (A·m²), as mx, my, mz',
+/** What the Add Object prompts say about a parameter after its unit, which
+ *  the engine says (`get_units`). A parameter asked for in an editor is not
+ *  here: its header says the same thing with room to say it. */
+const PARAM_HINTS: Record<string, string> = {
+  polarization: ', as Jx, Jy, Jz',
+  dimension: ' — Cuboid a,b,c · Cylinder d,h · Segment r1,r2,h,phi1,phi2',
+  moment: ', as mx, my, mz',
+};
+
+/** The units of the parameters no unit setting covers, said as they are. */
+const PARAM_SI: Record<string, string> = { moment: 'A·m²', magnetization: 'A/m' };
+
+/** A length unit in words, for an editor's header: "x, y, z in millimetres". */
+const LENGTH_WORDS: Record<string, string> = {
+  m: 'metres',
+  cm: 'centimetres',
+  mm: 'millimetres',
+  µm: 'micrometres',
 };
 
 /** Rotation axis: a named axis or a free vector. */
@@ -810,7 +978,7 @@ async function askRotationAxis(): Promise<string | (number | string)[] | undefin
 }
 
 /** Rotation anchor: spin in place, orbit the origin, or orbit a point. */
-async function askRotationAnchor(): Promise<
+async function askRotationAnchor(context: vscode.ExtensionContext): Promise<
   { value: number | (number | string)[] | undefined } | undefined
 > {
   const pick = await vscode.window.showQuickPick(
@@ -830,23 +998,15 @@ async function askRotationAnchor(): Promise<
   if (pick.label === 'Scene origin') {
     return { value: 0 };
   }
-  const text = await vscode.window.showInputBox({
-    prompt: 'Anchor point as x, y, z (m)',
-    value: '0, 0, 0',
-    validateInput: (v) => (parseVector(v, 3) ? undefined : 'Three numbers, e.g. 0, 0, 1'),
-  });
-  const anchor = text && parseVector(text, 3);
+  const length = (await unitView(context)).shown.length;
+  const anchor = await askTerms(
+    context,
+    { prompt: `Anchor point as x, y, z${inUnits(length)}`, value: '0, 0, 0' },
+    3,
+    length,
+    'Three numbers, e.g. 0, 0, 1',
+  );
   return anchor ? { value: anchor } : undefined;
-}
-
-/** Parse a free-form list of numbers ("1, 2 3"); undefined if none/invalid. */
-function parseNumbers(text: string): number[] | undefined {
-  const parts = text
-    .replace(/[[\]]/g, ' ')
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number);
-  return parts.length && parts.every((n) => Number.isFinite(n)) ? parts : undefined;
 }
 
 /**
@@ -861,12 +1021,13 @@ function asDocumentValue(text: string): number | string {
 }
 
 /**
- * Comma/space separated numbers *or* expressions, e.g. `0, 0, gap`. Bracket
- * characters are stripped as in parseNumbers, but an expression may itself
- * contain commas inside parentheses (`0, 0, max(a, b)`), so splitting only
- * happens at depth zero.
+ * The terms typed into one box, e.g. `0, 0, gap`. Bracket characters are
+ * stripped, and terms are split at commas outside parentheses, so `0, 0,
+ * max(a, b)` is three and `radius * cos(tau * t)` is one. With no comma,
+ * spaces separate only numbers -- `1 2 3`, as it always did -- because a
+ * space is also what sits inside `gap * 2` and between `5` and `mm`.
  */
-function parseTerms(text: string): (number | string)[] | undefined {
+export function splitTerms(text: string): string[] | undefined {
   const terms: string[] = [];
   let depth = 0;
   let current = '';
@@ -874,38 +1035,129 @@ function parseTerms(text: string): (number | string)[] | undefined {
     if (ch === '(') depth++;
     if (ch === ')') depth--;
     if (depth < 0) return undefined;
-    if (depth === 0 && (ch === ',' || /\s/.test(ch))) {
-      if (current.trim()) terms.push(current.trim());
+    if (depth === 0 && ch === ',') {
+      terms.push(current.trim());
       current = '';
     } else {
       current += ch;
     }
   }
-  if (current.trim()) terms.push(current.trim());
-  return depth === 0 && terms.length ? terms.map(asDocumentValue) : undefined;
+  if (depth !== 0) return undefined;
+  terms.push(current.trim());
+  const pieces = terms.length === 1 ? terms[0].split(/\s+/).filter(Boolean) : [];
+  if (pieces.length > 1 && pieces.every((piece) => Number.isFinite(Number(piece)))) {
+    return pieces;
+  }
+  const kept = terms.filter(Boolean);
+  return kept.length ? kept : undefined;
+}
+
+/** A box's terms as document values, where no unit applies: numbers, and
+ *  expressions marked with `=`. */
+function parseTerms(text: string): (number | string)[] | undefined {
+  return splitTerms(text)?.map(asDocumentValue);
+}
+
+/** How a value of one kind is shown and typed in the scene: a length in mm
+ *  at scale 1000, say (`get_units`). */
+type ShownUnit = Shown & { unit: string };
+
+/** The units the scene is shown in: each kind's, and given an object type,
+ *  each of its parameters' -- a list where the components differ. */
+interface UnitView {
+  model_unit: string;
+  field_unit: string;
+  shown: Record<string, ShownUnit>;
+  params?: Record<string, ShownUnit | ShownUnit[]>;
+}
+
+async function unitView(context: vscode.ExtensionContext, type?: string): Promise<UnitView> {
+  return (await getEngine(context)).request<UnitView>('get_units', type ? { type } : {});
+}
+
+/** The unit a box reads a bare number in, for its prompt: " (mm)", " (mm, °)"
+ *  for a segment's dimension, or `fallback` where no setting covers it. */
+function inUnits(shown?: ShownUnit | ShownUnit[], fallback = ''): string {
+  const all = Array.isArray(shown) ? shown : shown ? [shown] : [];
+  const symbols = [...new Set(all.map((s) => s.symbol).filter(Boolean))];
+  const said = symbols.join(', ') || fallback;
+  return said ? ` (${said})` : '';
+}
+
+/** Document values as a box shows them, in the unit it reads them in: 0.0234
+ *  is "23.4" in mm. An expression is as written, without its `=`. */
+function shownText(values: unknown[], shown?: ShownUnit | ShownUnit[]): string {
+  return values
+    .map((value, i) => {
+      const unit = Array.isArray(shown) ? shown[i] : shown;
+      if (typeof value === 'number') {
+        return String(Number((value * (unit?.scale ?? 1)).toPrecision(12)));
+      }
+      return typeof value === 'string' && value.startsWith('=') ? value.slice(1) : String(value);
+    })
+    .join(', ');
 }
 
 /**
- * "0, 10" / "0," / ", 10" -> [min, max] with null for an open end; undefined
- * if it is not a pair at all. An empty side is "no limit here", which is not
- * the same as no limits.
+ * The terms typed into a box as document values, read by the engine
+ * (`read_values`): a bare number in the unit the scene shows `unit` in,
+ * `5 mm` in its own, anything else an expression -- so `0, 0, 5` is 5 mm in
+ * a scene shown in mm, exactly. `count` terms, or `shape`, the box's own
+ * complaint; a unit that is not one of `unit`'s is the engine's.
  */
-function parseBoundPair(text: string): [number | null, number | null] | undefined {
-  const parts = text.split(',');
-  if (parts.length !== 2) {
+async function readTerms(
+  context: vscode.ExtensionContext,
+  text: string,
+  count: number | undefined,
+  unit: ShownUnit | ShownUnit[] | string | undefined,
+  shape: string,
+): Promise<(number | string)[] | string> {
+  const terms = splitTerms(text);
+  if (!terms || (count !== undefined && terms.length !== count)) {
+    return shape;
+  }
+  const kind = Array.isArray(unit)
+    ? unit.map((u) => u.unit)
+    : typeof unit === 'string'
+      ? unit
+      : (unit?.unit ?? null);
+  const read = await (await getEngine(context)).request<{
+    ok: boolean;
+    values?: (number | string)[];
+    error?: string;
+  }>('read_values', { terms, unit: kind });
+  return read.ok ? read.values! : read.error!;
+}
+
+/**
+ * An input box for `count` terms in a unit: checked by the engine as it is
+ * typed, and once accepted, the values it read. Undefined if escaped. `check`
+ * refuses what reads but does not fit -- an axis of zeros, say.
+ */
+async function askTerms(
+  context: vscode.ExtensionContext,
+  options: vscode.InputBoxOptions,
+  count: number | undefined,
+  unit: ShownUnit | ShownUnit[] | string | undefined,
+  shape: string,
+  check?: (values: (number | string)[]) => string | undefined,
+): Promise<(number | string)[] | undefined> {
+  const read = async (text: string) => {
+    const values = await readTerms(context, text, count, unit, shape);
+    return typeof values === 'string' ? values : (check?.(values) ?? values);
+  };
+  const text = await vscode.window.showInputBox({
+    ...options,
+    validateInput: async (v) => {
+      const values = await read(v);
+      return typeof values === 'string' ? values : undefined;
+    },
+  });
+  if (text === undefined) {
     return undefined;
   }
-  const ends = parts.map((part) => {
-    const trimmed = part.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const value = Number(trimmed);
-    return Number.isFinite(value) ? value : undefined;
-  });
-  return ends.some((end) => end === undefined)
-    ? undefined
-    : (ends as [number | null, number | null]);
+  const values = await read(text);
+  return typeof values === 'string' ? undefined : values;
 }
 
 /** Parse "1, 2, gap" into `count` numbers-or-expressions, else undefined. */
@@ -2101,7 +2353,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // The inspector's fields take expressions too, and a webview cannot
       // raise an input box — so the ask happens here, on the way through.
       if (params && MUTATING_WITH_VALUES.has(method)) {
-        if (!(await ensureVariablesDefined(Object.values(params)))) {
+        if (!(await ensureVariablesDefined(Object.values(params), { method, params }))) {
           return { ok: false, error: 'cancelled' };
         }
       }
@@ -2224,14 +2476,48 @@ export function activate(context: vscode.ExtensionContext): void {
    * for: the slider falls back to it, and Set Bounds… covers the soft range
    * for when the two differ.
    */
-  const askAllowedRange = async (name: string, whole = false) => {
+  const askAllowedRange = async (
+    name: string,
+    whole = false,
+    unit?: { unit: string | null; symbol: string },
+  ) => {
+    const symbol = unit?.symbol ?? '';
+    // in the variable's unit, read by the engine: `10, 30` for a length shown
+    // in mm is 10 mm to 30 mm
+    const readPair = async (v: string): Promise<[number | null, number | null] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 2) {
+        return 'min, max';
+      }
+      const ends: (number | null)[] = [];
+      for (const part of parts) {
+        if (!part.trim()) {
+          ends.push(null);
+          continue;
+        }
+        const read = await readQuantity(name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'min, max — numbers';
+        }
+        ends.push(read.value);
+      }
+      return ends as [number | null, number | null];
+    };
     const text = await vscode.window.showInputBox({
-      prompt: `Allowed range for ${name} — optional, and gives it a slider`,
-      placeHolder: 'min, max — e.g. 0, 10. Enter to skip',
-      validateInput: (v) =>
-        v.trim() === '' || parseBoundPair(v) ? undefined : 'min, max',
+      prompt:
+        `Allowed range for ${name}${symbol ? ` (${symbol})` : ''} — optional, ` +
+        'and gives it a slider',
+      placeHolder: `${rangeHint(unit?.unit, symbol)}. Enter to skip`,
+      validateInput: async (v) => {
+        if (v.trim() === '') {
+          return undefined;
+        }
+        const read = await readPair(v);
+        return typeof read === 'string' ? read : undefined;
+      },
     });
-    const pair = text && parseBoundPair(text);
+    const read = text && text.trim() ? await readPair(text) : undefined;
+    const pair = read && typeof read !== 'string' ? read : undefined;
     // `whole` is a fact about the variable, so it is recorded even when the
     // range is skipped — otherwise a count only becomes a count if you also
     // felt like bounding it.
@@ -2268,37 +2554,88 @@ export function activate(context: vscode.ExtensionContext): void {
     return result.ok ? undefined : result.error;
   };
 
-  /** One line of what expressions can do, read off the engine's allow-list. */
-  const expressionHint = async (): Promise<string> => {
-    const help = (await (await getEngine(context)).request('expression_help')) as {
-      functions: string[];
-      constants: string[];
+  /**
+   * What text typed for a variable means, when it is a number and perhaps a
+   * unit: the engine reads it (`quantity`), so `15` is 15 mm for a length
+   * shown in mm and the units live in one place. Undefined for an expression,
+   * which is stored as written.
+   */
+  const readQuantity = async (
+    name: string,
+    text: string,
+    unit?: string,
+  ): Promise<{ value?: number; error?: string } | undefined> => {
+    if (!QUANTITY.test(text)) {
+      return undefined;
+    }
+    const read = await (await getEngine(context)).request<{
+      ok: boolean;
+      value?: number;
+      error?: string;
+    }>('quantity', { name, text, ...(unit ? { unit } : {}) });
+    return read.ok ? { value: read.value } : { error: read.error };
+  };
+
+  /**
+   * The box a variable's value is typed into. Inside it, until something is
+   * typed, examples: a bare number, one with a unit, an expression. Under it,
+   * the rule: "a field, in T unless you type a unit". And as it is typed,
+   * what the value means in the unit the scene holds it in (`= 0.001 T`).
+   * `lead` names the variable: "a", or "a is a new variable".
+   */
+  const valueBox = async (
+    name: string,
+    unit: string | null | undefined,
+    symbol: string | undefined,
+    lead: string,
+    value?: string,
+  ): Promise<vscode.InputBoxOptions> => {
+    const rule = unitRule(unit, symbol);
+    return {
+      prompt: `${lead} — ${rule || 'a number or an expression'}`,
+      value,
+      placeHolder: valueExamples(unit, symbol),
+      validateInput: async (v) => {
+        const read = await readQuantity(name, v, unit ?? undefined);
+        if (read?.error) {
+          return read.error;
+        }
+        return read?.value !== undefined && unit
+          ? meaning(read.value, unit)
+          : checkExpression(v);
+      },
     };
-    return (
-      `+ - * / ** ( ) · ${help.functions.join(' ')} · ${help.constants.join(' ')}` +
-      ' · other variables'
-    );
   };
 
   const editVariable = async (variable: Variable, prompt?: string): Promise<boolean> => {
     // Same rule as the panel: only a leading '=' means an expression. A
-    // name-valued variable is a string that is simply its own value.
+    // name-valued variable is a string that is simply its own value. A number
+    // is shown in the variable's unit, as the panel shows it.
+    const isNumber = typeof variable.expression === 'number';
     const current =
       typeof variable.expression === 'string' && variable.expression.startsWith('=')
         ? variable.expression.slice(1)
-        : String(variable.expression);
-    const text = await vscode.window.showInputBox({
-      prompt: prompt ?? `${variable.name} — value or expression`,
-      value: current,
-      placeHolder: await expressionHint(),
-      validateInput: checkExpression,
-    });
+        : isNumber
+          ? inUnit(variable.expression as number, variable.shown) +
+            (variable.shown?.symbol ? ` ${variable.shown.symbol}` : '')
+          : String(variable.expression);
+    const unit = variable.bounds?.unit;
+    const text = await vscode.window.showInputBox(
+      await valueBox(
+        variable.name,
+        unit,
+        variable.shown?.symbol,
+        prompt ?? variable.name,
+        current,
+      ),
+    );
     if (text === undefined) {
       return false;
     }
+    const read = await readQuantity(variable.name, text, unit);
     return mutateFromTree('set_variable', {
       name: variable.name,
-      value: asDocumentValue(text),
+      value: read?.value ?? asDocumentValue(text),
     });
   };
 
@@ -2389,24 +2726,57 @@ export function activate(context: vscode.ExtensionContext): void {
       which === 'hard'
         ? [bounds.min, bounds.max]
         : [bounds.soft_min, bounds.soft_max];
+    // Shown and typed in the variable's unit, as the panel shows it; each end
+    // read by the engine, so `10, 30` is millimetres for a length shown in mm
+    // and `1, 3 cm` says so outright.
+    const shown = variable.shown;
+    const end = (value?: number) => (value === undefined ? '' : inUnit(value, shown));
+    const readEnds = async (v: string): Promise<[number | null, number | null] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 2) {
+        return 'min, max';
+      }
+      const ends: (number | null)[] = [];
+      for (const part of parts) {
+        if (!part.trim()) {
+          ends.push(null);
+          continue;
+        }
+        const read = await readQuantity(variable.name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'min, max — numbers';
+        }
+        ends.push(read.value);
+      }
+      return ends as [number | null, number | null];
+    };
     const text = await vscode.window.showInputBox({
       prompt:
-        which === 'hard'
+        (which === 'hard'
           ? `${variable.name} — allowed range: a value outside it is refused`
-          : `${variable.name} — slider range: the span worth dragging through`,
-      value:
-        low !== undefined || high !== undefined ? `${low ?? ''}, ${high ?? ''}` : '',
+          : `${variable.name} — slider range: the span worth dragging through`) +
+        (shown?.symbol ? ` (${shown.symbol})` : ''),
+      value: low !== undefined || high !== undefined ? `${end(low)}, ${end(high)}` : '',
       placeHolder:
         which === 'hard'
-          ? 'min, max — e.g. 0, 10. Empty for no limit'
-          : `min, max — empty to drag ${rangeLabel(bounds.min, bounds.max) ?? 'the allowed range, which is not set either'}`,
-      validateInput: (v) =>
-        v.trim() === '' || parseBoundPair(v) ? undefined : 'min, max',
+          ? `${rangeHint(bounds.unit, shown?.symbol)}. Empty for no limit`
+          : `${rangeHint(bounds.unit, shown?.symbol)} — empty to drag ${rangeLabel(bounds.min, bounds.max, shown) ?? 'the allowed range, which is not set either'}`,
+      validateInput: async (v) => {
+        if (v.trim() === '') {
+          return undefined;
+        }
+        const ends = await readEnds(v);
+        return typeof ends === 'string' ? ends : undefined;
+      },
     });
     if (text === undefined) {
       return;
     }
-    const [lo, hi] = parseBoundPair(text) ?? [null, null];
+    const read = text.trim() === '' ? [null, null] : await readEnds(text);
+    if (typeof read === 'string') {
+      return; // validated above; nothing to apply
+    }
+    const [lo, hi] = read;
     // null is an end left empty, and an absent key is what clears one
     const ends = { low: lo ?? undefined, high: hi ?? undefined };
     if (which === 'soft') {
@@ -2465,7 +2835,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const bounds = variable.bounds ?? {};
     const options = bounds.options?.length ? bounds.options : undefined;
     const kind: VariableKind = options ? 'choice' : bounds.integer ? 'whole' : 'number';
-    type Change = 'name' | 'hard' | 'soft' | 'options' | 'kind' | 'clear';
+    type Change = 'name' | 'hard' | 'soft' | 'options' | 'kind' | 'unit' | 'clear';
     const items: (vscode.QuickPickItem & { is: Change })[] = [
       {
         label: 'Name',
@@ -2487,14 +2857,15 @@ export function activate(context: vscode.ExtensionContext): void {
         : [
             {
               label: 'Allowed range',
-              description: rangeLabel(bounds.min, bounds.max) ?? 'not set',
+              description: rangeLabel(bounds.min, bounds.max, variable.shown) ?? 'not set',
               detail: 'A value outside it is refused, however it was arrived at',
               is: 'hard' as const,
             },
             {
               label: 'Slider range',
               description:
-                rangeLabel(bounds.soft_min, bounds.soft_max) ?? 'the allowed range',
+                rangeLabel(bounds.soft_min, bounds.soft_max, variable.shown) ??
+                'the allowed range',
               detail: 'Only the span dragging covers — a value outside stays legal',
               is: 'soft' as const,
             },
@@ -2506,7 +2877,19 @@ export function activate(context: vscode.ExtensionContext): void {
       detail: 'A quantity, something it counts, or one of a few names',
       is: 'kind',
     });
-    if (Object.keys(bounds).length) {
+    if (!options) {
+      const unit = UNIT_KINDS.find((u) => u.unit === (bounds.unit ?? null));
+      items.push({
+        label: 'Unit',
+        description:
+          (unit?.label ?? bounds.unit ?? 'No unit') +
+          (variable.shown?.symbol ? `, shown in ${variable.shown.symbol}` : ''),
+        detail: 'What it measures: shown and typed in that unit, while the value stays SI',
+        is: 'unit',
+      });
+    }
+    // a unit is not a limit, and clearing keeps it
+    if (Object.keys(bounds).some((key) => key !== 'unit')) {
       items.push({
         label: 'Clear limits',
         detail: 'Nothing refused, no slider, no dropdown',
@@ -2529,6 +2912,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (picked.is === 'options') {
       await askOptions(variable);
+      return;
+    }
+    if (picked.is === 'unit') {
+      const chosen = await vscode.window.showQuickPick(
+        UNIT_KINDS.map((u) => ({
+          ...u,
+          description: u.unit === (bounds.unit ?? null) ? 'current' : undefined,
+        })),
+        { placeHolder: `${variable.name} — what does it measure?` },
+      );
+      if (chosen && chosen.unit !== (bounds.unit ?? null)) {
+        await mutateFromTree('set_variable_unit', { name: variable.name, unit: chosen.unit });
+      }
       return;
     }
     if (picked.is === 'clear') {
@@ -2624,20 +3020,21 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!plane) {
       return;
     }
-    const anchor = await vscode.window.showInputBox({
-      prompt: 'Point the plane passes through as x, y, z (m)',
-      value: '0, 0, 0',
-      validateInput: (v) =>
-        parseVector(v, 3) ? undefined : 'Three numbers or expressions',
-    });
+    const length = (await unitView(context)).shown.length;
+    const anchor = await askTerms(
+      context,
+      {
+        prompt: `Point the plane passes through as x, y, z${inUnits(length)}`,
+        value: '0, 0, 0',
+      },
+      3,
+      length,
+      'Three numbers or expressions',
+    );
     if (!anchor) {
       return;
     }
-    await mutateFromTree('mirror', {
-      object_id: obj.id,
-      plane: plane.label,
-      anchor: parseVector(anchor, 3),
-    });
+    await mutateFromTree('mirror', { object_id: obj.id, plane: plane.label, anchor });
   };
 
   /** "N of these in a row" — see session.duplicate_along. */
@@ -2653,20 +3050,25 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!count) {
       return;
     }
-    const step = await vscode.window.showInputBox({
-      prompt: 'Step between copies as dx, dy, dz (m)',
-      value: '2, 0, 0',
-      placeHolder: 'numbers or expressions, e.g. pitch, 0, 0',
-      validateInput: (v) =>
-        parseVector(v, 3) ? undefined : 'Three numbers or expressions',
-    });
+    const length = (await unitView(context)).shown.length;
+    const step = await askTerms(
+      context,
+      {
+        prompt: `Step between copies as dx, dy, dz${inUnits(length)}`,
+        value: shownText([2, 0, 0], length),
+        placeHolder: 'numbers or expressions, e.g. pitch, 0, 0',
+      },
+      3,
+      length,
+      'Three numbers or expressions',
+    );
     if (!step) {
       return;
     }
     await mutateFromTree('duplicate_along', {
       object_id: obj.id,
       count: asDocumentValue(count),
-      step: parseVector(step, 3),
+      step,
     });
   };
 
@@ -2723,22 +3125,57 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const pick = await vscode.window.showQuickPick(
-      available.map((v) => ({ label: v.name, detail: `currently ${v.value}`, v })),
+      available.map((v) => ({
+        label: v.name,
+        detail:
+          typeof v.value === 'number'
+            ? `currently ${inUnit(v.value, v.shown)}${v.shown?.symbol ? ` ${v.shown.symbol}` : ''}`
+            : `currently ${v.value}`,
+        v,
+      })),
       { placeHolder: 'Variable to sweep' },
     );
     if (!pick) {
       return;
     }
+    // In the variable's unit, as the panel shows it: from and to are read by
+    // the engine, so `10, 30, 20` sweeps a length shown in mm from 10 to 30 mm.
+    const shown = pick.v.shown;
+    const now = typeof pick.v.value === 'number' ? pick.v.value : 0;
+    const readSweep = async (v: string): Promise<[number, number, number] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 3) {
+        return 'Three numbers: from, to, steps';
+      }
+      const ends: number[] = [];
+      for (const part of parts.slice(0, 2)) {
+        const read = await readQuantity(pick.v.name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'Three numbers: from, to, steps';
+        }
+        ends.push(read.value);
+      }
+      const steps = Number(parts[2].trim());
+      return Number.isFinite(steps) ? [ends[0], ends[1], steps] : 'steps is a number';
+    };
     const range = await vscode.window.showInputBox({
-      prompt: `Values for ${pick.label} — from, to, steps`,
-      value: `${pick.v.value ?? 0}, ${(pick.v.value ?? 0) * 2 || 1}, 20`,
-      validateInput: (v) =>
-        (parseNumbers(v)?.length ?? 0) === 3 ? undefined : 'Three numbers: from, to, steps',
+      prompt:
+        `Values for ${pick.label} — from, to, steps` +
+        (shown?.symbol ? ` (${shown.symbol})` : ''),
+      value: `${inUnit(now, shown)}, ${inUnit(now * 2 || 1 / (shown?.scale ?? 1), shown)}, 20`,
+      validateInput: async (v) => {
+        const read = await readSweep(v);
+        return typeof read === 'string' ? read : undefined;
+      },
     });
     if (!range) {
       return;
     }
-    const [from, to, steps] = parseNumbers(range)!;
+    const read = await readSweep(range);
+    if (typeof read === 'string') {
+      return;
+    }
+    const [from, to, steps] = read;
     const count = Math.max(2, Math.round(steps));
     const values = Array.from(
       { length: count },
@@ -2755,29 +3192,48 @@ export function activate(context: vscode.ExtensionContext): void {
    * A definition may itself introduce names (`a = b*2`), hence the loop.
    * Returns false if the user backed out, meaning: abandon the whole edit.
    */
-  const ensureVariablesDefined = async (values: unknown): Promise<boolean> => {
-    const { unknown } = await (await getEngine(context)).request<{ unknown: string[] }>(
-      'unknown_variables',
-      { values },
-    );
+  const ensureVariablesDefined = async (
+    values: unknown,
+    call?: { method: string; params: Record<string, unknown> },
+  ): Promise<boolean> => {
+    const engine = await getEngine(context);
+    const { unknown } = await engine.request<{ unknown: string[] }>('unknown_variables', {
+      values,
+    });
+    // What the box it was typed into measures: `gap` typed as a position is a
+    // length, shown and read in the scene's length unit from the start rather than once someone
+    // finds Variable Properties.
+    const { units: measured } = unknown.length && call
+      ? await engine.request<{ units: Record<string, { unit: string; symbol: string }> }>(
+          'field_units',
+          call,
+        )
+      : { units: {} as Record<string, { unit: string; symbol: string }> };
     for (const name of unknown) {
+      const unit = measured[name];
       // A definition naming something that does not exist yet is rejected by
       // the engine, so stay on this one until it takes or the user gives up.
       for (;;) {
-        const text = await vscode.window.showInputBox({
-          prompt: `${name} is a new variable — give it a value`,
-          placeHolder: await expressionHint(),
-          validateInput: checkExpression,
-        });
+        const text = await vscode.window.showInputBox(
+          await valueBox(
+            name,
+            unit?.unit,
+            unit?.symbol,
+            `${name} is a new variable`,
+          ),
+        );
         if (text === undefined) {
           return false;
         }
-        const result = (await (await getEngine(context)).request('set_variable', {
+        const read = await readQuantity(name, text, unit?.unit);
+        // what it measures in the same step as its value: one undo takes both
+        const result = (await engine.request('set_variable', {
           name,
-          value: asDocumentValue(text),
+          value: read?.value ?? asDocumentValue(text),
+          ...(unit ? { unit: unit.unit } : {}),
         })) as { ok: boolean; error?: string };
         if (result.ok) {
-          await askAllowedRange(name); // same offer as the explicit flow
+          await askAllowedRange(name, false, unit); // as the explicit flow
           break;
         }
         const retry = await vscode.window.showErrorMessage(
@@ -2806,7 +3262,10 @@ export function activate(context: vscode.ExtensionContext): void {
     { checkVariables = true } = {},
   ): Promise<boolean> => {
     // whatever was typed may name variables that do not exist yet
-    if (checkVariables && !(await ensureVariablesDefined(Object.values(params)))) {
+    if (
+      checkVariables &&
+      !(await ensureVariablesDefined(Object.values(params), { method, params }))
+    ) {
       return false;
     }
     let ok = false;
@@ -3348,25 +3807,141 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(InspectorViewProvider.viewId, inspector),
     vscode.window.registerTreeDataProvider('magpylib-studio.historyView', history),
     vscode.window.registerWebviewViewProvider(VariablesViewProvider.viewId, variables),
+    vscode.commands.registerCommand('magpylib-studio.setUnits', async () => {
+      // One button for both: what lengths are shown in, and what fields are.
+      const { model_unit: length, field_unit: field } = await (
+        await getEngine(context)
+      ).request<{ model_unit: string; field_unit: string }>('get_units');
+      const pick = await vscode.window.showQuickPick(
+        [
+          {
+            label: 'Length',
+            description: length,
+            detail: 'positions, sizes, length variables — and what a CAD export writes',
+            command: 'magpylib-studio.setLengthUnit',
+          },
+          {
+            label: 'Field',
+            description: field,
+            detail: 'polarizations, field variables, the field plots',
+            command: 'magpylib-studio.setFieldUnit',
+          },
+        ],
+        { placeHolder: 'Units the scene is shown in — its numbers stay SI' },
+      );
+      if (pick) {
+        await vscode.commands.executeCommand(pick.command);
+      }
+    }),
+    vscode.commands.registerCommand('magpylib-studio.setFieldUnit', async () => {
+      // What a field is shown in; the document's numbers stay tesla.
+      const { field_unit: current } = await (
+        await getEngine(context)
+      ).request<{ field_unit: string }>('get_units');
+      const pick = await vscode.window.showQuickPick(
+        FIELD_UNITS.map((unit) => ({
+          label: unit,
+          description: unit === current ? 'current' : undefined,
+        })),
+        { placeHolder: 'Show fields in — the scene stays in tesla' },
+      );
+      if (pick && pick.label !== current) {
+        await mutateFromTree('set_field_unit', { unit: pick.label });
+      }
+    }),
+    vscode.commands.registerCommand('magpylib-studio.setLengthUnit', async () => {
+      // What lengths are shown in, and what an export to a CAD or FEM tool
+      // writes. The document's numbers stay metres either way.
+      const { model_unit: current } = await (
+        await getEngine(context)
+      ).request<{ model_unit: string }>('get_variables');
+      const pick = await vscode.window.showQuickPick(
+        LENGTH_UNITS.map((unit) => ({
+          label: unit,
+          description: unit === current ? 'current' : undefined,
+        })),
+        { placeHolder: 'Show lengths in — the scene stays in metres' },
+      );
+      if (pick && pick.label !== current) {
+        await mutateFromTree('set_model_unit', { unit: pick.label });
+      }
+    }),
     vscode.commands.registerCommand('magpylib-studio.addVariable', async () => {
+      const {
+        model_unit: lengthUnit,
+        field_unit: fieldUnit,
+        variables: existing,
+      } = await (await getEngine(context)).request<{
+        model_unit: string;
+        field_unit: string;
+        variables: Variable[];
+      }>('get_variables');
+      // what a bare number of each kind is read in
+      const shownIn = (unit: string | null) =>
+        unit === 'length' ? lengthUnit : unit === 'field' ? fieldUnit : undefined;
+      // a name that exists would be overwritten, and its value read in what
+      // the old one measured
+      const taken = new Set(existing.map((v) => v.name));
       const name = await vscode.window.showInputBox({
         prompt: 'Variable name',
         placeHolder: 'letters, digits, underscores — e.g. gap, n, radius',
         validateInput: (v) =>
-          /^[A-Za-z_]\w*$/.test(v)
-            ? undefined
-            : 'Letters, digits, underscores; must not start with a digit.',
+          !/^[A-Za-z_]\w*$/.test(v)
+            ? 'Letters, digits, underscores; must not start with a digit.'
+            : taken.has(v)
+              ? `${v} exists already — Edit Variable changes it`
+              : undefined,
       });
       if (!name) {
         return;
       }
-      // Asked here rather than left for "Set bounds…" afterwards: what a
-      // variable *is* is part of creating it, and a choice variable cannot
-      // even be given a sensible first value without knowing its options.
-      const kind = await askVariableKind(name);
-      if (!kind) {
+      // Asked here rather than left for Variable Properties afterwards: what
+      // a variable *is* is part of creating it -- a choice cannot even be
+      // given a first value without its options, and a length is read in
+      // metres, or in the unit typed, from the first value on.
+      const measures = UNIT_KINDS.filter((u) => u.unit && u.unit !== 'dimensionless').map(
+        (u) => ({
+          label: u.label,
+          description: `in ${u.unit === 'angle' ? 'degrees' : (shownIn(u.unit) ?? u.si)}`,
+          detail: `${u.such} — or type a unit: ${u.example}`,
+          is: 'number' as VariableKind,
+          unit: u.unit,
+          symbol: shownIn(u.unit) ?? u.si,
+        }),
+      );
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...measures,
+          {
+            label: KIND_LABEL.number,
+            description: 'no unit',
+            detail: 'a ratio, a factor — gets a slider',
+            is: 'number' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+          {
+            label: KIND_LABEL.whole,
+            description: 'no unit',
+            detail: 'it counts things — magnets, turns, copies',
+            is: 'whole' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+          {
+            label: KIND_LABEL.choice,
+            detail: 'an axis (x, y, z) or a plane (xy, xz, yz) — gets a dropdown',
+            is: 'choice' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+        ],
+        { placeHolder: `${name} — what does it hold?` },
+      );
+      if (!picked) {
         return;
       }
+      const kind = picked.is;
       if (kind === 'choice') {
         const text = await vscode.window.showInputBox({
           prompt: `${name} — the values it may take`,
@@ -3386,10 +3961,28 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         return;
       }
-      if (!(await editVariable({ name, expression: 0, value: 0 }, 'Value or expression'))) {
+      const text = await vscode.window.showInputBox(
+        await valueBox(name, picked.unit, picked.symbol, name),
+      );
+      if (text === undefined) {
         return;
       }
-      await askAllowedRange(name, kind === 'whole');
+      const read = await readQuantity(name, text, picked.unit ?? undefined);
+      // what it measures in the same step as its value: one undo takes both
+      if (
+        !(await mutateFromTree('set_variable', {
+          name,
+          value: read?.value ?? asDocumentValue(text),
+          ...(picked.unit ? { unit: picked.unit } : {}),
+        }))
+      ) {
+        return;
+      }
+      await askAllowedRange(
+        name,
+        kind === 'whole',
+        picked.unit ? { unit: picked.unit, symbol: picked.symbol } : undefined,
+      );
     }),
     vscode.commands.registerCommand(
       'magpylib-studio.editVariable',
@@ -3796,9 +4389,13 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!id) {
           return;
         }
-        // Let the user set each parameter, prefilled with the default.
+        // Let the user set each parameter, prefilled with the default, in the
+        // unit the scene shows it in.
+        const view = await unitView(context, pick.t.type);
+        const lengthWord = LENGTH_WORDS[view.model_unit] ?? view.model_unit;
         const values: Record<string, unknown> = { ...pick.t.params };
         for (const [name, def] of Object.entries(pick.t.params)) {
+          const shown = view.params?.[name];
           // A list of points is asked for in an editor, one to a line, the
           // same way a custom path is. It used to be a single box holding a
           // flat run of numbers reshaped by counting in threes — nine of them
@@ -3861,15 +4458,16 @@ export function activate(context: vscode.ExtensionContext): void {
               subject: `A ${pick.label.toLowerCase()}`,
               noun: rule.noun,
               header: [
-                `One point per line — x, y, z in metres, in the`,
+                `One point per line — x, y, z in ${lengthWord}, in the`,
                 `${pick.label.toLowerCase()}'s own frame, in order.`,
                 '',
-                'Numbers or expressions: 0, 0, gap',
+                'Numbers, with a unit if you like, or expressions: 0, 0, 5 mm or 0, 0, gap',
               ],
-              example: shape.map((row) => row.join(', ')),
+              example: shape.map((row) => shownText(row, shown)),
               width: shape[0].length,
               min: rule.min,
               max: rule.max,
+              unit: Array.isArray(shown) ? undefined : shown?.unit,
             });
             if (!points) {
               return; // cancelled: abandon the whole creation, as escape does
@@ -3879,24 +4477,20 @@ export function activate(context: vscode.ExtensionContext): void {
             continue;
           }
           const isScalar = typeof def === 'number';
-          const flat = isScalar ? String(def) : JSON.stringify(def);
-          const text = await vscode.window.showInputBox({
-            prompt: `${pick.label} — ${name}${PARAM_UNITS[name] ?? ''}`,
-            // brackets off: what the box takes is a list of numbers
-            value: isScalar ? flat : flat.replace(/[[\]]/g, ''),
-            validateInput: (v) => {
-              if (isScalar) {
-                return v.trim() ? undefined : 'A number, or an expression';
-              }
-              return parseTerms(v)
-                ? undefined
-                : 'Numbers or expressions, e.g. 0, 0, gap';
+          const read = await askTerms(
+            context,
+            {
+              prompt: `${pick.label} — ${name}${inUnits(shown, PARAM_SI[name])}${PARAM_HINTS[name] ?? ''}`,
+              value: shownText(isScalar ? [def] : (def as unknown[]), shown),
             },
-          });
-          if (text === undefined) {
+            isScalar ? 1 : undefined,
+            shown,
+            isScalar ? 'A number, or an expression' : 'Numbers or expressions, e.g. 0, 0, gap',
+          );
+          if (read === undefined) {
             return; // escaped: abandon the whole creation
           }
-          values[name] = isScalar ? asDocumentValue(text) : parseTerms(text)!;
+          values[name] = isScalar ? read[0] : read;
         }
         const params: Record<string, unknown> = {
           object_id: id,
@@ -4018,12 +4612,17 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!id) {
           return;
         }
-        const polarization = await vscode.window.showInputBox({
-          prompt: `Polarization of "${id}" as x, y, z (T)`,
-          value: '0, 0, 1',
-          validateInput: (v) =>
-            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
-        });
+        const field = (await unitView(context)).shown.field;
+        const polarization = await askTerms(
+          context,
+          {
+            prompt: `Polarization of "${id}" as x, y, z${inUnits(field)}`,
+            value: shownText([0, 0, 1], field),
+          },
+          3,
+          field,
+          `Three numbers, e.g. ${shownText([0, 0, 1.3], field)}`,
+        );
         if (polarization === undefined) {
           return;
         }
@@ -4046,7 +4645,7 @@ export function activate(context: vscode.ExtensionContext): void {
               scale: unit.u.scale,
               ...(report.sha256 ? { sha256: report.sha256 } : {}),
             },
-            polarization: parseTerms(polarization)!,
+            polarization,
           },
           style: { label: basename(file) },
         };
@@ -4073,31 +4672,43 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!id) {
           return;
         }
+        const length = (await unitView(context)).shown.length;
         const points = await askPointRows(context, {
           name: `${id}-points`,
           subject: 'A mesh',
           noun: 'points',
           header: [
-            'One point per line — x, y, z in metres. The magnet is the convex',
-            'hull of them, so a point inside the shape the others make',
-            'changes nothing.',
+            `One point per line — x, y, z in ${LENGTH_WORDS[length.symbol] ?? length.symbol}.`,
+            'The magnet is the convex hull of them, so a point inside the',
+            'shape the others make changes nothing.',
             '',
-            'Numbers or expressions: 0, 0, gap',
+            'Numbers, with a unit if you like, or expressions: 0, 0, 5 mm or 0, 0, gap',
           ],
-          example: ['0, 0, 0', '0.01, 0, 0', '0, 0.01, 0', '0, 0, 0.01'],
+          example: [
+            [0, 0, 0],
+            [0.01, 0, 0],
+            [0, 0.01, 0],
+            [0, 0, 0.01],
+          ].map((row) => shownText(row, length)),
           width: 3,
           min: 4, // fewer than four is a plane, and a plane has no hull
+          unit: 'length',
         });
         if (!points) {
           return;
         }
         await closePointEditor(context, `${id}-points`);
-        const polarization = await vscode.window.showInputBox({
-          prompt: `Polarization of "${id}" as x, y, z (T)`,
-          value: '0, 0, 1',
-          validateInput: (v) =>
-            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
-        });
+        const field = (await unitView(context)).shown.field;
+        const polarization = await askTerms(
+          context,
+          {
+            prompt: `Polarization of "${id}" as x, y, z${inUnits(field)}`,
+            value: shownText([0, 0, 1], field),
+          },
+          3,
+          field,
+          `Three numbers, e.g. ${shownText([0, 0, 1.3], field)}`,
+        );
         if (polarization === undefined) {
           return;
         }
@@ -4106,7 +4717,7 @@ export function activate(context: vscode.ExtensionContext): void {
           type: 'magnet.TriangularMesh',
           params: {
             mesh_source: { from: 'hull', points },
-            polarization: parseTerms(polarization)!,
+            polarization,
           },
           style: { label: 'Mesh' },
         };
@@ -4148,23 +4759,31 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!id) {
           return;
         }
-        const size = await vscode.window.showInputBox({
-          prompt: `Size of "${id}" as width, depth, height (m)`,
-          value: '0.02, 0.02, 0.01',
-          validateInput: (v) =>
-            parseTerms(v)?.length === 3
-              ? undefined
-              : 'Three numbers, e.g. 0.02, 0.02, 0.01',
-        });
+        const length = (await unitView(context)).shown.length;
+        const size = await askTerms(
+          context,
+          {
+            prompt: `Size of "${id}" as width, depth, height${inUnits(length)}`,
+            value: shownText([0.02, 0.02, 0.01], length),
+          },
+          3,
+          length,
+          `Three numbers, e.g. ${shownText([0.02, 0.02, 0.01], length)}`,
+        );
         if (size === undefined) {
           return;
         }
-        const polarization = await vscode.window.showInputBox({
-          prompt: `Polarization of "${id}" as x, y, z (T)`,
-          value: '0, 0, 1',
-          validateInput: (v) =>
-            parseTerms(v)?.length === 3 ? undefined : 'Three numbers, e.g. 0, 0, 1.3',
-        });
+        const field = (await unitView(context)).shown.field;
+        const polarization = await askTerms(
+          context,
+          {
+            prompt: `Polarization of "${id}" as x, y, z${inUnits(field)}`,
+            value: shownText([0, 0, 1], field),
+          },
+          3,
+          field,
+          `Three numbers, e.g. ${shownText([0, 0, 1.3], field)}`,
+        );
         if (polarization === undefined) {
           return;
         }
@@ -4174,13 +4793,13 @@ export function activate(context: vscode.ExtensionContext): void {
           params: {
             mesh_source: {
               from: 'superquadric',
-              size: parseTerms(size)!,
+              size,
               // (pole to pole, around), the order the formula takes them in
               roundness: [shape.preset.profile, shape.preset.plan],
               around: 48,
               across: 24,
             },
-            polarization: parseTerms(polarization)!,
+            polarization,
           },
           style: { label: shape.preset.label },
         };
@@ -4197,14 +4816,18 @@ export function activate(context: vscode.ExtensionContext): void {
       async (obj: SceneObject) => {
         const current = (await (await getEngine(context)).request('get_transform', {
           object_id: obj.id,
-        })) as { position: number[] };
-        const text = await vscode.window.showInputBox({
-          prompt: `Position of "${obj.label}" as x, y, z (m)`,
-          value: current.position.join(', '),
-          validateInput: (v) =>
-            parseVector(v, 3) ? undefined : 'Three numbers, e.g. 0, 0, 1.5',
-        });
-        const position = text && parseVector(text, 3);
+        })) as { position: number[]; written_position?: unknown[] };
+        const length = (await unitView(context)).shown.length;
+        const position = await askTerms(
+          context,
+          {
+            prompt: `Position of "${obj.label}" as x, y, z${inUnits(length)}`,
+            value: shownText(current.written_position ?? current.position, length),
+          },
+          3,
+          length,
+          'Three numbers or expressions, e.g. 0, 0, 1.5',
+        );
         if (position) {
           await mutateFromTree('set_transform', { object_id: obj.id, position });
         }
@@ -4217,6 +4840,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!kind) {
           return;
         }
+        const length = (await unitView(context)).shown.length;
         let displacement: unknown;
         if (kind.kind === 'formula') {
           const run = await askSampledRun(
@@ -4246,14 +4870,19 @@ export function activate(context: vscode.ExtensionContext): void {
             subject: 'A path',
             noun: 'steps',
             header: [
-              'One displacement per line — dx, dy, dz in metres, relative to',
-              `where "${obj.label}" is now.`,
+              `One displacement per line — dx, dy, dz in ${LENGTH_WORDS[length.symbol] ?? length.symbol},`,
+              `relative to where "${obj.label}" is now.`,
               '',
-              'Numbers or expressions: 0, 0, gap',
+              'Numbers, with a unit if you like, or expressions: 0, 0, 5 mm or 0, 0, gap',
             ],
-            example: ['0, 0, 0', '0, 0, 0.5', '0, 0, 1'],
+            example: [
+              [0, 0, 0],
+              [0, 0, 0.5],
+              [0, 0, 1],
+            ].map((row) => shownText(row, length)),
             width: 3,
             min: 2,
+            unit: 'length',
           });
           if (!points) {
             return;
@@ -4262,20 +4891,22 @@ export function activate(context: vscode.ExtensionContext): void {
           displacement = points;
         } else {
           const total = kind.kind === 'linspace';
-          const text = await vscode.window.showInputBox({
-            prompt:
-              kind.kind === 'scalar'
-                ? 'Displacement dx, dy, dz (m)'
-                : total
-                  ? `Total displacement dx, dy, dz (m) — over ${kind.steps} steps`
-                  : `Displacement per step dx, dy, dz (m) — ${kind.steps} of them`,
-            value: kind.kind === 'arange' ? '0, 0, 0.05' : '0, 0, 1',
-            validateInput: (v) =>
-              parseVector(v, 3)
-                ? undefined
-                : 'Three numbers or expressions, e.g. 0, 0, gap',
-          });
-          const d = text && parseVector(text, 3);
+          const unit = inUnits(length);
+          const d = await askTerms(
+            context,
+            {
+              prompt:
+                kind.kind === 'scalar'
+                  ? `Displacement dx, dy, dz${unit}`
+                  : total
+                    ? `Total displacement dx, dy, dz${unit} — over ${kind.steps} steps`
+                    : `Displacement per step dx, dy, dz${unit} — ${kind.steps} of them`,
+              value: shownText(kind.kind === 'arange' ? [0, 0, 0.05] : [0, 0, 1], length),
+            },
+            3,
+            length,
+            'Three numbers or expressions, e.g. 0, 0, gap',
+          );
           if (!d) {
             return;
           }
@@ -4333,7 +4964,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (axis === undefined) {
           return;
         }
-        const anchor = await askRotationAnchor();
+        const anchor = await askRotationAnchor(context);
         if (anchor === undefined) {
           return;
         }
@@ -4366,11 +4997,12 @@ export function activate(context: vscode.ExtensionContext): void {
               `One angle per line, in degrees, relative to how "${obj.label}"`,
               'is turned now.',
               '',
-              'Numbers or expressions: 90, 180, turn',
+              'Numbers or expressions: 90, 180, 1.57 rad, turn',
             ],
             example: ['0', '45', '90'],
             width: 1,
             min: 2,
+            unit: 'angle',
           });
           if (!points) {
             return;
@@ -4379,21 +5011,27 @@ export function activate(context: vscode.ExtensionContext): void {
           angle = points.map(([a]) => a); // one value to a line, not a triple
         } else {
           const total = kind.kind === 'linspace';
-          const text = await vscode.window.showInputBox({
-            prompt:
-              kind.kind === 'scalar'
-                ? 'Angle in degrees'
-                : total
-                  ? `Total degrees — over ${kind.steps} steps (360 = full turn)`
-                  : `Degrees per step — ${kind.steps} of them`,
-            value: kind.kind === 'scalar' ? '45' : total ? '360' : '10',
-            validateInput: (v) =>
-              Number.isFinite(Number(v)) && v.trim() ? undefined : 'A number, e.g. 45',
-          });
-          if (text === undefined || !text.trim()) {
+          // degrees, or `1.57 rad` as the engine reads it
+          const read = await askTerms(
+            context,
+            {
+              prompt:
+                kind.kind === 'scalar'
+                  ? 'Angle in degrees'
+                  : total
+                    ? `Total degrees — over ${kind.steps} steps (360 = full turn)`
+                    : `Degrees per step — ${kind.steps} of them`,
+              value: kind.kind === 'scalar' ? '45' : total ? '360' : '10',
+            },
+            1,
+            'angle',
+            'A number, e.g. 45',
+            ([angle]) => (typeof angle === 'number' ? undefined : 'A number, e.g. 45'),
+          );
+          if (!read) {
             return;
           }
-          const typed = Number(text);
+          const typed = read[0] as number;
           // Same as Move By…: the turn starts from where the object is, so the
           // path carries its own zero and exports as the call that makes it.
           angle =
@@ -4438,16 +5076,34 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!plane) {
           return;
         }
+        const length = (await unitView(context)).shown.length;
+        const readSize = async (v: string) => {
+          if (v.trim() === '') {
+            return undefined;
+          }
+          const read = await readTerms(context, v, 1, length, 'A positive number, or blank');
+          return typeof read === 'string'
+            ? read
+            : typeof read[0] === 'number' && read[0] > 0
+              ? read[0]
+              : 'A positive number, or blank';
+        };
         const sizeText = await vscode.window.showInputBox({
           // No fixed default: a scene is written at whatever scale the object
           // is, and 4 m of measuring plane over a 25 mm magnet is one pixel.
           // Blank hands the choice to the engine, which sizes it off the scene.
-          prompt: 'Grid size (m) — the plane spans ± half of this',
+          prompt: `Grid size${inUnits(length)} — the plane spans ± half of this`,
           placeHolder: 'blank fits the scene',
-          validateInput: (v) =>
-            v.trim() === '' || Number(v) > 0 ? undefined : 'A positive number, or blank',
+          validateInput: async (v) => {
+            const size = await readSize(v);
+            return typeof size === 'string' ? size : undefined;
+          },
         });
         if (sizeText === undefined) {
+          return;
+        }
+        const size = await readSize(sizeText);
+        if (typeof size === 'string') {
           return;
         }
         const resText = await vscode.window.showInputBox({
@@ -4462,7 +5118,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await mutateFromTree('set_pixel_grid', {
           object_id: target.id,
           plane,
-          ...(sizeText.trim() === '' ? {} : { size: Number(sizeText) }),
+          ...(size === undefined ? {} : { size }),
           resolution: Number(resText),
         });
         openFieldPanel(context); // the map is the point of making a grid

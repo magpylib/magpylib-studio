@@ -3,7 +3,12 @@ import * as vscode from 'vscode';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /** Calls from this panel that change the scene, not just what it displays. */
-const MUTATING = new Set(['set_variable', 'set_variable_bounds', 'remove_variable']);
+const MUTATING = new Set([
+  'set_variable',
+  'set_variable_bounds',
+  'set_variable_unit',
+  'remove_variable',
+]);
 
 export interface VariableBounds {
   /** Hard limits: the engine rejects a value outside them. */
@@ -18,6 +23,17 @@ export interface VariableBounds {
    *  quantity — a rotation axis, a mirror plane. Mutually exclusive with a
    *  range in practice: a name has no min. */
   options?: (string | number)[];
+  /** What it measures — length, angle, field, current, dimensionless. Not a
+   *  limit, and not part of the value, which stays SI: what the panel shows
+   *  it in. */
+  unit?: string;
+}
+
+/** How a view shows a value of a variable that says what it measures: in
+ *  `symbol`, `scale` of them to one of the document's. */
+export interface Shown {
+  symbol: string;
+  scale: number;
 }
 
 export interface Variable {
@@ -27,6 +43,8 @@ export interface Variable {
   /** As resolved at the last build. */
   value: number | null;
   bounds?: VariableBounds;
+  /** Present when the variable says what it measures. */
+  shown?: Shown;
 }
 
 /** The range a slider should span: soft limits if given, else the hard ones. */

@@ -77,7 +77,11 @@ class El {
     this.childNodes = [];
   }
   append(...nodes) {
-    for (const n of nodes) this.childNodes.push(n);
+    // A string is a text node, as the DOM makes it: "gap" then " " then a
+    // span reads "gap mm", not "gapmm".
+    for (const n of nodes) {
+      this.childNodes.push(typeof n === "string" ? { textContent: n } : n);
+    }
   }
   appendChild(node) {
     this.childNodes.push(node);

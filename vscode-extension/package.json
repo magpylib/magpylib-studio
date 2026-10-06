@@ -252,6 +252,19 @@
         "title": "Variable Properties..."
       },
       {
+        "command": "magpylib-studio.setUnits",
+        "title": "Magpylib Studio: Units...",
+        "icon": "$(symbol-ruler)"
+      },
+      {
+        "command": "magpylib-studio.setLengthUnit",
+        "title": "Magpylib Studio: Length Unit..."
+      },
+      {
+        "command": "magpylib-studio.setFieldUnit",
+        "title": "Magpylib Studio: Field Unit..."
+      },
+      {
         "command": "magpylib-studio.selectOperation",
         "title": "Show This Step"
       },
@@ -610,6 +623,11 @@
           "command": "magpylib-studio.sweep",
           "when": "view == magpylib-studio.variablesView",
           "group": "navigation@2"
+        },
+        {
+          "command": "magpylib-studio.setUnits",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "navigation@3"
         },
         {
           "command": "magpylib-studio.rollbackClear",
@@ -1302,7 +1320,7 @@
         "displayName": "List magpylib scene variables",
         "toolReferenceName": "magpyVars",
         "canBeReferencedInPrompt": true,
-        "modelDescription": "List the scene's variables with what each was written as and what it currently resolves to. Call this before writing an expression, to see which names exist. Any numeric value in this scene may be an EXPRESSION over the document's variables instead of a number: a string starting with '=', e.g. \"=gap\", \"=360/n\", [0, 0, \"=gap*2\"]. Anything without the '=' is a literal, so an axis stays 'z'. Expressions may use + - * / ** and sqrt/sin/cos/atan2/radians/degrees/min/max/abs/round plus pi/e/tau. Every variable used must already exist (create it with the set variable tool first) or the call fails with \"unknown variable\".",
+        "modelDescription": "List the scene's variables with what each was written as and what it currently resolves to, always in SI. 'bounds.unit' says what one measures, 'shown' how the user sees it (symbol, and scale from SI: a length shown in mm has scale 1000), and 'model_unit' / 'field_unit' the units the scene is shown in - talk to the user in those, and write SI. Call this before writing an expression, to see which names exist. Any numeric value in this scene may be an EXPRESSION over the document's variables instead of a number: a string starting with '=', e.g. \"=gap\", \"=360/n\", [0, 0, \"=gap*2\"]. Anything without the '=' is a literal, so an axis stays 'z'. Expressions may use + - * / ** and sqrt/sin/cos/atan2/radians/degrees/min/max/abs/round plus pi/e/tau. Every variable used must already exist (create it with the set variable tool first) or the call fails with \"unknown variable\".",
         "inputSchema": {
           "type": "object",
           "properties": {}
@@ -1313,7 +1331,7 @@
         "displayName": "Set a magpylib scene variable",
         "toolReferenceName": "magpyVar",
         "canBeReferencedInPrompt": true,
-        "modelDescription": "Define or change one named value the scene can be written in terms of, so that editing it moves everything that refers to it. Use this for any quantity the user describes as a parameter, or that repeats across objects (a gap, a radius, a magnet count, a step angle). Values are unitless SI, as magpylib uses: metres, tesla, amperes, degrees. 'value' is a number, or an expression over the OTHER variables (\"=gap*2\"); a variable cannot refer to itself. Changing a variable rebuilds every object written in terms of it. Any numeric value in this scene may be an EXPRESSION over the document's variables instead of a number: a string starting with '=', e.g. \"=gap\", \"=360/n\", [0, 0, \"=gap*2\"]. Anything without the '=' is a literal, so an axis stays 'z'. Expressions may use + - * / ** and sqrt/sin/cos/atan2/radians/degrees/min/max/abs/round plus pi/e/tau. Every variable used must already exist (create it with the set variable tool first) or the call fails with \"unknown variable\".",
+        "modelDescription": "Define or change one named value the scene can be written in terms of, so that editing it moves everything that refers to it. Use this for any quantity the user describes as a parameter, or that repeats across objects (a gap, a radius, a magnet count, a step angle). Values are unitless SI, as magpylib uses: metres, tesla, amperes, degrees - whatever units the scene is shown in. Say what a new variable measures with 'unit' (length, angle, field, current or dimensionless; leave it out for a count): the user then sees and types it in the scene's units, 15 mm rather than 0.015, while the value stays SI. 'value' is a number, or an expression over the OTHER variables (\"=gap*2\"); a variable cannot refer to itself. Changing a variable rebuilds every object written in terms of it. Any numeric value in this scene may be an EXPRESSION over the document's variables instead of a number: a string starting with '=', e.g. \"=gap\", \"=360/n\", [0, 0, \"=gap*2\"]. Anything without the '=' is a literal, so an axis stays 'z'. Expressions may use + - * / ** and sqrt/sin/cos/atan2/radians/degrees/min/max/abs/round plus pi/e/tau. Every variable used must already exist (create it with the set variable tool first) or the call fails with \"unknown variable\".",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -1327,6 +1345,17 @@
                 "string"
               ],
               "description": "A number, or an expression over the other variables such as \"=gap*2\"."
+            },
+            "unit": {
+              "type": "string",
+              "enum": [
+                "length",
+                "angle",
+                "field",
+                "current",
+                "dimensionless"
+              ],
+              "description": "What the variable measures, so the user sees it in the scene's units. Optional; left out, what it already says is kept."
             }
           },
           "required": [
@@ -1667,12 +1696,14 @@
   "scripts": {
     "vscode:prepublish": "npm run license && npm run compile",
     "license": "node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\"",
-    "compile": "tsc -p ./ && npm run lint && npm run check:webviews && npm run check:contributions && npm run check:scene && npm run check:drag && npm run check:messages && npm run check:widget && npm run copy:widget && npm run check:version",
+    "compile": "tsc -p ./ && npm run lint && npm run check:webviews && npm run check:contributions && npm run check:scene && npm run check:drag && npm run check:units && npm run check:inspector-units && npm run check:messages && npm run check:widget && npm run copy:widget && npm run check:version",
     "lint": "eslint src media",
     "check:webviews": "node harness/check-webview-scripts.js",
     "check:contributions": "node harness/check-contributions.js",
     "check:scene": "node harness/check-scene-bounds.js",
     "check:drag": "node harness/check-variable-drag.js",
+    "check:units": "node harness/check-variable-units.js",
+    "check:inspector-units": "node harness/check-inspector-units.js",
     "check:messages": "node harness/check-messages.js",
     "check:widget": "node harness/check-widget.js",
     "copy:widget": "node harness/copy-widget.js",

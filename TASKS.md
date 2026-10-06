@@ -179,9 +179,10 @@ volume/centroid check.
 solver, no studio change, no open decision. Reaches `docs/fem.md`'s **G1** with
 nothing installed.
 
-### V2 — Units
+### V2 — Units ✅
 
-Unit _kind_ on a variable beside `integer`; one model unit per document;
+Done as roadmap R2 (`docs/fem.md` §6, "As built"); the emitters' side waits for
+M6. Unit _kind_ on a variable beside `integer`; one model unit per document;
 emitters convert at the boundary. Cheaper than `docs/fem.md` §6 implies —
 `_PARAM_UNITS` already sits beside `_PARAM_ATTRS`. **Interacts with F2**: a
 definition's parameters want units for the same reason its variables do.

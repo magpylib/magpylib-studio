@@ -57,8 +57,19 @@ Protocol surface (all JSON-serializable in/out):
   unknown_variables(values)            -> {"unknown": [names not defined yet]}
   expression_help()                    -> {operators, functions, constants, ...}
   check_expression(text)               -> {"ok": bool, "error"?: str}
-  set_variable(name, value)            -> {"ok": bool, "error"?: str}
+  set_variable(name, value, unit?)     -> {"ok": bool, "error"?: str}
   set_variable_bounds(name, min?, max?, soft_min?, soft_max?) -> {"ok": bool, ...}
+                                          (keeps the variable's unit)
+  set_variable_unit(name, unit?)       -> {"ok": bool, ...} length, angle, field,
+                                          current, dimensionless; None clears
+  set_model_unit(unit?)                -> {"ok": bool, ...} m, cm, mm, µm
+  set_field_unit(unit?)                -> {"ok": bool, ...} T, mT, µT
+  get_units(type?)                     -> {model_unit, field_unit, shown, params?}
+  quantity(name, text, unit?)          -> {"ok", "value"?} "15", "15 mm" -> SI
+  read_values(terms, unit?)            -> {"ok", "values"?} one box's terms -> SI
+  field_units(method, params)          -> {"units": {name: {unit, symbol}}} what a
+                                          variable typed into each box measures
+  unit_kinds()                         -> the kinds and the units each is typed in
   rename_variable(old, new)            -> {"ok": bool, "error"?: str}
   remove_variable(name)                -> {"ok": bool, "error"?: str}
   sweep(variable, values, sensor_id?, points?, field?) -> {"ok", "steps": [...]}
@@ -88,7 +99,7 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, meshes, style_compat, threejs
+from magpylib_studio import expressions, meshes, style_compat, threejs, units
 
 
 def example_scene():
@@ -154,17 +165,31 @@ def example_scene():
         "variable_bounds": {
             "n": {"min": 2, "max": 60, "soft_min": 4, "soft_max": 20, "integer": True},
             "radius": {
+                "unit": "length",
                 "min": 0.005,
                 "max": 0.08,
                 "soft_min": 0.016,
                 "soft_max": 0.04,
             },
-            "gap": {"min": 0, "max": 0.06, "soft_min": 0.01, "soft_max": 0.03},
-            "tilt": {"min": -180, "max": 180, "soft_min": -90, "soft_max": 90},
+            "gap": {
+                "unit": "length",
+                "min": 0,
+                "max": 0.06,
+                "soft_min": 0.01,
+                "soft_max": 0.03,
+            },
+            "tilt": {
+                "unit": "angle",
+                "min": -180,
+                "max": 180,
+                "soft_min": -90,
+                "soft_max": 90,
+            },
             # Not every variable is a quantity. An axis is a name, so a range
             # says nothing about it and a slider cannot offer one — options
             # are to a dropdown what bounds are to a slider.
             "tilt_axis": {"options": ["x", "y", "z"]},
+            "stagger": {"unit": "angle"},
         },
         "events": [
             ring_pattern(1),
@@ -248,18 +273,27 @@ def coil_scene():
                 "integer": True,
             },
             "coil_radius": {
+                "unit": "length",
                 "min": 0.0005,
                 "max": 0.1,
                 "soft_min": 0.003,
                 "soft_max": 0.03,
             },
             "pitch": {
+                "unit": "length",
                 "min": 0.0001,
                 "max": 0.02,
                 "soft_min": 0.001,
                 "soft_max": 0.006,
             },
-            "amps": {"min": -10000, "max": 10000, "soft_min": 0, "soft_max": 500},
+            "amps": {
+                "unit": "current",
+                "min": -10000,
+                "max": 10000,
+                "soft_min": 0,
+                "soft_max": 500,
+            },
+            "height": {"unit": "length"},
         },
         "events": [
             {
@@ -320,6 +354,7 @@ def spiral_scene():
         },
         "variable_bounds": {
             "radius": {
+                "unit": "length",
                 "min": 0.0005,
                 "max": 0.1,
                 "soft_min": 0.005,
@@ -327,6 +362,7 @@ def spiral_scene():
             },
             "turns": {"min": 0.25, "max": 40, "soft_min": 1, "soft_max": 8},
             "height": {
+                "unit": "length",
                 "min": 0.0002,
                 "max": 0.4,
                 "soft_min": 0.004,
@@ -341,6 +377,7 @@ def spiral_scene():
                 "soft_max": 40,
                 "integer": True,
             },
+            "pitch": {"unit": "length"},
         },
         "objects": [
             {
@@ -377,8 +414,20 @@ def pair_scene():
     return {
         "variables": {"gap": 0.02, "size": 0.01},
         "variable_bounds": {
-            "gap": {"min": 0.001, "max": 0.2, "soft_min": 0.005, "soft_max": 0.06},
-            "size": {"min": 0.0005, "max": 0.05, "soft_min": 0.005, "soft_max": 0.02},
+            "gap": {
+                "unit": "length",
+                "min": 0.001,
+                "max": 0.2,
+                "soft_min": 0.005,
+                "soft_max": 0.06,
+            },
+            "size": {
+                "unit": "length",
+                "min": 0.0005,
+                "max": 0.05,
+                "soft_min": 0.005,
+                "soft_max": 0.02,
+            },
         },
         "events": [
             {"target": "upper", "op": "mirror", "plane": "xy", "anchor": 0},
@@ -421,8 +470,20 @@ def array_scene():
             "nx": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
             "ny": {"min": 1, "max": 40, "soft_min": 2, "soft_max": 10, "integer": True},
             "nz": {"min": 1, "max": 20, "soft_min": 1, "soft_max": 10, "integer": True},
-            "pitch": {"min": 0.002, "max": 0.1, "soft_min": 0.01, "soft_max": 0.04},
-            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.04},
+            "pitch": {
+                "unit": "length",
+                "min": 0.002,
+                "max": 0.1,
+                "soft_min": 0.01,
+                "soft_max": 0.04,
+            },
+            "lift": {
+                "unit": "length",
+                "min": 0.001,
+                "max": 0.1,
+                "soft_min": 0.005,
+                "soft_max": 0.04,
+            },
         },
         "events": [
             {
@@ -548,9 +609,22 @@ def tolerance_scene(resolution=7):
             "tolerance": 0.002,
         },
         "variable_bounds": {
-            "mag": {"min": 0.0005, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
-            "gap": {"min": 0.0002, "max": 0.05, "soft_min": 0.001, "soft_max": 0.02},
+            "mag": {
+                "unit": "length",
+                "min": 0.0005,
+                "max": 0.1,
+                "soft_min": 0.005,
+                "soft_max": 0.03,
+            },
+            "gap": {
+                "unit": "length",
+                "min": 0.0002,
+                "max": 0.05,
+                "soft_min": 0.001,
+                "soft_max": 0.02,
+            },
             "tolerance": {
+                "unit": "length",
                 "min": 0.0001,
                 "max": 0.02,
                 "soft_min": 0.0005,
@@ -628,9 +702,27 @@ def solid_scene():
             "lift": 0.01,
         },
         "variable_bounds": {
-            "width": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
-            "depth": {"min": 0.0005, "max": 0.2, "soft_min": 0.005, "soft_max": 0.05},
-            "height": {"min": 0.0005, "max": 0.2, "soft_min": 0.003, "soft_max": 0.04},
+            "width": {
+                "unit": "length",
+                "min": 0.0005,
+                "max": 0.2,
+                "soft_min": 0.005,
+                "soft_max": 0.05,
+            },
+            "depth": {
+                "unit": "length",
+                "min": 0.0005,
+                "max": 0.2,
+                "soft_min": 0.005,
+                "soft_max": 0.05,
+            },
+            "height": {
+                "unit": "length",
+                "min": 0.0005,
+                "max": 0.2,
+                "soft_min": 0.003,
+                "soft_max": 0.04,
+            },
             # Never 0: at 0 every point on a face collapses onto its corner
             # and there is no surface left. 2 is the diamond; past it the
             # solid pinches inward, which is a different kind of shape and
@@ -647,7 +739,13 @@ def solid_scene():
                 "soft_max": 96,
                 "integer": True,
             },
-            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.04},
+            "lift": {
+                "unit": "length",
+                "min": 0.001,
+                "max": 0.1,
+                "soft_min": 0.005,
+                "soft_max": 0.04,
+            },
         },
         "objects": [
             {
@@ -709,8 +807,20 @@ def quiver_scene(density=12, steps=51):
     return {
         "variables": {"lift": 0.01, "width": 0.03, "density": density},
         "variable_bounds": {
-            "lift": {"min": 0.001, "max": 0.1, "soft_min": 0.005, "soft_max": 0.03},
-            "width": {"min": 0.001, "max": 0.1, "soft_min": 0.01, "soft_max": 0.05},
+            "lift": {
+                "unit": "length",
+                "min": 0.001,
+                "max": 0.1,
+                "soft_min": 0.005,
+                "soft_max": 0.03,
+            },
+            "width": {
+                "unit": "length",
+                "min": 0.001,
+                "max": 0.1,
+                "soft_min": 0.01,
+                "soft_max": 0.05,
+            },
             "density": {
                 "min": 2,
                 "max": 40,
@@ -853,6 +963,32 @@ _PARAM_UNITS = {
     "current": "A",
     "moment": "A·m²",
     "pixel": "m",
+}
+
+# What a variable typed into a box measures (`field_units`): a constructor
+# parameter's box by the parameter, an operation's by its argument. The
+# variable kinds of `units`, not the symbols of _PARAM_UNITS above: a
+# magnetization in A/m or a moment has no kind of its own.
+_PARAM_KINDS = {
+    "position": "length",
+    "dimension": "length",
+    "diameter": "length",
+    "vertices": "length",
+    "pixel": "length",
+    "polarization": "field",
+    "current": "current",
+}
+_ARGUMENT_KINDS = {
+    "position": "length",
+    "displacement": "length",
+    "anchor": "length",
+    "step": "length",
+    "size": "length",
+    "offset": "length",
+    "orientation": "angle",
+    "rotvec": "angle",
+    "angle": "angle",
+    "spin": "angle",
 }
 
 # What the components of a vector parameter are called, where they have
@@ -1218,9 +1354,14 @@ try:
 except PackageNotFoundError:  # a source tree that was never installed
     __version__ = "0+unknown"
 
+#: A variable's limits, in the order a document writes them.
+_LIMIT_KEYS = ("min", "max", "soft_min", "soft_max", "integer", "options", "unit")
+
 _DOC_KEYS = (
     "version",
     "generator",
+    "model_unit",
+    "field_unit",
     "variables",
     "variable_bounds",
     "objects",
@@ -1291,11 +1432,15 @@ def _canonical(doc):
         del doc["variables"]
     elif "variables" in doc:
         doc["variables"] = expressions.normalized(doc["variables"])
-    # limits belong to a variable and go when it does
+    # limits belong to a variable and go when it does, and are written in one
+    # order however they were set: the range, what it counts, what it measures
     if "variable_bounds" in doc:
         defined = doc.get("variables") or {}
         doc["variable_bounds"] = {
-            name: limits
+            name: {
+                **{k: limits[k] for k in _LIMIT_KEYS if k in limits},
+                **{k: v for k, v in limits.items() if k not in _LIMIT_KEYS},
+            }
             for name, limits in doc["variable_bounds"].items()
             if name in defined
         }
@@ -1714,13 +1859,25 @@ def _axis_label(value):
     return value if isinstance(value, str) else _vec(value)
 
 
-def _event_label(event):
+def _in_length_unit(value, model):
+    """A length, or a vector or path of them, in the scene's length unit."""
+    if isinstance(value, list):
+        return [_in_length_unit(v, model) for v in value]
+    return units.in_shown(value, "length", model)
+
+
+def _event_label(event, model=units.DEFAULT_MODEL_UNIT):
     """What an event did, named for the doing of it.
 
     The tree shows these, so they read as steps a person took — "orbit 36°
     about z" — rather than as the call that carried it out. The call is what
-    `source` is for, and what the script tab shows.
+    `source` is for, and what the script tab shows. Lengths are in the unit
+    the scene is shown in, `model`: "moved by (0, 0, 5) mm".
     """
+
+    def length(value):
+        return _vec(_in_length_unit(value, model), f" {model}")
+
     op = event.get("op", "rotate_from_angax")
     if op == "create":
         return "created"
@@ -1730,9 +1887,9 @@ def _event_label(event):
         parent = event.get("parent")
         return f"moved into {parent}" if parent else "moved to the scene root"
     if op == "move":
-        return f"moved by {_vec(event.get('displacement'), ' m')}"
+        return f"moved by {length(event.get('displacement'))}"
     if op == "position":
-        return f"placed at {_vec(event.get('value'), ' m')}"
+        return f"placed at {length(event.get('value'))}"
     if op == "orientation":
         return f"oriented {_vec(event.get('rotvec'), '°')}"
     if op == "duplicate_around":
@@ -1741,10 +1898,7 @@ def _event_label(event):
             f"{_axis_label(event.get('axis', 'z'))}"
         )
     if op == "duplicate_along":
-        return (
-            f"{_lit(event.get('count', 1))} copies every "
-            f"{_vec(event.get('step'), ' m')}"
-        )
+        return f"{_lit(event.get('count', 1))} copies every {length(event.get('step'))}"
     if op == "mirror":
         plane = event.get("plane") or _vec(event.get("normal"))
         return f"mirrored in {plane}"
@@ -1886,12 +2040,19 @@ def _script_failure(error, path):
 
 def _said(doc):
     """A document built by a builder script, as the script can say it: the
-    log without its own numbering, and the variables with their limits."""
+    log without its own numbering, the variables with their limits, and the
+    units it is shown in."""
     steps = [
         {key: value for key, value in event.items() if key != "id"}
         for event in doc.get("events") or []
     ]
-    return steps, doc.get("variables"), doc.get("variable_bounds")
+    return (
+        steps,
+        doc.get("variables"),
+        doc.get("variable_bounds"),
+        doc.get("model_unit"),
+        doc.get("field_unit"),
+    )
 
 
 def _drift(written, back, width=100):
@@ -2831,6 +2992,7 @@ class MagpylibStudioSession:
                     if name in _PARAM_COMPONENTS
                     else {}
                 ),
+                **self._param_shown(name, obj),
             }
             # `value` is what magpylib holds; when the document says it in
             # terms of a variable, the editor needs the expression as well —
@@ -2841,6 +3003,24 @@ class MagpylibStudioSession:
                 entry["written"] = written[name]
             out.append(entry)
         return out
+
+    def _param_shown(self, name, obj):
+        """How a parameter is shown and typed, where it measures something the
+        scene has a unit for: {"shown": {"unit", "symbol", "scale"}}, or one
+        per component where they differ -- a CylinderSegment's dimension is
+        three lengths and two angles."""
+        segment = isinstance(obj, magpy.magnet.CylinderSegment)
+        shown = self._shown_param(name, "magnet.CylinderSegment" if segment else None)
+        return {"shown": shown} if shown else {}
+
+    def _shown_param(self, name, type_):
+        """How the parameter `name` of an object of `type_` is shown, as
+        `_param_shown` says it."""
+        if name == "dimension" and type_ == "magnet.CylinderSegment":
+            kinds = ("length", "length", "length", "angle", "angle")
+            return [self._shown(kind) for kind in kinds]
+        kind = _PARAM_KINDS.get(name)
+        return self._shown(kind) if kind else None
 
     def inspect_mesh(self, source):
         """Read a mesh source without putting it in the scene.
@@ -2976,6 +3156,11 @@ class MagpylibStudioSession:
             "euler": euler[-1].round(9).tolist(),
             "path_length": len(position),
             "path": position.round(9).tolist() if len(position) > 1 else None,
+            # as the inspector shows and reads them: a position in mm
+            "shown": {
+                "position": self._shown("length"),
+                "orientation": self._shown("angle"),
+            },
         }
         # If the pose was written in terms of a variable, say so: an editor
         # showing only the resolved number would replace the expression the
@@ -3345,17 +3530,19 @@ class MagpylibStudioSession:
 
         data = self.get_field(points=points.tolist(), field=field)
         values = np.array(data["values"]).reshape(len(v), len(u), 3)
+        length = self._shown("length")
+        model, scale = length["symbol"], length["scale"]
         return self._heatmap(
-            u,
-            v,
+            u * scale,
+            v * scale,
             values,
             data["unit"],
             field,
             component,
             log,
             template,
-            labels=(f"{plane[0]} (m)", f"{plane[1]} (m)"),
-            subtitle=f"on {plane} at {'xyz'[inormal]} = {offset:g} m"
+            labels=(f"{plane[0]} ({model})", f"{plane[1]} ({model})"),
+            subtitle=f"on {plane} at {'xyz'[inormal]} = {offset * scale:g} {model}"
             + _skipped_note(data.get("skipped")),
         )
 
@@ -3386,8 +3573,10 @@ class MagpylibStudioSession:
         spread = np.ptp(pixel.reshape(-1, 3), axis=0)
         iu, iv = np.argsort(spread)[::-1][:2]
         iu, iv = sorted((int(iu), int(iv)))
-        u = pixel[0, :, iu]
-        v = pixel[:, 0, iv]
+        length = self._shown("length")
+        model, scale = length["symbol"], length["scale"]
+        u = pixel[0, :, iu] * scale
+        v = pixel[:, 0, iv] * scale
         return self._heatmap(
             u,
             v,
@@ -3397,7 +3586,7 @@ class MagpylibStudioSession:
             component,
             log,
             template,
-            labels=(f"sensor {'xyz'[iu]} (m)", f"sensor {'xyz'[iv]} (m)"),
+            labels=(f"sensor {'xyz'[iu]} ({model})", f"sensor {'xyz'[iv]} ({model})"),
             subtitle=f"over {sensor.style.label or sensor_id} "
             f"({pixel.shape[0]}×{pixel.shape[1]} pixels{path_note})"
             + _skipped_note(skipped),
@@ -3406,7 +3595,10 @@ class MagpylibStudioSession:
     def _heatmap(
         self, u, v, values, unit, field, component, log, template, labels, subtitle
     ):
-        """Shared heatmap builder for both field-map sources."""
+        """Shared heatmap builder for both field-map sources. `values` and
+        `unit` are SI; the map is in the scene's field unit."""
+        scale, unit = self._field_shown(field, unit)
+        values = np.asarray(values) * scale
         if component == "magnitude":
             z = np.linalg.norm(values, axis=-1)
             # sequential: one hue light -> dark, lightest reads as "near zero"
@@ -3485,7 +3677,13 @@ class MagpylibStudioSession:
             return_fig=True,
         )
         if isinstance(output, str):  # magpylib leaves the axes untitled
-            unit = "T" if output.startswith("B") else "A/m"
+            scale, unit = self._field_shown(
+                output[0], _FIELDS.get(output[0], ("", "A/m"))[1]
+            )
+            if scale != 1:  # in the scene's field unit: mT, say
+                for trace in fig.data:
+                    if getattr(trace, "y", None) is not None:
+                        trace.y = np.asarray(trace.y, dtype=float) * scale
             fig.update_layout(
                 xaxis_title="path index", yaxis_title=f"{output} ({unit})"
             )
@@ -4792,18 +4990,28 @@ class MagpylibStudioSession:
         bounds = self.doc.get("variable_bounds") or {}
         live = self._live_variable_names()
         shadowed = self._shadowed_variable_sources()
+        model = units.model_unit(self.doc)
+        field = units.field_unit(self.doc)
+
+        def shown(name):
+            view = units.shown((bounds.get(name) or {}).get("unit"), model, field)
+            return {"shown": view} if view else {}
+
         return {
+            "model_unit": model,
+            "field_unit": field,
             "variables": [
                 {
                     "name": name,
                     "expression": value,
                     "value": self._vars.get(name),
                     **({"bounds": bounds[name]} if name in bounds else {}),
+                    **shown(name),
                     **({"inert": True} if name not in live else {}),
                     **({"shadowed": shadowed[name]} if name in shadowed else {}),
                 }
                 for name, value in variables.items()
-            ]
+            ],
         }
 
     def restore_variable(self, name):
@@ -4907,7 +5115,8 @@ class MagpylibStudioSession:
         useful about it and a slider cannot offer it. Options give a UI a
         dropdown for the same reason bounds give it a slider.
 
-        Passing nothing clears the limits.
+        Passing nothing clears the limits. A unit is not a limit, and stays:
+        see `set_variable_unit`.
         """
         if name not in (self.doc.get("variables") or {}):
             return {"ok": False, "error": f"unknown variable {name!r}"}
@@ -4952,27 +5161,276 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             bounds = doc.setdefault("variable_bounds", {})
-            if limits:
-                bounds[name] = limits
+            unit = (bounds.get(name) or {}).get("unit")
+            # a choice is a name, which no unit measures
+            kept = (
+                {**limits, "unit": unit} if unit and "options" not in limits else limits
+            )
+            if kept:
+                bounds[name] = kept
             else:
                 bounds.pop(name, None)
 
         return self._mutate_doc(mutate, f"bound {name}")
 
-    def set_variable(self, name, value):
+    def set_variable_unit(self, name, unit=None):
+        """Say what a variable measures: `length`, `angle`, `field`, `current`
+        or `dimensionless` -- or None, to stop saying. Stored beside its limits
+        and changing nothing about its value, which stays in SI (degrees for an
+        angle): a view uses it to show `gap: 0.015 m` (15 in a scene shown in
+        mm) and to read `15 mm` back as 0.015. See `units`."""
+        if name not in (self.doc.get("variables") or {}):
+            return {"ok": False, "error": f"unknown variable {name!r}"}
+        if unit is not None and unit not in units.KINDS:
+            return {
+                "ok": False,
+                "error": f"{unit!r} is not a kind of unit; one of "
+                + ", ".join(units.KINDS),
+            }
+        limits = (self.doc.get("variable_bounds") or {}).get(name) or {}
+        if unit is not None and "options" in limits:
+            return {
+                "ok": False,
+                "error": f"{name} is one of a few names ({', '.join(map(str, limits['options']))}), "
+                "which no unit measures",
+            }
+
+        def mutate(doc):
+            bounds = doc.setdefault("variable_bounds", {})
+            entry = {k: v for k, v in (bounds.get(name) or {}).items() if k != "unit"}
+            if unit is not None:
+                entry["unit"] = unit
+            if entry:
+                bounds[name] = entry
+            else:
+                bounds.pop(name, None)
+
+        return self._mutate_doc(mutate, f"unit {name}")
+
+    def set_model_unit(self, unit=None):
+        """The length unit the scene is drawn in -- what a view shows a length
+        in, and what an export to a CAD or FEM tool writes. None goes back to
+        the default, metres. The document's numbers stay metres either way."""
+        if unit is not None and unit not in units.MODEL_UNITS:
+            return {
+                "ok": False,
+                "error": f"{unit!r} is not a length unit; one of "
+                + ", ".join(units.MODEL_UNITS),
+            }
+
+        def mutate(doc):
+            if unit is None:
+                doc.pop("model_unit", None)
+            else:
+                doc["model_unit"] = unit
+
+        return self._mutate_doc(mutate, f"draw in {unit or units.DEFAULT_MODEL_UNIT}")
+
+    def set_field_unit(self, unit=None):
+        """The unit a field is shown in -- a polarization, a field variable,
+        the field plots: T, mT or µT. None goes back to the default, tesla.
+        The document's numbers stay tesla either way."""
+        if unit is not None and unit not in units.FIELD_UNITS:
+            return {
+                "ok": False,
+                "error": f"{unit!r} is not a field unit; one of "
+                + ", ".join(units.FIELD_UNITS),
+            }
+
+        def mutate(doc):
+            if unit is None:
+                doc.pop("field_unit", None)
+            else:
+                doc["field_unit"] = unit
+
+        return self._mutate_doc(
+            mutate, f"show fields in {unit or units.DEFAULT_FIELD_UNIT}"
+        )
+
+    def _shown(self, kind):
+        """How a value of `kind` is shown and typed in this scene, as a view
+        needs it: {"unit": kind, "symbol", "scale"} -- 0.015 m is 15 for
+        "mm" at scale 1000. None for a kind the studio does not know."""
+        view = units.shown(kind, units.model_unit(self.doc), units.field_unit(self.doc))
+        return {"unit": kind, **view} if view else None
+
+    def _field_shown(self, field, si):
+        """How a field read in `si` is plotted: B and J, in tesla, in the
+        scene's field unit; H and M, in A/m, as they are. (scale, symbol)."""
+        if si != "T":
+            return 1.0, si
+        shown = self._shown("field")
+        return shown["scale"], shown["symbol"]
+
+    def get_units(self, type=None):  # noqa: A002 - as add_object names it
+        """The units this scene is shown in, and how each kind of value is
+        shown: {"model_unit", "field_unit", "shown": {kind: {"unit",
+        "symbol", "scale"}}}. For a view asking for a length before it has
+        anything else to ask. With an object `type` ("magnet.Cuboid"), also
+        how each of its parameters is: {"params": {name: shown}}, a list
+        for one whose components differ."""
+        out = {
+            "model_unit": units.model_unit(self.doc),
+            "field_unit": units.field_unit(self.doc),
+            "shown": {kind: self._shown(kind) for kind in units.KINDS},
+        }
+        if type is not None:
+            out["params"] = {
+                name: self._shown_param(name, type)
+                for name in _PARAM_KINDS
+                if self._shown_param(name, type)
+            }
+        return out
+
+    def read_values(self, terms, unit=None):
+        """What the terms typed into one box mean, as document values: each a
+        number, perhaps with a unit -- `5`, `5 mm` -- read as a value of
+        `unit` (a kind: a bare number in the unit the scene shows it in), or
+        anything else, an expression, as `=` and what was typed. One call
+        for a whole box, `0, 0, 5 mm` say. `unit` may be a list, one kind a
+        term, for a box whose terms differ -- a segment's dimension.
+        {"ok", "values"} or {"ok": False, "error"} naming the term."""
+        model = units.model_unit(self.doc)
+        field = units.field_unit(self.doc)
+        kinds = unit if isinstance(unit, list) else [unit] * len(terms)
+        if len(kinds) != len(terms):
+            return {
+                "ok": False,
+                "error": f"{len(terms)} values where {len(kinds)} were asked for",
+            }
+        values = []
+        for term, unit in zip(terms, kinds, strict=True):
+            text = str(term).strip()
+            if not units.QUANTITY.match(text.replace("\u03bc", "µ")):
+                values.append(f"={text}")
+                continue
+            try:
+                values.append(units.parse(text, unit, model, field))
+            except ValueError as e:
+                return {"ok": False, "error": f"{text}: {e}"}
+        return {"ok": True, "values": values}
+
+    def quantity(self, name, text, unit=None):
+        """What typed text means as a value of `name`, in the document's unit:
+        `15` in the unit the variable is shown in, `15 mm` or `1.5 cm` in the
+        one it names. For a view to call before `set_variable`, so the units
+        are known in one place. Not a quantity -- an expression, say -- is
+        {"ok": False}, and the view goes on as before.
+
+        `unit` reads it as that kind instead: for a variable being created,
+        which has no unit of its own yet (see `field_units`). A name not
+        defined yet, with no `unit`, reads a plain number -- what New
+        Variable asks for before the variable exists."""
+        if unit is not None:
+            kind = unit
+        else:
+            kind = ((self.doc.get("variable_bounds") or {}).get(name) or {}).get("unit")
+        try:
+            value = units.parse(
+                text, kind, units.model_unit(self.doc), units.field_unit(self.doc)
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "value": value}
+
+    def unit_kinds(self):
+        """The kinds a variable may measure, the units each is typed in, and
+        the length units a scene may be drawn in."""
+        return units.describe()
+
+    def field_units(self, method, params):
+        """What each variable named outright in an operation's values would
+        measure, from the box it was typed into -- for a view creating one on
+        the way: `gap` typed as a position is a length from the start, shown
+        and read in the scene's length unit. {"units": {name: {"unit",
+        "symbol"}}}.
+
+        Only a box holding the variable itself counts. `360 / n` in an angle
+        says nothing about what `n` is, and guessing would be worse than
+        asking: a unit is set in Variable Properties as easily as it is
+        cleared there."""
+        found = {}
+
+        def visit(value, kind):
+            if not kind:
+                return
+            if isinstance(value, list):
+                per_component = isinstance(kind, tuple)
+                if per_component and value and not isinstance(value[0], list):
+                    for item, each in zip(value, kind, strict=False):
+                        visit(item, each)
+                else:
+                    for item in value:
+                        visit(item, kind)
+                return
+            if isinstance(kind, tuple) or not expressions.is_expression(value):
+                return
+            name = expressions.source_of(value).strip()
+            if name.isidentifier():
+                found.setdefault(name, kind)
+
+        def parameter(name, value, type_):
+            kind = _PARAM_KINDS.get(name)
+            if name == "dimension" and type_ == "magnet.CylinderSegment":
+                kind = ("length", "length", "length", "angle", "angle")
+            visit(value, kind)
+
+        params = params or {}
+        if method == "set_param":
+            spec = next(
+                (
+                    s
+                    for s, _ in self._iter_specs()
+                    if s["id"] == params.get("object_id")
+                ),
+                None,
+            )
+            parameter(params.get("name"), params.get("value"), spec and spec["type"])
+        elif method == "add_object":
+            for name, value in (params.get("params") or {}).items():
+                parameter(name, value, params.get("type"))
+        else:
+            given = params.get("changes") if method == "edit_event" else params
+            for key, value in (given or {}).items():
+                visit(value, _ARGUMENT_KINDS.get(key))
+        return {
+            "units": {
+                name: {"unit": kind, "symbol": self._shown(kind)["symbol"]}
+                for name, kind in found.items()
+            }
+        }
+
+    def set_variable(self, name, value, unit=None):
         """Define or redefine a variable. `value` is a number, or an
         expression over the other variables ("=gap*2"). Everything that
         references it is rebuilt; a definition that cannot resolve (a typo, a
-        cycle, a value some object rejects) is reported and rolled back."""
+        cycle, a value some object rejects) is reported and rolled back.
+
+        `unit` says what it measures in the same step (see
+        `set_variable_unit`), so a variable is created a length rather than
+        created and then made one; None leaves what it says as it was."""
         if not isinstance(name, str) or not name.isidentifier():
             return {"ok": False, "error": f"{name!r} is not a valid variable name"}
         if name in expressions._CONSTANTS or name in expressions._FUNCTIONS:
             return {"ok": False, "error": f"{name!r} is a built-in expression name"}
         if not isinstance(value, int | float | str) or isinstance(value, bool):
             return {"ok": False, "error": "a variable is a number or an expression"}
+        if unit is not None and unit not in units.KINDS:
+            return {
+                "ok": False,
+                "error": f"{unit!r} is not a kind of unit; one of "
+                + ", ".join(units.KINDS),
+            }
+        if unit is not None and "options" in (
+            (self.doc.get("variable_bounds") or {}).get(name) or {}
+        ):
+            return {"ok": False, "error": f"{name} is a choice, which no unit measures"}
 
         def mutate(doc):
             doc.setdefault("variables", {})[name] = expressions.normalized(value)
+            if unit is not None:
+                bounds = doc.setdefault("variable_bounds", {})
+                bounds[name] = {**(bounds.get(name) or {}), "unit": unit}
 
         return self._mutate_doc(mutate, f"set {name}")
 
@@ -5105,7 +5563,15 @@ class MagpylibStudioSession:
         result = self.sweep(variable, values, sensor_id, points, field)
         if not result["ok"]:
             raise ValueError(result["error"])
-        xs = [step["value"] for step in result["steps"]]
+        # along the variable's own unit, as the panel shows it: gap in m, or mm
+        kind = ((self.doc.get("variable_bounds") or {}).get(variable) or {}).get("unit")
+        shown = self._shown(kind)
+        scale = shown["scale"] if shown else 1
+        field_scale, field_symbol = self._field_shown(field, result["unit"])
+        xs = [step["value"] * scale for step in result["steps"]]
+        axis = (
+            f"{variable} ({shown['symbol']})" if shown and shown["symbol"] else variable
+        )
         per_step = [
             np.atleast_2d(np.array(step["values"], dtype=float).reshape(-1, 3))
             for step in result["steps"]
@@ -5121,7 +5587,7 @@ class MagpylibStudioSession:
                 np.linalg.norm(column, axis=-1)
                 if component == "magnitude"
                 else column[:, "xyz".index(component)]
-            )
+            ) * field_scale
             shade = shades[i * len(shades) // n_points] if n_points > 1 else shades[3]
             traces.append(
                 go.Scatter(
@@ -5138,8 +5604,8 @@ class MagpylibStudioSession:
         fig = go.Figure(traces)
         fig.update_layout(
             title={"text": f"{label} against {variable}"},
-            xaxis={"title": {"text": variable}},
-            yaxis={"title": {"text": f"{label} ({result['unit']})"}},
+            xaxis={"title": {"text": axis}},
+            yaxis={"title": {"text": f"{label} ({field_symbol})"}},
             margin={"l": 60, "r": 20, "t": 50, "b": 50},
         )
         if template:
@@ -5153,6 +5619,20 @@ class MagpylibStudioSession:
         broken = {b["id"]: b["error"] for b in self._broken}
         events = self.doc.get("events") or []
         applied = len(events) if self._rollback is None else self._rollback
+        model = units.model_unit(self.doc)
+
+        def shown(event):
+            """How each of a step's own values is shown and typed: its step in
+            mm, its angle in degrees -- for an editor of the step."""
+            found = {
+                key: self._shown(_ARGUMENT_KINDS[key])
+                for key in event
+                if key in _ARGUMENT_KINDS
+            }
+            if event.get("op") == "position":  # its value is where it goes
+                found["value"] = self._shown("length")
+            return {"shown": found} if found else {}
+
         return {
             "rollback": self._rollback,
             "events": [
@@ -5161,8 +5641,9 @@ class MagpylibStudioSession:
                     "id": e["id"],
                     "target": e["target"],
                     "op": e.get("op", "rotate_from_angax"),
-                    "label": _event_label(e),
+                    "label": _event_label(e, model),
                     "source": _event_source(e),
+                    **shown(e),
                     # past the rollback point: part of the scene, not of what is
                     # currently being shown
                     **({"pending": True} if i >= applied else {}),

@@ -40,7 +40,7 @@ import warnings
 import magpylib as magpy
 import numpy as np
 
-from magpylib_studio import expressions
+from magpylib_studio import expressions, units
 from magpylib_studio.session import (
     _HIDE_STYLE,
     MagpylibStudioSession,
@@ -532,13 +532,24 @@ class Scene:
     scene is; a slider dragged in the panel and saved says what a variable is
     set to, and the next run keeps it -- see `variable`. A path to a file not
     there yet is no values, so a script can read the file it is about to save.
+
+    `model_unit` is the length unit the scene is shown in (`"m"`, the
+    default, `"cm"`, `"mm"` or `"µm"`): what a view shows a length variable
+    in, and what an export to a CAD or FEM tool writes. The numbers written
+    here stay metres either way. `field_unit` is the unit a field is shown
+    in (`"T"`, the default, `"mT"` or `"µT"`): a polarization, a field
+    variable, the field plots. The numbers stay tesla.
     """
 
-    def __init__(self, session=None, *, values=None):
+    def __init__(self, session=None, *, values=None, model_unit=None, field_unit=None):
         if session is None:
             session = MagpylibStudioSession()
             session._base_dir = _base_dir
         self._session = session
+        if model_unit is not None:
+            self._call("set_model_unit", model_unit)
+        if field_unit is not None:
+            self._call("set_field_unit", field_unit)
         if isinstance(values, str | pathlib.PurePath):
             path = pathlib.Path(values)
             saved = (
@@ -578,12 +589,18 @@ class Scene:
         slider=None,
         integer=None,
         options=None,
+        unit=None,
     ):
         """Define a variable and return it, to write the scene in.
 
         `value` is a number, a name (for a variable like an axis, with its
         `options`), or an expression over earlier variables. `bounds` are
-        the hard limits, `slider` the range worth dragging through.
+        the hard limits, `slider` the range worth dragging through. `unit`
+        says what it measures -- `"length"`, `"angle"`, `"field"`,
+        `"current"`, `"dimensionless"` -- so a view shows `gap: 0.015 m`, or
+        15 mm in a scene shown in mm, and reads `15 mm` typed; the
+        value itself stays in SI (degrees for an angle), as everything here
+        is: `s.variable("gap", 0.015, unit="length")`.
 
         With `values` given to the scene, a number or a name here is a
         default, and the saved value wins: that is a slider's position, kept
@@ -611,6 +628,8 @@ class Scene:
             limits["options"] = list(options)
         if limits:
             self._call("set_variable_bounds", name, **limits)
+        if unit is not None:
+            self._call("set_variable_unit", name, unit)
         return Variable(name)
 
     def sampled(self, of, *, count=None, over=None):
@@ -820,7 +839,7 @@ def rebuilt(session):
 
 
 #: A variable's limits as `Scene.variable` takes them.
-_LIMITS = ("min", "max", "soft_min", "soft_max", "integer", "options")
+_LIMITS = ("min", "max", "soft_min", "soft_max", "integer", "options", "unit")
 
 
 class _ScriptWriter:
@@ -930,7 +949,17 @@ class _ScriptWriter:
     # -- the script
 
     def write(self):
-        lines = [f"{self.scene} = Scene()"]
+        drawn = []
+        for key, known in (
+            ("model_unit", units.MODEL_UNITS),
+            ("field_unit", units.FIELD_UNITS),
+        ):
+            unit = self.doc.get(key)
+            if unit in known:
+                drawn.append(f"{key}={unit!r}")
+            elif unit is not None:
+                self.unwritten.append(f"{key} ({unit!r})")
+        lines = [f"{self.scene} = Scene({', '.join(drawn)})"]
         lines += self.write_variables()
         body, creates = self.write_events()
         lines += ["", *body]
@@ -968,6 +997,10 @@ class _ScriptWriter:
                 parts.append("integer=True")
             if "options" in limits:
                 parts.append(f"options={self.value(limits['options'])}")
+            if limits.get("unit") in units.KINDS:
+                parts.append(f"unit={limits['unit']!r}")
+            elif "unit" in limits:
+                self.unwritten.append(f"unit on {name} ({limits['unit']!r})")
             lines.append(f"{name} = {self.scene}.variable({', '.join(parts)})")
 
         for name in self.variables:

@@ -549,21 +549,26 @@ class SceneWidget(anywidget.AnyWidget):
         and clamping would be an edit nobody made. A whole number slides in
         whole steps, a variable with options is a dropdown, and one written as
         an expression has no control -- it follows the others. A number with
-        no range at all has nowhere to slide to, and is left out.
+        no range at all has nowhere to slide to, and is left out. One that
+        says what it measures slides in the unit the panel shows it in --
+        in a scene shown in mm, `gap (mm)` from 10 to 30, not from 0.01 to
+        0.03.
         """
         import ipywidgets as widgets
 
-        from magpylib_studio import expressions
+        from magpylib_studio import expressions, units
 
         session = self._editing("variable_sliders")
 
         def values():
             return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
 
-        controls = {}
-        for variable in session.get_variables()["variables"]:
+        controls, scales, kinds = {}, {}, {}
+        listed = session.get_variables()
+        for variable in listed["variables"]:
             name, value = variable["name"], variable["value"]
             limits = variable.get("bounds") or {}
+            shown = variable.get("shown") or {"symbol": "", "scale": 1.0}
             if expressions.is_expression(variable["expression"]):
                 continue
             if "options" in limits:
@@ -577,32 +582,51 @@ class SceneWidget(anywidget.AnyWidget):
                 if limits.get("integer"):
                     control = widgets.IntSlider(value, min=low, max=high)
                 else:
+                    scale = shown["scale"]  # a count is counted, never scaled
+                    scales[name], kinds[name] = scale, limits.get("unit")
+                    low, high = low * scale, high * scale
                     control = widgets.FloatSlider(
-                        value,
+                        value * scale,
                         min=low,
                         max=high,
                         step=(high - low) / 200 or 1,
                         readout_format=".4g",
                     )
-            control.description = name
+            symbol = shown["symbol"] if name in scales else ""
+            control.description = f"{name} ({symbol})" if symbol else name
             controls[name] = control
+
+        def document(name, value):
+            """A control's value in the document's unit, exactly: 23.4 mm is
+            0.0234, not 23.4 * 0.001."""
+            if name not in scales:
+                return value
+            return units.to_document(
+                value, kinds[name], listed["model_unit"], listed["field_unit"]
+            )
 
         def from_control(name):
             def moved(change):
-                if values().get(name) != change["new"]:  # an echo is no edit
-                    self.set_variable(name, change["new"])
+                value = document(name, change["new"])
+                if values().get(name) != value:  # an echo is no edit
+                    self.set_variable(name, value)
 
             return moved
 
         def from_view(_change):
             now = values()
             for name, control in controls.items():
-                if name not in now or now[name] == control.value:
+                if name not in now:
+                    continue
+                shown_now = now[name] * scales.get(name, 1)
+                if name in scales and document(name, control.value) == now[name]:
+                    continue
+                if name not in scales and now[name] == control.value:
                     continue
                 if hasattr(control, "max"):  # never clamp what the scene holds
-                    control.min = min(control.min, now[name])
-                    control.max = max(control.max, now[name])
-                control.value = now[name]
+                    control.min = min(control.min, shown_now)
+                    control.max = max(control.max, shown_now)
+                control.value = shown_now
 
         for name, control in controls.items():
             control.observe(from_control(name), "value")

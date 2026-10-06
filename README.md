@@ -1,414 +1,114 @@
-# magpylib-studio
+# Magpylib Studio
 
-Headless **magpylib editing engine** plus a **VS Code extension** built on it —
-a GUI _and_ LLM studio for magnetic scenes. The engine owns a magpylib scene and
-exposes everything a frontend needs over a tiny JSON-RPC protocol on stdio; the
-presentation layer (VS Code webview, Solara, a CLI…) is a thin client.
+Build and explore [magpylib](https://github.com/magpylib/magpylib) magnet
+designs visually — in VS Code, in a notebook, or in code. Name the numbers that
+matter, drag a slider, and the whole design follows, with the field computed
+exactly in milliseconds.
 
-The VS Code side is in [`vscode-extension/`](vscode-extension/) — scene tree
-with the construction history in it, schema-driven inspector, variables with
-sliders, 3D view, field maps and sweeps, an editable script tab, and Copilot
-chat tools.
+![The Halbach example in VS Code: the scene tree, the variables with their sliders, the 3D view and the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
 
-![The Halbach example open in VS Code: the scene tree listing each ring's construction steps and the copies a pattern made, the variables panel with sliders for n, radius, gap, stagger and tilt, the 3D view, and the script tab showing the same scene as parametric magpylib.](docs/halbach.png)
+_The Halbach example: two rings of ten magnets, each ring one magnet and one
+pattern. Drag `n` and both rings rebuild._
 
-_The `halbach` example: twenty magnets from two `create` steps and two circular
-patterns. Dragging `n` rebuilds both rings; the script tab on the right is the
-same scene, and saving an edit to it rebuilds the scene from what you wrote._
+## What you can do
 
-## Try it out
+- **Build a scene by hand.** Add magnets, currents and sensors, group them, and
+  move, turn and resize them in the 3D view.
+- **Make it parametric.** Name the numbers that matter — `radius`, `gap`, `n` —
+  and write positions and sizes in terms of them. Drag a slider and everything
+  follows. Values are SI unless you type a unit — `15 mm`, `2 cm`, `800 mT` — or
+  show the whole scene in mm and mT.
+- **Pattern, don't copy.** A ring of twenty magnets is one magnet and one
+  "repeat around an axis" step, so changing the magnet changes them all.
+- **See the field.** Along a sensor path, as a map over a plane, or swept
+  against a variable.
+- **Undo anything.** Every scene keeps the steps that built it; step back
+  through them, or change an early one.
+- **Switch to code and back.** The script tab shows the scene as Python and
+  applies your edits when you save. Export plain magpylib for anyone, or the
+  scene as code to keep.
+- **Let an AI assistant help.** Copilot Chat can build and edit the scene with
+  you.
 
-```sh
-code --install-extension magpylib.magpylib-studio-vscode
-```
+## Get started in VS Code
 
-That is the whole install — the Python side is not a second step you do first.
-Open a folder, click the magpylib icon in the activity bar and press **Load
-Example Scene**; the first time the extension needs the engine it offers
-**Install the Engine**, which either offers you the interpreter the Python
-extension already selected — named, because installing into someone else's
-interpreter is not the same act as making one — or makes a `.venv` in the
-workspace, installs `magpylib-studio` into it and points
-`magpylib-studio.pythonPath` at it for you. With [uv][uv] present it fetches a
-matching Python too, so even the ≥ 3.11 floor is not something to arrange in
-advance.
+1. Install the extension: search for **Magpylib Studio** in the Extensions view,
+   or run `code --install-extension magpylib.magpylib-studio-vscode`.
+2. Open a folder, click the magpylib icon in the Activity Bar, and choose **Load
+   Example Scene**.
+3. The first time, it offers to **Install the Engine** (the Python side) for
+   you. Nothing to set up beforehand.
 
-Full walkthrough in the
-[extension README](vscode-extension/README.md#try-it-out). To work on the
-extension rather than use it, see [Development](#development).
+More in the
+[extension's guide](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/README.md).
 
-[uv]: https://docs.astral.sh/uv/
+## Use it in a notebook
 
-## The 3D view in a notebook
-
-The same view, in a Jupyter, marimo, VS Code or Colab cell — the panel's
-three.js renderer wrapped as an [anywidget][aw]:
+The same 3D view, in Jupyter, marimo, VS Code notebooks or Colab:
 
 ```sh
 pip install "magpylib-studio[widget]"
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
+pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"  # until magpylib's next release
 ```
-
-The second line is not optional yet. The widget draws through magpylib's
-display-backend API, which is on main and in no release: on 5.2.3,
-`backend="widget"` does not exist.
 
 ```python
 import magpylib as magpy
 from magpylib_studio.widget import SceneWidget
 
-SceneWidget(magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1)))
+cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+SceneWidget(cube)  # look around it
+SceneWidget(cube, editable=True)  # or move, turn and resize it, with undo
 ```
 
-`magpy.show(objects, backend="widget")` is the same thing said magpylib's way,
-and `magpy.defaults.display.backend = "widget"` makes every `show()` in the
-notebook draw one. A script has no cell to draw in: run from a terminal of a
-studio window, it draws in the Magpylib Studio panel, and anywhere else it opens
-the view in your browser as a saved page, saying where. The tools sit in the
-view's top-right corner and show when the pointer is on it, as Plotly's modebar
-does: the legend, the axes, framing, the projection, the theme, a picture,
-export and full screen. `animation=True` captures the paths, and a transport
-along the foot of the view plays and scrubs them: in the browser, from the
-motion, when every step is the first one moved — and a frame at a time from
-python when the run changes shape as it goes.
+More in the
+[notebook guide](https://github.com/magpylib/magpylib-studio/blob/main/docs/notebook.md).
 
-A `SceneWidget` is read only, like the panel — what a view can offer to edit is
-what its host can put back, and a cell has already run (for a view you can edit,
-see [Editing a scene in the notebook](#editing-a-scene-in-the-notebook)).
-Selecting and hiding are the exceptions, because they are values rather than
-edits:
+## Write a scene in code
+
+It reads like magpylib, but the variables stay variables:
 
 ```python
-scene = mo.ui.anywidget(SceneWidget(height=460))  # one cell: the view
-...
-scene.widget.update(ring, probe)  # another: what it draws
-scene.widget.picked  # a third: what was clicked
+from magpylib_studio.build import Scene
+
+s = Scene()
+n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
+radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), unit="length")
+
+ring = s.Collection(id="ring")
+magnet = s.magnet.Cuboid(
+    dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
+)
+ring.add(magnet)
+magnet.duplicate_around(count=n, axis="z", spin=360 / n)
+
+s.save("ring.magpy.json")  # open it in the studio: n and radius are sliders there
 ```
 
-**Make the view once and re-point it.** A slider re-runs every cell that reads
-it, so a `SceneWidget(...)` in one of them is a _new widget per drag_: a new
-element, controls rebuilt from nothing, and the camera back at its opening
-framing — you lose the zoom you were working in. `update()` replaces the drawn
-objects and leaves the view alone, which is what makes a slider smooth.
+More in
+[docs/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/builder.md),
+and a complete example in
+[examples/builder_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/builder_demo.py).
 
-**The legend** floats over the view: the objects as they are nested, with a
-caret to fold a collection, an eye to hide it and everything in it — shown on
-the row under the pointer, and always on one that is hidden — a swatch in the
-colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
-range in tree order, a double click frames it. It writes `selected` and
-`hidden`, the traitlets a click in the view and a notebook cell write too. It
-needs the objects, because the payload cannot say how they nest: it comes with
-`SceneWidget(...)` and `update()`, and with a bare `magpy.show()` only where
-magpylib hands its backends the objects (`Panel.objects`).
-
-What is selected, hidden or folded survives `update()`: an object passed again
-keeps it, and a rebuilt one inherits it from whatever sat in its place in the
-tree — "the lower ring" is still the one below after a slider has remade both.
-
-**Keys**, once the view has focus, are the panel's: **F** frames the selection
-and **Home** everything, **1**/**3**/**7** look from the front, right and top,
-**5** switches the projection, **H** hides the selection and **shift-H** shows
-only it, **Esc** lets go, **space** plays. They come from one table in
-`scene3d.mjs` that both hosts use. Tab is the one the widget does not take: in a
-notebook it moves between cells.
-
-**Full screen** gives the view the screen, legend and controls with it. The
-**camera** saves the view as a PNG, as it is on screen and without the legend.
-**Export** saves it as one HTML file that opens anywhere with no notebook behind
-it — the widget itself, not a picture: orbit, legend, keys, and a captured run
-that still plays, because its motion — or, for a run that changes shape, its
-frames — travels in the file. `write_html(path)` does the same from a cell.
-Either way the page opens where the view was looking.
-
-Which is [docs/direction.md](docs/direction.md) §5.3 — _a viewer with parameter
-binding_ — with the notebook's own reactivity in place of a protocol: a slider
-rebuilds the objects, the view redraws them, and a click is an input to the next
-cell. `examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb`
-the same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
-reactivity.
-
-### Editing a scene in the notebook
-
-`editable=True` puts out the studio's handles, over a studio session in the
-kernel — the engine the VS Code extension drives, with nothing of the extension
-needed:
-
-```python
-studio = SceneWidget(ring, probe, editable=True)
-studio  # W moves, E turns, R resizes, P aims; L for the object's own axes
-```
-
-`SceneWidget("scene.py", editable=True)` is the same view of a script's objects,
-or of a `.magpy.json` the studio saved.
-
-```python
-studio.objects["probe"]  # the objects as edited, to compute with
-print(studio.to_script())  # what was built, and every edit, as magpylib code
-studio.undo()  # a whole drag at a time; ⌘Z / ctrl-Z in the view
-studio.save("ring.magpy.json")  # opens in the VS Code studio
-studio.set("probe", position=(0, 0, 0.02))  # an edit from code, as a drag makes
-```
-
-`set` and `observe(..., "revision")` keep a notebook control and the view in
-step both ways — `examples/jupyter_demo.ipynb` does it with a slider. A value
-the object already has is no edit, so neither side echoes the other. `revision`
-counts each settled edit — a drag's end, an undo, a redo, a `set` — once, and
-`last_edit` says what it was
-(`{"by": "drag", "objects": ["probe"], "changed": {...}}`, or the step an undo
-took back); the same example logs them under the view, with what was selected
-and hidden. A drag of several objects, or a `set` of several values, is one
-edit: refused in part, none of it is made.
-
-The objects are copied into the session rather than edited in place: the cell
-that made them stays as it was, and running it again does not take the edits
-away. A drag is recorded as it goes and is one step to undo; the notebook hears
-of it once, when it ends — in marimo, the cells that read
-`mo.ui.anywidget(studio)` re-run then, not on every frame. It needs a live
-kernel: without one the view says so and puts the object back, and a page saved
-with `write_html` is read only. The handles and their keys are the panel's —
-**W** moves, **E** turns, **R** resizes, **P** aims a polarization, **Q** puts
-them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
-swaps the world's axes for the object's own, **S** snaps — and a column down the
-view's right-hand side has the same. The corner reads out the numbers a drag is
-changing, and takes a typed value in their place; the keys button lists every
-key. A collection has handles of its own: select it — its row in the legend, or
-**C** from something in it, and **C** again for the one round that — and a drag
-moves and turns it whole, as one edit to the collection. The variables come
-later — [docs/editable-widget.md](docs/editable-widget.md).
-
-The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
-and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`
-bundles them with three.js into `magpylib_studio/static/widget.js`, which is
-committed so that installing the package needs no node; `npm run check:widget`
-fails the build when it no longer matches its sources.
-
-[aw]: https://anywidget.dev
-
-## Install the engine on its own
+## Install the Python package only
 
 ```sh
 pip install magpylib-studio
 ```
 
-That is enough: the engine works with **released magpylib** (≥ 5.2). [magpylib's
-main][branch], not yet released, adds a first-class style API, path-valued
-physics properties (`current=[100, 200, 300]`) and the display-backend API the
-editable 3D view is built on:
+Python 3.11 or newer, and magpylib 5.2 or newer.
 
-```sh
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
-```
+## Learn more
 
-`magpylib_studio/style_compat.py` detects which one you have. On released
-magpylib it reproduces the four style operations the engine needs from
-`style.update()` / `style.as_dict()`, and falls back to a generated copy of the
-main's JSON Schema (`style_schemas.json`) — the two style trees are the same
-shape, so the inspector keeps real widgets (enum dropdowns, ranges, colour
-pickers) either way. The test suite runs against both.
-
-[branch]: https://github.com/magpylib/magpylib/tree/main
-
-### Development
-
-```sh
-git clone https://github.com/magpylib/magpylib-studio.git
-cd magpylib-studio
-
-# the engine
-uv venv --python 3.13 .venv
-VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[dev]"
-.venv/bin/python -m pytest -q
-
-# the extension (from vscode-extension/)
-npm install
-npm run compile     # tsc + eslint + webview, contribution and version checks
-npm test            # twenty-three tests in a real Extension Development Host
-npm run check:widget-browser  # the notebook widget, driven in headless Chrome
-```
-
-Then open **the repo root** in VS Code and press `F5` — not the
-`vscode-extension/` folder: the launch config is at the root so the engine stays
-in the workspace you can edit, and F5 compiles before it launches. A second
-window opens, the Extension Development Host, with `sandbox/` as its workspace.
-
-Hooks run on every push via pre-commit.ci (`.pre-commit-config.yaml`), and
-locally with `pre-commit run --all-files`: ruff and prettier for formatting,
-ruff for linting (the ruleset is pinned in `pyproject.toml`, because ruff's
-defaults move), plus workflow and `pyproject` validation. The one commit that
-only reformats is listed in `.git-blame-ignore-revs`;
-`git config blame.ignoreRevsFile .git-blame-ignore-revs` makes local blame skip
-it, as GitHub already does.
-
-## Design decisions
-
-- **The document is a log, and the object tree is a projection of it.**
-  `doc["events"]` holds everything that built the scene — `create`, `remove`,
-  `reparent`, the transforms and the patterns — and every build folds it from
-  the start, so `doc["objects"]` is regenerated rather than stored. Strip it
-  from a document and the log reconstructs the same scene, ids and field
-  included. Editing an early event therefore re-applies everything after it for
-  free; what it breaks is reported rather than blocking the edit.
-- **What a thing _is_ is edited; what happened _to_ it is appended.** An
-  object's type, parameters and style live on its `create` event and are changed
-  in place — dragging a slider must not write history — while moves, rotations,
-  removals and reparents go on the end. That one distinction is what keeps the
-  log finite _and_ meaningful.
-- **Transforms are recorded magpylib calls, not derived poses.** The log holds
-  `move`, `rotate_from_angax`, … as they were made, so magpylib owns every
-  semantic: paths, anchors, `start`, and group transforms carrying a subtree.
-- **Scenes are parametric.** Any numeric value may be an expression over the
-  document's variables (`"=360/n"`), evaluated from its AST against an
-  allow-list — never `eval`, because a document is something you open from
-  someone else. A variable is not always a quantity: one bounded by `options`
-  holds a name (`"z"` for an axis), which gets a dropdown for the same reason
-  min/max gets a slider, and is enforced the same way. `sweep()` re-folds the
-  scene once per value of a variable, which is affordable because a rebuild is
-  milliseconds.
-- **A mesh is recorded as where it came from.** `TriangularMesh` is the one
-  class whose parameters nobody types — fifty thousand numbers arrive from a CAD
-  export — so a create event holds `mesh_source` (the file, its scale, a hash of
-  what was in it; the point cloud to take the hull of; or the superellipsoid to
-  sample) and the build performs it. The same rule as transforms: record the
-  call, not the result. A document stays a description of a scene rather than a
-  copy of the STL, the script export still says `pv.read("rotor.stl")`, and both
-  round-trip byte for byte. Resolving is the one expensive step in a system
-  where a rebuild happens on every slider drag — reorienting a 20k-face mesh
-  takes 16 s — so what a source resolves to is cached, and each rebuild is
-  handed the answers rather than asked to find them again. **What the checks
-  found travels with the object**: an open or disconnected mesh still computes a
-  field, and that field is wrong, so the tree row, the Inspector and the reading
-  itself say so rather than leaving it to a warning on a stream nobody reads.
-  What each source is _trusted_ for differs: a file gets every check, a hull
-  skips the one a convex body cannot fail, and a generated superellipsoid skips
-  both the quadratic face repair (its winding is consistent by construction, so
-  pointing it outward is one signed volume) and the self-intersection test (a
-  radial parametrisation cannot cross itself). Skipped answers are recorded as
-  answers, not as silence — magpylib re-asks an open question on every redraw.
-- **One schema contract.** The same JSON Schema drives the inspector widgets
-  _and_ the LLM tool inputs.
-- **Validation is shared.** Every edit goes through magpylib, and a bad edit is
-  _reported_ (`{"ok": false, "error": …}`), not raised — so a GUI shows an error
-  and an LLM self-corrects. There is no second validation layer.
-- **The saved file is the document, and it is versioned.** A scene saves as
-  `.magpy.json` — exactly what `to_dict()` returns, so the format the engine
-  works in is the format on disk, with no serializer in between to disagree with
-  it. It carries a `version`, because a file outlives the program that wrote it:
-  an older one is migrated, and a _newer_ one is refused rather than read
-  half-way and saved back with the parts we did not understand missing. Fields
-  the engine does not recognise are carried through, which is the only form of
-  forward compatibility a document can actually have. A script is an export, not
-  a save: it loses slider bounds and hidden flags, and nothing else — measured,
-  not assumed.
-- **Document canonical, script generated — one way.** `to_script()` emits
-  runnable magpylib code, patterns included (as the loops they mean), **folding
-  the log in order** rather than declaring everything up front: where an object
-  is created relative to the steps around it is part of the scene, and an object
-  added to an already-patterned group must not end up inside every copy. Nothing
-  reads it back: the script is an export and the document stays the artifact
-  (`docs/direction.md` §5.1). `load_script()` imports any script, this one
-  included, by _executing_ it with `show()` intercepted, and reports what that
-  flattens. `to_builder_script()` writes the scene as `magpylib_studio.build`
-  code instead, which run builds the same document: variables, formulas and
-  patterns included (`docs/builder.md`). A script written with the builder opens
-  in the studio as the scene it built, whole, and the script tab is that code:
-  `apply_builder_script()` runs it on a save and replaces the document with what
-  it built, as one undo step, refusing plain magpylib rather than flattening it.
-
-## JSON-RPC protocol (stdio)
-
-The host spawns `python -m magpylib_studio` and exchanges one JSON object per
-line — no ports, no framework.
-
-```
--> {"id": 1, "method": "get_schema", "params": {"object_id": "cube"}}
-<- {"id": 1, "result": { ...JSON Schema... }}
-<- {"id": 2, "error": {"type": "KeyError", "message": "..."}}
-```
-
-| group     | methods                                                                                                                                                                                     |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| inspect   | `list_objects` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                            |
-| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                   |
-| edit      | `apply_edit` (style) · `set_param` · `reset_style`                                                                                                                                          |
-| transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                       |
-| patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                       |
-| variables | `get_variables` · `set_variable` · `set_variable_bounds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression`                             |
-| history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                                                |
-| view      | `get_figure` (3D) · `get_field_figure` (along a sensor path) · `get_field_map` (plane heatmap) · `get_sweep_figure`                                                                         |
-| field     | `get_field` — summed B/H at points or along a sensor · `sweep` — the field against a variable                                                                                               |
-| undo      | `undo` · `redo` · `goto_history`                                                                                                                                                            |
-| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `apply_builder_script` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script` |
-| bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                                                      |
-
-Mutating methods return `{"ok": bool, "error"?: str}`. Everything is
-JSON-serializable in both directions.
-
-Try it:
-
-```sh
-printf '%s\n' \
-  '{"id":1,"method":"load_example"}' \
-  '{"id":2,"method":"list_objects"}' \
-  '{"id":3,"method":"get_field","params":{"points":[[0,0,0]]}}' \
-  '{"id":4,"method":"to_script"}' \
-| python -m magpylib_studio
-```
-
-## Status
-
-The engine is covered by 278 tests against both magpylib versions
-(`.venv/bin/python -m pytest -q`).
-
-The extension is checked at three levels, all wired into `npm run compile` so
-they run before every F5 and before packaging: type-checking and ESLint over
-both the host code and the webview scripts; two contribution checks (every
-declared command registered, every menu clause matching a context value the tree
-can set, every palette entry safe to invoke with no argument); and a DOM harness
-that runs a panel's real script against a real engine
-(`npm run inspect -- halbach`). On top of that, `npm test` runs twenty-three
-integration tests **inside a real Extension Development Host** — activation, the
-engine subprocess answering through the virtual `scene.json`, a removal taking a
-pattern's copies with it, the script tab applying an edit on save, the engine
-being killed mid-session and coming back holding the same scene, and the whole
-save/open path: a file that opens back as the same scene, a save that goes to
-the file it came from without asking, a document from a newer version being
-refused without disturbing the open one, and the crash backup being written and
-restorable.
-
-Both suites and the packaging run in CI on every push, the engine against **both
-magpylib versions** — the claim above used to be checked by hand. Pushing a `v*`
-tag builds the `.vsix` and attaches it to a GitHub release.
-
-Both halves are published: the engine on PyPI (`pip install magpylib-studio`)
-and the extension on the Marketplace under the `magpylib` publisher. That order
-mattered — an extension whose first act is "now go and pip install this git URL"
-fails at first contact, before anyone sees a feature — and it is what lets
-**Install the Engine** set the engine up for you rather than tell you to. The
-`.vsix` attached to each release is the same build, for anyone who would rather
-install it by hand.
-
-## Project documents
-
-| Question                             | Document                                           |
-| ------------------------------------ | -------------------------------------------------- |
-| What is built?                       | [CONTINUE.md](CONTINUE.md)                         |
-| What is next?                        | [TASKS.md](TASKS.md)                               |
-| Why is it going that way?            | [docs/direction.md](docs/direction.md)             |
-| How does instancing work?            | [docs/instancing.md](docs/instancing.md)           |
-| How does FEM validation go?          | [docs/fem.md](docs/fem.md)                         |
-| How does editing in a notebook work? | [docs/editable-widget.md](docs/editable-widget.md) |
-| Why is there one view?               | [docs/one-view.md](docs/one-view.md)               |
-
-The three at the root are the state, the work and the front door; `docs/` holds
-the long-form thinking behind them.
+| If you want to…                | Read                                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| use the VS Code extension      | [the extension's guide](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/README.md) |
+| use the 3D view in a notebook  | [docs/notebook.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/notebook.md)                |
+| write scenes in code           | [docs/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/builder.md)                  |
+| know how it works inside       | [docs/architecture.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/architecture.md)        |
+| contribute                     | [CONTRIBUTING.md](https://github.com/magpylib/magpylib-studio/blob/main/CONTRIBUTING.md)                  |
+| see where the project is going | [docs/roadmap.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/roadmap.md)                  |
 
 ## License
 
-BSD-3-Clause — the same as the other packages built on [magpylib][mplib]
-([magpylib-force][force], [magpylib-material-response][matresp]). The core
-library itself is BSD-2-Clause; its satellites are all 3-clause, and this is one
-of those. See [LICENSE](LICENSE).
-
-[mplib]: https://github.com/magpylib/magpylib
-[force]: https://github.com/magpylib/magpylib-force
-[matresp]: https://github.com/magpylib/magpylib-material-response
+BSD-3-Clause, like the other packages built on magpylib. See
+[LICENSE](https://github.com/magpylib/magpylib-studio/blob/main/LICENSE).
