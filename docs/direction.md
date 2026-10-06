@@ -132,6 +132,7 @@ evidence.
 | FreeCAD, SolidWorks, AEDT | model / feature tree    | GUI; macros are recordings                                                 | no          |
 | CadQuery / build123d      | code                    | viewer, plus parameters                                                    | no          |
 | **marimo**                | pure `.py`              | reactive notebook UI                                                       | none needed |
+| **marimo-studio**         | the notebook            | a view per audience, in any web framework, every value traced to its cell  | no          |
 
 **1. Nobody maintains bidirectional sync.** Every project picked a direction.
 The canonical counter-example — WYSIWYG HTML editors round-tripping designer
@@ -330,6 +331,14 @@ There is no second validation layer."_
 
 So: **structured operations for building, code for orchestrating, and keep the
 surface small and the loop tight either way.**
+
+**A team that shipped the tool-call shape replaced it with code** (2026). The
+first marimo pair let agents look at a notebook through read-only MCP tools and
+change it by editing its file; the second gives them Python in the live kernel,
+with notebook edits queued and checked as a whole — "If a check fails, marimo
+rejects the whole batch." The edits are still structured operations; the agent
+reaches them through code. That is the builder's shape exactly, and what R3 of
+`roadmap.md` now plans.
 
 One more finding worth acting on, because it is the token complaint answered
 directly. Onshape's stated reason for having agents write features rather than

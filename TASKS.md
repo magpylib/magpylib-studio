@@ -24,7 +24,7 @@ that touches none of this. W is independent of all three: it puts the engine as
 it is today in a notebook. A (agents) builds on F1b's builder.
 
 **The order across tracks is in [docs/roadmap.md](docs/roadmap.md) §4**: B3 (R1,
-done), units (R2), the agent tools and their evaluation (R3–R4), then FEM with
+done), units (R2), the agent's way in and its evaluation (R3–R4), then FEM with
 tier 0 checked on the Maxwell seat before the open solver (R7), then several
 scenes open at once — a project is a folder, a scene a file (R9).
 
@@ -239,29 +239,42 @@ checklist in `docs/one-view.md` §5 passes by hand in VS Code.
 
 ## Track A — Agents
 
-Plan in [docs/roadmap.md](docs/roadmap.md) R3–R6. The guideline it follows:
-consolidate tools, return high-signal results, and evaluate with agents.
+Plan in [docs/roadmap.md](docs/roadmap.md) R3–R6, amended 2026-10-06 after
+marimo's agent work (roadmap §3). The guideline it follows: consolidate tools,
+return high-signal results, and evaluate with agents; marimo's experience adds
+that the agent's code is the interface, not a set of fixed tools around it.
 
-### A1 — Four tools on the builder (R3)
+### A1 — Builder code against the live scene (R3)
 
-`read_scene` (builder code), `run_builder` (code against the open scene, one
-undo step), `field` (summaries), and later `validate` — served as an MCP server
-in the package, in place of the 24 one-per-operation LM tools. Decide the trust
+One way in: the agent's Python run against the open scene — builder calls (one
+undo step per run, refused whole with its line, as R1's save is), the scene as
+builder code and its variables to read, and field summaries as helpers in scope
+— in place of the 24 one-per-operation LM tools. Shipped as an Agent Skill and a
+CLI into the running engine, with MCP as an adapter for hosts without skills
+(pending a yes, roadmap §6); the engine has to be reachable from outside the
+editor for that. In marimo, marimo pair already reaches an editable widget's
+session; the view must follow edits made to it from outside. Decide the trust
 model for agent-written code first.
 
 ### A2 — An agent evaluation set (R4)
 
 About twenty magnetics tasks with checkable targets, run with the old tools and
-the new; success, tokens, turns and refusals recorded and kept.
+the new, in VS Code and through marimo pair; success, tokens, turns and refusals
+recorded and kept.
 
-### A3 — The view as an MCP App (R5)
+### A3 — Pointing, then the view in the chat (R5)
 
-The 3D view interactive in the chat, its sliders calling back into the tools.
+The person marks magnets in the 3D view and leaves a note; the agent gets their
+ids, the steps and builder lines that made them and their variables, and points
+back. In marimo, as marimo-lens targets on the widget's legend; in VS Code, the
+same channel natively. Then the 3D view interactive in the chat, as an MCP App,
+its sliders calling back.
 
-### A4 — A skill (R6)
+### A4 — The skill (R6, folded into A1)
 
-`SKILL.md` with a reference generated from the builder and tested against it;
-current capability only.
+The `SKILL.md` A1 ships: conventions, the builder's rules, what each refusal
+means, how to point; a reference generated from the builder and tested against
+it; current capability only.
 
 ## Not scheduled, and why
 
