@@ -11,6 +11,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 
 const scene = new THREE.Scene();
 let host = null; // the element the view is hung in; whose theme it wears
@@ -25,6 +28,8 @@ const byObjectId = new Map();
 // on one from outside would last only until the next.
 let hiddenIds = new Set();
 let framed = false;
+// What marks the selection, each `{ on, part }`: a part hung on the trace it
+// marks, so a drag or a step of a run carries it along. See `outline`.
 let outlines = [];
 // A fainter outline, for what the host is pointing at rather than what is
 // selected: a legend row under the pointer. By id, so it can be drawn again
@@ -293,6 +298,13 @@ function makeGizmo() {
     const rigid = (point) =>
       here.clone().add(point.clone().sub(from.here).applyQuaternion(turned));
     const turning = Math.abs(turned.w) < 1 - 1e-9;
+    // a path moves only where the edit below moves the object's position
+    holdPaths(from.pathTraces, (objectId) => {
+      const placed = new THREE.Vector3().fromArray(
+        anchors[objectId] || [0, 0, 0],
+      );
+      return !rigid(placed).equals(placed);
+    });
 
     const edits = [];
     for (const objectId of from.objectIds) {
@@ -324,7 +336,6 @@ function makeGizmo() {
       if (edit.position || edit.orientation || edit.shape) edits.push(edit);
     }
     if (edits.length) {
-      for (const box of outlines) box.update(); // boxes track objects, not the reverse
       host.dispatchEvent(
         new CustomEvent("objecttransform", { detail: { preview, edits } }),
       );
@@ -367,9 +378,24 @@ function makeGizmo() {
         .map((objectId) => byObjectId.get(objectId))
         .filter((each) => each && each !== node);
       for (const each of hung) node.attach(each);
+      // The paths of everything carried, where they are now: see `holdPaths`.
+      const pathTraces = [];
+      node.traverse((trace) => {
+        if (!trace.userData.path) return;
+        let owner = trace.parent;
+        while (owner && !owner.userData.objectId) owner = owner.parent;
+        trace.updateWorldMatrix(true, false);
+        pathTraces.push({
+          trace,
+          owner: owner?.userData.objectId,
+          local: trace.matrix.clone(),
+          world: trace.matrixWorld.clone(),
+        });
+      });
       from = {
         objectIds,
         hung,
+        pathTraces,
         quaternion: node.quaternion.clone(),
         orientations: turns,
         placed, // where each object is, as against where the handles are
@@ -399,6 +425,7 @@ function makeGizmo() {
       for (const each of from.hung) {
         if (each.parent === node) scene.attach(each);
       }
+      releasePaths(from.pathTraces);
       from = null;
     }
   });
@@ -408,6 +435,40 @@ function makeGizmo() {
     if (from?.shape) constrainScale(gizmo.object, from.shape.constraint);
     report(true);
   });
+}
+
+/** Keep each path where the edit will leave it while its object is dragged.
+ *
+ * A path hangs on its object's node, as the object's shape does, so it went
+ * where the handles took the node: it turned with a magnet turned in place,
+ * and grew with one resized, until the engine drew it again where it had been
+ * all along. A path is where the object goes, not part of it, and the drag's
+ * edit moves it only with the object's position -- a move, or a turn about a
+ * point off that position -- and then rigidly, as the node moves. So a path
+ * follows the node when `moved(owner)` says the edit moves its object, and
+ * stays where it was otherwise. Set as matrices, which hold a path still
+ * under a node turned and stretched at once, where position, rotation and
+ * scale alone cannot. */
+function holdPaths(held, moved) {
+  for (const { trace, owner, local, world } of held) {
+    if (!trace.parent) continue; // drawn again mid-drag, a reading redrawn
+    trace.matrixAutoUpdate = false;
+    if (moved(owner)) {
+      trace.matrix.copy(local);
+    } else {
+      trace.parent.updateWorldMatrix(true, false);
+      trace.matrix.copy(trace.parent.matrixWorld).invert().multiply(world);
+    }
+    trace.matrixWorldNeedsUpdate = true;
+  }
+}
+
+/** Hand the paths `holdPaths` held back to the usual way of being placed. */
+function releasePaths(held) {
+  for (const { trace } of held) {
+    trace.matrix.decompose(trace.position, trace.quaternion, trace.scale);
+    trace.matrixAutoUpdate = true;
+  }
 }
 
 /** Which handles to show, or "none" to put them away. Also how the handles
@@ -597,6 +658,7 @@ function resize(canvasEl) {
   // devicePixelRatio times too big, which on a retina display shows the top
   // left quarter of the scene and calls it the whole view.
   renderer.setSize(w, h);
+  for (const material of wideMaterials) material.resolution.set(w, h);
   applyProjection();
   redraw(); // a canvas resized is a canvas cleared
 }
@@ -656,14 +718,16 @@ function placeCollections() {
   }
 }
 
-/** `objectIds`, with each collection among them as what it holds: what is
- *  drawn for them, which is what an outline or a frame goes round. */
+/** `objectIds` and all that each collection among them holds: what is drawn
+ *  for them, which is what an outline or a frame goes round. A collection
+ *  itself is kept: it draws nothing of its own, but the copies a pattern of
+ *  it makes are drawn on its node -- the array example's rows and layers,
+ *  which were left out of the selection of the array they make up. */
 function drawnFor(objectIds) {
   const drawn = new Set();
   for (const objectId of objectIds) {
-    for (const each of collections[objectId] ?? [objectId]) {
-      if (!collections[each]) drawn.add(each);
-    }
+    drawn.add(objectId);
+    for (const each of collections[objectId] ?? []) drawn.add(each);
   }
   return [...drawn];
 }
@@ -703,24 +767,197 @@ function hint(objectIds) {
 }
 
 function drawHints() {
-  for (const box of hints) {
-    scene.remove(box);
-    box.dispose();
-  }
-  hints = [];
+  takeOff(hints);
   // Called on every redraw and every frame of a run, and nearly always with
-  // nothing to point at: no style lookup for a colour no box will wear.
-  if (!hintIds.length) return;
-  const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
-  for (const objectId of drawnFor(hintIds)) {
+  // nothing to point at: no style lookup for a colour nothing will wear.
+  hints = hintIds.length ? outline(hintIds, 0.4) : [];
+}
+
+/** Faces meeting at more than this many degrees meet at an edge. A
+ *  cylinder's sides, at 7.2° a facet, are one smooth surface; its rims are
+ *  edges. */
+const EDGE_ANGLE = 25;
+
+/** What a selection is drawn in: a green nothing else in a scene is. Not the
+ *  theme's focus colour, a blue: magpylib draws an object and its path in a
+ *  blue by default, and a field's arrows run through blues, so a blue
+ *  selection was there to be looked for rather than seen. Brighter and
+ *  yellower than the green magpylib paints a magnet's south pole. */
+const SELECTION_COLOUR = "#39ff14";
+
+/** How wide, in pixels, the selection's lines are: an edge in view, a path or
+ *  a wire, and an edge the shape hides, drawn faintly through it. A plain GL
+ *  line is one pixel whatever it is asked for, which is easy to miss. */
+const OUTLINE_WIDTH = 3;
+const HIDDEN_WIDTH = 1.5;
+
+/** How much larger a selected path's markers are drawn, beside its line. */
+const PATH_MARKER_GROWTH = 1.6;
+
+/** The wide lines' materials, which must know the view's size in pixels to
+ *  draw a width in pixels: told again when it changes (`resize`). */
+const wideMaterials = new Set();
+
+/** Mark what `objectIds` stand for -- the selection, or at `opacity` below 1
+ *  what the host points at -- and return what was added, to take off again.
+ *
+ * A shape is outlined by its edges, and its path is drawn in the selection's
+ * colour rather than boxed in with it. A box round an object goes round
+ * everything drawn for it, path included: a magnet on an orbit got a box the
+ * size of the ring, and a ring of them six such boxes, a cage pointing at
+ * none of them. Colour is touched only where it says nothing -- a path, a
+ * wire -- never on a shape, where it says the magnetization, or on a marker
+ * coloured by the field.
+ *
+ * Each part hangs on the trace it marks, so it moves with it.
+ */
+function outline(objectIds, opacity) {
+  const added = [];
+  const hang = (on, part) => {
+    part.raycast = () => {}; // an indicator, not a target
+    part.renderOrder = 1; // drawn over what it marks
+    part.userData.outline = true;
+    on.add(part);
+    added.push({ on, part });
+  };
+  for (const objectId of drawnFor(objectIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
-    const box = new THREE.BoxHelper(node, accent);
-    box.material.transparent = true;
-    box.material.opacity = 0.4;
-    box.raycast = () => {}; // an indicator, not a target
-    scene.add(box);
-    hints.push(box);
+    for (const trace of node.children) {
+      if (!trace.userData.trace) continue; // a handle, or another node
+      if (trace.isMesh) {
+        outlineShape(trace, opacity, hang);
+        continue;
+      }
+      // A scatter: its lines take the selection's colour, and its markers
+      // too where it is a path. A sensor's markers can be its pixels,
+      // coloured by the field they read.
+      for (const part of trace.children) {
+        if (part.isLine) {
+          const pairs = segmentsOf(
+            part.geometry.getAttribute("position").array,
+          );
+          if (pairs.length) {
+            hang(part, wideSegments(pairs, OUTLINE_WIDTH, opacity, true));
+          }
+        } else if (trace.userData.path && part.isPoints) {
+          hang(part, pathMarkers(part, opacity));
+        }
+      }
+    }
+  }
+  return added;
+}
+
+/** A shape's edges, wide in front where they show and faint through the
+ *  shape where it hides them. Two get their box instead: a shape with no
+ *  edges to draw -- a sphere, smooth all over -- and one coloured face by
+ *  face, which is a sensor's: its axes, or its arrows coloured by the field,
+ *  every small part of which would be outlined on its own. */
+function outlineShape(mesh, opacity, hang) {
+  let pairs;
+  if (!mesh.userData.faceColoured) {
+    const edges = new THREE.EdgesGeometry(mesh.geometry, EDGE_ANGLE);
+    pairs = edges.getAttribute("position").array;
+    edges.dispose();
+  }
+  if (!pairs || pairs.length < 18) {
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    pairs = boxEdges(mesh.geometry.boundingBox);
+  }
+  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true));
+  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false));
+}
+
+/** Lines from `pairs` -- each six numbers, a segment's two ends -- `width`
+ *  pixels wide in the selection's colour. Where they are `shown` they are
+ *  hidden by what stands in front, and drawn a little toward the eye, so
+ *  that an edge is not lost in the faces it bounds; otherwise they show
+ *  through everything. */
+function wideSegments(pairs, width, opacity, shown) {
+  const material = new LineMaterial({
+    linewidth: width,
+    transparent: opacity < 1,
+    opacity,
+    depthTest: shown,
+    polygonOffset: shown,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -4,
+  });
+  material.color = new THREE.Color(SELECTION_COLOUR);
+  if (renderer) renderer.getSize(material.resolution);
+  wideMaterials.add(material);
+  return new LineSegments2(
+    new LineSegmentsGeometry().setPositions(pairs),
+    material,
+  );
+}
+
+/** A line's points as the segments that join them, skipping a pen lift --
+ *  a NaN, where magpylib breaks a trace between a current's arrows. */
+function segmentsOf(position) {
+  const pairs = [];
+  for (let i = 0; i + 5 < position.length; i += 3) {
+    const ends = position.subarray(i, i + 6);
+    if (ends.every(Number.isFinite)) pairs.push(...ends);
+  }
+  return pairs;
+}
+
+/** A box's twelve edges, as `wideSegments` takes them. */
+function boxEdges(box) {
+  const { min: a, max: b } = box;
+  const corner = [
+    [a.x, a.y, a.z],
+    [b.x, a.y, a.z],
+    [b.x, b.y, a.z],
+    [a.x, b.y, a.z],
+    [a.x, a.y, b.z],
+    [b.x, a.y, b.z],
+    [b.x, b.y, b.z],
+    [a.x, b.y, b.z],
+  ];
+  const edges = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7],
+  ];
+  return edges.flatMap(([i, j]) => [...corner[i], ...corner[j]]);
+}
+
+/** A path's markers again, larger and in the selection's colour, over
+ *  themselves. Their geometry is the path's own, not a copy. */
+function pathMarkers(part, opacity) {
+  const copy = new THREE.Points(
+    part.geometry,
+    new THREE.PointsMaterial({
+      color: new THREE.Color(SELECTION_COLOUR),
+      transparent: opacity < 1,
+      opacity,
+      size: part.material.size * PATH_MARKER_GROWTH,
+      sizeAttenuation: part.material.sizeAttenuation,
+    }),
+  );
+  copy.userData.borrowed = true; // the geometry is the path's to free
+  return copy;
+}
+
+/** Take off what `outline` hung, and free it. */
+function takeOff(added) {
+  for (const { on, part } of added) {
+    on.remove(part);
+    if (!part.userData.borrowed) part.geometry?.dispose();
+    wideMaterials.delete(part.material);
+    part.material?.dispose();
   }
 }
 
@@ -772,6 +1009,9 @@ function buildMesh(item) {
 
   const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial(options));
   mesh.name = item.name;
+  mesh.userData.trace = true;
+  // coloured face by face: a sensor's axes, or its arrows by the field
+  mesh.userData.faceColoured = Boolean(item.facecolor);
   return mesh;
 }
 
@@ -848,6 +1088,9 @@ function buildScatter(item) {
     );
   }
   group.name = item.name;
+  group.userData.trace = true;
+  // an object's path, not the object: outlined apart from it (`outline`)
+  group.userData.path = Boolean(item.path);
   return group;
 }
 
@@ -878,31 +1121,27 @@ function sceneSphere(objectIds) {
   return Number.isFinite(sphere.radius) ? sphere : null;
 }
 
-/** Outline the selected object.
+/** Select `objectIds`: outline them, and put the handles on them.
  *
- * A box rather than a tint or an emissive glow: colour *is* the data here --
+ * Edges rather than a tint or an emissive glow: colour *is* the data here --
  * it carries magnetization direction and field magnitude -- so a highlight
- * that repainted the object would overwrite what the user is looking at.
+ * that repainted the object would overwrite what the user is looking at. And
+ * no glow: that is a second render of every frame, and its halo bleeds onto
+ * the neighbours in a ring of magnets, which is where telling them apart
+ * matters. See `outline`.
  */
 function highlight(objectIds) {
   selectedIds = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(
     Boolean,
   );
-  for (const box of outlines) {
-    scene.remove(box);
-    box.dispose();
-  }
-  outlines = [];
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
-  const accent = new THREE.Color(cssColor("--vscode-focusBorder", "#0078d4"));
-  for (const objectId of drawnFor(selectedIds)) {
-    const node = byObjectId.get(objectId);
-    if (!node?.visible) continue;
-    const box = new THREE.BoxHelper(node, accent);
-    box.raycast = () => {}; // an indicator, not a target
-    scene.add(box);
-    outlines.push(box);
-  }
+  drawOutlines();
+}
+
+/** Outline the selection afresh, round whatever is drawn for it now. */
+function drawOutlines() {
+  takeOff(outlines);
+  outlines = outline(selectedIds, 1);
 }
 
 /** Where a drag of several objects turns about: the middle of what is
@@ -1294,8 +1533,9 @@ function renderFrame(payload) {
     node.add(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
   }
   placeCollections();
-  for (const box of outlines) box.update();
-  drawHints(); // round the nodes just built, not the ones discarded
+  // round the nodes just built, not the ones discarded
+  drawOutlines();
+  drawHints();
 }
 
 /** Put each moving trace where it is at step `index` of the run, when the
@@ -1331,9 +1571,11 @@ function poseFrame(index) {
     entry.built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
     entry.node.attach(entry.built);
   }
-  // Round what moved, not built again: this runs at every step of a run.
-  for (const box of outlines) box.update();
-  for (const box of hints) box.update();
+  // What moved carries its outline; what was built again needs a new one.
+  if (changing.length) {
+    drawOutlines();
+    drawHints();
+  }
 }
 
 /** Whether the run can be played here, by `poseFrame`, with nothing to ask
@@ -1566,8 +1808,10 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
   // Mid-drag the selected object is the one that was *not* rebuilt, and
-  // re-attaching the gizmo to it would interrupt the drag in progress.
+  // re-attaching the gizmo to it would interrupt the drag in progress: the
+  // outline is drawn again, round what was, and the handles left alone.
   if (!held.size) highlight(selectedIds);
+  else drawOutlines();
   drawHints();
 }
 

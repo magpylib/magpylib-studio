@@ -16,7 +16,8 @@
  *   (`widget-pages/pool.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
- *   a run that plays with no python behind it.
+ *   a run that plays with no python behind it;
+ * - what a selection is drawn with: a shape's edges, its path apart.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -1104,6 +1105,168 @@ async function editing(port, base) {
   );
 }
 
+/** Page code: what marks the selection, by what it is hung on -- a shape's
+ *  edges, a path's line and markers in the accent colour, or markers that
+ *  are not a path's, which may be coloured by the field -- and how far the
+ *  parts on shapes reach, in scene units. */
+const OUTLINED = `
+  const found = { shapes: 0, shapeSpan: 0, paths: 0, markers: 0 };
+  for (const node of window.scene3d.byObjectId.values()) {
+    node.traverse((part) => {
+      if (!part.userData.outline) return;
+      const on = part.parent;
+      if (on.isMesh) {
+        found.shapes++;
+        part.updateMatrixWorld(true);
+        part.geometry.computeBoundingBox();
+        const box = part.geometry.boundingBox.clone().applyMatrix4(part.matrixWorld);
+        const span = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z);
+        found.shapeSpan = Math.max(found.shapeSpan, span);
+      } else if (on.parent?.userData.path) {
+        found.paths++;
+      } else if (part.isPoints) {
+        found.markers++;
+      }
+    });
+  }
+  return found;`;
+
+/** A selection marks the object and draws its path apart. A box round all
+ *  that was drawn for an object went round its path too: a ring of magnets
+ *  on an orbit came out as a cage of boxes the size of the ring. */
+async function selection(port, base) {
+  await check(
+    "a selection outlines the shape and draws its path apart",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/mix.html`);
+        const ready = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && document.querySelectorAll(".magpy-legend-row").length && window.scene3d`,
+          20_000,
+        );
+        if (!ready) return "the page never drew";
+        const pick = async (label) => {
+          await tab.evaluate(
+            `${row(label)}.querySelector(".magpy-legend-label").click()`,
+          );
+          await wait(300);
+          return tab.evaluate(OUTLINED);
+        };
+        const scrubTo = async (step) => {
+          await tab.evaluate(
+            `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+          );
+          await wait(500);
+          return tab.evaluate(OUTLINED);
+        };
+
+        // twelve unit cubes on an orbit of radius 3: edges no wider than a
+        // cube, and twelve paths in the accent colour
+        const ring = await pick("ring");
+        if (!ring.shapes) return "nothing outlines the magnets";
+        if (ring.shapeSpan > 2)
+          return `an outline ${ring.shapeSpan} across, for unit cubes`;
+        if (ring.paths < 12) return `${ring.paths} parts mark the twelve paths`;
+        if (ring.markers)
+          return `${ring.markers} markers recoloured that are no path's`;
+
+        // carried along a run, and not piled up by it
+        const later = await scrubTo(15);
+        if (later.shapes !== ring.shapes || later.paths !== ring.paths) {
+          return `at step 15 ${JSON.stringify(later)}, from ${JSON.stringify(ring)}`;
+        }
+        if (later.shapeSpan > 2)
+          return `at step 15 an outline ${later.shapeSpan} across`;
+
+        // a probe whose pixels show the field: its body and its path are
+        // marked, its pixels -- coloured by what they read -- are not
+        const probe = await pick("probe");
+        if (!probe.shapes || !probe.paths)
+          return `the probe: ${JSON.stringify(probe)}`;
+        if (probe.markers)
+          return `${probe.markers} parts recolour the probe's pixels`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+
+  await check(
+    "a selected collection outlines the copies its patterns made",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        // twelve magnets: a row of four tiles, the row three times over --
+        // the copies drawn on the nodes of the collections that were patterned
+        await tab.navigate(`${base}/pages/outline.html#array`);
+        if (!(await tab.until("return window.shown", 20_000))) {
+          return "never drew";
+        }
+        await wait(300);
+        const found = await tab.evaluate(OUTLINED);
+        const magnets = found.shapes / 2; // each drawn in front and behind
+        return magnets === 12
+          ? thrown(tab)
+          : `${magnets} of the twelve magnets outlined`;
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+
+  await check(
+    "a path stays where the edit leaves it while its object is dragged",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/outline.html?scene=pathed#mover`);
+        if (!(await tab.until("return window.shown", 20_000))) {
+          return "never drew";
+        }
+        // Turned where it stands, the magnet keeps its path where it is;
+        // moved, the path goes with it; resized, the path keeps its size.
+        const wrong = [];
+        for (const [mode, act, want] of [
+          ["rotate", "node.rotateZ(0.6)", "still"],
+          ["translate", "node.position.x += 0.01", "carried"],
+          ["scale", "node.scale.set(2, 1, 1)", "still"],
+        ]) {
+          await wait(400); // the redraw after the last one's release
+          const got = await tab.evaluate(DRAGGED(mode, act));
+          if (!got[want]) wrong.push(`${mode}: ${JSON.stringify(got)}`);
+        }
+        return wrong.length ? wrong.join("; ") : thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** Page code: drag the magnet on a path through the handles' own events --
+ *  `act` moving its node in between, as the pointer would -- and say whether
+ *  its path stayed `still` or was `carried` with the node. */
+const DRAGGED = (mode, act) => `
+  window.scene3d.setGizmoMode(${JSON.stringify(mode)});
+  const node = window.scene3d.byObjectId.get("mover");
+  const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+  const path = node.children.find((c) => c.userData.path);
+  path.updateWorldMatrix(true, false);
+  const before = path.matrixWorld.clone();
+  const from = node.matrixWorld.clone();
+  controls.dispatchEvent({ type: "dragging-changed", value: true });
+  ${act};
+  node.updateMatrixWorld(true);
+  controls.dispatchEvent({ type: "objectChange" });
+  path.updateWorldMatrix(true, false);
+  const after = path.matrixWorld.clone();
+  const motion = node.matrixWorld.clone().multiply(from.clone().invert());
+  controls.dispatchEvent({ type: "dragging-changed", value: false });
+  const same = (a, b) => a.elements.every((v, i) => Math.abs(v - b.elements[i]) < 1e-9);
+  return { still: same(after, before), carried: same(after, motion.multiply(before)) };`;
+
 async function collection(port, base) {
   await check("a collection's own handles move it whole", async () => {
     const tab = await openTab(port);
@@ -1485,6 +1648,7 @@ try {
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
   await collection(browser.port, base);
+  await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest

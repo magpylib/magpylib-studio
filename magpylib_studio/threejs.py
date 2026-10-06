@@ -282,6 +282,8 @@ def _scatter_payload(trace):
         "marker_color": trace.get("marker_color") or "#2e91e5",
         "marker_size": float(trace.get("marker_size") or 3)
         * SIZE_FACTORS["marker_size"],
+        # an object's path, not the object: see `_mark_paths`
+        **({"path": True} if trace.get("path") else {}),
     }
 
 
@@ -400,7 +402,46 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
             warning.category,
             stacklevel=3,
         )
-    return _captured.pop("scene")
+    scene = _captured.pop("scene")
+    _mark_paths(scene, objects)
+    return scene
+
+
+def _mark_paths(scene, objects=None):
+    """Mark each object's path line ``path``: the line magpylib draws through
+    the positions of an object that has a path (its `make_path`).
+
+    A view outlines a selected object and draws its path in the selection's
+    colour instead: an outline round the path as well is a box the size of
+    the orbit, and six of them are a cage that points at nothing. Only here
+    can the two be told apart -- in the payload a path is a line like a
+    current's loop -- and here by the one thing that makes it a path: its
+    points are the object's positions. `objects` are those the scene was
+    drawn from; without them, the ones magpylib handed its backend, where it
+    hands them. A line that is not found to be one is drawn as it was, and
+    so is a path that goes nowhere -- a collection turning where it stands,
+    its every step one point -- which is a dot, not a line to follow.
+    """
+    if objects is None:
+        objects = [o for panel in scene.panels for o in getattr(panel, "objects", ())]
+    known = {}
+    for obj in _given(objects):
+        for each in (obj, *getattr(obj, "children_all", ())):
+            known[id(each)] = each
+    for frame in scene.frames:
+        for trace in frame.traces:
+            if trace.get("type") != "scatter3d" or "path" in trace:
+                continue
+            positions = getattr(known.get(trace.get("object_id")), "_position", None)
+            x = trace.get("x")
+            if positions is None or len(positions) < 2 or x is None:
+                continue
+            if len(x) != len(positions):
+                continue
+            points = np.column_stack([x, trace["y"], trace["z"]]).astype(float)
+            trace["path"] = bool(
+                np.ptp(positions, axis=0).max() > 0 and np.allclose(points, positions)
+            )
 
 
 def capture_frames(objects, steps):
@@ -815,6 +856,7 @@ def run_payload(scene):
     """What a view draws `scene` from, and the run kept to serve it a frame
     at a time: None when there is no run, or it plays on its own, as motion
     and carried changes -- see `played_payload`."""
+    _mark_paths(scene)  # a script's scene, which `_capture` did not make
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
     payload = played or view_payload(scene, index=0)
