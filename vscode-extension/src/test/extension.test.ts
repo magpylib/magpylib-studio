@@ -672,6 +672,23 @@ suite('magpylib-studio', () => {
     )) as unknown as Doc;
     assert.strictEqual(plain.variables.ratio, 2.5);
     assert.strictEqual(plain.variable_bounds.ratio, undefined);
+
+    // A name that exists is refused: it would be overwritten, and its value
+    // read in what the old one measured.
+    const window = vscode.window as unknown as Record<string, unknown>;
+    const real = window.showInputBox;
+    let asked: vscode.InputBoxOptions | undefined;
+    window.showInputBox = async (options: vscode.InputBoxOptions) => {
+      asked = options;
+      return undefined;
+    };
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.addVariable');
+    } finally {
+      window.showInputBox = real;
+    }
+    assert.match(String(await asked?.validateInput?.('gap')), /gap exists already/);
+    assert.strictEqual(await asked?.validateInput?.('gap3'), undefined);
   });
 
   test('what a typed value means is said in the unit the scene holds it in', () => {

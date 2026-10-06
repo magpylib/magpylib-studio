@@ -63,8 +63,11 @@ QUANTITY = re.compile(
 
 
 def model_unit(doc):
-    """The length unit `doc` is drawn in."""
-    return doc.get("model_unit") or DEFAULT_MODEL_UNIT
+    """The length unit `doc` is drawn in. One the studio does not know -- a
+    file from a newer version, or edited by hand -- is carried, not shown in:
+    its lengths are shown in metres, the numbers they are."""
+    unit = doc.get("model_unit")
+    return unit if unit in MODEL_UNITS else DEFAULT_MODEL_UNIT
 
 
 def shown(kind, model):
@@ -96,7 +99,7 @@ def parse(text, kind, model):
                 f"this variable has no unit, so {symbol!r} means nothing to it: "
                 "give it one (Variable Properties), or type the bare number"
             )
-        return _number(number)
+        return _finite(_number(number), text)
     document, accepted = KINDS[kind]
     if not symbol:
         symbol = shown(kind, model)["symbol"]
@@ -105,8 +108,8 @@ def parse(text, kind, model):
         raise ValueError(f"{symbol!r} is not a unit of {kind} ({known})")
     factor = accepted.get(symbol, "1")
     if factor is None:  # radians: the one factor no decimal says exactly
-        return float(number) * 180 / math.pi
-    return _number(str(Decimal(number) * Decimal(factor)))
+        return _finite(float(number) * 180 / math.pi, text)
+    return _finite(_number(str(Decimal(number) * Decimal(factor))), text)
 
 
 def to_document(value, kind, model):
@@ -144,3 +147,15 @@ def _number(text):
         raise ValueError(f"{text!r} is not a number") from e
     whole = exact == exact.to_integral_value() and re.fullmatch(r"[-+]?\d+", text)
     return int(exact) if whole else float(exact)
+
+
+def _finite(value, text):
+    """`value`, unless `1e400` made it infinite: a document holds JSON, which
+    has no infinity, and a view waiting for the reply would wait forever."""
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:  # a whole number with four hundred digits
+        finite = False
+    if not finite:
+        raise ValueError(f"{text!r} is too large a number")
+    return value

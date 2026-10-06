@@ -152,7 +152,7 @@ const UNIT_KINDS: {
     detail: 'degrees, as magpylib turns',
     si: '°',
     example: '1.57 rad',
-    range: '-90, 90',
+    range: '-1.57 rad, 1.57 rad',
     such: 'a tilt, a stagger',
   },
   {
@@ -2745,7 +2745,8 @@ export function activate(context: vscode.ExtensionContext): void {
         is: 'unit',
       });
     }
-    if (Object.keys(bounds).length) {
+    // a unit is not a limit, and clearing keeps it
+    if (Object.keys(bounds).some((key) => key !== 'unit')) {
       items.push({
         label: 'Clear limits',
         detail: 'Nothing refused, no slider, no dropdown',
@@ -2975,7 +2976,14 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const pick = await vscode.window.showQuickPick(
-      available.map((v) => ({ label: v.name, detail: `currently ${v.value}`, v })),
+      available.map((v) => ({
+        label: v.name,
+        detail:
+          typeof v.value === 'number'
+            ? `currently ${inUnit(v.value, v.shown)}${v.shown?.symbol ? ` ${v.shown.symbol}` : ''}`
+            : `currently ${v.value}`,
+        v,
+      })),
       { placeHolder: 'Variable to sweep' },
     );
     if (!pick) {
@@ -3669,13 +3677,21 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('magpylib-studio.addVariable', async () => {
+      const { model_unit: lengthUnit, variables: existing } = await (
+        await getEngine(context)
+      ).request<{ model_unit: string; variables: Variable[] }>('get_variables');
+      // a name that exists would be overwritten, and its value read in what
+      // the old one measured
+      const taken = new Set(existing.map((v) => v.name));
       const name = await vscode.window.showInputBox({
         prompt: 'Variable name',
         placeHolder: 'letters, digits, underscores — e.g. gap, n, radius',
         validateInput: (v) =>
-          /^[A-Za-z_]\w*$/.test(v)
-            ? undefined
-            : 'Letters, digits, underscores; must not start with a digit.',
+          !/^[A-Za-z_]\w*$/.test(v)
+            ? 'Letters, digits, underscores; must not start with a digit.'
+            : taken.has(v)
+              ? `${v} exists already — Edit Variable changes it`
+              : undefined,
       });
       if (!name) {
         return;
@@ -3684,9 +3700,6 @@ export function activate(context: vscode.ExtensionContext): void {
       // a variable *is* is part of creating it -- a choice cannot even be
       // given a first value without its options, and a length is read in
       // metres, or in the unit typed, from the first value on.
-      const { model_unit: lengthUnit } = await (
-        await getEngine(context)
-      ).request<{ model_unit: string }>('get_variables');
       const measures = UNIT_KINDS.filter((u) => u.unit && u.unit !== 'dimensionless').map(
         (u) => ({
           label: u.label,

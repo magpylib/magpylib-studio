@@ -57,6 +57,10 @@ def test_radians_are_turned_into_the_degrees_magpylib_turns_by():
         ("5 mm", "angle", "'mm' is not a unit of angle"),
         ("5 mm", None, "has no unit, so 'mm' means nothing to it"),
         ("2*gap", "length", "is not a number, or a number and a unit"),
+        # JSON has no infinity: the reply would never reach the view
+        ("1e400", None, "is too large a number"),
+        ("1e400 mm", "length", "is too large a number"),
+        ("1" + "0" * 400, None, "is too large a number"),
     ],
 )
 def test_what_cannot_be_read_says_what_could(text, kind, said):
@@ -126,7 +130,7 @@ def test_a_unit_is_one_the_studio_knows_and_a_choice_has_none():
 
 def test_the_model_unit_is_the_documents_and_undoes():
     session = halbach()
-    assert "model_unit" not in session.to_dict()  # mm, unsaid
+    assert "model_unit" not in session.to_dict()  # metres, unsaid
     assert session.set_model_unit("cm")["ok"]
     assert session.to_dict()["model_unit"] == "cm"
     listed = {v["name"]: v for v in session.get_variables()["variables"]}
@@ -135,6 +139,21 @@ def test_the_model_unit_is_the_documents_and_undoes():
     assert session.set_model_unit("furlong")["ok"] is False
     assert session.undo()["ok"]
     assert "model_unit" not in session.to_dict()
+
+
+def test_a_model_unit_the_studio_does_not_know_is_carried_not_shown_in():
+    """A file from a newer version, or edited by hand: its lengths are shown
+    in metres, and the unit it says stays in it."""
+    session = halbach()
+    doc = session.to_dict()
+    doc["model_unit"] = "km"
+    assert session.load_scene(doc)["ok"]
+    assert session.get_variables()["model_unit"] == "m"
+    assert session.quantity("gap", "15")["value"] == 15
+    assert session.field_units("move", {"displacement": "=gap2"})["units"] == {
+        "gap2": {"unit": "length", "symbol": "m"}
+    }
+    assert session.to_dict()["model_unit"] == "km"
 
 
 def test_typed_text_is_read_for_the_variable_it_is_typed_into():
