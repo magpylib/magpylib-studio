@@ -6,7 +6,7 @@ import { PythonExtension } from '@vscode/python-extension';
 import { EngineClient } from './engineClient';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import { mediaUri, nonce as webviewNonce } from './webview';
-import { Variable, VariableBounds, VariablesViewProvider } from './variablesView';
+import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
   activateScriptViewer,
@@ -123,16 +123,44 @@ const KIND_LABEL: Record<VariableKind, string> = {
   choice: 'One of a few choices',
 };
 
-/** "0 … 10", "from 0", "up to 10" — or undefined when neither end is set. */
-function rangeLabel(low?: number, high?: number): string | undefined {
+/** What a variable may measure (`docs/fem.md` §6), as the picker offers it.
+ *  The value stays SI whichever it is; the unit is how it is shown and read. */
+const UNIT_KINDS: { unit: string | null; label: string; detail: string }[] = [
+  { unit: 'length', label: 'Length', detail: "metres, shown in the scene's length unit" },
+  { unit: 'angle', label: 'Angle', detail: 'degrees, as magpylib turns' },
+  { unit: 'field', label: 'Field', detail: 'tesla: a polarization, a flux density' },
+  { unit: 'current', label: 'Current', detail: 'amperes' },
+  { unit: 'dimensionless', label: 'Dimensionless', detail: 'a pure number' },
+  { unit: null, label: 'No unit', detail: 'shown as the bare number it is' },
+];
+
+/** The length units a scene may be shown in; its numbers stay metres. */
+const LENGTH_UNITS = ['m', 'cm', 'mm', 'µm'];
+
+/** "0 … 10", "from 0", "up to 10" — or undefined when neither end is set.
+ *  With `shown`, the ends in the unit the variable is shown in: "10 … 30 mm". */
+function rangeLabel(low?: number, high?: number, shown?: Shown): string | undefined {
+  const as = (value: number) => inUnit(value, shown);
+  const unit = shown?.symbol ? ` ${shown.symbol}` : '';
   if (low !== undefined && high !== undefined) {
-    return `${low} … ${high}`;
+    return `${as(low)} … ${as(high)}${unit}`;
   }
   if (low !== undefined) {
-    return `from ${low}`;
+    return `from ${as(low)}${unit}`;
   }
-  return high === undefined ? undefined : `up to ${high}`;
+  return high === undefined ? undefined : `up to ${as(high)}${unit}`;
 }
+
+/** A number as a variable is shown: 0.015 is "15" for one shown in mm. Six
+ *  significant figures, so 0.0234 shown in mm is 23.4 and not 23.400000000000002. */
+function inUnit(value: number, shown?: Shown): string {
+  const scaled = shown ? value * shown.scale : value;
+  return Number.isInteger(scaled) ? String(scaled) : String(Number(scaled.toPrecision(6)));
+}
+
+/** A number, then perhaps a unit and nothing else — `15`, `15 mm`, `1.5cm`,
+ *  `-90°` — which the engine reads (`quantity`). `2*gap` is an expression. */
+const QUANTITY = /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*[A-Za-zµμ°]*\s*$/;
 
 /** "x, y, z" -> ["x","y","z"], keeping numbers as numbers so a choice between
  *  4, 8 and 16 stays a choice between numbers. */
@@ -839,16 +867,6 @@ async function askRotationAnchor(): Promise<
   return anchor ? { value: anchor } : undefined;
 }
 
-/** Parse a free-form list of numbers ("1, 2 3"); undefined if none/invalid. */
-function parseNumbers(text: string): number[] | undefined {
-  const parts = text
-    .replace(/[[\]]/g, ' ')
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map(Number);
-  return parts.length && parts.every((n) => Number.isFinite(n)) ? parts : undefined;
-}
-
 /**
  * One typed field -> a document value: a number where it is one, otherwise an
  * expression over the scene's variables. The `=` marker the document uses is
@@ -883,29 +901,6 @@ function parseTerms(text: string): (number | string)[] | undefined {
   }
   if (current.trim()) terms.push(current.trim());
   return depth === 0 && terms.length ? terms.map(asDocumentValue) : undefined;
-}
-
-/**
- * "0, 10" / "0," / ", 10" -> [min, max] with null for an open end; undefined
- * if it is not a pair at all. An empty side is "no limit here", which is not
- * the same as no limits.
- */
-function parseBoundPair(text: string): [number | null, number | null] | undefined {
-  const parts = text.split(',');
-  if (parts.length !== 2) {
-    return undefined;
-  }
-  const ends = parts.map((part) => {
-    const trimmed = part.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const value = Number(trimmed);
-    return Number.isFinite(value) ? value : undefined;
-  });
-  return ends.some((end) => end === undefined)
-    ? undefined
-    : (ends as [number | null, number | null]);
 }
 
 /** Parse "1, 2, gap" into `count` numbers-or-expressions, else undefined. */
@@ -2101,7 +2096,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // The inspector's fields take expressions too, and a webview cannot
       // raise an input box — so the ask happens here, on the way through.
       if (params && MUTATING_WITH_VALUES.has(method)) {
-        if (!(await ensureVariablesDefined(Object.values(params)))) {
+        if (!(await ensureVariablesDefined(Object.values(params), { method, params }))) {
           return { ok: false, error: 'cancelled' };
         }
       }
@@ -2224,14 +2219,43 @@ export function activate(context: vscode.ExtensionContext): void {
    * for: the slider falls back to it, and Set Bounds… covers the soft range
    * for when the two differ.
    */
-  const askAllowedRange = async (name: string, whole = false) => {
+  const askAllowedRange = async (name: string, whole = false, symbol = '') => {
+    // in the variable's unit, read by the engine: `10, 30` for a length shown
+    // in mm is 10 mm to 30 mm
+    const readPair = async (v: string): Promise<[number | null, number | null] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 2) {
+        return 'min, max';
+      }
+      const ends: (number | null)[] = [];
+      for (const part of parts) {
+        if (!part.trim()) {
+          ends.push(null);
+          continue;
+        }
+        const read = await readQuantity(name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'min, max — numbers';
+        }
+        ends.push(read.value);
+      }
+      return ends as [number | null, number | null];
+    };
     const text = await vscode.window.showInputBox({
-      prompt: `Allowed range for ${name} — optional, and gives it a slider`,
+      prompt:
+        `Allowed range for ${name}${symbol ? ` (${symbol})` : ''} — optional, ` +
+        'and gives it a slider',
       placeHolder: 'min, max — e.g. 0, 10. Enter to skip',
-      validateInput: (v) =>
-        v.trim() === '' || parseBoundPair(v) ? undefined : 'min, max',
+      validateInput: async (v) => {
+        if (v.trim() === '') {
+          return undefined;
+        }
+        const read = await readPair(v);
+        return typeof read === 'string' ? read : undefined;
+      },
     });
-    const pair = text && parseBoundPair(text);
+    const read = text && text.trim() ? await readPair(text) : undefined;
+    const pair = read && typeof read !== 'string' ? read : undefined;
     // `whole` is a fact about the variable, so it is recorded even when the
     // range is skipped — otherwise a count only becomes a count if you also
     // felt like bounding it.
@@ -2280,25 +2304,54 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   };
 
+  /**
+   * What text typed for a variable means, when it is a number and perhaps a
+   * unit: the engine reads it (`quantity`), so `15` is 15 mm for a length
+   * shown in mm and the units live in one place. Undefined for an expression,
+   * which is stored as written.
+   */
+  const readQuantity = async (
+    name: string,
+    text: string,
+    unit?: string,
+  ): Promise<{ value?: number; error?: string } | undefined> => {
+    if (!QUANTITY.test(text)) {
+      return undefined;
+    }
+    const read = await (await getEngine(context)).request<{
+      ok: boolean;
+      value?: number;
+      error?: string;
+    }>('quantity', { name, text, ...(unit ? { unit } : {}) });
+    return read.ok ? { value: read.value } : { error: read.error };
+  };
+
   const editVariable = async (variable: Variable, prompt?: string): Promise<boolean> => {
     // Same rule as the panel: only a leading '=' means an expression. A
-    // name-valued variable is a string that is simply its own value.
+    // name-valued variable is a string that is simply its own value. A number
+    // is shown in the variable's unit, as the panel shows it.
+    const isNumber = typeof variable.expression === 'number';
     const current =
       typeof variable.expression === 'string' && variable.expression.startsWith('=')
         ? variable.expression.slice(1)
-        : String(variable.expression);
+        : isNumber
+          ? inUnit(variable.expression as number, variable.shown) +
+            (variable.shown?.symbol ? ` ${variable.shown.symbol}` : '')
+          : String(variable.expression);
     const text = await vscode.window.showInputBox({
       prompt: prompt ?? `${variable.name} — value or expression`,
       value: current,
       placeHolder: await expressionHint(),
-      validateInput: checkExpression,
+      validateInput: async (v) =>
+        (await readQuantity(variable.name, v))?.error ?? checkExpression(v),
     });
     if (text === undefined) {
       return false;
     }
+    const read = await readQuantity(variable.name, text);
     return mutateFromTree('set_variable', {
       name: variable.name,
-      value: asDocumentValue(text),
+      value: read?.value ?? asDocumentValue(text),
     });
   };
 
@@ -2389,24 +2442,57 @@ export function activate(context: vscode.ExtensionContext): void {
       which === 'hard'
         ? [bounds.min, bounds.max]
         : [bounds.soft_min, bounds.soft_max];
+    // Shown and typed in the variable's unit, as the panel shows it; each end
+    // read by the engine, so `10, 30` is millimetres for a length shown in mm
+    // and `1, 3 cm` says so outright.
+    const shown = variable.shown;
+    const end = (value?: number) => (value === undefined ? '' : inUnit(value, shown));
+    const readEnds = async (v: string): Promise<[number | null, number | null] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 2) {
+        return 'min, max';
+      }
+      const ends: (number | null)[] = [];
+      for (const part of parts) {
+        if (!part.trim()) {
+          ends.push(null);
+          continue;
+        }
+        const read = await readQuantity(variable.name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'min, max — numbers';
+        }
+        ends.push(read.value);
+      }
+      return ends as [number | null, number | null];
+    };
     const text = await vscode.window.showInputBox({
       prompt:
-        which === 'hard'
+        (which === 'hard'
           ? `${variable.name} — allowed range: a value outside it is refused`
-          : `${variable.name} — slider range: the span worth dragging through`,
-      value:
-        low !== undefined || high !== undefined ? `${low ?? ''}, ${high ?? ''}` : '',
+          : `${variable.name} — slider range: the span worth dragging through`) +
+        (shown?.symbol ? ` (${shown.symbol})` : ''),
+      value: low !== undefined || high !== undefined ? `${end(low)}, ${end(high)}` : '',
       placeHolder:
         which === 'hard'
           ? 'min, max — e.g. 0, 10. Empty for no limit'
-          : `min, max — empty to drag ${rangeLabel(bounds.min, bounds.max) ?? 'the allowed range, which is not set either'}`,
-      validateInput: (v) =>
-        v.trim() === '' || parseBoundPair(v) ? undefined : 'min, max',
+          : `min, max — empty to drag ${rangeLabel(bounds.min, bounds.max, shown) ?? 'the allowed range, which is not set either'}`,
+      validateInput: async (v) => {
+        if (v.trim() === '') {
+          return undefined;
+        }
+        const ends = await readEnds(v);
+        return typeof ends === 'string' ? ends : undefined;
+      },
     });
     if (text === undefined) {
       return;
     }
-    const [lo, hi] = parseBoundPair(text) ?? [null, null];
+    const read = text.trim() === '' ? [null, null] : await readEnds(text);
+    if (typeof read === 'string') {
+      return; // validated above; nothing to apply
+    }
+    const [lo, hi] = read;
     // null is an end left empty, and an absent key is what clears one
     const ends = { low: lo ?? undefined, high: hi ?? undefined };
     if (which === 'soft') {
@@ -2465,7 +2551,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const bounds = variable.bounds ?? {};
     const options = bounds.options?.length ? bounds.options : undefined;
     const kind: VariableKind = options ? 'choice' : bounds.integer ? 'whole' : 'number';
-    type Change = 'name' | 'hard' | 'soft' | 'options' | 'kind' | 'clear';
+    type Change = 'name' | 'hard' | 'soft' | 'options' | 'kind' | 'unit' | 'clear';
     const items: (vscode.QuickPickItem & { is: Change })[] = [
       {
         label: 'Name',
@@ -2487,14 +2573,15 @@ export function activate(context: vscode.ExtensionContext): void {
         : [
             {
               label: 'Allowed range',
-              description: rangeLabel(bounds.min, bounds.max) ?? 'not set',
+              description: rangeLabel(bounds.min, bounds.max, variable.shown) ?? 'not set',
               detail: 'A value outside it is refused, however it was arrived at',
               is: 'hard' as const,
             },
             {
               label: 'Slider range',
               description:
-                rangeLabel(bounds.soft_min, bounds.soft_max) ?? 'the allowed range',
+                rangeLabel(bounds.soft_min, bounds.soft_max, variable.shown) ??
+                'the allowed range',
               detail: 'Only the span dragging covers — a value outside stays legal',
               is: 'soft' as const,
             },
@@ -2506,6 +2593,17 @@ export function activate(context: vscode.ExtensionContext): void {
       detail: 'A quantity, something it counts, or one of a few names',
       is: 'kind',
     });
+    if (!options) {
+      const unit = UNIT_KINDS.find((u) => u.unit === (bounds.unit ?? null));
+      items.push({
+        label: 'Unit',
+        description:
+          (unit?.label ?? bounds.unit ?? 'No unit') +
+          (variable.shown?.symbol ? `, shown in ${variable.shown.symbol}` : ''),
+        detail: 'What it measures: shown and typed in that unit, while the value stays SI',
+        is: 'unit',
+      });
+    }
     if (Object.keys(bounds).length) {
       items.push({
         label: 'Clear limits',
@@ -2529,6 +2627,19 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     if (picked.is === 'options') {
       await askOptions(variable);
+      return;
+    }
+    if (picked.is === 'unit') {
+      const chosen = await vscode.window.showQuickPick(
+        UNIT_KINDS.map((u) => ({
+          ...u,
+          description: u.unit === (bounds.unit ?? null) ? 'current' : undefined,
+        })),
+        { placeHolder: `${variable.name} — what does it measure?` },
+      );
+      if (chosen && chosen.unit !== (bounds.unit ?? null)) {
+        await mutateFromTree('set_variable_unit', { name: variable.name, unit: chosen.unit });
+      }
       return;
     }
     if (picked.is === 'clear') {
@@ -2729,16 +2840,44 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!pick) {
       return;
     }
+    // In the variable's unit, as the panel shows it: from and to are read by
+    // the engine, so `10, 30, 20` sweeps a length shown in mm from 10 to 30 mm.
+    const shown = pick.v.shown;
+    const now = typeof pick.v.value === 'number' ? pick.v.value : 0;
+    const readSweep = async (v: string): Promise<[number, number, number] | string> => {
+      const parts = v.split(',');
+      if (parts.length !== 3) {
+        return 'Three numbers: from, to, steps';
+      }
+      const ends: number[] = [];
+      for (const part of parts.slice(0, 2)) {
+        const read = await readQuantity(pick.v.name, part);
+        if (!read || read.error || read.value === undefined) {
+          return read?.error ?? 'Three numbers: from, to, steps';
+        }
+        ends.push(read.value);
+      }
+      const steps = Number(parts[2].trim());
+      return Number.isFinite(steps) ? [ends[0], ends[1], steps] : 'steps is a number';
+    };
     const range = await vscode.window.showInputBox({
-      prompt: `Values for ${pick.label} — from, to, steps`,
-      value: `${pick.v.value ?? 0}, ${(pick.v.value ?? 0) * 2 || 1}, 20`,
-      validateInput: (v) =>
-        (parseNumbers(v)?.length ?? 0) === 3 ? undefined : 'Three numbers: from, to, steps',
+      prompt:
+        `Values for ${pick.label} — from, to, steps` +
+        (shown?.symbol ? ` (${shown.symbol})` : ''),
+      value: `${inUnit(now, shown)}, ${inUnit(now * 2 || 1 / (shown?.scale ?? 1), shown)}, 20`,
+      validateInput: async (v) => {
+        const read = await readSweep(v);
+        return typeof read === 'string' ? read : undefined;
+      },
     });
     if (!range) {
       return;
     }
-    const [from, to, steps] = parseNumbers(range)!;
+    const read = await readSweep(range);
+    if (typeof read === 'string') {
+      return;
+    }
+    const [from, to, steps] = read;
     const count = Math.max(2, Math.round(steps));
     const values = Array.from(
       { length: count },
@@ -2755,29 +2894,51 @@ export function activate(context: vscode.ExtensionContext): void {
    * A definition may itself introduce names (`a = b*2`), hence the loop.
    * Returns false if the user backed out, meaning: abandon the whole edit.
    */
-  const ensureVariablesDefined = async (values: unknown): Promise<boolean> => {
-    const { unknown } = await (await getEngine(context)).request<{ unknown: string[] }>(
-      'unknown_variables',
-      { values },
-    );
+  const ensureVariablesDefined = async (
+    values: unknown,
+    call?: { method: string; params: Record<string, unknown> },
+  ): Promise<boolean> => {
+    const engine = await getEngine(context);
+    const { unknown } = await engine.request<{ unknown: string[] }>('unknown_variables', {
+      values,
+    });
+    // What the box it was typed into measures: `gap` typed as a position is a
+    // length, shown and read in mm from the start rather than once someone
+    // finds Variable Properties.
+    const { units: measured } = unknown.length && call
+      ? await engine.request<{ units: Record<string, { unit: string; symbol: string }> }>(
+          'field_units',
+          call,
+        )
+      : { units: {} as Record<string, { unit: string; symbol: string }> };
     for (const name of unknown) {
+      const unit = measured[name];
+      const unitWords = unit
+        ? ` — a ${UNIT_KINDS.find((u) => u.unit === unit.unit)?.label.toLowerCase() ?? unit.unit}` +
+          (unit.symbol ? `, in ${unit.symbol}` : '')
+        : '';
       // A definition naming something that does not exist yet is rejected by
       // the engine, so stay on this one until it takes or the user gives up.
       for (;;) {
         const text = await vscode.window.showInputBox({
-          prompt: `${name} is a new variable — give it a value`,
+          prompt: `${name} is a new variable${unitWords} — give it a value`,
           placeHolder: await expressionHint(),
-          validateInput: checkExpression,
+          validateInput: async (v) =>
+            (await readQuantity(name, v, unit?.unit))?.error ?? checkExpression(v),
         });
         if (text === undefined) {
           return false;
         }
-        const result = (await (await getEngine(context)).request('set_variable', {
+        const read = await readQuantity(name, text, unit?.unit);
+        const result = (await engine.request('set_variable', {
           name,
-          value: asDocumentValue(text),
+          value: read?.value ?? asDocumentValue(text),
         })) as { ok: boolean; error?: string };
         if (result.ok) {
-          await askAllowedRange(name); // same offer as the explicit flow
+          if (unit) {
+            await engine.request('set_variable_unit', { name, unit: unit.unit });
+          }
+          await askAllowedRange(name, false, unit?.symbol ?? ''); // as the explicit flow
           break;
         }
         const retry = await vscode.window.showErrorMessage(
@@ -2806,7 +2967,10 @@ export function activate(context: vscode.ExtensionContext): void {
     { checkVariables = true } = {},
   ): Promise<boolean> => {
     // whatever was typed may name variables that do not exist yet
-    if (checkVariables && !(await ensureVariablesDefined(Object.values(params)))) {
+    if (
+      checkVariables &&
+      !(await ensureVariablesDefined(Object.values(params), { method, params }))
+    ) {
       return false;
     }
     let ok = false;
@@ -3348,6 +3512,23 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(InspectorViewProvider.viewId, inspector),
     vscode.window.registerTreeDataProvider('magpylib-studio.historyView', history),
     vscode.window.registerWebviewViewProvider(VariablesViewProvider.viewId, variables),
+    vscode.commands.registerCommand('magpylib-studio.setLengthUnit', async () => {
+      // What lengths are shown in, and what an export to a CAD or FEM tool
+      // writes. The document's numbers stay metres either way.
+      const { model_unit: current } = await (
+        await getEngine(context)
+      ).request<{ model_unit: string }>('get_variables');
+      const pick = await vscode.window.showQuickPick(
+        LENGTH_UNITS.map((unit) => ({
+          label: unit,
+          description: unit === current ? 'current' : undefined,
+        })),
+        { placeHolder: 'Show lengths in — the scene stays in metres' },
+      );
+      if (pick && pick.label !== current) {
+        await mutateFromTree('set_model_unit', { unit: pick.label });
+      }
+    }),
     vscode.commands.registerCommand('magpylib-studio.addVariable', async () => {
       const name = await vscode.window.showInputBox({
         prompt: 'Variable name',

@@ -37,6 +37,36 @@ function short(value) {
     : String(Number(value.toPrecision(6)));
 }
 
+/** A value as the variable is shown: 0.015 is 15 for a length shown in mm.
+ *  The document holds SI; `shown` says the unit and how many make one. */
+function inUnit(v, value) {
+  return short(
+    typeof value === "number" && v.shown ? value * v.shown.scale : value,
+  );
+}
+
+/** A number, then perhaps a unit and nothing else -- `15`, `15 mm`, `-90°` --
+ *  which the engine reads (`quantity`), so the units live in one place. */
+const QUANTITY =
+  /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*[A-Za-zµμ°]*\s*$/;
+
+/** What was typed, committed: a number the engine reads in the variable's
+ *  unit, or anything else as an expression, as it always was. */
+function commitTyped(v, text) {
+  if (!QUANTITY.test(text)) {
+    commit(v.name, asValue(text));
+    return;
+  }
+  rpc("quantity", { name: v.name, text })
+    .then((read) => {
+      if (read && read.ok) commit(v.name, read.value);
+      else statusEl.textContent = read ? read.error : "";
+    })
+    .catch((err) => {
+      statusEl.textContent = String(err);
+    });
+}
+
 /** Typed text -> document value: a number if it is one, else "=expr". */
 function asValue(text) {
   const trimmed = String(text).trim();
@@ -215,6 +245,14 @@ async function load() {
     const name = document.createElement("span");
     name.className = "name";
     name.textContent = v.name;
+    // What it measures, beside what it is called: the box holds 15, and the
+    // 15 is millimetres. Not in the box, where it would be typed over.
+    if (v.shown && v.shown.symbol) {
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = v.shown.symbol;
+      name.append(" ", unit);
+    }
     // A variable can be perfectly well defined and decide nothing: a drag
     // states a pose outright and the expression that used to decide it stays
     // in the create step, replayed and then overwritten. The slider still
@@ -229,9 +267,15 @@ async function load() {
     // box where the value should be.
     const isExpression =
       typeof v.expression === "string" && v.expression.startsWith("=");
+    const symbol = v.shown && v.shown.symbol ? " " + v.shown.symbol : "";
     name.title = isExpression
-      ? v.name + " = " + v.expression.slice(1) + ", currently " + short(v.value)
-      : v.name;
+      ? v.name +
+        " = " +
+        v.expression.slice(1) +
+        ", currently " +
+        inUnit(v, v.value) +
+        symbol
+      : v.name + (symbol ? " (" + symbol.trim() + ")" : "");
 
     // Soft bounds win: they are the range worth dragging through. A
     // variable defined by an expression is not draggable - its value
@@ -247,7 +291,7 @@ async function load() {
     const text = document.createElement("input");
     text.type = "text";
     text.spellcheck = false;
-    text.value = isExpression ? v.expression.slice(1) : short(v.value);
+    text.value = isExpression ? v.expression.slice(1) : inUnit(v, v.value);
     if (b.integer) name.title += " — whole numbers only";
     if (choices) {
       name.title += " — one of " + choices.join(", ");
@@ -262,7 +306,7 @@ async function load() {
     }
     if (isExpression) {
       text.classList.add("expr");
-      text.title = "currently " + short(v.value);
+      text.title = "currently " + inUnit(v, v.value) + symbol;
     }
     if (choices && !isExpression) {
       // The dropdown is the editor. Typing here would send 'z' through
@@ -270,7 +314,7 @@ async function load() {
       text.readOnly = true;
       text.title = "one of " + choices.join(", ");
     }
-    text.addEventListener("change", () => commit(v.name, asValue(text.value)));
+    text.addEventListener("change", () => commitTyped(v, text.value));
 
     const slot = document.createElement("div");
     // A variable with options is a choice, not a quantity: an axis is 'z',
@@ -301,14 +345,14 @@ async function load() {
       // a count has no values between its values
       slider.step = b.integer ? 1 : (high - low) / 100;
       slider.value = v.value;
-      slider.title = short(low) + " .. " + short(high);
+      slider.title = inUnit(v, low) + " .. " + inUnit(v, high) + symbol;
       // live scene while dragging, one edit in the history when released
       slider.addEventListener("pointerdown", () => {
         dragging = true;
         rpc("begin_interaction"); // the whole drag undoes as one
       });
       slider.addEventListener("input", () => {
-        text.value = short(parseFloat(slider.value));
+        text.value = inUnit(v, parseFloat(slider.value));
         // Only under the pointer: a keyboard step fires input and change
         // together, and would otherwise set the same value twice.
         if (dragging) preview(v.name, parseFloat(slider.value));
@@ -365,9 +409,10 @@ async function load() {
       note.className = "range";
       note.textContent =
         "allowed " +
-        (b.min === undefined ? "−∞" : short(b.min)) +
+        (b.min === undefined ? "−∞" : inUnit(v, b.min)) +
         " .. " +
-        (b.max === undefined ? "∞" : short(b.max));
+        (b.max === undefined ? "∞" : inUnit(v, b.max)) +
+        symbol;
       listEl.appendChild(note);
     }
   }

@@ -571,6 +571,98 @@ suite('magpylib-studio', () => {
     assert.doesNotMatch(text, /regenerated/);
   });
 
+  test("a length is shown and typed in the scene's length unit", async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    type Doc = {
+      model_unit?: string;
+      variables: Record<string, unknown>;
+      variable_bounds: Record<string, { unit?: string }>;
+    };
+    const doc = (d: unknown) => d as Doc;
+    // as the Variables panel hands a row's variable to its commands
+    const gap = {
+      name: 'gap',
+      expression: 0.015,
+      value: 0.015,
+      bounds: { min: 0, max: 0.06, soft_min: 0.01, soft_max: 0.03, unit: 'length' },
+      shown: { symbol: 'mm', scale: 1000 },
+    };
+
+    // Typed in the unit it is shown in: 20 is millimetres.
+    let prompts = answering({ input: ['20'] });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.editVariable', gap);
+    } finally {
+      prompts.restore();
+    }
+    await sceneWhere((d) => doc(d).variables.gap === 0.02, 'gap typed as 20 to be 0.02 m');
+
+    // Drawn in centimetres: the document's numbers stay metres.
+    prompts = answering({ pick: (items) => items.find((i) => i.label === 'cm') });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setLengthUnit');
+    } finally {
+      prompts.restore();
+    }
+    const drawn = await sceneWhere((d) => doc(d).model_unit === 'cm', 'the scene drawn in cm');
+    assert.strictEqual(doc(drawn).variables.gap, 0.02);
+
+    // What a variable measures, said in its properties.
+    prompts = answering({
+      pick: (items) =>
+        items.find((i) => i.label === 'Unit') ?? items.find((i) => i.label === 'Dimensionless'),
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setVariableBounds', {
+        name: 'n',
+        expression: 10,
+        value: 10,
+        bounds: { min: 2, max: 60, soft_min: 4, soft_max: 20, integer: true },
+      });
+    } finally {
+      prompts.restore();
+    }
+    const said = await sceneWhere(
+      (d) => doc(d).variable_bounds.n?.unit === 'dimensionless',
+      'n to say it is dimensionless',
+    );
+    assert.deepStrictEqual(
+      doc(said).variable_bounds.n,
+      { min: 2, max: 60, soft_min: 4, soft_max: 20, integer: true, unit: 'dimensionless' },
+      'saying what it measures changed its limits',
+    );
+  });
+
+  test('a variable typed into a length takes that unit from the start', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    // Position "0, 0, lift2", then lift2's value -- asked for in mm, since a
+    // position is a length -- then no range.
+    const prompts = answering({ input: ['0, 0, lift2', '12', ''] });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.setPosition', {
+        id: 'sensor',
+        type: 'Sensor',
+        label: 'Sensor',
+        parent: null,
+        visible: true,
+      });
+    } finally {
+      prompts.restore();
+    }
+    type Doc = {
+      variables: Record<string, unknown>;
+      variable_bounds: Record<string, { unit?: string }>;
+    };
+    const after = (await sceneWhere(
+      (d) => (d as unknown as Doc).variables.lift2 !== undefined,
+      'lift2 to be created',
+    )) as unknown as Doc;
+    assert.strictEqual(after.variables.lift2, 0.012, '12 typed for a length is 12 mm');
+    assert.strictEqual(after.variable_bounds.lift2?.unit, 'length');
+  });
+
   test('a scene saved to a file opens again as the same scene', async function () {
     this.timeout(60000);
     const before = await loadExample('halbach', 'halbach');

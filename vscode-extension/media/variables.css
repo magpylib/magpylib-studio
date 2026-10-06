@@ -17,6 +17,11 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* What the value is in -- mm, ° -- quieter than the name it qualifies. */
+.name .unit {
+  opacity: 0.6;
+  font-size: 10px;
+}
 /* Deciding nothing. The row still works — the value is still the variable's,
    and other things may come to be written in terms of it — so this is dimmed
    rather than disabled: a statement about what it currently reaches, not a

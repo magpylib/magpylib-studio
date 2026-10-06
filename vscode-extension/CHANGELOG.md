@@ -6,6 +6,16 @@ All notable changes to the Magpylib Studio extension.
 
 ### Added
 
+- **Units.** A variable can say what it measures — length, angle, field, current
+  — under **Variable Properties…**, and is then shown and typed in that unit:
+  the Variables panel shows `gap mm` holding 15, where typing `20` means 20 mm
+  and `2 cm` means what it says. Its ranges, Edit Variable and a sweep's range
+  are read the same way, and a sweep is plotted along `gap (mm)`. Lengths are
+  shown in the scene's length unit, mm unless **Length Unit…** says otherwise;
+  the scene itself stays in metres, so nothing that was saved changes. A
+  variable created by typing its name into a box takes that box's unit: `gap`
+  typed as a position is a length, and its value is asked for in mm. The
+  examples say what their variables measure.
 - A figure a script draws with `magpy.show(..., backend="studio")`, or with
   **Draw scripts here** on, is now the notebook widget: the legend nesting the
   objects as their collections do, the tools and the keys. `animation=True`

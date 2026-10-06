@@ -59,10 +59,12 @@ from magpylib_studio.build import Scene
 
 s = Scene()
 n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
-radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), slider=(0.016, 0.04))
-gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03))
-stagger = s.variable("stagger", 360 / (2 * n))  # stored as "=360 / (2 * n)"
-tilt = s.variable("tilt", 0.0, bounds=(-180, 180), slider=(-90, 90))
+radius = s.variable(
+    "radius", 0.023, bounds=(0.005, 0.08), slider=(0.016, 0.04), unit="length"
+)
+gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03), unit="length")
+stagger = s.variable("stagger", 360 / (2 * n), unit="angle")  # "=360 / (2 * n)"
+tilt = s.variable("tilt", 0.0, bounds=(-180, 180), slider=(-90, 90), unit="angle")
 tilt_axis = s.variable("tilt_axis", "z", options=("x", "y", "z"))
 
 halbach = s.Collection(id="halbach", style_label="Halbach stack")
@@ -286,8 +288,9 @@ message).
 neither waits for the other. B1 is what makes "write it in code, export it to
 Maxwell with its design variables" true end to end.
 
-**Units** go on `variable(…, unit="length")` once `fem.md` §6's unit kinds
-exist; the builder does not invent its own.
+**Units** go on `variable(…, unit="length")`, and the length unit a scene is
+shown in on `Scene(model_unit="cm")` (`fem.md` §6, roadmap R2); the values stay
+SI, and the builder invents no units of its own.
 
 **Instancing** (`instancing.md`) is compatible. A Python function over the
 builder, like the `ring` loop above, is reuse at authoring time: the document

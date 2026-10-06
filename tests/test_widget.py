@@ -1071,6 +1071,31 @@ def test_a_views_variables_get_controls_bound_both_ways():
 
 
 @needs_scene_graph
+def test_a_length_slides_in_the_unit_it_is_shown_in():
+    """`gap (mm)` from 10 to 30, as the panel shows it, not 0.01 to 0.03 --
+    and what it sets is the exact number of metres, not 23.4 * 0.001."""
+    from magpylib_studio.build import Scene
+
+    s = Scene()
+    gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03), unit="length")
+    s.magnet.Cuboid(
+        id="m",
+        dimension=(0.01, 0.01, 0.01),
+        polarization=(0, 0, 1),
+        position=(gap, 0, 0),
+    )
+    studio = widget.SceneWidget(s, editable=True)
+    (control,) = studio.variable_sliders().children
+    assert control.description == "gap (mm)"
+    assert (control.min, control.value, control.max) == pytest.approx((10, 15, 30))
+
+    control.value = 23.4
+    assert studio._session.to_dict()["variables"]["gap"] == 0.0234
+    assert studio.undo()
+    assert control.value == pytest.approx(15)
+
+
+@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()

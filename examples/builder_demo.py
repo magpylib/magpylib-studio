@@ -29,9 +29,13 @@ here = pathlib.Path(globals().get("__file__", "builder_demo.py")).resolve().pare
 s = Scene(values=here / "builder_demo.magpy.json")
 
 n = s.variable("n", 12, bounds=(4, 48), slider=(6, 24), integer=True)
-radius = s.variable("radius", 0.025, bounds=(0.01, 0.1), slider=(0.018, 0.04))
-gap = s.variable("gap", 0.012, bounds=(0.006, 0.05), slider=(0.009, 0.03))
-stagger = s.variable("stagger", 180 / n)  # half a magnet step, whatever n is
+radius = s.variable(
+    "radius", 0.025, bounds=(0.01, 0.1), slider=(0.018, 0.04), unit="length"
+)
+gap = s.variable(
+    "gap", 0.012, bounds=(0.006, 0.05), slider=(0.009, 0.03), unit="length"
+)
+stagger = s.variable("stagger", 180 / n, unit="angle")  # half a step, whatever n is
 density = s.variable("density", 7, bounds=(2, 25), slider=(3, 15), integer=True)
 
 # %% [markdown]

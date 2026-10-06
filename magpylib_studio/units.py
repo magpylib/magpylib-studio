@@ -1,0 +1,143 @@
+"""Units for variables: what a number measures, said beside it, never in it.
+
+The document stays bare SI -- metres, tesla, amperes -- and degrees for
+angles, which is how magpylib turns things. A variable may say what kind of
+quantity it is (`docs/fem.md` §6), stored beside `integer` in its limits:
+
+    "variable_bounds": {"gap": {"min": 0.001, "max": 0.06, "unit": "length"}}
+
+and a document may say which length unit it is drawn in (`model_unit`, mm
+when it says nothing). From those two a view shows `gap: 15 mm` rather than
+`0.015`, and reads `15`, `15 mm` or `1.5 cm` back as 0.015. Nothing else
+changes: an expression still computes in SI, and `"5mm"` typed into a
+document is still a string, which is what keeps `"z"` an axis name.
+
+What this does not do is check dimensions. `gap * current` is not caught;
+magpylib does not catch it either, and an algebra of units to serve what is a
+question of display would be the tail wagging the dog.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from decimal import Decimal, InvalidOperation
+
+#: Each kind: the unit the document holds it in, and the units a value may
+#: be typed in, as how many of the document's unit one of them is. Written as
+#: decimal text so that 1.1 mm is 0.0011 and not the float 1.1 * 0.001.
+KINDS = {
+    "length": (
+        "m",
+        {"m": "1", "cm": "0.01", "mm": "0.001", "µm": "1e-6", "um": "1e-6"},
+    ),
+    "angle": ("deg", {"°": "1", "deg": "1", "rad": None}),  # rad: 180/π, not decimal
+    "field": ("T", {"T": "1", "mT": "0.001", "µT": "1e-6", "uT": "1e-6"}),
+    "current": ("A", {"A": "1", "mA": "0.001", "kA": "1000"}),
+    "dimensionless": ("", {}),
+}
+
+#: What each kind is called in prose, for a script's comment and a menu.
+NAMES = {
+    "length": "metres",
+    "angle": "degrees",
+    "field": "tesla",
+    "current": "amperes",
+    "dimensionless": "a pure number",
+}
+
+#: The length units a document may be drawn in, and the one it is drawn in
+#: when it says nothing: a magnet is millimetres long.
+MODEL_UNITS = ("m", "cm", "mm", "µm")
+DEFAULT_MODEL_UNIT = "mm"
+
+#: A number, then perhaps a unit and nothing else: `15`, `15 mm`, `1.5cm`,
+#: `-90°`. `2*gap` is not one -- it is an expression.
+QUANTITY = re.compile(
+    r"^\s*(?P<number>[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*"
+    r"(?P<symbol>[A-Za-zµμ°]+)?\s*$"
+)
+
+
+def model_unit(doc):
+    """The length unit `doc` is drawn in."""
+    return doc.get("model_unit") or DEFAULT_MODEL_UNIT
+
+
+def shown(kind, model):
+    """How a view shows a value of `kind`: its unit's symbol, and how many of
+    that unit one of the document's is -- or None for a kind it does not know,
+    which it then shows as the bare number it is."""
+    if kind not in KINDS:
+        return None
+    if kind == "length":
+        per = Decimal(KINDS["length"][1][model])
+        return {"symbol": model, "scale": float(Decimal(1) / per)}
+    if kind == "angle":
+        return {"symbol": "°", "scale": 1.0}
+    return {"symbol": KINDS[kind][0], "scale": 1.0}
+
+
+def parse(text, kind, model):
+    """Typed text as a number in the document's unit: `15` in the unit the
+    value is shown in, or `15 mm` in the one it names. Raises ValueError
+    saying what it would have taken."""
+    # Greek mu and the micro sign look alike and are typed alike
+    match = QUANTITY.match(str(text).replace("\u03bc", "µ"))
+    if not match:
+        raise ValueError(f"{text!r} is not a number, or a number and a unit")
+    number, symbol = match["number"], match["symbol"]
+    if kind not in KINDS:
+        if symbol:
+            raise ValueError(
+                f"this variable has no unit, so {symbol!r} means nothing to it: "
+                "give it one (Variable Properties), or type the bare number"
+            )
+        return _number(number)
+    document, accepted = KINDS[kind]
+    if not symbol:
+        symbol = shown(kind, model)["symbol"]
+    if symbol not in accepted and symbol != document:
+        known = ", ".join(s for s in accepted if s not in ("um", "uT")) or "none"
+        raise ValueError(f"{symbol!r} is not a unit of {kind} ({known})")
+    factor = accepted.get(symbol, "1")
+    if factor is None:  # radians: the one factor no decimal says exactly
+        return float(number) * 180 / math.pi
+    return _number(str(Decimal(number) * Decimal(factor)))
+
+
+def to_document(value, kind, model):
+    """A number as a view shows it, in the document's unit -- a slider's
+    position, say. Through decimal text, so 23.4 mm is 0.0234."""
+    view = shown(kind, model)
+    if view is None or view["scale"] == 1:
+        return value
+    return parse(repr(float(value)), kind, model)
+
+
+def describe():
+    """The kinds and the units each is typed in, for a menu or a reference."""
+    return {
+        "kinds": [
+            {
+                "kind": kind,
+                "name": NAMES[kind],
+                "units": [s for s in accepted if s not in ("um", "uT")]
+                or ([document] if document else []),
+            }
+            for kind, (document, accepted) in KINDS.items()
+        ],
+        "model_units": list(MODEL_UNITS),
+        "default_model_unit": DEFAULT_MODEL_UNIT,
+    }
+
+
+def _number(text):
+    """Decimal text as the number a document holds: a whole number typed as
+    one stays an int, as the panel has always sent `10`."""
+    try:
+        exact = Decimal(text)
+    except InvalidOperation as e:  # the pattern lets nothing else through
+        raise ValueError(f"{text!r} is not a number") from e
+    whole = exact == exact.to_integral_value() and re.fullmatch(r"[-+]?\d+", text)
+    return int(exact) if whole else float(exact)
