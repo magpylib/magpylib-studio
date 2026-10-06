@@ -6,11 +6,13 @@ quantity it is (`docs/fem.md` §6), stored beside `integer` in its limits:
 
     "variable_bounds": {"gap": {"min": 0.001, "max": 0.06, "unit": "length"}}
 
-and a document may say which length unit it is drawn in (`model_unit`, mm
-when it says nothing). From those two a view shows `gap: 15 mm` rather than
-`0.015`, and reads `15`, `15 mm` or `1.5 cm` back as 0.015. Nothing else
-changes: an expression still computes in SI, and `"5mm"` typed into a
-document is still a string, which is what keeps `"z"` an axis name.
+and a document may say which length unit it is shown in (`model_unit`:
+metres, SI like everything else, when it says nothing). From those two a view
+shows `gap: 0.015 m`, and reads `0.015`, `15 mm` or `1.5 cm` back as 0.015: a
+number typed bare is in the unit shown, and one with a unit in its own. A
+scene shown in mm reads a bare `15` as 15 mm. Nothing else changes: an
+expression still computes in SI, and `"5mm"` typed into a document is still a
+string, which is what keeps `"z"` an axis name.
 
 What this does not do is check dimensions. `gap * current` is not caught;
 magpylib does not catch it either, and an algebra of units to serve what is a
@@ -46,10 +48,11 @@ NAMES = {
     "dimensionless": "a pure number",
 }
 
-#: The length units a document may be drawn in, and the one it is drawn in
-#: when it says nothing: a magnet is millimetres long.
+#: The length units a document may be shown in, and the one it is shown in
+#: when it says nothing: SI, as the numbers are. Millimetres are a choice to
+#: make (Length Unit...), or a unit to type: `15 mm`.
 MODEL_UNITS = ("m", "cm", "mm", "µm")
-DEFAULT_MODEL_UNIT = "mm"
+DEFAULT_MODEL_UNIT = "m"
 
 #: A number, then perhaps a unit and nothing else: `15`, `15 mm`, `1.5cm`,
 #: `-90°`. `2*gap` is not one -- it is an expression.

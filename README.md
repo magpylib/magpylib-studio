@@ -16,7 +16,7 @@ pattern. Drag `n` and both rings rebuild._
   move, turn and resize them in the 3D view.
 - **Make it parametric.** Name the numbers that matter — `radius`, `gap`, `n` —
   and write positions and sizes in terms of them. Drag a slider and everything
-  follows. Values show in their units: `gap: 15 mm`.
+  follows. Values are SI unless you type a unit: `15 mm`, `2 cm`, `800 mT`.
 - **Pattern, don't copy.** A ring of twenty magnets is one magnet and one
   "repeat around an axis" step, so changing the magnet changes them all.
 - **See the field.** Along a sensor path, as a map over a plane, or swept

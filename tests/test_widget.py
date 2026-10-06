@@ -1072,11 +1072,12 @@ def test_a_views_variables_get_controls_bound_both_ways():
 
 @needs_scene_graph
 def test_a_length_slides_in_the_unit_it_is_shown_in():
-    """`gap (mm)` from 10 to 30, as the panel shows it, not 0.01 to 0.03 --
-    and what it sets is the exact number of metres, not 23.4 * 0.001."""
+    """In a scene shown in mm, `gap (mm)` from 10 to 30, as the panel shows
+    it, not 0.01 to 0.03 -- and what it sets is the exact number of metres,
+    not 23.4 * 0.001. In metres, the default, it is `gap (m)`."""
     from magpylib_studio.build import Scene
 
-    s = Scene()
+    s = Scene(model_unit="mm")
     gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03), unit="length")
     s.magnet.Cuboid(
         id="m",

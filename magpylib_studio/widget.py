@@ -551,7 +551,8 @@ class SceneWidget(anywidget.AnyWidget):
         an expression has no control -- it follows the others. A number with
         no range at all has nowhere to slide to, and is left out. One that
         says what it measures slides in the unit the panel shows it in --
-        `gap (mm)` from 10 to 30, not from 0.01 to 0.03.
+        in a scene shown in mm, `gap (mm)` from 10 to 30, not from 0.01 to
+        0.03.
         """
         import ipywidgets as widgets
 

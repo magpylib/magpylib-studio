@@ -5124,8 +5124,8 @@ class MagpylibStudioSession:
         """Say what a variable measures: `length`, `angle`, `field`, `current`
         or `dimensionless` -- or None, to stop saying. Stored beside its limits
         and changing nothing about its value, which stays in SI (degrees for an
-        angle): a view uses it to show `gap: 15 mm` and to read `15` back as
-        0.015. See `units`."""
+        angle): a view uses it to show `gap: 0.015 m` (15 in a scene shown in
+        mm) and to read `15 mm` back as 0.015. See `units`."""
         if name not in (self.doc.get("variables") or {}):
             return {"ok": False, "error": f"unknown variable {name!r}"}
         if unit is not None and unit not in units.KINDS:
@@ -5157,7 +5157,7 @@ class MagpylibStudioSession:
     def set_model_unit(self, unit=None):
         """The length unit the scene is drawn in -- what a view shows a length
         in, and what an export to a CAD or FEM tool writes. None goes back to
-        the default (mm). The document's numbers stay metres either way."""
+        the default, metres. The document's numbers stay metres either way."""
         if unit is not None and unit not in units.MODEL_UNITS:
             return {
                 "ok": False,
@@ -5181,11 +5181,11 @@ class MagpylibStudioSession:
         {"ok": False}, and the view goes on as before.
 
         `unit` reads it as that kind instead: for a variable being created,
-        which has no unit of its own yet (see `field_units`)."""
+        which has no unit of its own yet (see `field_units`). A name not
+        defined yet, with no `unit`, reads a plain number -- what New
+        Variable asks for before the variable exists."""
         if unit is not None:
             kind = unit
-        elif name not in (self.doc.get("variables") or {}):
-            return {"ok": False, "error": f"unknown variable {name!r}"}
         else:
             kind = ((self.doc.get("variable_bounds") or {}).get(name) or {}).get("unit")
         try:
@@ -5202,8 +5202,9 @@ class MagpylibStudioSession:
     def field_units(self, method, params):
         """What each variable named outright in an operation's values would
         measure, from the box it was typed into -- for a view creating one on
-        the way: `gap` typed as a position is a length, and is shown and read
-        in mm from the start. {"units": {name: {"unit", "symbol"}}}.
+        the way: `gap` typed as a position is a length from the start, shown
+        and read in the scene's length unit. {"units": {name: {"unit",
+        "symbol"}}}.
 
         Only a box holding the variable itself counts. `360 / n` in an angle
         says nothing about what `n` is, and guessing would be worse than
@@ -5407,7 +5408,7 @@ class MagpylibStudioSession:
         result = self.sweep(variable, values, sensor_id, points, field)
         if not result["ok"]:
             raise ValueError(result["error"])
-        # along the variable's own unit, as the panel shows it: gap in mm
+        # along the variable's own unit, as the panel shows it: gap in m, or mm
         kind = ((self.doc.get("variable_bounds") or {}).get(variable) or {}).get("unit")
         shown = units.shown(kind, units.model_unit(self.doc))
         scale = shown["scale"] if shown else 1

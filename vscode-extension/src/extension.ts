@@ -125,14 +125,128 @@ const KIND_LABEL: Record<VariableKind, string> = {
 
 /** What a variable may measure (`docs/fem.md` §6), as the picker offers it.
  *  The value stays SI whichever it is; the unit is how it is shown and read. */
-const UNIT_KINDS: { unit: string | null; label: string; detail: string }[] = [
-  { unit: 'length', label: 'Length', detail: "metres, shown in the scene's length unit" },
-  { unit: 'angle', label: 'Angle', detail: 'degrees, as magpylib turns' },
-  { unit: 'field', label: 'Field', detail: 'tesla: a polarization, a flux density' },
-  { unit: 'current', label: 'Current', detail: 'amperes' },
-  { unit: 'dimensionless', label: 'Dimensionless', detail: 'a pure number' },
-  { unit: null, label: 'No unit', detail: 'shown as the bare number it is' },
+const UNIT_KINDS: {
+  unit: string | null;
+  label: string;
+  detail: string;
+  /** The unit the scene holds it in. */
+  si: string;
+  /** What a value typed with a unit looks like, and a range typed so. */
+  example: string;
+  range: string;
+  /** What variables of this kind are, to recognise one by. */
+  such: string;
+}[] = [
+  {
+    unit: 'length',
+    label: 'Length',
+    detail: "metres, or the scene's length unit",
+    si: 'm',
+    example: '15 mm, 2 cm',
+    range: '10 mm, 30 mm',
+    such: 'a gap, a radius, a pitch',
+  },
+  {
+    unit: 'angle',
+    label: 'Angle',
+    detail: 'degrees, as magpylib turns',
+    si: '°',
+    example: '1.57 rad',
+    range: '-90, 90',
+    such: 'a tilt, a stagger',
+  },
+  {
+    unit: 'field',
+    label: 'Field',
+    detail: 'tesla: a polarization, a flux density',
+    si: 'T',
+    example: '800 mT',
+    range: '500 mT, 1.4 T',
+    such: 'a polarization, a flux density',
+  },
+  {
+    unit: 'current',
+    label: 'Current',
+    detail: 'amperes',
+    si: 'A',
+    example: '2 kA',
+    range: '0, 2 kA',
+    such: 'a coil current',
+  },
+  {
+    unit: 'dimensionless',
+    label: 'Dimensionless',
+    detail: 'a pure number',
+    si: '',
+    example: '',
+    range: '0, 10',
+    such: 'a ratio, a factor',
+  },
+  {
+    unit: null,
+    label: 'No unit',
+    detail: 'shown as the bare number it is',
+    si: '',
+    example: '',
+    range: '0, 10',
+    such: '',
+  },
 ];
+
+/** The rule a value box states under itself: "a field, in T unless you type
+ *  a unit". Empty for a variable that measures nothing. */
+function unitRule(unit?: string | null, symbol?: string): string {
+  const kind = UNIT_KINDS.find((u) => u.unit === unit);
+  if (!kind?.example) {
+    return '';
+  }
+  const article = /^[aeiou]/i.test(kind.label) ? 'an' : 'a';
+  const shownIn = kind.unit === 'angle' ? 'degrees' : symbol || kind.si;
+  return `${article} ${kind.label.toLowerCase()}, in ${shownIn} unless you type a unit`;
+}
+
+/** What a value box shows inside itself until something is typed: a bare
+ *  number, one with a unit, an expression -- "e.g. 1.2   or   800 mT   or
+ *  an expression like b * 2". A length's bare number is in the unit it is
+ *  shown in, so its example follows the scene's length unit. */
+function valueExamples(unit?: string | null, symbol?: string): string {
+  const LENGTH: Record<string, [string, string]> = {
+    m: ['0.015', '15 mm'],
+    cm: ['1.5', '15 mm'],
+    mm: ['15', '2 cm'],
+    µm: ['15000', '15 mm'],
+  };
+  const EXAMPLES: Record<string, [string, string]> = {
+    length: LENGTH[symbol ?? 'm'] ?? LENGTH.m,
+    angle: ['90', '1.57 rad'],
+    field: ['1.2', '800 mT'],
+    current: ['3', '2 kA'],
+  };
+  const [bare, typed] = EXAMPLES[unit ?? ''] ?? ['2.5', ''];
+  return ['e.g. ' + bare, typed, 'an expression like b * 2'].filter(Boolean).join('   or   ');
+}
+
+/** "min, max" as a range of this kind is typed, for a placeholder. */
+function rangeHint(unit?: string | null, symbol?: string): string {
+  const kind = UNIT_KINDS.find((u) => u.unit === unit);
+  return kind?.example
+    ? `min, max in ${kind.unit === 'angle' ? 'degrees' : symbol || kind.si}, or with units: ${kind.range}`
+    : 'min, max — e.g. 0, 10';
+}
+
+/** What a typed value means, said under the box as it is typed: `1` for a
+ *  field is 1 T, `15 mm` for a length is 0.015 m -- the number the scene
+ *  will hold, in the unit it holds it in. */
+export function meaning(
+  value: number,
+  unit?: string | null,
+): vscode.InputBoxValidationMessage {
+  const si = UNIT_KINDS.find((u) => u.unit === unit)?.si ?? '';
+  return {
+    message: `= ${inUnit(value)}${si ? (si === '°' ? si : ` ${si}`) : ''}`,
+    severity: vscode.InputBoxValidationSeverity.Info,
+  };
+}
 
 /** The length units a scene may be shown in; its numbers stay metres. */
 const LENGTH_UNITS = ['m', 'cm', 'mm', 'µm'];
@@ -2219,7 +2333,12 @@ export function activate(context: vscode.ExtensionContext): void {
    * for: the slider falls back to it, and Set Bounds… covers the soft range
    * for when the two differ.
    */
-  const askAllowedRange = async (name: string, whole = false, symbol = '') => {
+  const askAllowedRange = async (
+    name: string,
+    whole = false,
+    unit?: { unit: string | null; symbol: string },
+  ) => {
+    const symbol = unit?.symbol ?? '';
     // in the variable's unit, read by the engine: `10, 30` for a length shown
     // in mm is 10 mm to 30 mm
     const readPair = async (v: string): Promise<[number | null, number | null] | string> => {
@@ -2245,7 +2364,7 @@ export function activate(context: vscode.ExtensionContext): void {
       prompt:
         `Allowed range for ${name}${symbol ? ` (${symbol})` : ''} — optional, ` +
         'and gives it a slider',
-      placeHolder: 'min, max — e.g. 0, 10. Enter to skip',
+      placeHolder: `${rangeHint(unit?.unit, symbol)}. Enter to skip`,
       validateInput: async (v) => {
         if (v.trim() === '') {
           return undefined;
@@ -2292,18 +2411,6 @@ export function activate(context: vscode.ExtensionContext): void {
     return result.ok ? undefined : result.error;
   };
 
-  /** One line of what expressions can do, read off the engine's allow-list. */
-  const expressionHint = async (): Promise<string> => {
-    const help = (await (await getEngine(context)).request('expression_help')) as {
-      functions: string[];
-      constants: string[];
-    };
-    return (
-      `+ - * / ** ( ) · ${help.functions.join(' ')} · ${help.constants.join(' ')}` +
-      ' · other variables'
-    );
-  };
-
   /**
    * What text typed for a variable means, when it is a number and perhaps a
    * unit: the engine reads it (`quantity`), so `15` is 15 mm for a length
@@ -2326,6 +2433,37 @@ export function activate(context: vscode.ExtensionContext): void {
     return read.ok ? { value: read.value } : { error: read.error };
   };
 
+  /**
+   * The box a variable's value is typed into. Inside it, until something is
+   * typed, examples: a bare number, one with a unit, an expression. Under it,
+   * the rule: "a field, in T unless you type a unit". And as it is typed,
+   * what the value means in the unit the scene holds it in (`= 0.001 T`).
+   * `lead` names the variable: "a", or "a is a new variable".
+   */
+  const valueBox = async (
+    name: string,
+    unit: string | null | undefined,
+    symbol: string | undefined,
+    lead: string,
+    value?: string,
+  ): Promise<vscode.InputBoxOptions> => {
+    const rule = unitRule(unit, symbol);
+    return {
+      prompt: `${lead} — ${rule || 'a number or an expression'}`,
+      value,
+      placeHolder: valueExamples(unit, symbol),
+      validateInput: async (v) => {
+        const read = await readQuantity(name, v, unit ?? undefined);
+        if (read?.error) {
+          return read.error;
+        }
+        return read?.value !== undefined && unit
+          ? meaning(read.value, unit)
+          : checkExpression(v);
+      },
+    };
+  };
+
   const editVariable = async (variable: Variable, prompt?: string): Promise<boolean> => {
     // Same rule as the panel: only a leading '=' means an expression. A
     // name-valued variable is a string that is simply its own value. A number
@@ -2338,17 +2476,20 @@ export function activate(context: vscode.ExtensionContext): void {
           ? inUnit(variable.expression as number, variable.shown) +
             (variable.shown?.symbol ? ` ${variable.shown.symbol}` : '')
           : String(variable.expression);
-    const text = await vscode.window.showInputBox({
-      prompt: prompt ?? `${variable.name} — value or expression`,
-      value: current,
-      placeHolder: await expressionHint(),
-      validateInput: async (v) =>
-        (await readQuantity(variable.name, v))?.error ?? checkExpression(v),
-    });
+    const unit = variable.bounds?.unit;
+    const text = await vscode.window.showInputBox(
+      await valueBox(
+        variable.name,
+        unit,
+        variable.shown?.symbol,
+        prompt ?? variable.name,
+        current,
+      ),
+    );
     if (text === undefined) {
       return false;
     }
-    const read = await readQuantity(variable.name, text);
+    const read = await readQuantity(variable.name, text, unit);
     return mutateFromTree('set_variable', {
       name: variable.name,
       value: read?.value ?? asDocumentValue(text),
@@ -2475,8 +2616,8 @@ export function activate(context: vscode.ExtensionContext): void {
       value: low !== undefined || high !== undefined ? `${end(low)}, ${end(high)}` : '',
       placeHolder:
         which === 'hard'
-          ? 'min, max — e.g. 0, 10. Empty for no limit'
-          : `min, max — empty to drag ${rangeLabel(bounds.min, bounds.max, shown) ?? 'the allowed range, which is not set either'}`,
+          ? `${rangeHint(bounds.unit, shown?.symbol)}. Empty for no limit`
+          : `${rangeHint(bounds.unit, shown?.symbol)} — empty to drag ${rangeLabel(bounds.min, bounds.max, shown) ?? 'the allowed range, which is not set either'}`,
       validateInput: async (v) => {
         if (v.trim() === '') {
           return undefined;
@@ -2903,7 +3044,7 @@ export function activate(context: vscode.ExtensionContext): void {
       values,
     });
     // What the box it was typed into measures: `gap` typed as a position is a
-    // length, shown and read in mm from the start rather than once someone
+    // length, shown and read in the scene's length unit from the start rather than once someone
     // finds Variable Properties.
     const { units: measured } = unknown.length && call
       ? await engine.request<{ units: Record<string, { unit: string; symbol: string }> }>(
@@ -2913,19 +3054,17 @@ export function activate(context: vscode.ExtensionContext): void {
       : { units: {} as Record<string, { unit: string; symbol: string }> };
     for (const name of unknown) {
       const unit = measured[name];
-      const unitWords = unit
-        ? ` — a ${UNIT_KINDS.find((u) => u.unit === unit.unit)?.label.toLowerCase() ?? unit.unit}` +
-          (unit.symbol ? `, in ${unit.symbol}` : '')
-        : '';
       // A definition naming something that does not exist yet is rejected by
       // the engine, so stay on this one until it takes or the user gives up.
       for (;;) {
-        const text = await vscode.window.showInputBox({
-          prompt: `${name} is a new variable${unitWords} — give it a value`,
-          placeHolder: await expressionHint(),
-          validateInput: async (v) =>
-            (await readQuantity(name, v, unit?.unit))?.error ?? checkExpression(v),
-        });
+        const text = await vscode.window.showInputBox(
+          await valueBox(
+            name,
+            unit?.unit,
+            unit?.symbol,
+            `${name} is a new variable`,
+          ),
+        );
         if (text === undefined) {
           return false;
         }
@@ -2938,7 +3077,7 @@ export function activate(context: vscode.ExtensionContext): void {
           if (unit) {
             await engine.request('set_variable_unit', { name, unit: unit.unit });
           }
-          await askAllowedRange(name, false, unit?.symbol ?? ''); // as the explicit flow
+          await askAllowedRange(name, false, unit); // as the explicit flow
           break;
         }
         const retry = await vscode.window.showErrorMessage(
@@ -3541,13 +3680,56 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!name) {
         return;
       }
-      // Asked here rather than left for "Set bounds…" afterwards: what a
-      // variable *is* is part of creating it, and a choice variable cannot
-      // even be given a sensible first value without knowing its options.
-      const kind = await askVariableKind(name);
-      if (!kind) {
+      // Asked here rather than left for Variable Properties afterwards: what
+      // a variable *is* is part of creating it -- a choice cannot even be
+      // given a first value without its options, and a length is read in
+      // metres, or in the unit typed, from the first value on.
+      const { model_unit: lengthUnit } = await (
+        await getEngine(context)
+      ).request<{ model_unit: string }>('get_variables');
+      const measures = UNIT_KINDS.filter((u) => u.unit && u.unit !== 'dimensionless').map(
+        (u) => ({
+          label: u.label,
+          description: `in ${u.unit === 'length' ? lengthUnit : u.unit === 'angle' ? 'degrees' : u.si}`,
+          detail: `${u.such} — or type a unit: ${u.example}`,
+          is: 'number' as VariableKind,
+          unit: u.unit,
+          symbol: u.unit === 'length' ? lengthUnit : u.si,
+        }),
+      );
+      const picked = await vscode.window.showQuickPick(
+        [
+          ...measures,
+          {
+            label: KIND_LABEL.number,
+            description: 'no unit',
+            detail: 'a ratio, a factor — gets a slider',
+            is: 'number' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+          {
+            label: KIND_LABEL.whole,
+            description: 'no unit',
+            detail: 'it counts things — magnets, turns, copies',
+            is: 'whole' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+          {
+            label: KIND_LABEL.choice,
+            detail: 'an axis (x, y, z) or a plane (xy, xz, yz) — gets a dropdown',
+            is: 'choice' as VariableKind,
+            unit: null,
+            symbol: '',
+          },
+        ],
+        { placeHolder: `${name} — what does it hold?` },
+      );
+      if (!picked) {
         return;
       }
+      const kind = picked.is;
       if (kind === 'choice') {
         const text = await vscode.window.showInputBox({
           prompt: `${name} — the values it may take`,
@@ -3567,10 +3749,29 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         return;
       }
-      if (!(await editVariable({ name, expression: 0, value: 0 }, 'Value or expression'))) {
+      const text = await vscode.window.showInputBox(
+        await valueBox(name, picked.unit, picked.symbol, name),
+      );
+      if (text === undefined) {
         return;
       }
-      await askAllowedRange(name, kind === 'whole');
+      const read = await readQuantity(name, text, picked.unit ?? undefined);
+      if (
+        !(await mutateFromTree('set_variable', {
+          name,
+          value: read?.value ?? asDocumentValue(text),
+        }))
+      ) {
+        return;
+      }
+      if (picked.unit) {
+        await mutateFromTree('set_variable_unit', { name, unit: picked.unit });
+      }
+      await askAllowedRange(
+        name,
+        kind === 'whole',
+        picked.unit ? { unit: picked.unit, symbol: picked.symbol } : undefined,
+      );
     }),
     vscode.commands.registerCommand(
       'magpylib-studio.editVariable',

@@ -10,12 +10,14 @@
  * panel's own script:
  *
  * 1. A length says what it is in, beside its name, and its box holds the
- *    number in that unit: `gap mm`, 15 -- not 0.015.
+ *    number in that unit: SI unless the scene says otherwise -- `gap m`, 0.015.
  * 2. A bare number typed is in that unit, and one with a unit is in its own:
- *    `20` and `2 cm` both store 0.02.
- * 3. A unit that is not one of the variable's is refused with the engine's
+ *    `0.03`, `20 mm` and `2 cm` all mean what they say.
+ * 3. A scene shown in mm shows `gap mm` holding 30, and reads a bare `20` as
+ *    20 mm.
+ * 4. A unit that is not one of the variable's is refused with the engine's
  *    reason, and nothing is stored.
- * 4. A variable that says nothing about what it measures is as it was: `n`
+ * 5. A variable that says nothing about what it measures is as it was: `n`
  *    shows 10 and takes 12.
  */
 const { enginePython } = require("./engine-python");
@@ -35,7 +37,7 @@ async function main() {
   }
   engine = startEngine();
   await engine.request("load_example", { name: "halbach" });
-  const { roots, settle, sent } = await mount("variables", engine);
+  const { provider, roots, settle, sent } = await mount("variables", engine);
   await settle(8);
 
   const row = (name) => {
@@ -65,24 +67,28 @@ async function main() {
     await settle(12);
   };
 
-  // 1. shown in its unit
-  const gapName = row("gap").querySelector("span.name").textContent;
+  // 1. shown in its unit: SI by default
+  let gapName = row("gap").querySelector("span.name").textContent;
   check(
-    gapName === "gap mm",
+    gapName === "gap m",
     `a length says its unit beside its name: "${gapName}"`,
   );
   check(
-    box("gap").value === "15",
-    `and its box holds millimetres: ${box("gap").value}`,
+    box("gap").value === "0.015",
+    `and its box holds metres: ${box("gap").value}`,
   );
 
   // 2. read in its unit, or in the one typed
-  await type("gap", "20");
+  await type("gap", "0.03");
+  check(
+    (await stored("gap")) === 0.03,
+    `"0.03" stores 0.03 m: ${await stored("gap")}`,
+  );
+  await type("gap", "20 mm");
   check(
     (await stored("gap")) === 0.02,
-    `"20" stores 0.02 m: ${await stored("gap")}`,
+    `"20 mm" stores 0.02 m: ${await stored("gap")}`,
   );
-  check(box("gap").value === "20", `and shows 20 again: ${box("gap").value}`);
   await type("gap", "2.5 cm");
   check(
     (await stored("gap")) === 0.025,
@@ -92,11 +98,27 @@ async function main() {
     (m) => m.type === "rpcRequest" && m.method === "quantity",
   );
   check(
-    asked.length === 2,
-    `the engine reads both (${asked.length} quantity calls)`,
+    asked.length === 3,
+    `the engine reads all three (${asked.length} quantity calls)`,
   );
 
-  // 3. refused, with the reason
+  // 3. a scene shown in mm
+  await engine.request("set_model_unit", { unit: "mm" });
+  provider.refresh();
+  await settle(12);
+  gapName = row("gap").querySelector("span.name").textContent;
+  check(gapName === "gap mm", `shown in mm, it says so: "${gapName}"`);
+  check(
+    box("gap").value === "25",
+    `and holds millimetres: ${box("gap").value}`,
+  );
+  await type("gap", "20");
+  check(
+    (await stored("gap")) === 0.02,
+    `a bare "20" is 20 mm: ${await stored("gap")}`,
+  );
+
+  // 4. refused, with the reason
   const before = await stored("gap");
   await type("gap", "5 kg");
   check(
@@ -109,7 +131,7 @@ async function main() {
     `and says why: "${status}"`,
   );
 
-  // 4. a count is as it was
+  // 5. a count is as it was
   check(box("n").value === "10", `a count shows as it is: ${box("n").value}`);
   await type("n", "12");
   check(

@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import {
   evenRamp,
   incrementRamp,
+  meaning,
   sceneFileState,
   stopEngineForTest,
 } from '../extension';
@@ -586,17 +587,17 @@ suite('magpylib-studio', () => {
       expression: 0.015,
       value: 0.015,
       bounds: { min: 0, max: 0.06, soft_min: 0.01, soft_max: 0.03, unit: 'length' },
-      shown: { symbol: 'mm', scale: 1000 },
+      shown: { symbol: 'm', scale: 1 },
     };
 
-    // Typed in the unit it is shown in: 20 is millimetres.
-    let prompts = answering({ input: ['20'] });
+    // SI unless said otherwise: 20 mm is typed as such, and stored in metres.
+    let prompts = answering({ input: ['20 mm'] });
     try {
       await vscode.commands.executeCommand('magpylib-studio.editVariable', gap);
     } finally {
       prompts.restore();
     }
-    await sceneWhere((d) => doc(d).variables.gap === 0.02, 'gap typed as 20 to be 0.02 m');
+    await sceneWhere((d) => doc(d).variables.gap === 0.02, 'gap typed as 20 mm to be 0.02 m');
 
     // Drawn in centimetres: the document's numbers stay metres.
     prompts = answering({ pick: (items) => items.find((i) => i.label === 'cm') });
@@ -634,12 +635,59 @@ suite('magpylib-studio', () => {
     );
   });
 
+  test('New Variable asks what it holds, and reads its value in that unit', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    type Doc = {
+      variables: Record<string, unknown>;
+      variable_bounds: Record<string, Record<string, unknown>>;
+    };
+    const create = async (label: string, input: string[]) => {
+      const prompts = answering({ input, pick: (items) => items.find((i) => i.label === label) });
+      try {
+        await vscode.commands.executeCommand('magpylib-studio.addVariable');
+      } finally {
+        prompts.restore();
+      }
+    };
+
+    // A length, its value and its range typed with units.
+    await create('Length', ['spacing', '15 mm', '10 mm, 30 mm']);
+    const length = (await sceneWhere(
+      (d) => (d as unknown as Doc).variable_bounds.spacing?.max !== undefined,
+      'spacing to be created with its range',
+    )) as unknown as Doc;
+    assert.strictEqual(length.variables.spacing, 0.015);
+    assert.deepStrictEqual(length.variable_bounds.spacing, {
+      min: 0.01,
+      max: 0.03,
+      unit: 'length',
+    });
+
+    // A plain number, no range: as it always was.
+    await create('Number', ['ratio', '2.5', '']);
+    const plain = (await sceneWhere(
+      (d) => (d as unknown as Doc).variables.ratio !== undefined,
+      'ratio to be created',
+    )) as unknown as Doc;
+    assert.strictEqual(plain.variables.ratio, 2.5);
+    assert.strictEqual(plain.variable_bounds.ratio, undefined);
+  });
+
+  test('what a typed value means is said in the unit the scene holds it in', () => {
+    assert.strictEqual(meaning(1, 'field').message, '= 1 T');
+    assert.strictEqual(meaning(0.015, 'length').message, '= 0.015 m');
+    assert.strictEqual(meaning(90, 'angle').message, '= 90°');
+    assert.strictEqual(meaning(3000, 'current').message, '= 3000 A');
+    assert.strictEqual(meaning(2, 'dimensionless').message, '= 2');
+  });
+
   test('a variable typed into a length takes that unit from the start', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
-    // Position "0, 0, lift2", then lift2's value -- asked for in mm, since a
-    // position is a length -- then no range.
-    const prompts = answering({ input: ['0, 0, lift2', '12', ''] });
+    // Position "0, 0, lift2", then lift2's value -- asked for as a length,
+    // since a position is one, and typed in mm -- then no range.
+    const prompts = answering({ input: ['0, 0, lift2', '12 mm', ''] });
     try {
       await vscode.commands.executeCommand('magpylib-studio.setPosition', {
         id: 'sensor',
@@ -659,7 +707,7 @@ suite('magpylib-studio', () => {
       (d) => (d as unknown as Doc).variables.lift2 !== undefined,
       'lift2 to be created',
     )) as unknown as Doc;
-    assert.strictEqual(after.variables.lift2, 0.012, '12 typed for a length is 12 mm');
+    assert.strictEqual(after.variables.lift2, 0.012, '12 mm typed for a length is 0.012 m');
     assert.strictEqual(after.variable_bounds.lift2?.unit, 'length');
   });
 

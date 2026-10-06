@@ -846,9 +846,10 @@ supports.
 - **Units are metadata** (R2, `docs/fem.md` §6): the document stays bare SI, as
   magpylib wants; a variable may say what it measures (`unit` beside `integer`
   in its limits) and a document which length unit it is shown in (`model_unit`,
-  mm when absent). Views show and read values in that unit through the engine
-  (`get_variables`' `shown`, `quantity`), so no document had to migrate and no
-  `5mm` became a quantity in `expressions.py`.
+  metres when absent: everything is SI until someone says otherwise). Views show
+  and read values in that unit through the engine (`get_variables`' `shown`,
+  `quantity`), so no document had to migrate and no `5mm` became a quantity in
+  `expressions.py`.
 - **Undo is still snapshots.** `_undo` holds whole document copies, so the
   History view and the event log remain two mechanisms that look alike. Now that
   structure is event-sourced, undo could become a pointer into the log — except

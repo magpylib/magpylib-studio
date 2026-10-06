@@ -533,8 +533,8 @@ class Scene:
     set to, and the next run keeps it -- see `variable`. A path to a file not
     there yet is no values, so a script can read the file it is about to save.
 
-    `model_unit` is the length unit the scene is drawn in (`"m"`, `"cm"`,
-    `"mm"` -- the default -- or `"µm"`): what a view shows a length variable
+    `model_unit` is the length unit the scene is shown in (`"m"`, the
+    default, `"cm"`, `"mm"` or `"µm"`): what a view shows a length variable
     in, and what an export to a CAD or FEM tool writes. The numbers written
     here stay metres either way.
     """
@@ -593,7 +593,8 @@ class Scene:
         `options`), or an expression over earlier variables. `bounds` are
         the hard limits, `slider` the range worth dragging through. `unit`
         says what it measures -- `"length"`, `"angle"`, `"field"`,
-        `"current"`, `"dimensionless"` -- so a view shows `gap: 15 mm`; the
+        `"current"`, `"dimensionless"` -- so a view shows `gap: 0.015 m`, or
+        15 mm in a scene shown in mm, and reads `15 mm` typed; the
         value itself stays in SI (degrees for an angle), as everything here
         is: `s.variable("gap", 0.015, unit="length")`.
 

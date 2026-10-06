@@ -14,7 +14,7 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[dev]"
 # the extension (from vscode-extension/)
 npm install
 npm run compile     # tsc + eslint + webview, contribution and version checks
-npm test            # twenty-five tests in a real Extension Development Host
+npm test            # twenty-seven tests in a real Extension Development Host
 npm run check:widget-browser  # the notebook widget, driven in headless Chrome
 ```
 
@@ -42,7 +42,7 @@ both the host code and the webview scripts; two contribution checks (every
 declared command registered, every menu clause matching a context value the tree
 can set, every palette entry safe to invoke with no argument); and a DOM harness
 that runs a panel's real script against a real engine
-(`npm run inspect -- halbach`). On top of that, `npm test` runs twenty-five
+(`npm run inspect -- halbach`). On top of that, `npm test` runs twenty-seven
 integration tests **inside a real Extension Development Host** — activation, the
 engine subprocess answering through the virtual `scene.json`, a removal taking a
 pattern's copies with it, the script tab applying an edit on save, the engine

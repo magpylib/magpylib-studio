@@ -75,13 +75,28 @@ def test_a_length_is_shown_in_the_model_unit():
 
 
 def test_a_variable_says_what_it_measures_and_its_value_stays_si():
+    """SI unless the scene says otherwise: a length is shown in metres."""
     session = halbach()
     listed = {v["name"]: v for v in session.get_variables()["variables"]}
-    assert session.get_variables()["model_unit"] == "mm"
+    assert session.get_variables()["model_unit"] == "m"
     assert listed["gap"]["value"] == 0.015
-    assert listed["gap"]["shown"] == {"symbol": "mm", "scale": 1000.0}
+    assert listed["gap"]["shown"] == {"symbol": "m", "scale": 1.0}
     assert listed["stagger"]["shown"] == {"symbol": "°", "scale": 1.0}
     assert "shown" not in listed["n"]  # a count measures nothing
+
+
+def test_every_kind_is_shown_in_si_unless_the_scene_says_otherwise():
+    """Metres, tesla, amperes -- and degrees for an angle, which is what
+    magpylib turns by and what the document holds."""
+    shown = {k: units.shown(k, units.DEFAULT_MODEL_UNIT) for k in units.KINDS}
+    assert {k: v["symbol"] for k, v in shown.items()} == {
+        "length": "m",
+        "angle": "°",
+        "field": "T",
+        "current": "A",
+        "dimensionless": "",
+    }
+    assert all(v["scale"] == 1 for v in shown.values())
 
 
 def test_a_unit_is_not_a_limit():
@@ -123,9 +138,14 @@ def test_the_model_unit_is_the_documents_and_undoes():
 
 
 def test_typed_text_is_read_for_the_variable_it_is_typed_into():
+    """A bare number in the unit shown -- metres, unless the scene is shown
+    in something else -- and one with a unit in its own."""
     session = halbach()
-    assert session.quantity("gap", "20") == {"ok": True, "value": 0.02}
+    assert session.quantity("gap", "0.02") == {"ok": True, "value": 0.02}
+    assert session.quantity("gap", "20 mm") == {"ok": True, "value": 0.02}
     assert session.quantity("gap", "2 cm") == {"ok": True, "value": 0.02}
+    assert session.set_model_unit("mm")["ok"]
+    assert session.quantity("gap", "20") == {"ok": True, "value": 0.02}
     assert session.quantity("tilt", "45") == {"ok": True, "value": 45}
     assert session.quantity("n", "12") == {"ok": True, "value": 12}
     assert session.quantity("gap", "radius / 2")["ok"] is False  # an expression
@@ -225,10 +245,15 @@ def test_units_are_reachable_over_the_wire():
 
 
 def test_a_sweep_is_plotted_along_the_variables_unit():
-    """Swept from 10 to 30 mm, it reads 10 to 30 along a `gap (mm)` axis --
-    not 0.01 to 0.03 along `gap`."""
+    """Along a `gap (m)` axis, and in a scene shown in mm along `gap (mm)`
+    from 10 to 30 -- not 0.01 to 0.03 along a bare `gap`."""
     session = halbach()
-    figure = session.get_sweep_figure("gap", [0.01, 0.02, 0.03], points=[[0, 0, 0]])
+    sweep = [0.01, 0.02, 0.03]
+    figure = session.get_sweep_figure("gap", sweep, points=[[0, 0, 0]])
+    assert figure["layout"]["xaxis"]["title"]["text"] == "gap (m)"
+    assert figure["data"][0]["x"] == pytest.approx(sweep)
+    assert session.set_model_unit("mm")["ok"]
+    figure = session.get_sweep_figure("gap", sweep, points=[[0, 0, 0]])
     assert figure["layout"]["xaxis"]["title"]["text"] == "gap (mm)"
     assert figure["data"][0]["x"] == pytest.approx([10, 20, 30])
     plain = session.get_sweep_figure("n", [8, 10], points=[[0, 0, 0]])
@@ -302,5 +327,15 @@ def test_a_variable_typed_into_a_box_measures_what_the_box_does(method, params, 
 
 def test_a_new_variables_value_is_read_in_the_unit_it_will_have():
     session = halbach()
-    assert session.quantity("lift", "12", unit="length") == {"ok": True, "value": 0.012}
-    assert session.quantity("lift", "12")["ok"] is False  # no such variable yet
+    assert session.quantity("lift", "0.012", unit="length") == {
+        "ok": True,
+        "value": 0.012,
+    }
+    assert session.quantity("lift", "12 mm", unit="length") == {
+        "ok": True,
+        "value": 0.012,
+    }
+    assert session.quantity("jz", "1", unit="field") == {"ok": True, "value": 1}
+    # not defined yet and no unit said: a plain number, as New Variable asks
+    assert session.quantity("lift", "12") == {"ok": True, "value": 12}
+    assert session.quantity("lift", "12 mm")["ok"] is False

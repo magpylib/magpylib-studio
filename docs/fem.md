@@ -314,16 +314,25 @@ double-convert.
   Stored as `"unit"` in `variable_bounds`, last in a fixed key order. Set with
   `set_variable_unit(name, unit)`; `set_variable_bounds` keeps it, since a unit
   is not a limit, and a variable with options takes none.
-- **The model unit:** `"model_unit"` on the document (`m`, `cm`, `mm`, `µm`), mm
-  when absent, set with `set_model_unit`. It is what a length is shown in now
-  and what M6's emitter will write.
+- **The model unit:** `"model_unit"` on the document (`m`, `cm`, `mm`, `µm`),
+  set with `set_model_unit`. It is what a length is shown in now and what M6's
+  emitter will write. **Metres when absent** (decided 2026-10-06): every kind is
+  shown in SI — metres, tesla, amperes, and degrees for an angle, as the
+  document holds them — until a scene is set to be shown otherwise, and a unit
+  typed (`15 mm`) is always read as itself. "mm typical" above was the guess for
+  an Ansys model; it is now a choice per scene, not the default.
 - **Views:** `get_variables` says how each value is shown (`shown`: a symbol and
   a scale), and `quantity(name, text)` reads what was typed — `15` in the shown
   unit, `15 mm` or `1.5 cm` in its own — in decimal, so 1.1 mm is 0.0011 and not
   1.1 × 0.001. The Variables panel, Edit Variable, both ranges in Variable
   Properties and the sweep's range read through it; the notebook sliders slide
-  in the shown unit; the sweep plot's axis is `gap (mm)`; **Length Unit…** sets
-  the model unit.
+  in the shown unit; the sweep plot's axis is `gap (m)`, or `gap (mm)` in a
+  scene shown in mm; **Length Unit…** sets the model unit. While a value is
+  typed, the box says what it means in the unit the scene holds it in: `1` for a
+  field is `= 1 T`, `15 mm` for a length `= 0.015 m`. New Variable asks what the
+  variable holds — a length, an angle, a field, a current, a plain number, a
+  count or a choice — and every prompt for a value says the unit a bare number
+  is read in and how to type another.
 - **Scripts:** the builder takes `variable(…, unit=…)` and
   `Scene(model_unit=…)`, and `to_builder_script` writes both. A plain export
   says what a number measures in its comment (`gap = 0.015  # metres, …`). A
@@ -331,9 +340,9 @@ double-convert.
   number, and named in a builder script rather than written.
 - **The examples** say what their variables measure.
 - **A variable typed into a box** — `gap` as a position — measures what the box
-  does (`field_units`): it is created a length, its value asked for and read in
-  mm. Only a box holding the variable itself; `360 / n` in an angle says nothing
-  about `n`.
+  does (`field_units`): it is created a length, and its value is asked for as
+  one ("a length, in m"). Only a box holding the variable itself; `360 / n` in
+  an angle says nothing about `n`.
 - **G5 holds:** a document that never said a unit loads, lists and saves exactly
   as before (`tests/test_units.py`).
 - **Not yet:** emitters (M6 converts at that boundary); the Inspector shows an

@@ -30,8 +30,8 @@ sequences them and adds what they did not cover: agents, and Ansys both ways.
     applies it (`apply_builder_script`), as one undo step; plain magpylib is
     refused, and **Export as Builder Script…** writes code to keep.
 - **#12 merged** (2026-10-06, `320b80a`).
-- **R2, units**, on `feat/units`: what a variable measures, shown and read in
-  its unit (`gap: 15 mm`), the document still SI.
+- **R2, units**, on `feat/units` (#28): what a variable measures, shown in SI
+  unless the scene says otherwise, and read in whatever unit is typed (`15 mm`).
 - **On `main`**: the first-fit zoom fix (`0af7f01`) — the axes' `Box3Helper` was
   measured as the unit cube it is built as, so scenes in centimetres opened as a
   speck. A browser-harness check guards it.
@@ -213,9 +213,9 @@ apply-on-save returned. **Then #12 is a complete proposal** — merge it.
 ### R2 — Units ✅
 
 **Done** (2026-10-06; `fem.md` §6, "As built"): a unit kind per variable, a
-model unit per document (mm unless it says otherwise), and every view that shows
-or reads a variable's value doing it in that unit — the Variables panel, its
-properties, the sweep, the notebook sliders. The builder takes
+model unit per document (metres unless it says otherwise), and every view that
+shows or reads a variable's value doing it in that unit — the Variables panel,
+its properties, the sweep, the notebook sliders. The builder takes
 `variable(…, unit=…)` and `Scene(model_unit=…)`; the examples say what their
 variables measure; documents without units are unchanged. The emitter's side of
 the boundary waits for M6.

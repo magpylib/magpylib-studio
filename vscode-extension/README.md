@@ -56,12 +56,13 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   and constants listed in the panel and checked as you type. `⋯` lists what a
   variable is — its name, its limits, its kind — each entry showing what it
   holds; renaming from there rewrites everything written in terms of it. A
-  variable can also say what it measures — length, angle, field, current — and
-  is then shown and typed in that unit: `gap mm` holds 15, `20` means 20 mm and
-  `2 cm` means what it says, while the scene itself stays in metres. Lengths are
-  shown in the scene's length unit, mm unless **Length Unit…** says otherwise.
-  **Sweep a Variable…** plots the field against one in the Field view, along its
-  unit.
+  variable can also say what it measures — length, angle, field, current. It is
+  shown in SI (`gap m` holds 0.015) and reads a unit when one is typed: `20 mm`
+  and `2 cm` mean what they say, and the box says what a value means as it is
+  typed (`1` for a field: `= 1 T`). **Length Unit…** shows a scene's lengths in
+  mm instead, where a bare number then means mm; the scene itself stays in
+  metres. **Sweep a Variable…** plots the field against one in the Field view,
+  along its unit.
 - **Undo view** — the session's checkpoints, newest first: click any to jump the
   scene there, backwards or forwards. This is _not_ the construction history
   above; it is document snapshots, and it is gone on reload.
