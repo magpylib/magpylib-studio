@@ -222,7 +222,7 @@ VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[dev]"
 # the extension (from vscode-extension/)
 npm install
 npm run compile     # tsc + eslint + webview, contribution and version checks
-npm test            # nineteen tests in a real Extension Development Host
+npm test            # twenty-three tests in a real Extension Development Host
 npm run check:widget-browser  # the notebook widget, driven in headless Chrome
 ```
 
@@ -309,8 +309,10 @@ it, as GitHub already does.
   included, by _executing_ it with `show()` intercepted, and reports what that
   flattens. `to_builder_script()` writes the scene as `magpylib_studio.build`
   code instead, which run builds the same document: variables, formulas and
-  patterns included (`docs/builder.md`). And a script written with the builder
-  opens in the studio as the scene it built, whole.
+  patterns included (`docs/builder.md`). A script written with the builder opens
+  in the studio as the scene it built, whole, and the script tab is that code:
+  `apply_builder_script()` runs it on a save and replaces the document with what
+  it built, as one undo step, refusing plain magpylib rather than flattening it.
 
 ## JSON-RPC protocol (stdio)
 
@@ -323,20 +325,20 @@ line — no ports, no framework.
 <- {"id": 2, "error": {"type": "KeyError", "message": "..."}}
 ```
 
-| group     | methods                                                                                                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| inspect   | `list_objects` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                   |
-| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                          |
-| edit      | `apply_edit` (style) · `set_param` · `reset_style`                                                                                                                 |
-| transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                              |
-| patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                              |
-| variables | `get_variables` · `set_variable` · `set_variable_bounds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression`    |
-| history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                       |
-| view      | `get_figure` (3D) · `get_field_figure` (along a sensor path) · `get_field_map` (plane heatmap) · `get_sweep_figure`                                                |
-| field     | `get_field` — summed B/H at points or along a sensor · `sweep` — the field against a variable                                                                      |
-| undo      | `undo` · `redo` · `goto_history`                                                                                                                                   |
-| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script` |
-| bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                             |
+| group     | methods                                                                                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| inspect   | `list_objects` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                            |
+| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                   |
+| edit      | `apply_edit` (style) · `set_param` · `reset_style`                                                                                                                                          |
+| transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                       |
+| patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                       |
+| variables | `get_variables` · `set_variable` · `set_variable_bounds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression`                             |
+| history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                                                |
+| view      | `get_figure` (3D) · `get_field_figure` (along a sensor path) · `get_field_map` (plane heatmap) · `get_sweep_figure`                                                                         |
+| field     | `get_field` — summed B/H at points or along a sensor · `sweep` — the field against a variable                                                                                               |
+| undo      | `undo` · `redo` · `goto_history`                                                                                                                                                            |
+| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `apply_builder_script` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script` |
+| bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                                                      |
 
 Mutating methods return `{"ok": bool, "error"?: str}`. Everything is
 JSON-serializable in both directions.
@@ -363,7 +365,7 @@ both the host code and the webview scripts; two contribution checks (every
 declared command registered, every menu clause matching a context value the tree
 can set, every palette entry safe to invoke with no argument); and a DOM harness
 that runs a panel's real script against a real engine
-(`npm run inspect -- halbach`). On top of that, `npm test` runs nineteen
+(`npm run inspect -- halbach`). On top of that, `npm test` runs twenty-three
 integration tests **inside a real Extension Development Host** — activation, the
 engine subprocess answering through the virtual `scene.json`, a removal taking a
 pattern's copies with it, the script tab applying an edit on save, the engine

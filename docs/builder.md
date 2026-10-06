@@ -2,10 +2,11 @@
 
 **Status: B1 is built**, with formulas (`s.sampled`) and saved values
 (`Scene(values=…)`) (`magpylib_studio/build.py`, `tests/test_build.py`,
-`examples/builder_demo.py`), and so is B2 (`to_builder_script`); B3 is not.
-Written on the one-way branch (#12) because #12 removes the only way to write
-parametric code and get a document back, and this is what replaces it. #12
-should be judged with it, not without.
+`examples/builder_demo.py`), and so are B2 (`to_builder_script`) and B3 (the
+script tab shows builder code and a deliberate save applies it). Written on the
+one-way branch (#12) because #12 removes the only way to write parametric code
+and get a document back, and this is what replaces it. #12 should be judged with
+it, not without.
 
 ---
 
@@ -153,7 +154,7 @@ That keeps magpylib's spelling. Whether it is too clever next to a plain
 ```
 panel, widget     ─┐                          ┌─▶ to_script          plain magpylib
 agent (LM tools)  ─┼─▶ session ─▶ document ───┼─▶ to_aedt_script     fem.md M6
-builder script    ─┘   operations             └─▶ to_builder_script  later, §5
+builder script    ─┘   operations             └─▶ to_builder_script  the script tab, §5
 ```
 
 Nothing reads code back. The builder is _executed_, and execution calls the same
@@ -191,21 +192,61 @@ would read almost line for line alike.
 - **`parse_script` stays deleted.** The builder is not a reader.
 - **`to_script` stays the plain magpylib export.** A script anyone can run
   without studio is worth keeping as it is.
-- **The save flow is provisional.** #12's "Build a new scene from this" imports
-  by executing plain magpylib, which flattens. `to_builder_script()` emits one
-  builder call per step instead, which makes that import lossless, and would let
-  the script tab show builder code.
+- **The script tab shows builder code, and a deliberate save applies it** (B3,
+  `roadmap.md` R1). #12 first took apply-on-save away: running an edited plain
+  magpylib script recovers only the objects it leaves behind, so a save that
+  changed nothing still turned every variable into a number and every pattern
+  into its copies. Saving offered "Build a new scene from this" instead, an
+  import by execution that flattened in the same way. `to_builder_script()`
+  writes one builder call per step, which is lossless, so the save could apply
+  again.
 
-That last one is a round trip, but through execution rather than parsing. The
-emitter has one call per operation to produce, and whether
-`exec(to_builder_script(doc))` rebuilds `doc` is a property tested over every
-example and over a scene edited the way the panel edits one -- not an
-idiom-by-idiom agreement between an emitter and a parser (`direction.md` §2).
-Poses are the one subtlety: the panel merges a pin into the pin it follows, so a
-pose is written as one `set_transform` with both halves, and a reparent replays
-through the same merge. Whether the tab shows builder code, and whether its save
-then applies, is the decision to make here: before #12 merges, or with #12
-shipped as is and this revisiting it.
+That is a round trip, but through execution rather than parsing. The emitter has
+one call per operation to produce, and whether `exec(to_builder_script(doc))`
+rebuilds `doc` is a property tested over every example and over a scene edited
+the way the panel edits one -- not an idiom-by-idiom agreement between an
+emitter and a parser (`direction.md` §2). Poses are the one subtlety: the panel
+merges a pin into the pin it follows, so a pose is written as one
+`set_transform` with both halves, and a reparent replays through the same merge.
+
+**Why apply-on-save returned.** The degradation that removed it was what plain
+magpylib cannot say, and builder code says it. Editing `radius` in the tab and
+saving changes `radius`; `r1` still sits at `=radius` and the ring is still a
+pattern. The session's `apply_builder_script(path)` runs the tab, takes the
+`Scene` it built and replaces the document as one undo step.
+
+**Compared with the tab, not with the scene.** What the edited script built is
+set beside the open scene built again from its own tab (`build.rebuilt`). The
+same: nothing happens, so a reflexive save is free whatever the tab could not
+say. Different, while the tab does not build the open scene back exactly: the
+save is refused and names the first line that differs, because the edit would
+carry every such difference with it and nobody made those. That is a guard for
+gaps not found yet; the ones a review found are closed (hide and `show()`, a
+reparented path, a step that no longer applies), except a step the History panel
+moved after its pattern (§9). What it costs, said in the tab's header:
+
+- **The tab is the studio's view.** It is regenerated from the scene after a
+  save, so a helper or a loop typed into it comes back as the steps it made, and
+  comments go. Code to keep goes to a file of its own: **Export as Builder
+  Script…** writes it once, and nothing regenerates it after that.
+- **The tab is out of date while it is being edited.** It is not re-rendered
+  under unsaved or refused text, so a drag, an agent's edit or an undo made
+  meanwhile is not in it, and applying it would undo them: the save asks first.
+- **What no call writes does not survive a save that changes something.** An
+  expression a resize set aside (`overridden`) is named at the top of the tab,
+  and the save's result names it again when it goes. A save that builds the
+  scene already open changes nothing and adds no undo step, so a reflexive Cmd+S
+  keeps it.
+
+**What a save refuses**, leaving the scene as it was: a script that raises (with
+its line, and the tab keeps the text until it runs; a clean `exit()` is a script
+that finished); one that builds no `Scene`, or several; one that would change
+more than its edit (above); and plain magpylib, which would come back flattened.
+Bringing plain magpylib in is an import, asked for by name: save it as a file of
+its own and use Open in Magpylib Studio. A relative mesh path in the tab means
+what it means in the document, relative to the scene's folder, although the tab
+is a file in the editor's storage; in a builder script opened in the studio,
+relative to the script's folder, where an exported one sits beside its scene.
 
 ---
 
@@ -224,9 +265,17 @@ every example, and a scene edited in the panel's ways (drags pinned in front of
 a pattern, moves, turns, a reparent, a hidden ring, an object made and removed),
 come back as the same document.
 
-**B3 — the script tab.** Builder code or plain magpylib, and apply-on-save or
-explicit import (§5). Proposed (`docs/roadmap.md` R1): builder code, applied on
-a deliberate save, with an export for code someone keeps.
+**B3 — the script tab ✅.** Builder code, applied on a deliberate save (§5,
+`docs/roadmap.md` R1): `apply_builder_script` in the session, the tab rendering
+`to_builder_script()` under a header that says it is regenerated, auto-save not
+applying, and **Export as Builder Script…** for code someone keeps. Tested in
+the engine (an edit applies as one step and changes nothing else; a reflexive
+save is unchanged across the scenes the panel leaves, and those the tab cannot
+say; a save that would change more than its edit, a failing script, one with no
+`Scene` and plain magpylib are each refused and change nothing) and in VS Code
+(edit `radius` in the tab and save, and the document follows; a broken script
+leaves the scene alone and stays in the tab; plain magpylib is refused with the
+message).
 
 **Independent of FEM.** `fem.md` M6 consumes the document, not the builder, so
 neither waits for the other. B1 is what makes "write it in code, export it to
@@ -273,17 +322,17 @@ that, three levels:
    longer apply (which the session already does for a scene it opens). Nothing
    is parsed or rewritten. It is an override layer, though, and `instancing.md`
    warns that Godot's override bugs live exactly there.
-3. **The script as a generated view — B3.** Regenerate the builder script from
-   the document on every edit and apply its save by execution. Always in sync,
-   because the script is machine-owned: helpers, loops and comments are
-   normalized away at the next GUI edit.
+3. **The script as a generated view — built (B3).** Regenerate the builder
+   script from the document on every edit and apply its save by execution.
+   Always in sync, because the script is machine-owned: helpers, loops and
+   comments are normalized away at the next save or GUI edit.
 
-**A builder script opens whole.** `load_script` -- Open in Magpylib Studio, and
-the script tab's "Build a new scene from this" -- runs a script; one that left a
-`Scene` behind made a document, and that document is what opens: variables,
-formulas and patterns, with nothing to guess and nothing to warn about. In a
-notebook, `SceneWidget(scene, editable=True).variable_sliders()` is the
-Variables panel's controls for the same scene, bound both ways.
+**A builder script opens whole.** `load_script` -- Open in Magpylib Studio --
+runs a script; one that left a `Scene` behind made a document, and that document
+is what opens: variables, formulas and patterns, with nothing to guess and
+nothing to warn about. In a notebook,
+`SceneWidget(scene, editable=True).variable_sliders()` is the Variables panel's
+controls for the same scene, bound both ways.
 
 **Any other script says what it lost.** `load_script` keeps what a plain
 magpylib script built; its top-level numbers come back as numbers. The import
@@ -327,9 +376,18 @@ Each has a provisional answer in B1, to revisit with use.
 - **Coverage.** Editor state such as `overridden`, mesh stamps and hidden
   styles: builder calls, or out of scope and carried some other way? B2's
   property test forces the answer. _B2:_ everything a person or an agent can
-  make is written -- a hidden object as its style before hiding, then `hide()`
-  -- and the one piece of editor state with no call, an expression a resize set
-  aside (`overridden`), is named in a comment at the top of the script.
+  make is written -- a hidden object as its style before hiding, then `hide()`,
+  and `show()` for one shown again inside a hidden collection -- and what has no
+  call, an expression a resize set aside (`overridden`), a key this engine does
+  not know or a step that no longer applies, is named in a comment at the top of
+  the script.
+- **Step order.** The panel puts an edit to a patterned object in front of its
+  pattern, so that a drag moves the whole ring, and builder calls go through the
+  same operation: `m.duplicate_around(…)` then `m.move(…)` moves every copy,
+  where magpylib's reading of those lines moves `m` alone. It is also why a step
+  the History panel moved after a pattern cannot be written back, which R1's
+  save refuses rather than carry. _Open:_ recording a script's steps in the
+  order written closes both, and changes what such a script means.
 - **numpy.** Support `np.sin(handle)` through `__array_ufunc__`, or refuse numpy
   on handles entirely and keep one way to say it? _B1:_ numpy's arithmetic and
   the functions an expression has are written as expressions (so `np.pi * r` and

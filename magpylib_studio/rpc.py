@@ -54,6 +54,7 @@ _PUBLIC = {
     "load_scene",
     "load_script",
     "load_captured",
+    "apply_builder_script",
     "load_example",
     "list_examples",
     "clear_scene",
@@ -79,6 +80,7 @@ _PUBLIC = {
     "move_event",
     "to_dict",
     "to_script",
+    "to_builder_script",
 }
 
 

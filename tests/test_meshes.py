@@ -555,6 +555,61 @@ def test_moving_the_document_re_resolves_its_meshes(cube_stl, tmp_path):
     assert "cube.stl" in session._broken[0]["error"]
 
 
+def test_the_script_tab_finds_a_mesh_where_the_scene_does(cube_stl, tmp_path):
+    """The tab lives in the editor's storage and the engine runs wherever the
+    editor started it, so a relative path in the tab means what it means in
+    the document: beside the scene. Resolved anywhere else, saving the tab of
+    a scene with a part in it would be refused for a file that is right
+    there."""
+    session = MagpylibStudioSession()
+    session.set_base_dir(str(cube_stl.parent))
+    assert add_mesh(
+        session, "rotor", {"from": "file", "path": "cube.stl", "scale": 0.001}
+    )["ok"]
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    tab = storage / "scene.py"
+    tab.write_text(
+        session.to_builder_script().replace("(0, 0, 1.2)", "(0, 0, 1.0)"),
+        encoding="utf-8",
+    )
+
+    result = session.apply_builder_script(str(tab))
+
+    assert result == {"ok": True}
+    (rotor,) = session.list_objects()
+    assert rotor["mesh"]["faces"] == 12
+    params = {p["name"]: p["value"] for p in session.get_params("rotor")}
+    assert params["polarization"] == [0, 0, 1.0]
+
+
+def test_an_exported_builder_script_opens_with_its_parts(
+    cube_stl, tmp_path, monkeypatch
+):
+    """Export as Builder Script writes the scene's code beside the scene, and
+    its mesh paths mean that folder. Opened again -- Open in Magpylib Studio,
+    in an engine started anywhere -- it found its parts only if the engine
+    happened to have been started there."""
+    session = MagpylibStudioSession()
+    session.set_base_dir(str(cube_stl.parent))
+    assert add_mesh(
+        session, "rotor", {"from": "file", "path": "cube.stl", "scale": 0.001}
+    )["ok"]
+    script = cube_stl.parent / "scene_build.py"
+    script.write_text(session.to_builder_script(), encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    opened = MagpylibStudioSession()
+    result = opened.load_script(str(script))
+
+    assert result["ok"] is True
+    (rotor,) = opened.list_objects()
+    assert rotor["mesh"]["faces"] == 12
+    assert opened._base_dir == str(cube_stl.parent)
+
+
 def test_a_refused_load_leaves_the_open_scene_where_it_was(cube_stl):
     """`load_scene` refuses a document from a newer version rather than read
     it half-way — and that refusal has to be total. Setting the base directory

@@ -113,13 +113,21 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   opening anything, the way VS Code restores an unsaved editor: the scene is in
   the tree when you look, and _New Scene_ discards it if you would rather start
   over.
-- **The script tab is editable both ways** — _Edit Python Script_ renders the
-  scene as runnable magpylib, and saving it rebuilds the scene from what you
-  wrote, as one undo step. Variables and patterns survive the round trip intact;
-  a script the studio cannot parse is executed instead, and what that flattens
-  is reported. It is a view of the current scene, not a saved file: a tab VS
-  Code restores after a reload is re-rendered against whatever scene is loaded
-  now (unsaved edits excepted), so it never shows the last project.
+- **The script tab is the scene as code you can edit** — _Edit Python Script_
+  shows the scene as builder code (`magpylib_studio.build`: magpylib's spelling,
+  with variables that stay variables), and saving it applies it, as one undo
+  step. Change `radius` and save, and the scene's `radius` changes, with every
+  variable and pattern intact. A script that fails leaves the scene alone and
+  stays in the tab for you to fix; plain magpylib is refused, since running it
+  would flatten the scene — open that with _Open in Magpylib Studio_ instead.
+  The rare scene the tab cannot write exactly refuses edits from the tab, saying
+  where, rather than letting a save change what you did not edit; and if the
+  scene changed after the tab was written — a drag, an agent, an undo — a save
+  asks before undoing that. Auto-save does not apply the tab. It is a view of
+  the current scene, not a saved file: it is regenerated after a save, so a loop
+  or a helper written there comes back as the steps it made. For code to keep,
+  use _Export as Builder Script…_; _Export as Python Script…_ writes plain
+  magpylib anyone can run.
 - **Properties** — the Inspector's `properties` section: the object's physics
   parameters (polarization, dimension, diameter, current, moment, vertices,
   pixels) as numeric widgets, with units in the tooltips; matrices like polyline

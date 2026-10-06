@@ -110,6 +110,10 @@
         "title": "Magpylib Studio: Export as Python Script..."
       },
       {
+        "command": "magpylib-studio.exportBuilderScript",
+        "title": "Magpylib Studio: Export as Builder Script..."
+      },
+      {
         "command": "magpylib-studio.importScript",
         "title": "Magpylib Studio: Import Python Script..."
       },
@@ -588,9 +592,14 @@
           "group": "2_scene@3"
         },
         {
-          "command": "magpylib-studio.newCollection",
+          "command": "magpylib-studio.exportBuilderScript",
           "when": "view == magpylib-studio.sceneView",
           "group": "2_scene@4"
+        },
+        {
+          "command": "magpylib-studio.newCollection",
+          "when": "view == magpylib-studio.sceneView",
+          "group": "2_scene@5"
         },
         {
           "command": "magpylib-studio.addVariable",

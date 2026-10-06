@@ -196,23 +196,28 @@ function answering({
   };
 }
 
-/** What saving the script tab says, since it no longer applies the edit. */
-const SCRIPT_OFFER = /edits here are not applied back/;
-const BUILD_FROM_SCRIPT = 'Build a new scene from this';
+/** What a refused save of the script tab starts with. */
+const NOT_APPLIED = /^Magpylib Studio: the script was not applied, and the scene is as it was/;
+/** What a save asks when the scene moved on after the tab was written. */
+const STALE = /^Magpylib Studio: the scene changed after the script tab was written/;
+const APPLY_ANYWAY = 'Apply Anyway';
 
 /**
- * Answer the warnings a test expects, and hear what they said. A warning with
- * no answer here goes on to the suite's spy, so one nobody expected still
- * fails the run.
+ * Answer the messages of one kind a test expects, and hear what they said. A
+ * message with no answer here goes on to the suite's spy, so one nobody
+ * expected still fails the run.
  */
-function answeringWarnings(...answers: [RegExp, string | undefined][]): {
+function answeringMessages(
+  kind: 'showErrorMessage' | 'showWarningMessage',
+  ...answers: [RegExp, string | undefined][]
+): {
   said: string[];
   restore: () => void;
 } {
   const window = vscode.window as unknown as Record<string, unknown>;
-  const spied = window.showWarningMessage as (...a: unknown[]) => unknown;
+  const spied = window[kind] as (...a: unknown[]) => unknown;
   const said: string[] = [];
-  window.showWarningMessage = async (message: string, ...rest: unknown[]) => {
+  window[kind] = async (message: string, ...rest: unknown[]) => {
     const found = answers.find(([pattern]) => pattern.test(message));
     if (!found) {
       return spied(message, ...rest);
@@ -223,9 +228,28 @@ function answeringWarnings(...answers: [RegExp, string | undefined][]): {
   return {
     said,
     restore: () => {
-      window.showWarningMessage = spied;
+      window[kind] = spied;
     },
   };
+}
+
+/** Wait for something with no event of its own to wait on, such as a message
+ *  having been said. */
+async function until(predicate: () => boolean, what: string, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out after ${timeoutMs} ms waiting for ${what}`);
+    }
+    await pause(50);
+  }
+}
+
+/** Close the script tab, which lets go of any text it holds: the next test
+ *  to open it starts from the scene. */
+async function closeScriptTab(tab: vscode.TextDocument) {
+  await vscode.window.showTextDocument(tab);
+  await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
 }
 
 /** Poll an open document's text, the way sceneWhere polls the scene. */
@@ -386,56 +410,165 @@ suite('magpylib-studio', () => {
     assert.ok(present.has('r2'), 'the other ring should be untouched');
   });
 
-  test('saving the script tab applies nothing, and puts the rendering back', async function () {
-    this.timeout(60000);
-    const before = await loadExample('halbach', 'halbach');
-    const tab = await openScriptTab();
-    const rendered = tab.getText();
-    assert.match(rendered, /^import magpylib as magpy/m);
-    assert.match(rendered, /for i in range\(1, n\)/, 'the pattern should export as a loop');
-
-    // Generation is one-way: the edit is not applied, the save says so, and
-    // declining the import it offers hands the tab back to the scene.
-    const answers = answeringWarnings([SCRIPT_OFFER, undefined]);
-    try {
-      await editAndSave(tab, (text) => text.replace(/^radius = [\d.]+/m, 'radius = 0.0325'));
-      await textWhere(tab, (text) => text === rendered, 'the rendering to be put back');
-    } finally {
-      answers.restore();
-    }
-    assert.strictEqual(answers.said.length, 1, 'the save should offer an import once');
-
-    await pause(500); // an apply would land after the tab, not before it
-    assert.deepStrictEqual(await scene(), before, 'the save changed the scene');
-  });
-
-  test('a saved script tab builds a new scene when asked to', async function () {
+  test('the script tab is builder code, and saving it applies it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
     const tab = await openScriptTab();
+    const rendered = tab.getText();
+    assert.match(rendered, /^# The scene as builder code\. Save to apply it/);
+    assert.match(rendered, /regenerated from the scene after\n# a save/);
+    assert.match(rendered, /^from magpylib_studio\.build import Scene$/m);
+    assert.match(rendered, /^r1\.duplicate_around\(/m, 'the pattern should be one call');
 
-    const flattened = /^Magpylib Studio import: .*without a variable of their own/;
-    const answers = answeringWarnings([SCRIPT_OFFER, BUILD_FROM_SCRIPT], [flattened, undefined]);
-    try {
-      await editAndSave(tab, (text) => text.replace(/^radius = [\d.]+/m, 'radius = 0.0325'));
-      // The edit arrives as a number where the scene had `=radius`: this is
-      // a new scene run from the text, not the old one edited.
-      type Step = { op: string; target: string; params?: { position?: unknown[] } };
-      const placed = (e: Step) =>
-        e.op === 'create' && e.target === 'r1' && e.params?.position?.[0] === 0.0325;
-      await sceneWhere(
-        (d) => (d.events as Step[]).some(placed),
-        'the edited script to build a new scene',
-      );
-    } finally {
-      answers.restore();
-    }
-    // What running the script could not keep, the import says: the ring's
-    // pattern comes back as separate copies.
-    assert.ok(
-      answers.said.some((m) => flattened.test(m)),
-      `the import did not say what it flattened; saw ${JSON.stringify(answers.said)}`,
+    // Edit radius and save: the document follows, as the edit and nothing
+    // else. r1 still sits at `=radius` and the ring is still a pattern -- the
+    // scene edited, not a new one run from the text.
+    await editAndSave(
+      tab,
+      (text) =>
+        text.replace("s.variable('radius', 0.023,", "s.variable('radius', 0.0325,") +
+        '# a note the tab will not keep\n',
     );
+    type Step = { op: string; target: string; params?: { position?: unknown[] } };
+    const radius = (d: unknown) => (d as { variables: Record<string, unknown> }).variables.radius;
+    const after = await sceneWhere((d) => radius(d) === 0.0325, 'the saved radius to reach the scene');
+    const steps = after.events as Step[];
+    const r1 = steps.find((e) => e.op === 'create' && e.target === 'r1');
+    assert.strictEqual(r1?.params?.position?.[0], '=radius', 'r1 lost its variable');
+    assert.ok(
+      steps.some((e) => e.op === 'duplicate_around' && e.target === 'r1'),
+      'the ring is no longer a pattern',
+    );
+    // Regenerated from the scene: the note is gone, the number is not.
+    await textWhere(
+      tab,
+      (text) => !text.includes('a note the tab') && text.includes("'radius', 0.0325,"),
+      'the tab to be regenerated from the scene',
+    );
+
+    // One step to undo.
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    await sceneWhere((d) => radius(d) === 0.023, 'undo to put the radius back');
+  });
+
+  test('a script that fails leaves the scene alone, and the tab keeps it', async function () {
+    this.timeout(60000);
+    const before = await loadExample('halbach', 'halbach');
+    const tab = await openScriptTab();
+
+    const refused = answeringMessages('showErrorMessage', [NOT_APPLIED, undefined]);
+    try {
+      await editAndSave(tab, (text) => text.replace('s.Collection(', 's.Group('));
+      await until(() => refused.said.length > 0, 'the save to be refused');
+    } finally {
+      refused.restore();
+    }
+    assert.match(refused.said[0], /line \d+: AttributeError: .*Group/);
+    assert.deepStrictEqual(await scene(), before, 'a refused save changed the scene');
+
+    // Held until it runs: an edit elsewhere does not write over it.
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'sensor',
+      type: 'Sensor',
+      label: 'Sensor',
+      parent: null,
+      visible: true,
+    });
+    await sceneWhere(without('sensor'), 'the removal to land');
+    await pause(500); // a re-render would land after the scene, not before it
+    assert.ok(tab.getText().includes('s.Group('), 'the tab lost the text it was holding');
+
+    // Fixed and saved, it would run -- and put the sensor back, since the tab
+    // was written before the removal. So the save asks, and a no keeps both
+    // the scene and the text.
+    const asked = answeringMessages('showWarningMessage', [STALE, undefined]);
+    try {
+      await editAndSave(tab, (text) => text.replace('s.Group(', 's.Collection('));
+      await until(() => asked.said.length > 0, 'the save to ask');
+    } finally {
+      asked.restore();
+    }
+    await pause(500); // an apply would land after the answer, not before it
+    assert.ok(!ids((await scene()).objects).has('sensor'), 'a declined save applied');
+    assert.ok(tab.getText().includes('s.Collection('), 'the tab lost the fixed text');
+
+    // Asked again and told yes, it runs: the scene is what the tab says.
+    const told = answeringMessages('showWarningMessage', [STALE, APPLY_ANYWAY]);
+    try {
+      await editAndSave(tab, (text) => text + '# applied knowingly\n');
+      await sceneWhere(holding('sensor'), 'the fixed script to apply');
+    } finally {
+      told.restore();
+    }
+    assert.strictEqual(told.said.length, 1, 'the save should ask before undoing the removal');
+  });
+
+  test('text held in the script tab lets go when another scene opens', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    const tab = await openScriptTab();
+    const refused = answeringMessages('showErrorMessage', [NOT_APPLIED, undefined]);
+    try {
+      await editAndSave(tab, (text) => text.replace('s.Collection(', 's.Group('));
+      await until(() => refused.said.length > 0, 'the save to be refused');
+    } finally {
+      refused.restore();
+    }
+
+    // Held, it was written against the halbach: fixed and saved once the coil
+    // is open, it would put the halbach back over the coil. So the tab
+    // follows the scene that was opened instead.
+    await vscode.commands.executeCommand('magpylib-studio.loadExample', 'coil', DISCARD);
+    await sceneWhere(holding('coil'), 'the coil example to load');
+    await textWhere(
+      tab,
+      (text) => text.includes("id='coil'") && !text.includes('s.Group('),
+      'the tab to follow the scene opened',
+    );
+  });
+
+  test('plain magpylib in the script tab is refused, not flattened', async function () {
+    this.timeout(60000);
+    const before = await loadExample('halbach', 'halbach');
+    const tab = await openScriptTab();
+
+    const refused = answeringMessages('showErrorMessage', [NOT_APPLIED, undefined]);
+    try {
+      await editAndSave(
+        tab,
+        () =>
+          'import magpylib as magpy\n\n' +
+          'cube = magpy.magnet.Cuboid(dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1))\n' +
+          'magpy.show(cube)\n',
+      );
+      await until(() => refused.said.length > 0, 'the save to be refused');
+    } finally {
+      refused.restore();
+    }
+    assert.match(refused.said[0], /plain magpylib.*Open in Magpylib Studio/);
+    assert.deepStrictEqual(await scene(), before, 'plain magpylib replaced the scene');
+    await closeScriptTab(tab);
+  });
+
+  test('a scene exports as the builder script that builds it', async function () {
+    this.timeout(60000);
+    await loadExample('halbach', 'halbach');
+    const target = tempScene('halbach_build.py');
+    const prompts = answering({ save: target });
+    const window = vscode.window as unknown as Record<string, unknown>;
+    const inform = window.showInformationMessage;
+    window.showInformationMessage = async () => undefined; // "exported …, Open?"
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.exportBuilderScript');
+    } finally {
+      prompts.restore();
+      window.showInformationMessage = inform;
+    }
+    const text = Buffer.from(await vscode.workspace.fs.readFile(target)).toString('utf8');
+    assert.match(text, /^from magpylib_studio\.build import Scene$/m);
+    assert.match(text, /^r1\.duplicate_around\(/m);
+    // Code someone keeps: nothing regenerates it, so it does not say so.
+    assert.doesNotMatch(text, /regenerated/);
   });
 
   test('a scene saved to a file opens again as the same scene', async function () {

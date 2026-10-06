@@ -12,8 +12,9 @@ sequences them and adds what they did not cover: agents, and Ansys both ways.
 ## 1. Where things stand
 
 - **PR #12** (`feat/one-way-script-generation`, open, CI green) holds:
-  - one-way generation — `parse_script` and the old `apply_script` gone, the
-    script tab's save offers an import instead (`direction.md` §5.1);
+  - one-way generation — `parse_script` and the old `apply_script` gone
+    (`direction.md` §5.1); the script tab's save, briefly an offer to import,
+    applies builder code since R1;
   - the builder, `magpylib_studio.build` (`builder.md` B1): magpylib's spelling
     with variables that stay variables, formulas (`s.sampled`), saved values
     (`Scene(values=…)`);
@@ -23,7 +24,10 @@ sequences them and adds what they did not cover: agents, and Ansys both ways.
     on a builder script is the full editable scene; an import of plain magpylib
     names the variables it turned into numbers;
   - `SceneWidget.variable_sliders()`, and `examples/builder_demo.py` written for
-    the three ways in (the studio, a notebook, a plain run).
+    the three ways in (the studio, a notebook, a plain run);
+  - **R1, done:** the script tab shows builder code, and a deliberate save
+    applies it (`apply_builder_script`), as one undo step; plain magpylib is
+    refused, and **Export as Builder Script…** writes code to keep.
 - **On `main`**: the first-fit zoom fix (`0af7f01`) — the axes' `Box3Helper` was
   measured as the unit cube it is built as, so scenes in centimetres opened as a
   speck. A browser-harness check guards it.
@@ -100,7 +104,29 @@ Sources:
 
 ## 4. The next steps, in order
 
-### R1 — The script tab shows builder code, and its save applies
+### R1 — The script tab shows builder code, and its save applies ✅
+
+**Done** on #12, as written below, with what a review before pushing found:
+
+- **B2 was not lossless everywhere**, and a save would have carried each gap.
+  Fixed in the builder and the writer: a collection hidden around a magnet shown
+  again, or one added after, came back all hidden (`show()` now exists); a
+  reparented path gained two steps per run; a step that no longer applies made
+  the tab fail to render at all. So that no gap found later is carried silently
+  either, the save compares the edited script with the open scene built back
+  from its own tab: the same, nothing happens (a reflexive save is free,
+  always); different while the tab does not build the open scene back exactly,
+  the save is refused and names the line. One such gap stays, guarded: a step
+  the History panel moved after its pattern (open question below).
+- A relative mesh path in the tab resolves against the scene's folder, and in an
+  opened builder script against the script's; auto-save (on a delay or on
+  leaving the tab) does not apply and holds the text; a save asks first when the
+  scene changed after the tab was written (a drag, an agent, an undo), since
+  applying the tab would undo that; `exit()`, `quit()` and `input()` in a script
+  no longer reach the engine's own stdin; a save while the history is rolled
+  back keeps the script's order.
+- An old leak: a script with a syntax error left magpylib's `show()` patched for
+  the rest of the engine's life (`load_script` had it too).
 
 **What.** The tab renders `to_builder_script()`; a deliberate save runs it and
 replaces the document with the scene it built, as one undo step (autosave still
@@ -308,7 +334,16 @@ which works on plain magpylib objects; studio adds the parametric half.
 
 ## 6. Decisions waiting on Alex
 
-- **R1 as described** (live builder tab), and #12 merged after it.
+- **#12 merged**, now that R1 is built on it (R1 itself was approved as
+  described).
+- **Step order in a builder script.** The panel puts a move or a turn of a
+  patterned object _in front of_ its pattern, so a drag moves the whole ring;
+  builder calls go through the same operation, so `m.duplicate_around(…)` then
+  `m.move(…)` moves every copy, where magpylib's own reading of those two lines
+  moves `m` alone. It is also why the tab cannot write a step the History panel
+  put after a pattern (R1 refuses that save rather than carry the difference).
+  Recording a script's steps in the order they are written would close both; it
+  changes what such a hand-written script means (`builder.md` §9).
 - **#12 as a draft** until then, so it reads as a proposal.
 - **The §7 amendment** (R7): tier 0 on the Maxwell seat before the open solver.
 - **Removing the 24 LM tools** in R3 (the package is a preview, so breaking is
