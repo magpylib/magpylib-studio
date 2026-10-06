@@ -49,7 +49,7 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
-- A selection is drawn in a bright green, in lines three pixels wide: the
+- A selection is drawn in a bright green, in lines a pixel and a half wide: the
   object's own edges, and its path apart, with larger markers. It used to be a
   thin blue box round everything drawn for the object, path included: a magnet
   on an orbit got a box the size of the ring, a selected ring of them a cage

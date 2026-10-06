@@ -788,8 +788,8 @@ const SELECTION_COLOUR = "#39ff14";
 /** How wide, in pixels, the selection's lines are: an edge in view, a path or
  *  a wire, and an edge the shape hides, drawn faintly through it. A plain GL
  *  line is one pixel whatever it is asked for, which is easy to miss. */
-const OUTLINE_WIDTH = 3;
-const HIDDEN_WIDTH = 1.5;
+const OUTLINE_WIDTH = 1.5;
+const HIDDEN_WIDTH = 1;
 
 /** How much larger a selected path's markers are drawn, beside its line. */
 const PATH_MARKER_GROWTH = 1.6;
