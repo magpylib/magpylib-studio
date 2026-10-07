@@ -24,9 +24,10 @@ that touches none of this. W is independent of all three: it puts the engine as
 it is today in a notebook. A (agents) builds on F1b's builder.
 
 **The order across tracks is in [docs/roadmap.md](docs/roadmap.md) §4**: B3 (R1,
-done), units (R2), the agent's way in and its evaluation (R3–R4), then FEM with
-tier 0 checked on the Maxwell seat before the open solver (R7), then several
-scenes open at once — a project is a folder, a scene a file (R9).
+done), units (R2, done), the agent skill and its evaluation (R3 step 1, R4), the
+agent's way into the open scene (R3 step 2), then FEM with tier 0 checked on the
+Maxwell seat before the open solver (R7), then several scenes open at once — a
+project is a folder, a scene a file (R9).
 
 ---
 
@@ -94,8 +95,8 @@ Auto-save still does not apply. **Export as Builder Script…** writes code to
 keep. Why apply-on-save returned: `docs/direction.md` §5.1, `docs/builder.md`
 §5.
 
-**Next.** #12 merges. Structure kept in sync as a layer of GUI steps over a
-script's (`docs/builder.md` §7, level 2) is designed, not started.
+**Next.** Structure kept in sync as a layer of GUI steps over a script's
+(`docs/builder.md` §7, level 2) is designed, not started.
 
 ### F2 — Parameterised instancing
 
@@ -242,27 +243,31 @@ checklist in `docs/one-view.md` §5 passes by hand in VS Code.
 ## Track A — Agents
 
 Plan in [docs/roadmap.md](docs/roadmap.md) R3–R6, amended 2026-10-06 after
-marimo's agent work (roadmap §3). The guideline it follows: consolidate tools,
-return high-signal results, and evaluate with agents; marimo's experience adds
-that the agent's code is the interface, not a set of fixed tools around it.
+marimo's agent work (roadmap §3), its open questions decided 2026-10-07 (roadmap
+§6). The guideline it follows: consolidate tools, return high-signal results,
+and evaluate with agents; marimo's experience adds that the agent's code is the
+interface, not a set of fixed tools around it.
 
-### A1 — Builder code against the live scene (R3)
+### A1 — Builder code, on its own copy, then on the open scene (R3)
 
-One way in: the agent's Python run against the open scene — builder calls (one
-undo step per run, refused whole with its line, as R1's save is), the scene as
-builder code and its variables to read, and field summaries as helpers in scope
-— in place of the 24 one-per-operation LM tools. Shipped as an Agent Skill and a
-CLI into the running engine, with MCP as an adapter for hosts without skills
-(pending a yes, roadmap §6); the engine has to be reachable from outside the
-editor for that. In marimo, marimo pair already reaches an editable widget's
-session; the view must follow edits made to it from outside. Decide the trust
-model for agent-written code first.
+One way in, the agent's Python written with the builder, in place of the 24
+one-per-operation LM tools; decided 2026-10-07 (roadmap §6). **Step 1,
+started:** the skill (A4), over the builder as it runs today — the agent builds
+a `Scene` of its own, reads the field through its session, and the person opens
+the result in the studio. **Then the LM tools go.** **Step 2:** the engine
+listens on a local connection only the person's account can use, a command
+(`magpylib-studio run script.py`) runs builder code against the open scene — one
+undo step per run, refused whole with its line, as R1's save is — and the engine
+tells the panel when its scene changed (shared with V3). The gate is the agent's
+host, as for any command it runs. MCP comes with A3's view in the chat. In
+marimo, pair already reaches an editable widget's session; the view must follow
+edits made to it from outside, which step 2's message gives it.
 
 ### A2 — An agent evaluation set (R4)
 
-About twenty magnetics tasks with checkable targets, run with the old tools and
-the new, in VS Code and through marimo pair; success, tokens, turns and refusals
-recorded and kept.
+About twenty magnetics tasks with checkable targets, run first by an agent with
+plain magpylib and by the same agent with the skill, headless; then through step
+2 and marimo pair. Success, tokens, turns and refusals recorded and kept.
 
 ### A3 — Pointing, then the view in the chat (R5)
 
@@ -272,16 +277,19 @@ back. In marimo, as marimo-lens targets on the widget's legend; in VS Code, the
 same channel natively. Then the 3D view interactive in the chat, as an MCP App,
 its sliders calling back.
 
-### A4 — The skill (R6, folded into A1)
+### A4 — The skill (R6, folded into A1) — started
 
-The `SKILL.md` A1 ships: conventions, the builder's rules, what each refusal
-means, how to point; a reference generated from the builder and tested against
-it; current capability only.
+`magpylib_studio/.agents/skills/magpylib-studio/`, in the wheel, linked into a
+project by `uvx library-skills`: conventions, the builder's rules, the field and
+sweeps, what each refusal means; a reference generated from the builder and
+tested against it (`tools/write-skill-reference.py`), and every example in it
+run by the tests; current capability only. Pointing joins it with A3, the open
+scene with A1's step 2.
 
 ## Not scheduled, and why
 
 - **Anything downstream of `docs/fem.md`'s G3 spike** — the solver is
   deliberately undecided until it is measured.
 - **F4** — see above.
-- **The agent skill** (`docs/fem.md` M9) — a skill may only describe an API that
-  exists.
+- **The skill's FEM part** (`docs/fem.md` M9) — a skill may only describe an API
+  that exists.

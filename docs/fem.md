@@ -917,6 +917,11 @@ presentation, and it extends a principle the README already states — **"One
 schema contract: the same JSON Schema drives the inspector widgets _and_ the LLM
 tool inputs."**
 
+**Amended 2026-10-07** (`docs/roadmap.md` R3, §6): the LM tools go. The hosts
+are the skill, a command that runs builder code in the running engine, and MCP
+when a chat host needs it; the skill's authoring half exists now, and its FEM
+half waits for M7 as below.
+
 Which points at the strongest version of the idea. `expression_help()` already
 returns the operators and functions **read off the allow-list that enforces
 them**, with a test comparing the two, precisely so the help cannot drift from

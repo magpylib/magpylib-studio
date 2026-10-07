@@ -1,12 +1,14 @@
 # Roadmap — what studio becomes, and in what order
 
 **Status: plan, written 2026-10-05; amended 2026-10-06** with marimo's agent
-work (§3), which reshapes R3, R5 and R6. It records where things stand, what was
-learned from looking at the field and the guidelines around it, and the order to
-build in. Each step says what it is, why, and when it is done. The reasoning for
-the pieces already planned lives in `direction.md` (positioning, the model),
-`fem.md` (validation) and `builder.md` (writing scenes in code); this file
-sequences them and adds what they did not cover: agents, and Ansys both ways.
+work (§3), which reshapes R3, R5 and R6, **and 2026-10-07**, when R3's four open
+questions were decided (§6) and its first step started. It records where things
+stand, what was learned from looking at the field and the guidelines around it,
+and the order to build in. Each step says what it is, why, and when it is done.
+The reasoning for the pieces already planned lives in `direction.md`
+(positioning, the model), `fem.md` (validation) and `builder.md` (writing scenes
+in code); this file sequences them and adds what they did not cover: agents, and
+Ansys both ways.
 
 ---
 
@@ -30,8 +32,9 @@ sequences them and adds what they did not cover: agents, and Ansys both ways.
     applies it (`apply_builder_script`), as one undo step; plain magpylib is
     refused, and **Export as Builder Script…** writes code to keep.
 - **#12 merged** (2026-10-06, `320b80a`).
-- **R2, units**, on `feat/units` (#28): what a variable measures, shown in SI
+- **R2, units, merged** (#28, 2026-10-06): what a variable measures, shown in SI
   unless the scene says otherwise, and read in whatever unit is typed (`15 mm`).
+- **R3, step 1 started** (2026-10-07): the skill, shipped inside the package.
 - **On `main`**: the first-fit zoom fix (`0af7f01`) — the axes' `Box3Helper` was
   measured as the unit cube it is built as, so scenes in centimetres opened as a
   speck. A browser-harness check guards it.
@@ -76,13 +79,18 @@ producing fully editable parametric models from text.
 
 **There are guidelines for the agent side, and they are specific.**
 
-- Anthropic, _Writing effective tools for agents — with agents_: tools are a
-  contract with a non-deterministic caller; consolidate rather than wrap an API
-  endpoint by endpoint; return high-signal context, not raw identifiers or bulk
-  data; make errors say how to fix them; **evaluate tools with real agents**.
-- Anthropic, _Code execution with MCP_: agents that write code against an API
-  instead of calling tools one at a time use far fewer tokens (one workflow:
-  150k → 2k). `direction.md` §8 arrived at the same place — code for
+- Anthropic, _Writing effective tools for agents — with agents_ (September
+  2025): tools are a contract with a non-deterministic caller; consolidate
+  rather than wrap an API endpoint by endpoint; return high-signal context, not
+  raw identifiers or bulk data; make errors say how to fix them; **evaluate
+  tools with real agents**.
+- Anthropic, _Code execution with MCP_ (November 2025): agents that write code
+  against an API instead of calling tools one at a time use far fewer tokens.
+  Its one number is a worked example, an agent loading only the tool definitions
+  a Google Drive → Salesforce task needs: 150k → 2k. The same post states the
+  price: "Running agent-generated code requires a secure execution environment
+  with appropriate sandboxing, resource limits, and monitoring" — R3's trust
+  question (§6). `direction.md` §8 arrived at the same place — code for
   orchestration, structured operations for building — and the builder is both at
   once: plain Python whose every call is a validated operation.
 - **MCP Apps** (the first official MCP extension, stable since January 2026): a
@@ -108,8 +116,15 @@ R3–R6 directly.
   exit "as one transaction", after the checks any notebook edit gets — "If a
   check fails, marimo rejects the whole batch." That is R1's save, and the shape
   R3 plans for `run_builder`, reached independently by a team that had shipped
-  the alternative first. The write-up gives no numbers and says nothing about
-  trust.
+  the alternative first. How it reaches the kernel, and whom it trusts, are in
+  its README rather than the write-up: the notebook is already a local web
+  server, which the skill's script finds by itself when it runs with
+  `--no-token`, or with `MARIMO_TOKEN` when it does not; and each call is a
+  shell command the agent's host may ask the person to approve — the README says
+  to allow the two scripts in `.claude/settings.json`. Neither gives a number.
+  marimo did not drop MCP: its server is still there (`--mcp`, experimental),
+  with "lower-level, read-only tools", and its docs say "If your goal is to have
+  a coding agent drive a live notebook, see marimo pair instead."
 - **marimo-lens** (30 September; a paper at IEEE VIS 2026): an anywidget that
   lets the person point. Mark a point or a region of any output and leave a
   note, and the agent receives the mark, the note, the cell that produced the
@@ -132,18 +147,20 @@ R3–R6 directly.
 
 **What that says about studio today.** The extension exposes 24 language-model
 tools that mirror the engine's operations one for one (`addObject`, `setParam`,
-`rotate`, `move`, …): the wrapper shape the guideline warns against. And
-`direction.md` §9.4 already calls agent reliability its thinnest evidence.
-marimo's releases show three more gaps. R3 as first planned keeps reading and
-computing in fixed tools around one that runs code, where marimo's experience is
-that the code is the interface and fixed views are what it outgrew. The 3D view
-lets a person drag, but not point an agent at a magnet and ask. And in the
-notebook ecosystem the widget is for, "studio" now names a marimo product:
-`magpylib-studio` reached PyPI on 31 July, a day after `marimo-studio`.
+`rotate`, `move`, …): the wrapper shape the guideline warns against. They are VS
+Code's language-model tools, which Copilot Chat calls; an agent working in a
+terminal — Claude Code, Codex — never sees them. And `direction.md` §9.4 already
+calls agent reliability its thinnest evidence. marimo's releases show three more
+gaps. R3 as first planned keeps reading and computing in fixed tools around one
+that runs code, where marimo's experience is that the code is the interface and
+fixed views are what it outgrew. The 3D view lets a person drag, but not point
+an agent at a magnet and ask. And in the notebook ecosystem the widget is for,
+"studio" now names a marimo product: `magpylib-studio` reached PyPI on 31 July,
+a day after `marimo-studio`.
 
 Sources:
-[tools guideline](https://modelcontextprotocol.info/docs/tutorials/writing-effective-tools/),
-[code execution with MCP](https://www.marktechpost.com/2025/11/08/anthropic-turns-mcp-agents-into-code-first-systems-with-code-execution-with-mcp-approach/),
+[tools guideline](https://www.anthropic.com/engineering/writing-tools-for-agents),
+[code execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp),
 [MCP Apps](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/),
 [Agent Skills](https://atlan.com/know/ai-agent/ai-agent-skills/what-are-agent-skills/),
 [Zookeeper](https://docs.zoo.dev/research/zookeeper),
@@ -151,11 +168,14 @@ Sources:
 [Embodied CAD](https://arxiv.org/pdf/2606.31252),
 [marimo pair](https://marimo.io/blog/marimo-pair),
 [notebooks as a tool for agents](https://marimo.io/blog/notebooks-as-a-tool-for-agents),
+[marimo pair's README](https://github.com/marimo-team/marimo-pair),
+[marimo's MCP docs](https://github.com/marimo-team/marimo/blob/main/docs/guides/editor_features/mcp.md),
 [marimo-lens](https://marimo.io/blog/introducing-marimo-lens),
 [Point, Revise, Review](https://arxiv.org/html/2609.19839v1),
 [Lens targets](https://marimo-team.github.io/marimo-lens/reference/attributes.md),
 [marimo-studio](https://marimo.io/blog/introducing-marimo-studio),
-[prepared exports](https://marimo-team.github.io/marimo-studio/guide/run-and-share.md).
+[prepared exports](https://marimo-team.github.io/marimo-studio/guide/run-and-share.md),
+[library skills](https://tiangolo.com/ideas/library-agent-skills).
 
 ---
 
@@ -231,53 +251,91 @@ takes `variable(…, unit="length")`.
 export all carry variables across a boundary that has units, and each one built
 before this is one more place to migrate.
 
-### R3 — The agent interface: builder code against the live scene
+### R3 — The agent interface: builder code, on its own copy first, then on the open scene
 
 **Amended 2026-10-06** after marimo pair (§3): the code is the interface, and
 how it reaches the engine comes second. Planned first as four MCP tools; what
-changes is that reading and the field stop being fixed tools.
+changes is that reading and the field stop being fixed tools. **Decided
+2026-10-07** (§6): two steps, a skill first and MCP only when a chat host needs
+it, the agent's host as the gate, and the 24 LM tools gone.
 
 **What.** Replace the 24 one-per-operation tools with one way in: the agent's
-Python, run against the open scene. In scope for that code:
+Python, written with the builder. In scope for that code:
 
-| In scope                     | What it is                                                                               |
-| ---------------------------- | ---------------------------------------------------------------------------------------- |
-| the open scene, as a `Scene` | builder calls, live: one undo step per run, refused whole with its line and message (R1) |
-| reads                        | the scene as builder code (`to_builder_script`), and the variables                       |
-| field helpers                | summaries — min, max, mean, uniformity — not arrays unless asked                         |
-| `validate` (after R7)        | the FEM job API, refusal-first, per `fem.md` §12–13                                      |
+| In scope              | What it is                                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| a `Scene`             | builder calls: `Scene()` on its own copy; on the open scene (step 2), one undo step per run, refused whole (R1) |
+| reads                 | the scene as builder code (`to_builder_script`), and the variables                                              |
+| the field             | `get_field` and `sweep` on the scene's session; summaries as helpers if R4 shows they are worth having          |
+| `validate` (after R7) | the FEM job API, refusal-first, per `fem.md` §12–13                                                             |
 
 What the agent needs to look at depends on the scene and the task, which a fixed
-tool cannot anticipate; the helpers are conveniences inside the code, not the
-only views there are. **Every run takes a scene** — its file — defaulting to the
-open one, so several open scenes (R9) changes nothing about it.
+tool cannot anticipate; helpers are conveniences inside the code, not the only
+views there are.
 
-**Shipped as** an Agent Skill (R6's content) and a small CLI that runs code in
-the running engine, as marimo pair ships `execute-code`, so any agent that reads
-skills has it; an MCP server wraps the same entry point for hosts without skills
-(Claude Desktop, ChatGPT). The VS Code LM tools become a pass-through, or go.
-For the CLI the engine has to be reachable from outside the editor, which it is
-not yet: it is a subprocess on the extension's stdio (a local socket, or the
-extension relaying, would do — decide here).
+**Step 1 — on its own copy: the skill** (started 2026-10-07). An Agent Skill,
+`magpylib-studio`, inside the package at
+`magpylib_studio/.agents/skills/magpylib-studio/`: the library-skills layout,
+which magpylib's own skill uses too (magpylib#992), so it ships with the version
+it describes and `uvx library-skills` links it into a project. It teaches the
+builder as it runs today: the agent writes a builder script, runs it with plain
+Python, reads the field through the scene's session, and the person opens the
+result in the studio — Open in Magpylib Studio on the script, or the saved
+`.magpy.json`. Nothing has to be built for that to work, and nothing new is
+reachable: it is Python in the agent's terminal. Its API reference is generated
+from the builder, with a test that the two agree, and the tests run every
+example in it (`fem.md` §13.1, §13.4). R4 can measure it with no editor in the
+loop.
+
+**Step 2 — on the open scene: a way in.** The person sees the agent's edits
+arrive in the panel, each one an undo away. Today only the extension reaches the
+engine, through the stdio of the process it started. The engine also listens on
+a local connection only the person's account can use (with a token, as Jupyter's
+kernels and marimo's server have one), and a small command runs builder code
+against the open scene — `magpylib-studio run script.py`, the counterpart of
+marimo pair's `execute-code`. The engine then has to tell the panel that its
+scene changed, which the panel today learns only from its own calls; FEM's jobs
+need the same server-initiated messages (`fem.md` §12.1, `TASKS.md` V3), and so
+does the notebook view (below). **Every run takes a scene** — its file —
+defaulting to the open one, so several open scenes (R9) changes nothing about
+it.
+
+**Trust: the agent's host.** The agent's Python runs with the person's rights,
+as any script does. Python cannot be fenced in honestly (`direction.md` §4,
+finding 3); a hermetic language is the real answer and the expensive one
+(`direction.md` §5.4). So the gate is the one every other command the agent runs
+goes through: its host asks first — Claude Code before each command, unless told
+once that it may. That is marimo pair's model, and it reaches nothing the agent
+could not already reach with `python` in the same terminal; Anthropic's caveat
+(§3) is about running agent code as a service, with nobody there to ask. The
+engine adds what it can: a connection only the person's account can open, one
+undo step per run, and documents that never run code when opened
+(`expressions.py`), so a scene from someone else stays safe to open. The skill
+says so.
+
+**MCP when a host needs it.** Only a host with no terminal — Claude Desktop,
+ChatGPT — needs an MCP server, and there running Python is new power: a chat
+that could not touch the machine could then run code on it. So it comes with
+R5's view in the chat, which is MCP anyway, as an adapter over step 2's entry
+point, each run approved in the chat.
+
+**The 24 LM tools go** once the skill is in. Only Copilot Chat calls them, and
+R4 has a better baseline than them.
 
 **In a marimo notebook the way in exists already.** Through marimo pair an agent
 runs code in the kernel that holds an editable `SceneWidget`'s session, reads
 `widget.selected` (what the person clicked) and assigns it (which moves the
 outline). Missing there: the view follows edits made through its own calls only,
 so builder code run against its session from outside leaves it stale until the
-next. A change hook on the session closes that.
+next. A change hook on the session closes that — step 2's message, in the
+kernel.
 
 **Why.** The guideline (§3) and the code-execution evidence point here, marimo's
 pair is the same conclusion reached by a team that shipped the tool-call shape
 first, and the halbach as builder code is about 25 lines where its document is
-hundreds of lines of JSON — in a form models have seen a great deal of.
-
-**Open: the trust model.** Agent-written Python runs in the engine, with the
-user's rights. That is the same trust as opening a script, but an agent writes
-more of them, faster. Python cannot be sandboxed honestly; the real answer is
-`direction.md` §5.4 (a hermetic language). Until then: say so in the skill, and
-keep the engine's working directory and environment narrow. marimo's write-up
-does not address it either. Decide before shipping R3.
+hundreds of lines of JSON — in a form models have seen a great deal of. The
+order is cost: step 1 needs no code in the engine, and step 2 brings the
+connection, the messages and the command.
 
 ### R4 — Evaluate with agents, before adding more
 
@@ -291,9 +349,13 @@ does not address it either. Decide before shipping R3.
 - after R5, "this magnet" — a request that only makes sense with what the person
   pointed at.
 
-Run them with today's 24 tools and with R3's code, in VS Code and through marimo
-pair; record success, tokens, turns and refusals hit. Keep the set in the repo
-and re-run it when the interface changes.
+Run them two ways first: an agent with plain magpylib and no studio — the
+question of 2026-10-05, whether studio earns its place over an agent writing
+magpylib itself — and the same agent with the studio skill (R3, step 1), which
+needs no editor, so the set runs headless. Then through R3's way into the open
+scene and through marimo pair, once those exist. Record success, tokens, turns
+and refusals hit. Keep the set in the repo and re-run it when the interface
+changes.
 
 **Why.** `direction.md` §9.4 names agent reliability as the thinnest evidence
 and asks for it to be counted. This counts it, which the closest prior art has
@@ -336,12 +398,14 @@ person both on it.
 ### R6 — A skill for magpylib-studio
 
 **Folded into R3** (2026-10-06): the skill is how R3 ships, as marimo pair and
-marimo-lens both ship as skills. What it says stays as planned: magpylib's
-conventions (SI units, diameter not radius, polarization in the object's own
-frame), the builder's rules, what each refusal means and how to fix it, and how
-to point and be pointed at (R5). Its API reference is generated from the
-builder, with a test that the two agree (`fem.md` §13.4). Present tense and
-current capability only (`fem.md` §13.1): authoring now, FEM when FEM exists.
+marimo-lens both ship as skills. **Started 2026-10-07** as R3's step 1, in
+`magpylib_studio/.agents/skills/magpylib-studio/`. What it says stays as
+planned: magpylib's conventions (SI units, diameter not radius, polarization in
+the object's own frame), the builder's rules, what each refusal means and how to
+fix it, and, once R5 exists, how to point and be pointed at. Its API reference
+is generated from the builder, with a test that the two agree (`fem.md` §13.4).
+Present tense and current capability only (`fem.md` §13.1): authoring and the
+field now, the open scene when step 2 exists, FEM when FEM exists.
 
 ### R7 — FEM, with the order amended
 
@@ -453,16 +517,10 @@ which works on plain magpylib objects; studio adds the parametric half.
 
 ## 6. Decisions waiting on Alex
 
-- **#12 merged**, now that R1 is built on it (R1 itself was approved as
-  described).
-- **#12 as a draft** until then, so it reads as a proposal.
+Ask each one as a plain question with a recommended answer: listed here, the R3
+four went unanswered for two days because nobody asked them.
+
 - **The §7 amendment** (R7): tier 0 on the Maxwell seat before the open solver.
-- **Removing the 24 LM tools** in R3 (the package is a preview, so breaking is
-  acceptable).
-- **R3 shipped as a skill and a CLI**, with MCP as an adapter (§3, marimo pair),
-  rather than as an MCP server first; and how the engine is reached from outside
-  the editor.
-- **The trust model for agent-written code** (R3).
 - **R5's order:** pointing at the scene (marimo-lens targets in a notebook, the
   same channel in VS Code) before the view in the chat.
 - **A project is a folder of scene files** (R9), rather than a container format;
@@ -477,6 +535,20 @@ which works on plain magpylib objects; studio adds the parametric half.
   the package, extension and import names differ, the prefix matches the org's
   other packages, and a rename would touch PyPI, the marketplace id, the repo
   and every doc.
+
+**Decided** (2026-10-07), R3's four:
+
+- **The agent works on its own copy first, on the open scene after.** Step 1 is
+  the skill over the builder as it runs today; step 2 gives the engine a local
+  connection only the person's account can use, and a command that runs builder
+  code against the open scene.
+- **The gate for agent-written code is the agent's host**, as for any command it
+  runs. The engine adds an owner-only connection, one undo step per run, and
+  documents that never run code when opened.
+- **The 24 LM tools go**, breaking or not: only Copilot Chat calls them.
+- **A skill first, MCP when a chat host needs it** (R5's view in the chat): a
+  skill is what terminal agents read, it is where marimo pair ended up, and it
+  adds nothing to trust.
 
 ---
 
