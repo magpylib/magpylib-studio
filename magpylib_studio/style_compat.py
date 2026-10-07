@@ -51,7 +51,7 @@ def _flatten(mapping, prefix=""):
 
 def schema(obj):
     """JSON Schema of an object's style — the contract the inspector widgets
-    and the LLM tool both read."""
+    are built from."""
     style_cls = type(obj.style)
     if hasattr(style_cls, "schema"):
         return style_cls.schema()

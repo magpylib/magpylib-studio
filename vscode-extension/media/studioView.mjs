@@ -305,7 +305,7 @@ window.addEventListener("message", (event) => {
     told.selected = selected;
     take("selected", selected);
   } else if (message.type === "refresh") {
-    // after any edit anywhere: the Inspector, a chat tool, a slider, a drag
+    // after any edit anywhere: the Inspector, the tree, a slider, a drag
     refresh();
   }
 });

@@ -254,14 +254,14 @@ One way in, the agent's Python written with the builder, in place of the 24
 one-per-operation LM tools; decided 2026-10-07 (roadmap §6). **Step 1,
 started:** the skill (A4), over the builder as it runs today — the agent builds
 a `Scene` of its own, reads the field through its session, and the person opens
-the result in the studio. **Then the LM tools go.** **Step 2:** the engine
-listens on a local connection only the person's account can use, a command
-(`magpylib-studio run script.py`) runs builder code against the open scene — one
-undo step per run, refused whole with its line, as R1's save is — and the engine
-tells the panel when its scene changed (shared with V3). The gate is the agent's
-host, as for any command it runs. MCP comes with A3's view in the chat. In
-marimo, pair already reaches an editable widget's session; the view must follow
-edits made to it from outside, which step 2's message gives it.
+the result in the studio. **The LM tools are gone** (2026-10-07). **Step 2:**
+the engine listens on a local connection only the person's account can use, a
+command (`magpylib-studio run script.py`) runs builder code against the open
+scene — one undo step per run, refused whole with its line, as R1's save is —
+and the engine tells the panel when its scene changed (shared with V3). The gate
+is the agent's host, as for any command it runs. MCP comes with A3's view in the
+chat. In marimo, pair already reaches an editable widget's session; the view
+must follow edits made to it from outside, which step 2's message gives it.
 
 ### A2 — An agent evaluation set (R4)
 

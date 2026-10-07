@@ -98,8 +98,7 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
 - **Pose** — the Inspector's `pose` section: the object's absolute position and
   rotation vector, showing the expression a value was written as beside what it
   currently comes to. Relative moves and rotations are not here; they record a
-  _step_, so they live on the tree's Transform menu. Same operations in chat:
-  `#magpyMove`, `#magpyRotate`, `#magpyPose`.
+  _step_, so they live on the tree's Transform menu.
 - **Saving and opening scenes** — a scene is a document: **Save** (`Cmd/Ctrl+S`
   with the Scene view focused) writes it to a `.magpy.json` file, and the view
   title shows which file it is and a `•` while it differs from what is on disk.
@@ -148,25 +147,17 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   so magpylib validation errors show inline.
 
 All three surfaces (plot, tree, inspector) refresh automatically after any edit,
-whatever its origin — inspector widget, chat tool, or tree context menu.
+whatever its origin — inspector widget, tree context menu or script tab —
+debounced so bursts redraw once.
 
-- **Language Model Tools** (native Copilot chat, no API key): `#magpyObjects`
-  (list scene objects), `#magpySchema` (style JSON Schema for an object),
-  `#magpyEdit` (set one dotted style path, validated by magpylib), `#magpyAdd` /
-  `#magpyRemove` (add/remove scene objects), `#magpyParam` (constructor params:
-  move, resize, repolarize), `#magpyClear` (empty the scene in one call),
-  `#magpyBatch` (many operations in one call — the tool descriptions steer the
-  model to it for multi-object work), `#magpyVars` / `#magpyVar` /
-  `#magpyBounds` (the scene's variables), `#magpyDuplicate` / `#magpyRow` /
-  `#magpyMirror` (patterns, which the descriptions steer the model to instead of
-  adding ring magnets one at a time), `#magpySweep` (the field against a
-  variable) and `#magpyEvents` / `#magpyEditEvent` / `#magpyMoveEvent` /
-  `#magpyRemoveEvent` (the construction history). Edits auto-refresh all
-  surfaces, debounced so bursts redraw once.
+- **Coding agents** — the Python package carries an Agent Skill that teaches
+  them to write a scene with the builder, read its field and sweep a variable;
+  the result opens here with **Open in Magpylib Studio**. How to install it is
+  in the
+  [package's README](https://github.com/magpylib/magpylib-studio#let-a-coding-agent-write-it).
 
-Both the webview and the LM tools share one engine process
-([src/engineClient.ts](src/engineClient.ts) — promise-based RPC client that owns
-the request-id space).
+Every view shares one engine process ([src/engineClient.ts](src/engineClient.ts)
+— promise-based RPC client that owns the request-id space).
 
 ## Try it out
 
@@ -223,9 +214,7 @@ tool is for:
 - _Edit Python Script_ to see the whole thing as parametric magpylib, edit a
   line, and save it back;
 - `Cmd/Ctrl+S` with the Scene view focused to save it as `scene.magpy.json`,
-  then reload the window — it comes back;
-- with GitHub Copilot installed, ask chat `make the magnets green #magpyEdit` or
-  `a ring of 8 dipoles at radius 5 #magpyDuplicate`.
+  then reload the window — it comes back.
 
 [branch]: https://github.com/magpylib/magpylib/tree/feat/improve-style
 

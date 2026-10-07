@@ -34,7 +34,8 @@ Ansys both ways.
 - **#12 merged** (2026-10-06, `320b80a`).
 - **R2, units, merged** (#28, 2026-10-06): what a variable measures, shown in SI
   unless the scene says otherwise, and read in whatever unit is typed (`15 mm`).
-- **R3, step 1 started** (2026-10-07): the skill, shipped inside the package.
+- **R3, step 1 started** (2026-10-07): the skill, shipped inside the package;
+  the 24 LM tools removed the same day.
 - **On `main`**: the first-fit zoom fix (`0af7f01`) — the axes' `Box3Helper` was
   measured as the unit cube it is built as, so scenes in centimetres opened as a
   speck. A browser-harness check guards it.
@@ -145,16 +146,17 @@ R3–R6 directly.
   static files; a widget's captured model is replayed, and a preflight reports
   what still needs live Python.
 
-**What that says about studio today.** The extension exposes 24 language-model
-tools that mirror the engine's operations one for one (`addObject`, `setParam`,
-`rotate`, `move`, …): the wrapper shape the guideline warns against. They are VS
-Code's language-model tools, which Copilot Chat calls; an agent working in a
-terminal — Claude Code, Codex — never sees them. And `direction.md` §9.4 already
-calls agent reliability its thinnest evidence. marimo's releases show three more
-gaps. R3 as first planned keeps reading and computing in fixed tools around one
-that runs code, where marimo's experience is that the code is the interface and
-fixed views are what it outgrew. The 3D view lets a person drag, but not point
-an agent at a magnet and ask. And in the notebook ecosystem the widget is for,
+**What that said about studio, on 2026-10-06.** The extension exposed 24
+language-model tools that mirrored the engine's operations one for one
+(`addObject`, `setParam`, `rotate`, `move`, …): the wrapper shape the guideline
+warns against. They were VS Code's language-model tools, which Copilot Chat
+calls; an agent working in a terminal — Claude Code, Codex — never saw them.
+They went on 2026-10-07 (R3). And `direction.md` §9.4 already calls agent
+reliability its thinnest evidence. marimo's releases show three more gaps. R3 as
+first planned keeps reading and computing in fixed tools around one that runs
+code, where marimo's experience is that the code is the interface and fixed
+views are what it outgrew. The 3D view lets a person drag, but not point an
+agent at a magnet and ask. And in the notebook ecosystem the widget is for,
 "studio" now names a marimo product: `magpylib-studio` reached PyPI on 31 July,
 a day after `marimo-studio`.
 
@@ -319,8 +321,8 @@ that could not touch the machine could then run code on it. So it comes with
 R5's view in the chat, which is MCP anyway, as an adapter over step 2's entry
 point, each run approved in the chat.
 
-**The 24 LM tools go** once the skill is in. Only Copilot Chat calls them, and
-R4 has a better baseline than them.
+**The 24 LM tools went** on 2026-10-07, once the skill was in. Only Copilot Chat
+called them, and R4 has a better baseline than them.
 
 **In a marimo notebook the way in exists already.** Through marimo pair an agent
 runs code in the kernel that holds an editable `SceneWidget`'s session, reads
@@ -545,7 +547,8 @@ four went unanswered for two days because nobody asked them.
 - **The gate for agent-written code is the agent's host**, as for any command it
   runs. The engine adds an owner-only connection, one undo step per run, and
   documents that never run code when opened.
-- **The 24 LM tools go**, breaking or not: only Copilot Chat calls them.
+- **The 24 LM tools go**, breaking or not: only Copilot Chat calls them. Done
+  the same day.
 - **A skill first, MCP when a chat host needs it** (R5's view in the chat): a
   skill is what terminal agents read, it is where marimo pair ended up, and it
   adds nothing to trust.

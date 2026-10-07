@@ -87,7 +87,7 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** External change (chat tool, tree action): re-pull values. */
+  /** External change (tree action, script tab, undo): re-pull values. */
   refresh(): void {
     if (this.view && this.ready) {
       this.view.webview.postMessage({ type: 'refresh' });

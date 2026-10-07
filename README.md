@@ -27,8 +27,9 @@ pattern. Drag `n` and both rings rebuild._
 - **Switch to code and back.** The script tab shows the scene as Python and
   applies your edits when you save. Export plain magpylib for anyone, or the
   scene as code to keep.
-- **Let an AI assistant help.** Copilot Chat can build and edit the scene with
-  you, and a coding agent can write it in code (see below).
+- **Let an AI assistant help.** A coding agent can write the scene in code, read
+  its field and sweep its variables, and hand it to you to open in the studio
+  (see below).
 
 ## Get started in VS Code
 

@@ -195,8 +195,7 @@ and drives it.
   `get_transform`. Undoable, batchable, exported verbatim by `to_script`. UI:
   Inspector **transform** section, Scene-tree **inline hover icons** (move,
   rotate, + on collections) and a **Transform** submenu; move and rotate first
-  ask _single step or N-step path_. LM tools `#magpyMove`, `#magpyRotate`,
-  `#magpyPose`.
+  ask _single step or N-step path_.
 - **The log is editable — this is the ANSYS-style history, engine side only so
   far.** `get_events()` lists it with a rendered `source` line per event;
   `edit_event(id, changes)`, `remove_event(id)`, `move_event(id, index)` mutate
@@ -327,12 +326,11 @@ and drives it.
   H, J or M** of all leaf sources (`_FIELDS` maps each to its magpylib getter
   and unit; J and M are zero outside a magnet and constant inside it, which
   makes them the quick way to see what a shape covers) along a sensor path or
-  explicit points (numeric, for `#magpyField`).
-  `get_field_figure(output?, animation?, template?)` delegates to **magpylib's
-  own 2D rendering** (`show(output="B"|"Bx"|...)`) — field at the scene's
-  sensors along their paths, animatable. Shown in a dedicated on-demand **Field
-  panel** ($(graph-line) icon / "Open Field View") with an output selector, not
-  embedded in the 3D view.
+  explicit points (numeric). `get_field_figure(output?, animation?, template?)`
+  delegates to **magpylib's own 2D rendering** (`show(output="B"|"Bx"|...)`) —
+  field at the scene's sensors along their paths, animatable. Shown in a
+  dedicated on-demand **Field panel** ($(graph-line) icon / "Open Field View")
+  with an output selector, not embedded in the 3D view.
 - **Script import**: `magpylib_studio/importer.py` + `load_script(path, scene?)`
   — run an existing magpylib script with **show() intercepted**: each show()
   call the script makes is captured as a scene candidate (what its author
@@ -367,11 +365,9 @@ and drives it.
     the request-id space, line-buffered stdout, rejects on engine exit).
   - `src/extension.ts` — `openStudio` command → webview (bundled plotly.js 3.x
     via webview URI + CSP nonce, `uirevision` holds the camera, object picker,
-    schema + set-values panes, manual edit form) and six **`vscode.lm` Language
-    Model Tools**: `#magpyObjects`, `#magpySchema`, `#magpyEdit`, `#magpyAdd`,
-    `#magpyRemove`, `#magpyParam` (successful edits auto-refresh the panel). One
-    shared engine process. Tool names declared in package.json must exactly
-    match those registered in `registerLmTools`.
+    schema + set-values panes, manual edit form). One shared engine process. The
+    24 language-model tools Copilot Chat called went on 2026-10-07: an agent
+    writes builder code instead, taught by the skill (`docs/roadmap.md` R3).
   - `src/sceneTree.ts` + activity-bar **Scene view** (`media/magnet.svg`, drawn
     after the magpylib logo — magnet/magpie/chip silhouette; the activity bar
     renders it as an alpha mask): clickable tree of scene objects; context menu
@@ -490,19 +486,14 @@ and drives it.
     `mutateFromTree` and in the inspector's request channel — a webview cannot
     raise an input box, so the ask happens on the way through — which covers
     every prompt, tree command and inspector field at once. Backing out of the
-    prompt abandons the whole edit. LM tools deliberately bypass it: there is no
-    one to ask, so Copilot gets the error and fixes it.
-  - **LM tools cover the parametric surface**: `#magpyVars`, `#magpyVar`,
-    `#magpyDuplicate`, `#magpySweep`, and the existing add/set/move/rotate
-    descriptions now teach the `=expression` convention (a model that is not
-    told will only ever write literals). `#magpyAdd` is explicitly steered away
-    from adding ring magnets one at a time. `set_variable`, `remove_variable`
-    and `duplicate_around` are batchable, so a whole parametric scene —
-    variables, the object written in terms of them, the arrangement — is one
-    undoable call. **Sweep a Variable…** ($(graph-line) in the same title bar)
-    asks for from/to/steps and drives the Field panel's third mode, "Against a
-    variable" (`get_sweep_figure`). **Duplicate Around…** is in the scene tree's
-    Transform submenu.
+    prompt abandons the whole edit.
+  - **Batchable and sweepable.** `set_variable`, `remove_variable` and
+    `duplicate_around` are batchable, so a whole parametric scene — variables,
+    the object written in terms of them, the arrangement — is one undoable call.
+    **Sweep a Variable…** ($(graph-line) in the same title bar) asks for
+    from/to/steps and drives the Field panel's third mode, "Against a variable"
+    (`get_sweep_figure`). **Duplicate Around…** is in the scene tree's Transform
+    submenu.
   - **Generated copies are read-only, not inert**: they come back from
     `list_objects` with a `derived` key, and get `contextValue = 'derivedCopy'`
     — deliberately outside the `magpy*` namespace that all 14 scene-view menu
@@ -524,8 +515,8 @@ and drives it.
     read only, with its own animation toggle (template follows the VS Code
     theme). `broadcastMutation()` (debounced 150 ms) refreshes plot + tree +
     inspector + virtual docs after every edit from any surface (inspector
-    widgets, LM tools, tree commands); a drag previews without it, paced one
-    request in flight.
+    widgets, tree commands, the script tab); a drag previews without it, paced
+    one request in flight.
   - **Script/scene I/O**: read-only virtual doc `magpylib-studio:/scene.json`
     (to_dict) that live-updates on every edit; commands Edit Python Script
     ($(code) icon on the Scene view), Save Scene As… (.py or .json via
@@ -614,16 +605,6 @@ and drives it.
     socket path cannot exceed 103 characters and this repo's path is deep enough
     to blow that; and `.vscode-test/` holds a 300 MB VS Code download, which is
     gitignored.
-  - **Language model tools carry `prepareInvocation`**: an invocation line
-    saying what is about to happen ("Removing r1", "Patterning r1 about an
-    axis"), and for the three that destroy something — `clear_scene`,
-    `remove_object`, `remove_event` — a confirmation that names it. The guide's
-    point is that a dialog naming nothing in particular is one people click
-    through, and `remove_object` in particular now says out loud that a
-    pattern's copies go with the object. `check-contributions.js` also checks
-    the tool contract (declared vs registered, and that each carries displayName
-    / modelDescription / inputSchema), and an integration test asserts all 24
-    are live in a real host.
   - **Checked against the API guides**, not only the samples: the two sidebar
     webviews dropped `retainContextWhenHidden` (the guide calls it a last resort
     for its memory cost, and both rebuild from the engine on ready); the two
@@ -707,10 +688,10 @@ supports.
    is the durable history**. (An _in-session_ undo/redo stack of doc snapshots
    exists for quick reverts — `undo`/`redo`/`get_history`/
    `goto_history(index)`, batch = one step, Cmd+Z in the panels, undo/redo
-   icons + a clickable **History view** in the sidebar, `#magpyUndo` — it
-   complements git, it does not replace it.)
-2. **`schema()` is the one contract** — the same JSON Schema drives the frontend
-   inspector widgets AND the LLM tool's `input_schema`.
+   icons + a clickable **History view** in the sidebar — it complements git, it
+   does not replace it.)
+2. **`schema()` is the one contract** — the JSON Schema the frontend inspector
+   widgets are built from.
 3. **Shared validation** — every edit goes through `style.set`, validated by the
    property tree; bad edits are reported so a GUI shows an error and an LLM
    self-corrects. No second validation layer.
@@ -882,8 +863,7 @@ supports.
 - **Optimisation** on top of `sweep()` (find the gap that flattens the field) is
   a small step now that a rebuild-and-measure loop exists.
 - **Try it live**: open `vscode-extension/` in VS Code, F5, run "Magpylib
-  Studio: Open Scene View"; in Copilot chat try `make the cube green #magpyEdit`
-  or `add a green sphere at [0,2,0] #magpyAdd`.
+  Studio: Open Scene View".
 - **Click-to-select in the 3D view** — needs solving magpylib's merged traces
   first (one mesh per collection, so hit-testing needs per-object rendering or a
   vertex-range → object map). Spike before promising.
@@ -891,7 +871,6 @@ supports.
   needs an install story for the engine (unreleased magpylib branch).
 - **No TypeScript tests** — ~1.5k lines verified only by `tsc` + manual F5; a
   `@vscode/test-electron` harness would cover tree/clipboard/commands.
-- **Chat Participant `@magpy`** if richer chat UX than plain tools is wanted.
 
 ## Gotchas
 
@@ -919,6 +898,5 @@ supports.
   JSON-safe).
 - Style paths are **dotted** (`magnetization.arrow.width`); `to_script` nests
   them for the `style=` kwarg. Constructor `style=` needs nested, not dotted.
-- LLM: for a VS Code extension prefer `vscode.lm` (Copilot, zero key). Use the
-  Anthropic SDK path from the Solara POC only if you specifically want Claude
-  and are OK managing keys/chat UI.
+- Agents reach the studio through builder code and the skill, not through tools
+  the extension registers (`docs/roadmap.md` R3, decided 2026-10-07).

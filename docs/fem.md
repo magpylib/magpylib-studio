@@ -765,6 +765,12 @@ studio; that is §4's handoff artifact doing its job.
 
 ### 12.3 Human + agent
 
+**Amended 2026-10-07** (`docs/roadmap.md` R3): the LM tools, and the
+`registerLmTools` factories this section builds on, are gone. What carries over
+is the split by cost — reading free, a solve confirmed, the caveats in the
+payload — now for the job API as the agent's code calls it: the confirmation is
+the agent's host's, and §12.4's budget is the engine's own.
+
 **Tools split by cost, and the hook already exists.** `registerLmTools` already
 has two factories: `queryTool` (read-only — `invocationMessage` only) and
 `editTool` (mutating — adds `confirmationMessages`, then `broadcastMutation()`).
@@ -917,10 +923,10 @@ presentation, and it extends a principle the README already states — **"One
 schema contract: the same JSON Schema drives the inspector widgets _and_ the LLM
 tool inputs."**
 
-**Amended 2026-10-07** (`docs/roadmap.md` R3, §6): the LM tools go. The hosts
-are the skill, a command that runs builder code in the running engine, and MCP
-when a chat host needs it; the skill's authoring half exists now, and its FEM
-half waits for M7 as below.
+**Amended 2026-10-07** (`docs/roadmap.md` R3, §6): the LM tools are gone. The
+hosts are the skill, a command that runs builder code in the running engine, and
+MCP when a chat host needs it; the skill's authoring half exists now, and its
+FEM half waits for M7 as below.
 
 Which points at the strongest version of the idea. `expression_help()` already
 returns the operators and functions **read off the allow-list that enforces

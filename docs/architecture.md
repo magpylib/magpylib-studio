@@ -69,8 +69,8 @@ pickers) either way. The test suite runs against both.
   pointing it outward is one signed volume) and the self-intersection test (a
   radial parametrisation cannot cross itself). Skipped answers are recorded as
   answers, not as silence — magpylib re-asks an open question on every redraw.
-- **One schema contract.** The same JSON Schema drives the inspector widgets
-  _and_ the LLM tool inputs.
+- **One schema contract.** The inspector's widgets are built from the style's
+  JSON Schema, read off magpylib, rather than from a list of fields kept here.
 - **Validation is shared.** Every edit goes through magpylib, and a bad edit is
   _reported_ (`{"ok": false, "error": …}`), not raised — so a GUI shows an error
   and an LLM self-corrects. There is no second validation layer.

@@ -28,8 +28,7 @@ All notable changes to the Magpylib Studio extension.
   So does every box that asks for a length — Set Position…, Move By…, an anchor,
   a mirror point, a step, a size, a pixel grid, the point editors — and every
   polarization. Steps read `moved by (0, 0, 5) mm`, field maps have their axes
-  in mm, and the field plots are in mT. Copilot can say what a variable it
-  creates measures, so it shows in the scene's units too.
+  in mm, and the field plots are in mT.
 - A box's values are split at commas: `0, 0, gap * 2` and the sampled curve's
   own example, `radius * cos(tau * turns * t)`, used to be split at their spaces
   and refused.
@@ -92,6 +91,13 @@ All notable changes to the Magpylib Studio extension.
 - The 3D view draws only when something in it changes, where it used to draw
   every frame whether or not anything moved. An idle panel no longer keeps the
   GPU busy.
+
+### Removed
+
+- **The Copilot Chat tools** (`#magpyAdd`, `#magpyEdit` and the 22 others). A
+  coding agent now writes the scene with the builder, taught by the Agent Skill
+  the Python package carries, and **Open in Magpylib Studio** opens what it
+  wrote.
 
 ### Fixed
 

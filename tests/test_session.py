@@ -13,7 +13,6 @@ import pytest
 from magpylib_studio import threejs
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
-    _BATCHABLE,
     DOC_VERSION,
     EXAMPLES,
     MagpylibStudioSession,
@@ -3988,30 +3987,6 @@ def test_a_name_is_never_quietly_arithmetic():
     assert s._objs["m"].style.label == "10"
     reloaded = MagpylibStudioSession(json.loads(json.dumps(s.to_dict())))
     assert reloaded._objs["m"].style.label == "10"
-
-
-def test_every_batchable_method_is_offered_to_the_model():
-    """The batch tool's schema is a copy of `_BATCHABLE`, and a copy drifts:
-    `remove_variable` was batchable, and described as batchable, for a release
-    in which the enum next to that description would not let anyone call it."""
-    manifest = os.path.join(
-        os.path.dirname(__file__), "..", "vscode-extension", "package.json"
-    )
-    with open(manifest, encoding="utf-8") as f:
-        package = json.load(f)
-    batch = next(
-        tool
-        for tool in package["contributes"]["languageModelTools"]
-        if tool["name"] == "magpylib-studio_batch"
-    )
-    offered = batch["inputSchema"]["properties"]["operations"]["items"]["properties"][
-        "method"
-    ]["enum"]
-    assert set(offered) == _BATCHABLE
-    assert len(offered) == len(set(offered))
-    # and what the description promises is what the enum accepts
-    for method in _BATCHABLE:
-        assert method in batch["modelDescription"]
 
 
 def test_variable_bounds_are_hard_or_only_advisory(tmp_path):

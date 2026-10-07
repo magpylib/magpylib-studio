@@ -158,7 +158,7 @@ That keeps magpylib's spelling. Whether it is too clever next to a plain
 
 ```
 panel, widget     ─┐                          ┌─▶ to_script          plain magpylib
-agent (LM tools)  ─┼─▶ session ─▶ document ───┼─▶ to_aedt_script     fem.md M6
+agent (R3)        ─┼─▶ session ─▶ document ───┼─▶ to_aedt_script     fem.md M6
 builder script    ─┘   operations             └─▶ to_builder_script  the script tab, §5
 ```
 
@@ -351,10 +351,10 @@ before a scene with sliders could come back with none and say nothing.
 
 ## 8. What would make this wrong
 
-1. **Nobody writes scenes in code.** If the GUI, and agents over the LM tools,
-   cover it, the builder is surface for nobody and `direction.md` §1's tax for
-   nothing. Watch whether the notebooks, the demos and the FEM work get written
-   against it.
+1. **Nobody writes scenes in code.** Agents do now — the builder is their way in
+   since the LM tools went (`roadmap.md` R3) — but if people never do, it is
+   surface for agents alone and `direction.md` §1's tax for little. Watch
+   whether the notebooks, the demos and the FEM work get written against it.
 2. **The refusals bite constantly.** JAX's are among its most complained-about
    behaviour. If ordinary scripts keep tripping over an `if` or an `np.linspace`
    on a variable, rule 2 is still right, but the builder is unpleasant to use.

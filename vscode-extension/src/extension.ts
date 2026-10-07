@@ -2042,8 +2042,8 @@ function scheduleBackup(): void {
 const REFRESH_WINDOW_MS = 150;
 
 /** Bring every surface back in sync with the engine. Throttled so a burst —
- *  an LLM chaining tool calls, a batch applied one operation at a time —
- *  costs one pass per window rather than one each. Says nothing about the
+ *  a batch applied one operation at a time, a run of edits in quick
+ *  succession — costs one pass per window rather than one each. Says nothing about the
  *  scene having *changed*: see broadcastMutation; redrawing and editing are
  *  not the same event, and conflating them would put an unsaved-changes mark
  *  on a Refresh.
@@ -2076,7 +2076,7 @@ function refreshSurfaces(): void {
   }, REFRESH_WINDOW_MS);
 }
 
-/** An edit happened somewhere (inspector, chat tool, tree action, panel):
+/** An edit happened somewhere (inspector, tree action, panel, script tab):
  *  the document now differs from its file, and every surface is stale. */
 function broadcastMutation(): void {
   // Every path that changes the scene ends up here, which makes it the one
@@ -2094,143 +2094,6 @@ function broadcastMutation(): void {
   }
   scheduleBackup();
   refreshSurfaces();
-}
-
-function toolResult(payload: unknown): vscode.LanguageModelToolResult {
-  return new vscode.LanguageModelToolResult([
-    new vscode.LanguageModelTextPart(JSON.stringify(payload)),
-  ]);
-}
-
-/** What a tool is about to do, in the words of the thing it will do it to. */
-function invocationMessage(method: string, input: Record<string, unknown>): string {
-  const id = (input.object_id ?? input.event_id ?? input.name) as string | undefined;
-  const target = id ? ` ${id}` : '';
-  const said: Record<string, string> = {
-    add_object: `Adding ${(input.type as string) ?? 'an object'}${target}`,
-    remove_object: `Removing${target}`,
-    remove_event: `Removing step${target}`,
-    set_param: `Setting ${(input.name as string) ?? 'a parameter'} on${target}`,
-    apply_edit: `Styling${target}`,
-    move: `Moving${target}`,
-    rotate: `Rotating${target}`,
-    set_transform: `Placing${target}`,
-    duplicate_around: `Patterning${target} about an axis`,
-    duplicate_along: `Patterning${target} along a direction`,
-    mirror: `Mirroring${target}`,
-    set_variable: `Setting${target}`,
-    set_variable_bounds: `Bounding${target}`,
-    edit_event: `Editing step${target}`,
-    move_event: `Reordering step${target}`,
-    clear_scene: 'Clearing the scene',
-    undo: 'Undoing the last change',
-    batch: `Applying ${(input.operations as unknown[])?.length ?? 0} changes`,
-  };
-  return said[method] ?? `Running ${method}`;
-}
-
-/**
- * The tools that cannot be shrugged off if the model gets them wrong, with
- * what the user should be told before agreeing. The guide's point is that a
- * confirmation naming nothing in particular is one people click through.
- */
-function confirmation(
-  method: string,
-  input: Record<string, unknown>,
-): { title: string; message: vscode.MarkdownString } | undefined {
-  const id = (input.object_id ?? input.event_id) as string | undefined;
-  const text = {
-    clear_scene: ['Clear the scene?', 'Every object, step and variable goes. Undo can bring them back.'],
-    remove_object: [
-      `Remove ${id}?`,
-      `${id} goes, along with everything inside it **and any copies a pattern made from it**.`,
-    ],
-    remove_event: [
-      `Remove step ${id}?`,
-      'Later steps that depended on it will be reported as broken rather than removed.',
-    ],
-  }[method];
-  return text && { title: text[0], message: new vscode.MarkdownString(text[1]) };
-}
-
-function registerLmTools(context: vscode.ExtensionContext): void {
-  /** Read-only tool: forward input as RPC params, return the result.
-   *
-   *  `fixed` params are added after the model's own and win over them — they
-   *  are how the caller is answered in the shape a *reader* wants rather than
-   *  the shape a tree view wants, without putting a knob in the schema for
-   *  the model to get wrong. */
-  const queryTool = (
-    toolName: string,
-    method: string,
-    fixed: Record<string, unknown> = {},
-  ) =>
-    vscode.lm.registerTool(toolName, {
-      prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<object>) {
-        return {
-          invocationMessage: invocationMessage(
-            method,
-            options.input as Record<string, unknown>,
-          ),
-        };
-      },
-      async invoke(options: vscode.LanguageModelToolInvocationOptions<object>) {
-        return toolResult(
-          await (await getEngine(context)).request(method, {
-            ...(options.input as Record<string, unknown>),
-            ...fixed,
-          }),
-        );
-      },
-    });
-  /** Mutating tool: same, but refresh all surfaces afterwards. A partially
-   *  failed batch still changed the scene, so refresh regardless of ok. */
-  const editTool = (toolName: string, method: string) =>
-    vscode.lm.registerTool(toolName, {
-      prepareInvocation(options: vscode.LanguageModelToolInvocationPrepareOptions<object>) {
-        const input = options.input as Record<string, unknown>;
-        return {
-          invocationMessage: invocationMessage(method, input),
-          confirmationMessages: confirmation(method, input),
-        };
-      },
-      async invoke(options: vscode.LanguageModelToolInvocationOptions<object>) {
-        const result = (await (await getEngine(context)).request(
-          method,
-          options.input as Record<string, unknown>,
-        )) as { ok: boolean; error?: string };
-        broadcastMutation();
-        return toolResult(result);
-      },
-    });
-  context.subscriptions.push(
-    // Copies counted, not listed: a patterned ring is one object and a number
-    // to a reader, and 60 unaddressable entries to nobody's benefit.
-    queryTool('magpylib-studio_listObjects', 'list_objects', { copies: 'count' }),
-    queryTool('magpylib-studio_getSchema', 'get_schema'),
-    queryTool('magpylib-studio_getField', 'get_field'),
-    queryTool('magpylib-studio_getVariables', 'get_variables'),
-    queryTool('magpylib-studio_getEvents', 'get_events'),
-    editTool('magpylib-studio_editEvent', 'edit_event'),
-    editTool('magpylib-studio_removeEvent', 'remove_event'),
-    editTool('magpylib-studio_moveEvent', 'move_event'),
-    queryTool('magpylib-studio_sweep', 'sweep'),
-    editTool('magpylib-studio_setVariable', 'set_variable'),
-    editTool('magpylib-studio_setVariableBounds', 'set_variable_bounds'),
-    editTool('magpylib-studio_duplicateAround', 'duplicate_around'),
-    editTool('magpylib-studio_duplicateAlong', 'duplicate_along'),
-    editTool('magpylib-studio_mirror', 'mirror'),
-    editTool('magpylib-studio_applyEdit', 'apply_edit'),
-    editTool('magpylib-studio_addObject', 'add_object'),
-    editTool('magpylib-studio_removeObject', 'remove_object'),
-    editTool('magpylib-studio_setParam', 'set_param'),
-    editTool('magpylib-studio_rotate', 'rotate'),
-    editTool('magpylib-studio_move', 'move'),
-    editTool('magpylib-studio_setTransform', 'set_transform'),
-    editTool('magpylib-studio_clearScene', 'clear_scene'),
-    editTool('magpylib-studio_batch', 'batch'),
-    editTool('magpylib-studio_undo', 'undo'),
-  );
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -5277,7 +5140,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  registerLmTools(context);
   void adoptRestoredScriptTab();
   void restoreScene();
 
