@@ -30,6 +30,12 @@ Writes into OUT:
   ``get_scene`` and ``object_tree``;
 * ``collection.json`` -- an editable view of two magnets held as one
   collection, and the scene its session answers `get_scene` with;
+* ``array.json`` -- the array example as the studio panel's engine answers
+  it: a tile patterned into a row, the row into a layer, the layer again, the
+  copies drawn on the nodes of what was patterned;
+* ``pathed.json`` -- a magnet on a path, as the studio panel's engine
+  answers it: what a drag of its handles must leave the path where the edit
+  leaves it;
 * ``small.html`` -- a ring of centimetre magnets, edited (so drawn in metres,
   as a session draws), saved never drawn: the page frames it itself, as a
   notebook's first look does;
@@ -223,6 +229,23 @@ def main(out):
     # what the studio panel's engine answers: the scene, and its tree
     (out / "studio.json").write_text(
         json.dumps({"scene": studio.payload, "tree": studio.tree})
+    )
+
+    array = MagpylibStudioSession()
+    array.load_example("array")
+    (out / "array.json").write_text(
+        json.dumps({"scene": array.get_scene(), "tree": array.object_tree()})
+    )
+
+    pathed = MagpylibStudioSession()
+    pathed.add_object(
+        "mover",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]},
+    )
+    pathed.move("mover", [[0.01 * i, 0, 0] for i in range(1, 6)], start=0)
+    (out / "pathed.json").write_text(
+        json.dumps({"scene": pathed.get_scene(), "tree": pathed.object_tree()})
     )
 
     held = scene_with_a_collection()

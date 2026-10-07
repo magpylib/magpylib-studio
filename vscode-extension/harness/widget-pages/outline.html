@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  The studio panel's view, as studio-drag.html builds it, on a scene named in
+  the query (`?scene=pathed`), the array example when none is: a scene whose
+  patterns draw their copies on the nodes of what was patterned, collections
+  among them. Selects the ids the address names after the `#`, and says so in
+  `window.shown`.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <link rel="stylesheet" href="/media/studioView.css" />
+    <script>
+      window.posted = [];
+      window.charted = 0;
+      window.Plotly = {
+        purge() {},
+        react: () => (window.charted += 1),
+      };
+      const answer = (message, after = 0) =>
+        setTimeout(() => window.postMessage(message, "*"), after);
+      const name = new URLSearchParams(location.search).get("scene") || "array";
+      window.scenes = fetch(`/out/${name}.json`).then((r) => r.json());
+      window.acquireVsCodeApi = () => ({
+        postMessage(message) {
+          window.posted.push(message);
+          if (message.type === "rpcRequest") {
+            window.scenes.then(({ scene, tree }) => {
+              const result =
+                message.method === "object_tree"
+                  ? tree
+                  : message.method === "get_figure"
+                    ? { data: [], layout: {} }
+                    : scene;
+              answer({ type: "rpcResult", reqId: message.reqId, result });
+            });
+          } else if (message.type === "previewTransform") {
+            answer({ type: "previewDone" }, 30); // the engine taking its time
+          }
+        },
+      });
+    </script>
+  </head>
+  <body data-widget="/static/widget.js" style="height: 640px">
+    <div id="view"></div>
+    <div id="chart" hidden></div>
+    <div id="bar">
+      <span id="mode">
+        <button id="modeEdit" type="button" class="on">Edit</button
+        ><button id="modeChart" type="button">Chart</button>
+      </span>
+      <button id="animate" type="button" hidden>Animate</button>
+      <span id="status"></span>
+    </div>
+    <script type="module" src="/media/studioView.mjs"></script>
+    <script type="module">
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      for (let i = 0; i < 100 && !document.querySelector("#view canvas"); i++) {
+        await wait(50);
+      }
+      await wait(600);
+      const ids = decodeURIComponent(location.hash.slice(1)).split(",");
+      window.scene3d.highlight(ids.filter(Boolean));
+      window.shown = ids;
+    </script>
+  </body>
+</html>

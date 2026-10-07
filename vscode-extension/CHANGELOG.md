@@ -49,6 +49,16 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- A selection is drawn in a bright green, in lines a pixel and a half wide: the
+  object's own edges, and its path apart, with larger markers. It used to be a
+  thin blue box round everything drawn for the object, path included: a magnet
+  on an orbit got a box the size of the ring, a selected ring of them a cage
+  that pointed at none, and the blue was magpylib's own. A sensor's field arrows
+  are boxed once, not outlined arrow by arrow. A selected collection takes in
+  the copies its patterns made: the array example's rows and layers were left
+  out, of the outline and of F's framing alike. The magnets' colours, which say
+  their magnetization, and a sensor's pixels, coloured by the field, are left as
+  they are. In the notebook widget too.
 - **The script tab is builder code, and saving it applies it.** _Edit Python
   Script_ shows the scene written with `magpylib_studio.build`, and a save
   replaces the scene with the one it builds, as one undo step, keeping every
@@ -85,6 +95,9 @@ All notable changes to the Magpylib Studio extension.
 
 ### Fixed
 
+- Turning or resizing an object on a path with the handles turned or stretched
+  its path along with it, which jumped back when the handle was let go. The path
+  stays where it is, and moves only as the object's position does.
 - A drag of several objects that the engine refused said only "undefined". It
   now says why.
 - A sensor that draws its own reading -- pixels coloured, or arrows, by the

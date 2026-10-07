@@ -591,6 +591,46 @@ def test_things_that_move_together_share_a_track():
 
 
 @needs_scene_graph
+@pytest.mark.parametrize("animation", [False, True])
+def test_a_path_is_marked_apart_from_what_travels_it(animation):
+    """A view outlines a selected object and draws its path apart, so the
+    payload says which line is a path: two magnets on an orbit, and a loop
+    moved along a line -- not the wire of a loop that is, nor its arrows."""
+    ring = magpy.Collection(
+        *[
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
+            ).rotate_from_angax(angle, "z", anchor=0)
+            for angle in (0, 180)
+        ]
+    )
+    ring.rotate_from_angax(np.linspace(0, 90, 10), "z", anchor=0, start=0)
+    moved = magpy.current.Circle(current=1, diameter=2)
+    moved.move(np.linspace((0, 0, 0), (0, 0, 2), 5), start=0)
+    still = magpy.current.Circle(current=1, diameter=2, position=(0, 0, 5))
+
+    def marked(payload):
+        return sorted(
+            len(s["position"]) // 3 for s in payload["scatters"] if s.get("path")
+        )
+
+    scene = threejs._capture((ring, moved, still), animation=animation)
+    payload, _ = threejs.run_payload(scene)
+    # the loop's line and two orbits -- not the ring's own, which turns where
+    # it stands: ten steps at one point is a dot, not a path
+    assert marked(payload) == [5, 10, 10]
+    assert len(payload["scatters"]) == 4 + 4  # that dot, two wires, two arrows
+
+    # a script's scene, which reaches the panel without `_capture`: marked
+    # from the objects magpylib handed its backend
+    for frame in scene.frames:
+        for trace in frame.traces:
+            trace.pop("path", None)
+    payload, _ = threejs.run_payload(scene)
+    assert marked(payload) == [5, 10, 10]
+
+
+@needs_scene_graph
 def test_a_run_that_changes_shape_carries_the_change(morphing):
     """A cube that grows is not a cube that moves, however it is fitted: its
     trace is carried as it is at every step, and the run still plays."""
