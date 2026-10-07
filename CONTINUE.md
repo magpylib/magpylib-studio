@@ -346,6 +346,15 @@ and drives it.
   Script…" command, right-click a `.py` → "Open in Magpylib Studio", welcome
   link, and a post-import "Switch Scene…" prompt + "Switch Imported Scene…"
   palette command when several candidates exist.
+- **The agent skill** (`docs/roadmap.md` R3, step 1):
+  `magpylib_studio/.agents/skills/magpylib-studio/`, in the wheel where
+  `uvx library-skills` finds it, as magpylib's own skill sits in its package.
+  `SKILL.md` teaches the builder, the field, sweeps, changing a saved scene and
+  what each refusal means; `references/api.md` is written from the docstrings by
+  `tools/write-skill-reference.py`. `tests/test_skill.py` runs every example in
+  the skill and fails when the reference is not what the code says today, so the
+  skill cannot describe an API the package lacks (`docs/fem.md` §13.4);
+  `tools/check-package-alone.py` checks the wheel carries it.
 - `magpylib_studio/rpc.py` — JSON-RPC stdio loop (`serve`), method allow-list.
 - `magpylib_studio/__main__.py` — `python -m magpylib_studio`.
 - `tests/test_session.py` — 29 tests, **all green**, ruff clean

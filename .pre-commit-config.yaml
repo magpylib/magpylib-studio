@@ -61,8 +61,10 @@ repos:
         types_or: [yaml, markdown, html, css, javascript, json]
         args: [--prose-wrap=always]
         # VS Code's own config files are JSONC, which prettier parses as
-        # strict JSON and chokes on.
-        exclude: (^|/)\.vscode/|/jsconfig\.json$
+        # strict JSON and chokes on. The skill's reference is written by
+        # tools/write-skill-reference.py from the docstrings, and a test
+        # checks it is exactly what that writes; rewrapped, it never would be.
+        exclude: (^|/)\.vscode/|/jsconfig\.json$|^magpylib_studio/\.agents/skills/magpylib-studio/references/api\.md$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: "v0.16.10"

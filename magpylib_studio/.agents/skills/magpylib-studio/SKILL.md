@@ -1,0 +1,229 @@
+---
+name: magpylib-studio
+description: >-
+  Use when building, changing or studying a magnet, coil or sensor arrangement
+  that should stay parametric — a Halbach ring, a magnet array, a coil stack, a
+  sensor placement — in a project with magpylib-studio installed, or whenever a
+  task touches a `.magpy.json` scene or a script using `magpylib_studio.build`.
+  Covers writing the scene with the builder (magpylib's spelling, with variables
+  that stay variables), patterns instead of loops, reading the field and
+  sweeping a variable, changing a saved scene, and handing the result to the
+  person in the studio. A scene written in plain magpylib loses its variables:
+  every number is frozen, and the studio's sliders have nothing to move.
+license: BSD-3-Clause
+---
+
+# magpylib-studio
+
+A studio scene is one parametric document, saved as `.magpy.json`: magnets,
+currents and sensors, the variables they are written in, and the steps that
+placed them. The person works on it in the studio — a VS Code panel or a
+notebook widget — with a slider per variable. You write it in code with the
+builder, `magpylib_studio.build`: magpylib's spelling, with variables that stay
+variables. Every builder call goes through the operation the studio's own panel
+uses, so a call the scene cannot take fails at its line and says why.
+
+## Quick reference
+
+- Build with `from magpylib_studio.build import Scene`, not plain magpylib,
+  whenever the scene should keep its variables.
+- Values are SI, as in magpylib: metres, tesla, amperes, degrees.
+- A variable is a handle, not a number. Arithmetic on it writes an expression;
+  `if`, `range`, `float`, `math.*` or `print` on it raise `TypeError`, saying
+  what to write instead. See [Variables are handles](#variables-are-handles).
+- Repeat with a pattern — `duplicate_around`, `duplicate_along`, `mirror` —
+  never with a loop over a variable. The object must sit in a collection.
+- Read the field with `s.session.get_field(...)`, and try other values with
+  `s.session.sweep(...)`. Both return plain data, in SI.
+- Save with `s.save("name.magpy.json")`, or leave the script: the studio opens
+  either one whole.
+- To change a saved scene, write it out as a builder script, edit that, and run
+  it. See [Change a saved scene](#change-a-saved-scene).
+- Every signature: [references/api.md](references/api.md).
+
+## Write a scene
+
+```python
+from magpylib_studio.build import Scene
+
+s = Scene()
+n = s.variable("n", 12, bounds=(4, 48), integer=True)
+radius = s.variable("radius", 0.025, bounds=(0.01, 0.1), unit="length")
+
+ring = s.Collection(id="ring", style_label="Halbach ring")
+magnet = s.magnet.Cuboid(
+    id="magnet",
+    dimension=(0.008, 0.008, 0.008),  # m
+    polarization=(1, 0, 0),  # T, in the magnet's own frame
+    position=(radius, 0, 0),  # kept as "=radius", not as 0.025
+)
+ring.add(magnet)
+# n copies round z, each turned by a further 360/n: the polarization turns
+# twice per revolution, which makes a Halbach dipole
+magnet.duplicate_around(count=n, axis="z", spin=360 / n)
+s.Sensor(id="centre", position=(0, 0, 0))
+
+s.save("halbach.magpy.json")
+```
+
+- **Objects** are magpylib's classes under `s.magnet`, `s.current` and `s.misc`,
+  plus `s.Collection` and `s.Sensor`, taking magpylib's own keywords. `id=`
+  names an object, unique in the scene; `style_label=` and the other `style_…`
+  keywords set its style.
+- **Variables:**
+  `s.variable(name, value, bounds=(low, high), slider=(low, high), integer=True, options=(...), unit=...)`.
+  `bounds` are hard limits, `slider` the range worth dragging, `integer` for
+  anything that counts, `options` for a choice such as an axis name. `unit` is
+  `"length"`, `"angle"`, `"field"`, `"current"` or `"dimensionless"`, and only
+  changes how the studio shows the value. A variable can be defined by others:
+  `s.variable("stagger", 180 / n, unit="angle")`.
+- **Shown units:** `Scene(model_unit="mm", field_unit="mT")` shows the scene in
+  mm and mT. What you write stays SI.
+- **Groups:** `s.Collection(*children, id=...)` and `group.add(...)`. Add the
+  outermost group first, then what goes in it: an object added to a group after
+  anything else touched it is moved there with its position frozen as numbers,
+  and a `UserWarning` says so.
+- **Steps:** `move`, `rotate_from_angax(angle, axis, anchor=...)`,
+  `rotate_from_rotvec`, `set_transform`, `reparent`, `hide`, `show` and
+  `remove`, as in magpylib, applied in the order written. A step on a collection
+  carries what is in it.
+- **Patterns:** `obj.duplicate_around(count, axis="z", anchor=0, spin=0)`,
+  `obj.duplicate_along(count, step)` (twice — on the object, then on its
+  collection — for a grid) and `obj.mirror(plane="xy")`. Each is one step that
+  stays a pattern: change `n` and the ring rebuilds. The copies are generated;
+  to change them, change the source object, its pattern step, or a variable.
+- **Starting points:** `MagpylibStudioSession().list_examples()` names the
+  built-in scenes; `load_example(name)` and `to_builder_script()` show how each
+  is written.
+
+## Variables are handles
+
+| Instead of                          | Write                                                                            |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `for i in range(n): ... copy() ...` | `obj.duplicate_around(count=n, ...)` or `obj.duplicate_along(count=n, step=...)` |
+| `if gap > 0.01:`                    | decide in Python on fixed values: a scene holds no conditions                    |
+| `math.sin(tilt)`, `float(radius)`   | `s.sin(tilt)` or `np.sin(tilt)`; pass `radius` itself where a value goes         |
+| `np.linspace(0, radius, k)`         | `s.sampled(lambda t: ..., count=..., over=...)`, a run of points as a formula    |
+| `print(radius)`                     | `repr(radius)` for its expression, `s.session.get_variables()` for values        |
+
+A loop over fixed values is ordinary Python (`for z in (0.0, 0.01):` to make two
+rings), and a plain name can hold an expression: after `reach = radius / 2`,
+`position=(reach, 0, 0)` still follows `radius`. The functions an expression may
+call are listed in [references/api.md](references/api.md).
+
+## Read the field
+
+```python
+import numpy as np
+
+field = s.session.get_field(points=[(0, 0, 0), (0.005, 0, 0)])  # m
+B = np.array(field["values"])  # T, one row per point
+print(field["unit"], np.linalg.norm(B, axis=1))
+```
+
+- `get_field(points=...)` sums the field of every source in the scene at those
+  points, hidden ones included; `get_field(sensor_id="centre")` reads a sensor
+  along its path. `field="H"` gives H in A/m; `"J"` and `"M"` give the material,
+  zero outside it. Values are SI whatever units the scene is shown in.
+- Read `field.get("skipped")` and `field.get("warnings")` and pass them on: a
+  source that could not be included, or a mesh whose surface does not close,
+  whose field is computed and wrong.
+- Uniformity, a peak or a gradient: compute it from the values with numpy.
+
+```python
+grid = np.mgrid[-0.005:0.005:5j, -0.005:0.005:5j, 0:0:1j].T.reshape(-1, 3)
+magnitude = np.linalg.norm(s.session.get_field(points=grid)["values"], axis=1)
+print(f"{magnitude.mean():.4f} T, spread {np.ptp(magnitude) / magnitude.mean():.1%}")
+```
+
+## Try other values
+
+```python
+result = s.session.sweep(
+    "radius", np.linspace(0.02, 0.04, 5).tolist(), points=[(0, 0, 0)]
+)
+assert result["ok"], result["error"]
+for step in result["steps"]:
+    print(step["value"], step["magnitude"])
+
+print(s.session.set_variable("n", 16))  # {'ok': True}
+print(
+    s.session.set_variable("n", 6.5)
+)  # {'ok': False, 'error': 'n = 6.5 counts things, ...'}
+```
+
+- `sweep(variable, values, points=... or sensor_id=..., field="B")` rebuilds the
+  scene once per value and reads the field each time, in milliseconds, and
+  leaves the scene on the value it started with. `values` must be a list:
+  `.tolist()` a numpy array.
+- `set_variable(name, value)` changes a value for good.
+- Session calls report a refusal rather than raise it: check `["ok"]` and read
+  `["error"]`.
+
+## Change a saved scene
+
+A `.magpy.json` is the log of the steps that built the scene; do not edit it by
+hand. Write it out as builder code, edit that, and run it:
+
+```python
+import pathlib
+
+from magpylib_studio.session import MagpylibStudioSession
+
+session = MagpylibStudioSession()
+assert session.load_scene("halbach.magpy.json")["ok"]
+pathlib.Path("halbach_scene.py").write_text(session.to_builder_script())
+```
+
+The script builds the same scene, variables and patterns included, into a
+`Scene` named `s`. Add `s.save("halbach.magpy.json")` at its end, make the
+change, and run it. Write it out afresh each time: the person may have changed
+the scene in the studio since.
+
+When the script is what is kept — in git, with the `.magpy.json` rebuilt from it
+— edit the script itself, and build with `Scene(values="halbach.magpy.json")` so
+that the slider positions the person saved survive the next run.
+
+## Hand it to the person
+
+- **VS Code:** right-click a builder script and choose **Open in Magpylib
+  Studio** — the studio runs it and opens the scene it built, with a slider per
+  variable. A `.magpy.json` opens with **Magpylib Studio: Open Scene…**.
+- **Notebook:** `SceneWidget(s, editable=True)`, from `magpylib_studio.widget`
+  (`pip install "magpylib-studio[widget]"`), is the 3D view with handles, and
+  `.variable_sliders()` adds a slider per variable.
+- Give numbers with where they were read and in what unit, and say how you
+  computed them. Whether a field is good enough is the person's call.
+
+## When a call fails
+
+- **`TypeError` on a line that uses a variable:** the line asked for its value.
+  The message says what to write instead; see
+  [Variables are handles](#variables-are-handles).
+- **`BuildError`:** the scene refused the call, in the studio's own words, and
+  is as it was. The common ones:
+  - `'magnet' must be inside a Collection to duplicate it` — add the object to a
+    collection before patterning it.
+  - `n = 100 is above its maximum 48` — a value outside its variable's `bounds`;
+    a fraction for an `integer` one is refused the same way.
+  - `object id 'ring' already exists`, `there is already a variable 'n'` — names
+    are unique in a scene.
+  - `Tetrahedron cannot be mirrored` — only shapes with a mirror symmetry of
+    their own can be: cuboids, cylinders and their segments, spheres, dipoles
+    and sensors.
+- Fix the line and run the script again: a `Scene()` is built from nothing on
+  every run.
+
+## Conventions to check
+
+- SI throughout: a 5 mm cube is `dimension=(0.005, 0.005, 0.005)`, NdFeB about
+  `polarization=(0, 0, 1.2)`. Millimetres and millitesla from old magpylib code
+  are wrong by factors of 1000 or more, and nothing raises.
+- `magnet.Cylinder(dimension=(d, h))` and `current.Circle(diameter=d)` take a
+  diameter, not a radius.
+- `polarization` is in the magnet's own frame: rotate the magnet and it turns
+  with it. `magnetization` is in A/m; prefer `polarization`, in T.
+
+A builder script is Python and runs with the person's rights, like any script. A
+`.magpy.json` never runs code when it is opened, so it is the form in which to
+share a scene.

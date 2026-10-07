@@ -35,6 +35,12 @@ if "site-packages" not in package.parts:
 for name in ("widget.js", "widget.css"):
     if not (package / "static" / name).is_file():
         fail(f"the wheel has no static/{name}")
+# The agent skill ships inside the package, where `uvx library-skills` looks
+# for it; a dot-folder is the kind of thing a build backend quietly leaves out.
+skill = package / ".agents" / "skills" / "magpylib-studio"
+for name in ("SKILL.md", "references/api.md"):
+    if not (skill / name).is_file():
+        fail(f"the wheel has no .agents/skills/magpylib-studio/{name}")
 
 magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
 probe = magpy.Sensor(position=(0, 0, 0.02))

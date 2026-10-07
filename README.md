@@ -28,7 +28,7 @@ pattern. Drag `n` and both rings rebuild._
   applies your edits when you save. Export plain magpylib for anyone, or the
   scene as code to keep.
 - **Let an AI assistant help.** Copilot Chat can build and edit the scene with
-  you.
+  you, and a coding agent can write it in code (see below).
 
 ## Get started in VS Code
 
@@ -88,6 +88,17 @@ More in
 [docs/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/builder.md),
 and a complete example in
 [examples/builder_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/builder_demo.py).
+
+## Let a coding agent write it
+
+The package carries an [Agent Skill](https://agentskills.io) that teaches coding
+agents — Claude Code, Codex, Copilot and others — to write scenes with the
+builder, read the field and sweep a variable, and hand you the result to open in
+the studio. In a project that depends on `magpylib-studio`:
+
+```sh
+uvx library-skills  # pick magpylib-studio; for Claude Code, install into .claude/skills
+```
 
 ## Install the Python package only
 
