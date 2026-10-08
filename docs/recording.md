@@ -64,15 +64,23 @@ its arguments as written; magpylib's own nested calls (a constructor setting its
 properties, a collection moving its children) are not. `resolve` turns each
 argument into a number before magpylib sees it, so a variable never reaches
 magpylib's validators, transforms or kernels. Generic, about 140 lines and a
-4-line hook in `BaseGeo.__init_subclass__`; studio is one user of it.
+4-line hook in `BaseGeo.__init_subclass__`; studio is one user of it. Only
+magpylib's own classes are wrapped: a subclass written in a script is
+transparent, so the magpylib calls its methods make are what is recorded, and
+its objects are reported as the magpylib class they extend (found on the docs'
+`MagnetRing`, §3).
 
-**Style needs nothing new from magpylib.** The recorder keeps each object's
-`style.as_dict()` and, at every recorded call, writes what changed since as
+**Style needs nothing new from magpylib.** The recorder keeps the style each
+object was _given_ — the style tree's `set_values()`, `style_compat`'s
+equivalent on 5.2.x — and, at every recorded call, writes what changed since as
 style steps, paths sorted (`color`, `magnetization.show`). An edit lands before
 the next call, which is where it was written as far as any later call can tell:
-a style set before `copy()` is in the copy. `observe` would say the same where
-the style tree has it, but `as_dict()` exists on every magpylib, so one method
-writes the same document everywhere (§5).
+a style set before `copy()` is in the copy. Given, not resolved: one `show()`
+resolves every default, and recording those turned 27 steps into 759 on one
+docs page. And read without making a style that was never made: reading
+`obj.style` creates it, and `copy()` labels a copy differently once it exists
+(`Cuboid_01` instead of none), so a recorder that looks changes what it records.
+P0 fixes that in `copy()`; until then the recorder checks before it reads.
 
 **Studio's half: a recorder that calls the builder's own internals.** Each event
 becomes what the builder does today for the same call: a construction is
@@ -100,7 +108,16 @@ of studio's:
   values, the field matched a
   direct plain-magpylib build exactly (0.0 difference, where the change moved B
   by 89 %).
-- magpylib's suite passes (1406) with the hook in place.
+- magpylib's suite passes (1410) with the hook in place.
+- **magpylib's own docs examples** (`tools/replay-magpylib-docs.py`), each page
+  run plain and recorded, the recording replayed from JSON and every object
+  compared — pose, field, pixels, the style it was given. Of 35 pages, 31 run
+  here (four need a package or a matplotlib this machine lacks). **Recording
+  changed what no page did. 27 replay exactly**, among them 1 215 objects and
+  3 438 steps in `examples_force_floating`, pyvista meshes, convex hulls, current
+  sheets, paths, animations and copied collections. The other four are two gaps,
+  both known: a `model3d` trace, data that needs an encoding (§8.3), and a
+  `CustomSource` with a Python `field_func`, which is code (§8.5).
 - **Cost with nothing recording: about 0.1 µs per wrapped call**, some 4 % on
   building and moving objects, nothing measurable once a field is computed.
   Building many objects in a Python loop is the slow way in magpylib anyway; a
@@ -164,7 +181,10 @@ styled before it was copied, a sensor): released 5.2.3 with the copy, `main`
 with the copy, and the spike branch with its own hook. All three write
 **byte-identical documents**, and each replays at changed values to the exact
 field of a direct build. That is the property the transition rests on, so it is
-a test: one scene, recorded on each magpylib in CI, the documents compared.
+a test: one scene, recorded on each magpylib in CI, the documents compared. That
+check compared resolved styles; with style now recorded as given (§2), it holds
+only if `style_compat`'s given values on 5.2.x match `set_values()` on the tree,
+which P1 checks first.
 
 **When the release comes**, studio's minimum moves to it and `record_compat`
 goes. Nothing a user wrote or saved changes.
@@ -188,15 +208,21 @@ goes. Nothing a user wrote or saved changes.
 **P0 — magpylib: the hook, public.** As `magpylib.record` (§4), docs, tests (the
 spike's three, plus "type in, type out" for every class and transform), a
 release. A scene listens for as long as it lives (§2), not for a block, so
-`record` needs a start/stop form beside `with`. Not a blocker: studio ships on
-`record_compat` (§5) until then.
+`record` needs a start/stop form beside `with`. With it: `copy()` labels a copy
+the same whether or not the original's style was ever read (§2), and
+`Trace3d`'s `==` stops raising on a trace that holds arrays. Not a blocker:
+studio ships on `record_compat` (§5) until then.
 
 **P1 — the recorder.** `Scene()` starts listening, mapping each magpylib event
 onto the builder's internals, on `record_compat`; `s.paused()`, the takeover by
-a newer scene, and `save()`'s warning go with it. Acceptance, as B1's was: each built-in
-example written in plain magpylib builds the same document as its builder script
-— same variables, bounds and steps, and the same field (`same_field`) — on every
-magpylib studio supports, and the documents are byte-identical across them.
+a newer scene, and `save()`'s warning go with it. Acceptance, as B1's was: each
+built-in example written in plain magpylib builds the same document as its
+builder script — same variables, bounds and steps, and the same field
+(`same_field`) — on every magpylib studio supports, and the documents are
+byte-identical across them. And magpylib's docs, through
+`tools/replay-magpylib-docs.py` on studio's recorder in place of the stand-in:
+no page broken by recording, the 27 exact pages still exact, and the two gaps
+(§3) closed or refused at their line.
 
 **P2 — the tab and the skill.** `to_builder_script` writes the new spelling; the
 script tab and apply-on-save are unchanged in mechanism (`builder.md` §5).
@@ -241,3 +267,7 @@ spelling's whole point is fewer turns.
 4. **A path over a variable** (`np.linspace(0, stroke, 100)`): a variable refuses
    to become an array, so a recorded path needs `s.sampled` (`builder.md` §7),
    as the builder does today.
+5. **A `CustomSource` with a Python `field_func`** is code, and a document holds
+   none. Refused at its line, or kept as an importable `module:function` that
+   opening the scene imports — which is running code, what `direction.md` §7
+   rejected for the document?
