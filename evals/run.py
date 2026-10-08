@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -153,9 +154,10 @@ def prepare(task, condition, work, skill=None):
         shutil.copytree(skill, work / ".claude" / "skills" / SKILL)
 
 
-def agent_env(venv, work=None):
+def agent_env(venv, work=None, local=None):
     """A clean environment: this machine's identity and the condition's
-    Python, and nothing of the session that started the run."""
+    Python, and nothing of the session that started the run -- and, given
+    `local` ({"base_url", "model"}), the way to a local model."""
     keep = ("HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TERM")
     env = {key: os.environ[key] for key in keep if key in os.environ}
     env["PATH"] = f"{venv / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -167,7 +169,37 @@ def agent_env(venv, work=None):
         # matplotlib's cache is in the home folder, outside the sandbox: told
         # nothing, it warns on every import, into the agent's output
         env["MPLCONFIGDIR"] = str(work / ".matplotlib")
+    if local is not None:
+        # Claude Code against a local server that speaks Anthropic's API --
+        # Ollama, LM Studio, llama.cpp. Every model it would ask for, the main
+        # one and the small one it uses for chores, is the local one; nothing
+        # else leaves the machine.
+        env["ANTHROPIC_BASE_URL"] = local["base_url"]
+        env["ANTHROPIC_AUTH_TOKEN"] = "local"  # noqa: S105 - a local server takes any
+        for tier in ("OPUS", "SONNET", "HAIKU"):
+            env[f"ANTHROPIC_DEFAULT_{tier}_MODEL"] = local["model"]
+        env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     return env
+
+
+def local_models(base_url):
+    """The models a local server holds, as Ollama or an OpenAI-style
+    server lists them, or a ConnectionError saying what to start."""
+    readers = (
+        ("/api/tags", lambda data: [m["name"] for m in data["models"]]),
+        ("/v1/models", lambda data: [m["id"] for m in data["data"]]),
+    )
+    for path, read in readers:
+        url = base_url.rstrip("/") + path
+        try:
+            with urllib.request.urlopen(url, timeout=5) as answer:  # noqa: S310 - the server named on the command line
+                return read(json.loads(answer.read()))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    raise ConnectionError(
+        f"no model server answers at {base_url}: start one (`ollama serve`), "
+        "or pass --base-url"
+    )
 
 
 def command(claude, model, budget):
@@ -278,7 +310,7 @@ def run_one(name, task, condition, folder, args, envs):
             argv,
             stdin=subprocess.PIPE,
             cwd=work,
-            env=agent_env(envs[condition], work),
+            env=agent_env(envs[condition], work, args.local_server),
             stdout=transcript,
             stderr=stderr,
             text=True,
@@ -378,10 +410,17 @@ def summarize(results, out, meta):
         "",
         f"Model `{meta['model']}`, {meta['repeats']} run(s) per task and condition, "
         f"checkout `{meta['commit']}`. Tokens are input + output, cache reads "
-        "included; cost is what Claude Code reported.",
+        "included; time is the median run's, in seconds; "
+        + (
+            f"no cost: a local model, at {meta['local']}."
+            if meta.get("local")
+            else "cost is what Claude Code reported."
+        ),
         "",
-        "| task | condition | passed | turns | tokens | cost $ | refusals | skill read |",
-        "| ---- | --------- | ------ | ----- | ------ | ------ | -------- | ---------- |",
+        "| task | condition | passed | turns | tokens | time s | cost $ | refusals "
+        "| skill read |",
+        "| ---- | --------- | ------ | ----- | ------ | ------ | ------ | -------- "
+        "| ---------- |",
     ]
     for r in results:
         r["tokens"] = sum(
@@ -400,10 +439,12 @@ def summarize(results, out, meta):
         groups.setdefault((r["task"], r["condition"]), []).append(r)
     for (task, condition), runs in sorted(groups.items()):
         passed = sum(r["ok"] for r in runs)
-        cost = _median(runs, "cost_usd")
+        cost = None if meta.get("local") else _median(runs, "cost_usd")
+        seconds = _median(runs, "seconds")
         lines.append(
             f"| {task} | {condition} | {passed}/{len(runs)} | {_median(runs, 'turns')} | "
-            f"{_median(runs, 'tokens')} | {'' if cost is None else f'{cost:.3f}'} | "
+            f"{_median(runs, 'tokens')} | {'' if seconds is None else f'{seconds:.0f}'} | "
+            f"{'' if cost is None else f'{cost:.3f}'} | "
             f"{sum(r['refusals'] for r in runs)} | "
             f"{sum(r['skill_read'] for r in runs)}/{len(runs)} |"
         )
@@ -458,12 +499,27 @@ def main(argv=None):
     parser.add_argument(
         "--budget", type=float, default=2.0, help="USD per run, at most"
     )
-    parser.add_argument("--timeout", type=int, default=1200, help="seconds per run")
+    parser.add_argument(
+        "--timeout", type=int, help="seconds per run (1200; 3600 with --local)"
+    )
+    parser.add_argument(
+        "--local",
+        metavar="MODEL",
+        help="a model on a local server that speaks Anthropic's API (Ollama: "
+        "`ollama pull MODEL`, then `ollama serve`), instead of Anthropic's",
+    )
+    parser.add_argument("--base-url", default="http://localhost:11434")
     parser.add_argument("--claude", default=find_claude())
     parser.add_argument("--rebuild-envs", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recheck", type=pathlib.Path, help="a results folder")
     args = parser.parse_args(argv)
+    # A local model reads Claude Code's long system prompt at laptop speed.
+    args.timeout = args.timeout or (3600 if args.local else 1200)
+    args.local_server = None
+    if args.local:
+        args.model = args.local
+        args.local_server = {"base_url": args.base_url, "model": args.local}
 
     if args.recheck:
         results = []
@@ -490,9 +546,20 @@ def main(argv=None):
         parser.error(f"no such task: {', '.join(unknown)}")
     if not args.dry_run and not args.claude:
         parser.error("no claude found: pass --claude or set CLAUDE_BIN")
+    if args.local and not args.dry_run:
+        try:
+            held = local_models(args.base_url)
+        except ConnectionError as e:
+            parser.error(str(e))
+        if args.local not in held and f"{args.local}:latest" not in held:
+            parser.error(
+                f"{args.base_url} has no {args.local!r} (it has: "
+                f"{', '.join(held) or 'nothing'}): `ollama pull {args.local}`"
+            )
     conditions = args.conditions.split(",")
     started = datetime.datetime.now().strftime("%Y-%m-%d-%H%M")
-    out = RESULTS / f"{started}-{args.model}{'-dry' if args.dry_run else ''}"
+    label = re.sub(r"[^A-Za-z0-9.]+", "-", args.model)  # qwen3:8b -> qwen3-8b
+    out = RESULTS / f"{started}-{label}{'-dry' if args.dry_run else ''}"
     envs = None if args.dry_run else environments(args.rebuild_envs)
     commit = subprocess.run(  # noqa: S603 - git, on this checkout
         ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],  # noqa: S607
@@ -506,6 +573,7 @@ def main(argv=None):
         "repeats": args.repeats,
         "commit": commit,
         "budget_usd": args.budget,
+        **({"local": args.base_url} if args.local else {}),
     }
     results = []
     for name in chosen:

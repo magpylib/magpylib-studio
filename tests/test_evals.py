@@ -303,3 +303,44 @@ def test_a_run_the_machine_slept_through_is_not_a_failure(tmp_path):
     (tmp_path / "run.json").write_text(json.dumps({"slept_seconds": 5220}))
     result = run.judge("field_above_magnet", task, "plain", tmp_path)
     assert result["ran"] is False and "slept 87 min" in result["notes"][0]
+
+
+def test_a_local_model_is_reached_and_nothing_else_is_changed():
+    venv = pathlib.Path("/venv")
+    assert not any(key.startswith("ANTHROPIC") for key in run.agent_env(venv))
+    local = {"base_url": "http://localhost:11434", "model": "qwen3:8b"}
+    env = run.agent_env(venv, local=local)
+    assert env["ANTHROPIC_BASE_URL"] == "http://localhost:11434"
+    assert {
+        env[f"ANTHROPIC_DEFAULT_{t}_MODEL"] for t in ("OPUS", "SONNET", "HAIKU")
+    } == {"qwen3:8b"}
+
+
+def test_a_local_server_that_is_not_there_says_what_to_start():
+    import socket
+
+    with socket.socket() as probe:  # a port nothing listens on
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    with pytest.raises(ConnectionError, match="ollama serve"):
+        run.local_models(f"http://127.0.0.1:{port}")
+
+
+def test_a_local_run_is_summarized_by_time_and_without_cost(tmp_path):
+    result = {
+        "task": "t",
+        "condition": "plain",
+        "ok": True,
+        "ran": True,
+        "turns": 4,
+        "seconds": 300.0,
+        "cost_usd": 1.23,
+        "refusals": 0,
+        "skill_read": False,
+    }
+    meta = {"started": "s", "model": "qwen3:8b", "repeats": 1, "commit": "c"}
+    run.summarize([result], tmp_path, {**meta, "local": "http://localhost:11434"})
+    text = (tmp_path / "summary.md").read_text()
+    assert (
+        "no cost: a local model" in text and "| 300 |" in text and "1.230" not in text
+    )

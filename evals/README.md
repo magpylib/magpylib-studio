@@ -83,6 +83,23 @@ through is not a measurement: the first full pass had one, an agent's command
 timing out across a fifteen-minute sleep and its run taking twice the turns to
 recover.
 
+### With a local model
+
+Claude Code can run against a model on this machine, through a server that
+speaks Anthropic's API -- Ollama since 0.14, LM Studio, llama.cpp. Nothing then
+reaches Anthropic, and nothing counts against the account's usage:
+
+```sh
+ollama pull qwen3:8b && ollama serve          # in another terminal
+.venv/bin/python evals/run.py --local qwen3:8b --tasks field_above_magnet,sweep_gap
+```
+
+`--base-url` names another server (default `http://localhost:11434`). Every
+model Claude Code would ask for is the local one, the timeout is an hour, and
+the summary gives time instead of cost. Claude Code's system prompt alone is
+some 20k tokens, read at the speed of this machine: expect minutes a run, not
+seconds, and a small model to stumble on the tools before the magnetics.
+
 Results go to `evals/results/<date>-<model>/`: `summary.md` sets the conditions
 side by side per task, and `runs/` holds each run's folder, prompt, transcript
 and result. Only the summaries are kept in git.
