@@ -254,5 +254,5 @@ unanswered for two days because nobody asked them.
 - **R5's order:** pointing at the scene before the view in the chat.
 - **A project is a folder of scene files** (R9), rather than a container format;
   and whether variants are named value sets inside a scene.
-- **`plans/recording.md`:** the scene as a function with annotated parameters,
-  and an explicit `name(obj, id)` for ids a label does not give.
+- **`plans/recording.md`, as a whole:** go ahead with P0 upstream and P1, or
+  stay on the builder's own spelling.
