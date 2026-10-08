@@ -35,6 +35,9 @@ uses, so a call the scene cannot take fails at its line and says why.
   never with a loop over a variable. The object must sit in a collection.
 - Read the field with `s.session.get_field(...)`, and try other values with
   `s.session.sweep(...)`. Both return plain data, in SI.
+- Search a design in one script -- a loop over `set_variable` and `get_field`,
+  or over a function that builds a `Scene` -- not one run per guess. See
+  [Search a design](#search-a-design).
 - Save with `s.save("name.magpy.json")`, or leave the script: the studio opens
   either one whole.
 - To change a saved scene, write it out as a builder script, edit that, and run
@@ -159,6 +162,47 @@ print(
 - `set_variable(name, value)` changes a value for good.
 - Session calls report a refusal rather than raise it: check `["ok"]` and read
   `["error"]`.
+
+## Search a design
+
+Search in one script, not one run per guess: a try costs milliseconds in a loop,
+and a turn when each guess is a run of its own.
+
+```python
+best = None
+for count in (8, 12, 16):
+    for r in (0.025, 0.03, 0.035):
+        s.session.set_variable("n", count)
+        s.session.set_variable("radius", r)
+        b = np.linalg.norm(s.session.get_field(points=[(0, 0, 0)])["values"][0])
+        if best is None or b > best[0]:
+            best = (b, count, r)
+s.session.set_variable("n", best[1])  # leave the scene on the one you keep
+s.session.set_variable("radius", best[2])
+print(f"{best[0] * 1e3:.1f} mT with n = {best[1]}, radius = {best[2]} m")
+```
+
+What is not a variable -- which shape, how many parts -- is an argument of a
+function that builds a `Scene`, called once per try:
+
+```python
+def magnet_of(shape):
+    s = Scene()
+    if shape == "cube":  # branching on a plain value is ordinary Python
+        s.magnet.Cuboid(dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1.2))
+    else:  # a cylinder of the same height and volume
+        diameter = 2 * (0.01**2 / np.pi) ** 0.5
+        s.magnet.Cylinder(dimension=(diameter, 0.01), polarization=(0, 0, 1.2))
+    return s
+
+
+for shape in ("cube", "cylinder"):
+    field = magnet_of(shape).session.get_field(points=[(0, 0, 0.01)])
+    print(shape, np.linalg.norm(field["values"][0]))
+```
+
+Check what the search cannot see the same way, in the loop: two magnets in the
+same place, a limit the task sets. Then save the one you keep.
 
 ## Change a saved scene
 

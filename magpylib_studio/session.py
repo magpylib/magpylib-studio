@@ -4491,7 +4491,9 @@ class MagpylibStudioSession:
         if not isinstance(scene, dict) or not {"objects", "events"} & set(scene):
             return {
                 "ok": False,
-                "error": "not a scene document: expected 'objects' or 'events'",
+                "error": "not a scene document: expected 'objects' or 'events'. "
+                "A scene is made in the studio, or in Python with "
+                "magpylib_studio.build.Scene and saved with s.save(path)",
             }
 
         def mutate(doc):

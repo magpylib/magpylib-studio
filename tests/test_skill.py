@@ -89,3 +89,21 @@ def test_the_reference_is_what_the_code_says():
     assert written == writer["reference"](), (
         "references/api.md is out of date: run python tools/write-skill-reference.py"
     )
+
+
+def test_the_package_help_leads_to_the_builder_and_the_skill(tmp_path, monkeypatch):
+    """An agent that explores with `help(magpylib_studio)` instead of loading
+    the skill lands here -- one did, and wrote a scene file by hand. What it
+    reads must run as written, and must point at the skill."""
+    doc = magpylib_studio.__doc__
+    example = "\n".join(
+        line[4:] if line.startswith("    ") else line
+        for line in doc.split("open one with a session:", 1)[1]
+        .split("A `.magpy.json` is", 1)[0]
+        .splitlines()
+    )
+    monkeypatch.chdir(tmp_path)
+    exec(compile(example, "magpylib_studio.__doc__", "exec"), {})  # noqa: S102
+    assert (tmp_path / "ring.magpy.json").is_file()
+    assert ".agents/skills/magpylib-studio/SKILL.md" in doc
+    assert (SKILL / "SKILL.md").is_file()
