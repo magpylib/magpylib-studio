@@ -4,10 +4,11 @@ short ring's field bulges -- so it takes the idea of stacking rings."""
 
 import pathlib
 
+import magpylib as magpy
 import numpy as np
 
 from evals import kit
-from magpylib_studio.build import Scene
+from magpylib_studio import duplicate_around, name, scene
 
 TITLE = "A Halbach assembly: 0.1 T, uniform to 3 %, from 10 mm cubes"
 KIND = "design"
@@ -84,17 +85,23 @@ def reference(work, condition):
             encoding="utf-8",
         )
         return
-    s = Scene()
-    stack = s.Collection(id="stack")
-    for number, z in enumerate((-0.012, 0.0, 0.012)):
-        ring = s.Collection(id=f"ring{number}")
-        stack.add(ring)
-        cube = s.magnet.Cuboid(
-            id=f"cube{number}",
-            dimension=(EDGE, EDGE, EDGE),
-            polarization=(POLARIZATION, 0, 0),
-            position=(0.022, 0, z),
-        )
-        ring.add(cube)
-        cube.duplicate_around(count=8, axis="z", spin=45)
-    s.save(path / "design.magpy.json")
+
+    @scene
+    def design():
+        stack = name(magpy.Collection(), "stack")
+        for number, z in enumerate((-0.012, 0.0, 0.012)):
+            ring = name(magpy.Collection(), f"ring{number}")
+            stack.add(ring)
+            cube = name(
+                magpy.magnet.Cuboid(
+                    dimension=(EDGE, EDGE, EDGE),
+                    polarization=(POLARIZATION, 0, 0),
+                    position=(0.022, 0, z),
+                ),
+                f"cube{number}",
+            )
+            ring.add(cube)
+            duplicate_around(cube, count=8, axis="z", spin=45)
+        return stack
+
+    design.save(path / "design.magpy.json")

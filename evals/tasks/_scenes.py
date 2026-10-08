@@ -2,11 +2,12 @@
 scene for "studio", the same scene as plain magpylib for "plain"."""
 
 import json
+from typing import Annotated
 
 import magpylib as magpy
 import numpy as np
 
-from magpylib_studio.build import Scene
+from magpylib_studio import Length, name, scene
 from magpylib_studio.session import MagpylibStudioSession
 
 
@@ -17,20 +18,24 @@ def halbach():
     return session
 
 
-def pair(gap=0.002):
+def pair(distance=0.002):
     """Two cylinder magnets stacked on z, `gap` apart, a probe midway."""
-    s = Scene()
-    g = s.variable("gap", gap, bounds=(0.0005, 0.02), unit="length")
-    for name, sign in (("lower", -1), ("upper", 1)):
-        s.magnet.Cylinder(
-            id=name,
-            style_label=f"{name.capitalize()} magnet",
-            dimension=(0.01, 0.005),
-            polarization=(0, 0, 1.3),
-            position=(0, 0, sign * (g / 2 + 0.0025)),
-        )
-    s.Sensor(id="probe", style_label="Probe", position=(0, 0, 0))
-    return s.session
+
+    @scene
+    def design(gap: Annotated[float, Length(0.0005, 0.02)] = distance):
+        for label, sign in (("lower", -1), ("upper", 1)):
+            name(
+                magpy.magnet.Cylinder(
+                    dimension=(0.01, 0.005),
+                    polarization=(0, 0, 1.3),
+                    position=(0, 0, sign * (gap / 2 + 0.0025)),
+                    style_label=f"{label.capitalize()} magnet",
+                ),
+                label,
+            )
+        name(magpy.Sensor(position=(0, 0, 0), style_label="Probe"), "probe")
+
+    return design.build().session
 
 
 def as_files(session, stem, condition):

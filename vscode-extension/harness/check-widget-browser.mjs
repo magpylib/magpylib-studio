@@ -1216,6 +1216,30 @@ async function selection(port, base) {
     },
   );
 
+  await check("the legend counts a pattern's copies", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/outline.html#array`);
+      if (!(await tab.until("return window.shown", 20_000))) {
+        return "never drew";
+      }
+      // Twelve magnets drawn, one listed: the tile's row says how many it
+      // stands for, and the collection holding it all counts twelve.
+      const counts = await tab.evaluate(
+        `const rows = [...document.querySelectorAll(".magpy-legend-row")];
+         return rows.map((r) => [r.querySelector(".magpy-legend-label").textContent, r.querySelector(".magpy-legend-count")?.textContent || ""]);`,
+      );
+      const top = counts[0];
+      const sources = counts.filter(([, count]) => count.startsWith("×"));
+      if (top[1] !== "12") return `the top row counts ${JSON.stringify(top)}`;
+      return sources.length
+        ? null
+        : `no row says what its pattern makes: ${JSON.stringify(counts)}`;
+    } finally {
+      await tab.close();
+    }
+  });
+
   await check(
     "a path stays where the edit leaves it while its object is dragged",
     async () => {
@@ -1439,6 +1463,29 @@ async function savedView(port, base, out, expected) {
     return rounded(rows) === rounded(expected.rows)
       ? null
       : `rows ${rows.join(", ")}`;
+  });
+
+  await check("a leaf keeps a group's slot, with a dot in it", async () => {
+    // A top-level leaf after a nested branch: its name starts where the
+    // group's does, and the caret's slot is not blank, or the row reads as a
+    // stray of the branch above.
+    const measured = await tab.evaluate(
+      `const left = (r) => r.querySelector(".magpy-legend-label").getBoundingClientRect().left;
+       const dot = ${row("probe")}.querySelector(".magpy-legend-caret.leaf");
+       const style = getComputedStyle(dot);
+       return {
+         stack: left(${row("stack")}),
+         probe: left(${row("probe")}),
+         width: dot.getBoundingClientRect().width,
+         drawn: style.backgroundColor !== "rgba(0, 0, 0, 0)" && parseFloat(style.opacity) > 0,
+       };`,
+    );
+    if (Math.abs(measured.stack - measured.probe) > 0.5) {
+      return `the probe's name starts at ${measured.probe}, the stack's at ${measured.stack}`;
+    }
+    return measured.width > 0 && measured.drawn
+      ? null
+      : `the leaf's slot is ${JSON.stringify(measured)}`;
   });
 
   await check("a saved view opens where it was looking", async () => {

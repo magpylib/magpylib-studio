@@ -402,6 +402,9 @@ def run_script(path):
     code = compile(source, str(path), "exec")
     targets = _show_patch_targets()
     originals = [getattr(owner, name) for owner, name in targets]
+    # The studio's own drawing goes through show() too (a `SceneWidget` a
+    # notebook script makes at its end): it finds the real one here.
+    _capture_show.original = originals[0]
     for owner, name in targets:
         setattr(owner, name, _capture_show)
     # And stdin is the channel the engine is asked on: a script's input()

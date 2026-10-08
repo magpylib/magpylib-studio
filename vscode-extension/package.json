@@ -110,7 +110,7 @@
       },
       {
         "command": "magpylib-studio.exportBuilderScript",
-        "title": "Magpylib Studio: Export as Builder Script..."
+        "title": "Magpylib Studio: Export as Scene Script..."
       },
       {
         "command": "magpylib-studio.importScript",

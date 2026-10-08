@@ -3,10 +3,11 @@ of one magnet cannot make by itself."""
 
 import pathlib
 
+import magpylib as magpy
 import numpy as np
 
 from evals import kit
-from magpylib_studio.build import Scene
+from magpylib_studio import name, scene
 
 TITLE = "A 4 × 4 checkerboard of alternating cubes"
 KIND = "design"
@@ -80,15 +81,19 @@ def reference(work, condition):
             encoding="utf-8",
         )
         return
-    s = Scene()
-    board = s.Collection(id="board")
-    for x in STEPS:
-        for y in STEPS:  # fixed places: a loop over literals is plain Python
-            board.add(
-                s.magnet.Cuboid(
-                    dimension=(EDGE, EDGE, EDGE),
-                    polarization=(0, 0, _sign(x, y) * POLARIZATION),
-                    position=(float(x), float(y), 0),
+
+    @scene
+    def design():
+        board = name(magpy.Collection(), "board")
+        for x in STEPS:
+            for y in STEPS:  # fixed places: a loop over literals is plain Python
+                board.add(
+                    magpy.magnet.Cuboid(
+                        dimension=(EDGE, EDGE, EDGE),
+                        polarization=(0, 0, _sign(x, y) * POLARIZATION),
+                        position=(float(x), float(y), 0),
+                    )
                 )
-            )
-    s.save(path / "design.magpy.json")
+        return board
+
+    design.save(path / "design.magpy.json")

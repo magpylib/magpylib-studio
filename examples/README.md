@@ -8,13 +8,13 @@ from sliders, and a sensor sweeping past a magnet.
 | -------------------- | ------------------------------------------------------------------ |
 | `marimo_demo.py`     | `marimo edit examples/marimo_demo.py`                              |
 | `jupyter_demo.ipynb` | VS Code, or `jupyter lab examples/jupyter_demo.ipynb`              |
-| `builder_demo.py`    | VS Code: **Open in Magpylib Studio** (title bar), or run its cells |
+| `scene_demo.py`      | VS Code: **Open in Magpylib Studio** (title bar), or run its cells |
 
 Both need the widget extra, and magpylib's main branch — the display-backend API
 they draw through is in no release yet:
 
 ```sh
-uv pip install -e ".[widget]" marimo
+uv pip install -e ".[widget]" marimo wigglystuff
 uv pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
 ```
 

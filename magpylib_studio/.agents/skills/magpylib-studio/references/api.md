@@ -1,199 +1,151 @@
-# The builder and the session, as the skill uses them
+# A scene function, its words, and the session, as the skill uses them
 
 Generated from the code by `tools/write-skill-reference.py`: edit the
 docstrings, not this file. What follows is what this version of
 magpylib-studio has.
 
-## The scene
+## The mark
 
-### `Scene(session=None, *, values=None, model_unit=None, field_unit=None)`
+### `scene(fn=None, *, model_unit=None, field_unit=None)`
 
-A studio document, written in code.
+Mark a function as a scene: its parameters are the variables, its body
+is plain magpylib, and `build()` records it. `@scene`, or
+`@scene(model_unit="mm", field_unit="mT")` for the units the studio
+shows the scene in (the numbers stay SI).
 
-`Scene()` builds one of its own; `Scene(session)` writes into a session
-that already holds a scene, as another way to edit it. Read it with
-`to_dict`, `to_script` or `save`, or show it: `SceneWidget(s, editable=True)`.
-To open a saved `.magpy.json` -- its field, a sweep of a variable -- use
-the session: `MagpylibStudioSession().load_scene(path)`, then `get_field`
-or `sweep`.
+What `@scene` makes:
 
-`values` is where the variables' values come from when there are some: a
-saved scene, or a mapping of names to values. The script says what the
-scene is; a slider dragged in the panel and saved says what a variable is
-set to, and the next run keeps it -- see `variable`. A path to a file not
-there yet is no values, so a script can read the file it is about to save.
+### `fn.build(values=None)`
 
-`model_unit` is the length unit the scene is shown in (`"m"`, the
-default, `"cm"`, `"mm"` or `"µm"`): what a view shows a length variable
-in, and what an export to a CAD or FEM tool writes. The numbers written
-here stay metres either way. `field_unit` is the unit a field is shown
-in (`"T"`, the default, `"mT"` or `"µT"`): a polarization, a field
-variable, the field plots. The numbers stay tesla.
+Call the function with its parameters as handles, recording what
+it does, and return the `Scene` it built: the document, to `save`,
+to show (`SceneWidget(s, editable=True)`), or to read the field of
+through `s.session`.
 
-### `s.variable(name, value, *, bounds=None, slider=None, integer=None, options=None, unit=None)`
+`values` is where the parameters' values come from when there are
+some: a saved scene (its path) or a mapping of names to values. A
+default in the signature is the value when nothing says otherwise;
+a slider dragged in the panel and saved wins, so the next run keeps
+it. A `derived` variable is a definition, and the function's wins.
 
-Define a variable and return it, to write the scene in.
+### `fn.save(path, values=None)`
 
-`value` is a number, a name (for a variable like an axis, with its
-`options`), or an expression over earlier variables. `bounds` are
-the hard limits, `slider` the range worth dragging through. `unit`
-says what it measures -- `"length"`, `"angle"`, `"field"`,
-`"current"`, `"dimensionless"` -- so a view shows `gap: 0.015 m`, or
-15 mm in a scene shown in mm, and reads `15 mm` typed; the
-value itself stays in SI (degrees for an angle), as everything here
-is: `s.variable("gap", 0.015, unit="length")`.
+`build(values).save(path)`: the document, as the studio saves one.
 
-With `values` given to the scene, a number or a name here is a
-default, and the saved value wins: that is a slider's position, kept
-across runs. An expression is not a default but what the variable
-*is*, so the script's wins -- a definition changed in the script
-must not be undone by the file it last saved.
+## A parameter's kind and bounds
 
-### `s.sampled(of, *, count=None, over=None)`
+Inside `Annotated[float, ...]` or `Annotated[int, ...]`; a choice of
+names is `Literal[...]`. A parameter without an annotation is a plain
+number with no bounds.
 
-A run of points as a formula: `of(t)`, for `t` running across
-`over` in `count` steps (the document's defaults, given neither: two,
-across 0 to 1). Where a value is a run of points -- a
-sensor's pixels, a path, a mesh's vertices -- this keeps it a formula
-of the variables, count included, which `np.linspace` over a variable
-cannot (it would need the count now):
+### `Length(low=None, high=None, *, slider=None)`
 
-    grid = s.sampled(
-        lambda t: (t % n / (n - 1), t // n / (n - 1), 0),
-        count=n**2, over=(0, n**2 - 1),
-    )
+A length in metres: `Annotated[float, Length(0.005, 0.08)]`.
 
-`of` is called once, with `t` a variable like the others, and
-returns one value for a run of numbers or one per component for a
-run of points. Each is computed for the whole sample at once, as
-numpy would, so `min` and `max` -- not elementwise -- are refused.
+### `Angle(low=None, high=None, *, slider=None)`
 
-### `s.Collection(*children, id=None, style=None, **kwargs)`
+An angle in degrees, as magpylib turns.
 
-magpylib's `Collection`, as the scene's.
+### `Count(low=None, high=None, *, slider=None)`
 
-### `s.Sensor(id=None, style=None, **kwargs)`
+A whole number of things: `Annotated[int, Count(2, 60)]`.
 
-magpylib's `Sensor`, as the scene's.
+### `Bounds(low: 'float | None' = None, high: 'float | None' = None, slider: 'tuple | None' = None, unit: 'str | None' = None, integer: 'bool' = False) -> None`
 
-### `s.add(*objects)`
+A parameter's limits, as `annotated_types` constraints with studio's
+metadata beside them: `Annotated[float, Bounds(0, 1, slider=(0.2, 0.8),
+unit="length")]`. Expands to `Ge`, `Le` and a `MultipleOf` for any reader
+that follows the protocol, so pydantic and the like read the bounds; the
+`Unit` and `Slider` ride along for the studio. `Length`, `Angle` and
+`Count` are this with the kind filled in.
 
-Put these in the scene at its root, now. Most never need it --
-an object enters when it is first used, or when the scene is read --
-but a script that wants one created at this point in the log says
-so, which is what `to_builder_script` writes.
+## Studio's words
 
-### `s.session`
+Imported from `magpylib_studio`. Each is one step in the document when
+the scene is built, and plain magpylib when the function is called.
 
-The session the scene is written into, with everything
-constructed so far in it.
+### `derived(name, formula, *, unit=None)`
 
-### `s.save(path)`
+A variable defined by a formula of the others, shown in the panel as
+one: `stagger = derived("stagger", 360 / (2 * n), unit="angle")`. Called
+plainly, it is the formula's value.
 
-Write the document as the studio saves one, to open in the panel
-(Open Scene) or a notebook (`SceneWidget(path, editable=True)`).
+### `duplicate_around(obj, count, axis='z', anchor=0, spin=0)`
 
-### `s.to_script()`
-
-Plain magpylib, for anyone: see `MagpylibStudioSession.to_script`.
-
-## Objects
-
-### `s.magnet.<Class>(id=None, style=None, **kwargs)`, `s.current.<Class>(...)`, `s.misc.<Class>(...)`
-
-Any class of `magpylib.magnet`, `magpylib.current` or `magpylib.misc`,
-taking magpylib's own keywords. `id=` names the object, unique in the
-scene (left out: its label, else its class); `style=` takes magpylib's
-style as a dict, and each `style_label=`-shaped keyword sets one field
-of it.
-
-A magpylib object as the scene records it.
-
-Constructing one records nothing. Its create step is written when it
-first enters the scene -- added to a collection, touched by any other
-call, or when the scene is read -- because magpylib groups after it
-builds (`ring.add(magnet)`), and the session's reparent keeps a moved
-object's world pose as numbers: a position written in variables would
-stop following them. Created inside its collection, it never moves.
-
-### `obj.move(displacement, start='auto', spacing=None)`
-
-As magpylib's `move`, recorded as a step. `spacing="arange"` says
-a path was built from a step, as the script will write it.
-
-### `obj.rotate_from_angax(angle, axis, anchor=None, start='auto', degrees=True, spacing=None)`
-
-As magpylib's `rotate_from_angax`, recorded as a step.
-
-### `obj.rotate_from_rotvec(rotvec, anchor=None, start='auto', degrees=True)`
-
-As magpylib's `rotate_from_rotvec`, recorded as a step.
-
-### `obj.set_transform(position=None, orientation=None)`
-
-Put it at `position` and turn it to `orientation`, in world
-coordinates -- the studio's own step for a pose stated outright, which
-is what a drag records. `orientation` is a rotation vector in degrees,
-or a scipy `Rotation`.
-
-### `obj.reparent(parent)`
-
-Move it into `parent` -- or to the scene's root, given None --
-keeping where it is in the world, as the studio's tree does. Unlike
-`parent.add(it)` for something already in the scene, this is what it
-says, so it does not warn.
-
-### `obj.hide()`
-
-Hide it in the 3D view. It still counts in the field.
-
-### `obj.show()`
-
-Show it again in the 3D view, after `hide` -- its own, or that of a
-collection it sits in.
-
-### `obj.remove()`
-
-Take it out of the scene, as a step: what happened while it was
-there still happened.
-
-### `obj.duplicate_around(count, axis='z', anchor=0, spin=0)`
-
-`count` of it about `axis` through `anchor`, each copy turned by
+`count` of `obj` about `axis` through `anchor`, each copy turned by
 `spin` degrees more than the last: one step, which stays a pattern.
+`obj` must sit in a collection, which the copies join.
 
 Going round the ring already turns each copy with it. `spin` is the extra
 turn about the copy's own axis, on top of that: a Halbach ring, whose
 magnets turn twice as fast as they go round, takes `spin=360 / count`.
 
-### `obj.duplicate_along(count, step)`
+### `duplicate_along(obj, count, step)`
 
-`count` of it in a row, each `step` on from the last.
+`count` of `obj` in a row, each `step` on from the last. Twice -- on
+the object, then on its collection -- for a grid.
 
-### `obj.mirror(plane='xy', normal=None, anchor=0)`
+### `mirror(obj, plane='xy', normal=None, anchor=0)`
 
-A reflected copy across `plane` (or the plane with `normal`).
+A reflected copy of `obj` across `plane` (or the plane with `normal`),
+polarization and all. Only shapes with a mirror symmetry of their own:
+cuboids, cylinders and their segments, spheres, dipoles and sensors.
 
-### `group.add(*children)`
+### `place(obj, position=None, orientation=None)`
 
-As magpylib's `add`. A child that is already in the scene is
-reparented, which keeps its world pose as numbers; the builder warns,
-since a position written in variables then stops following them.
+Put `obj` at `position` and turn it to `orientation`, in world
+coordinates: the studio's own step for a pose stated outright, which is
+what a drag records. `orientation` is a rotation vector in degrees.
+
+### `sampled(of, *, count=None, over=None)`
+
+A run of points as a formula: `of(t)` for `t` running across `over`
+(0 to 1 unless said) in `count` steps. Where a value is a run of points
+-- a sensor's pixels, a path -- this keeps it a formula of the
+variables, count included, which `np.linspace` over a variable cannot.
+Called plainly, it is the points.
+
+### `hide(obj)`
+
+Hide `obj` in the 3D view. It still counts in the field.
+
+### `show(obj)`
+
+Show `obj` again in the 3D view, after `hide`.
+
+### `remove(obj)`
+
+Take `obj` out of the scene, as a step: what happened while it was
+there still happened.
+
+### `TriangularMesh(mesh_source, **kwargs)`
+
+magpylib's `TriangularMesh`, recorded as where its mesh came from
+rather than as its vertices: `mesh_source={"from": "file", "path":
+"rotor.stl", "scale": 0.001}`, `{"from": "hull", "points": [...]}` or
+`{"from": "superquadric", "size": ..., "roundness": ...}`. The other
+keywords are magpylib's (`polarization`, `position`, `style_label`).
+
+### `name(obj, object_id)`
+
+Give an object the id `object_id` in the document, where its label (or
+its class) would give another. Rarely needed by hand: the script tab
+writes it where a scene's ids are not what its labels give.
 
 ## What an expression may call
 
-`s.abs`, `s.acos`, `s.asin`, `s.atan`, `s.atan2`, `s.cos`, `s.degrees`, `s.exp`, `s.hypot`, `s.log`, `s.max`, `s.min`, `s.radians`, `s.round`, `s.sin`, `s.sqrt`, `s.tan`, and the constants `s.e`, `s.pi`, `s.tau`. Each takes numbers and
-variables alike; these are the expression allow-list's own names, and
-all a scene can hold. On a variable, numpy's `np.sin`, `np.cos`, `np.tan`, `np.arcsin`, `np.arccos`, `np.arctan`, `np.arctan2`, `np.sqrt`, `np.exp`, `np.log`, `np.hypot`, `np.radians`, `np.deg2rad`, `np.degrees`, `np.rad2deg`, `np.absolute` write the same
-expressions, as does its arithmetic; any other numpy function refuses.
+`abs`, `acos`, `asin`, `atan`, `atan2`, `cos`, `degrees`, `exp`, `hypot`, `log`, `max`, `min`, `radians`, `round`, `sin`, `sqrt`, `tan`, and the constants `e`, `pi`, `tau`: the expression
+allow-list's own names, and all a scene can hold. Over a variable,
+numpy's `np.sin`, `np.cos`, `np.tan`, `np.arcsin`, `np.arccos`, `np.arctan`, `np.arctan2`, `np.sqrt`, `np.exp`, `np.log`, `np.hypot`, `np.radians`, `np.deg2rad`, `np.degrees`, `np.rad2deg`, `np.absolute`, `np.minimum`, `np.maximum` write these expressions, as does arithmetic, and
+the builtins `abs` and `round`; any other numpy function refuses. The
+constants as handles are `from magpylib_studio.recording import pi, tau, e`.
 
 ## The session
 
-`s.session` is the scene's `MagpylibStudioSession`;
+`fn.build().session` is the scene's `MagpylibStudioSession`;
 `MagpylibStudioSession()` is an empty one, to open a saved scene into.
 Most of its calls report a refusal rather than raise it:
-`{"ok": False, "error": ...}`. Reading the field raises `ValueError`
-when there is nothing to read.
+`{"ok": False, "error": "..."}`.
 
 ### `session.get_field(sensor_id=None, points=None, field='B')`
 
@@ -265,9 +217,3 @@ The scene as a `magpylib_studio.build` script which, run, builds
 this document again -- variables, formulas and patterns included.
 `to_script` is for anyone with magpylib; this is for whoever keeps
 the scene as code. See `docs/plans/builder.md`.
-
-## When a call fails
-
-### `BuildError`
-
-The scene refused a call. The message is the session's own.

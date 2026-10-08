@@ -18,10 +18,11 @@ A page is **exact** when every object comes back the same. What JSON cannot
 hold -- a Python function, a `model3d` trace -- is listed apart, so a known gap
 does not read as a wrong replay.
 
-The recorder here is a stand-in for studio's (`docs/plans/recording.md` P1): it logs
-magpylib's calls as they are, without mapping them onto session operations. It
-needs a magpylib with the hook (`magpylib.record`, or `magpylib._src.recording`
-on the `spike/record-calls` branch).
+The recorder here is a stand-in: it logs magpylib's calls as they are, without
+mapping them onto session operations, and needs a magpylib with the hook.
+`--studio` runs each page through studio's own recorder instead
+(`magpylib_studio.recording`, on any magpylib): the page's cells are one scene
+function's body, and the document's objects are set beside the live ones.
 """
 
 import argparse
@@ -250,7 +251,7 @@ def replay(steps):
     return objs
 
 
-def compare(live, again):
+def compare(live, again, pose_atol=1e-15, field_rtol=1e-9, field_scale=0.0):
     import magpylib as magpy
     import numpy as np
 
@@ -267,7 +268,7 @@ def compare(live, again):
             bad.append(f"{oid} {kind}: not rebuilt")
             continue
         try:
-            if not np.allclose(a.position, b.position, rtol=1e-12, atol=1e-15):
+            if not np.allclose(a.position, b.position, rtol=1e-12, atol=pose_atol):
                 bad.append(f"{oid} {kind}: position")
             if not np.allclose(
                 a.orientation.as_matrix(), b.orientation.as_matrix(), atol=1e-12
@@ -286,7 +287,13 @@ def compare(live, again):
                 if isinstance(fa, str) or isinstance(fb, str):
                     if not (isinstance(fa, str) and isinstance(fb, str) and fa == fb):
                         bad.append(f"{oid} {kind}: field")
-                elif not np.allclose(fa, fb, rtol=1e-9, atol=1e-18, equal_nan=True):
+                elif not np.allclose(
+                    fa,
+                    fb,
+                    rtol=field_rtol,
+                    atol=max(1e-18, field_scale * np.nanmax(np.abs(fa), initial=0.0)),
+                    equal_nan=True,
+                ):
                     bad.append(f"{oid} {kind}: field")
             sa, sb = style_set(a), style_set(b)
             diff = sorted(
@@ -299,6 +306,55 @@ def compare(live, again):
                 f"{oid} {kind}: compare raised {type(e).__name__}: {str(e)[:80]}"
             )
     return bad
+
+
+# --- studio's recorder over a docs page -----------------------------------------
+
+
+def run_page_studio(page, result, cells, namespace):
+    """Run the page's cells as one scene function's body, through studio's
+    recorder, and set the document's objects beside the live ones."""
+    from magpylib_studio import build, hook
+    from magpylib_studio.recording import _Recorder, building
+
+    hook.install()
+    document = build.Scene()
+    recorder = _Recorder(document)
+    error = None
+    with building(recorder), hook.record(recorder.on_event, resolve=recorder.resolve):
+        for i, code in enumerate(cells):
+            try:
+                exec(compile(code, f"{page.name}[{i}]", "exec"), namespace)  # noqa: S102
+            except Exception as e:  # noqa: BLE001 - a page's failure is the result
+                where = traceback.extract_tb(e.__traceback__)[-1]
+                first = str(e).splitlines()[0][:120] if str(e) else ""
+                error = f"cell {i}: {type(e).__name__}: {first} @ {os.path.basename(where.filename)}:{where.lineno}"
+                break
+        recorder.finish()
+    result["ran"], result["error"] = error is None, error
+    result["objects"] = len(recorder.live)
+    result["steps"] = len(document.to_dict().get("events", []))
+    result["unencodable"] = []
+    result["mismatches"], result["replay_error"] = [], None
+    try:
+        session = document.session
+        again = {
+            oid: session._objs[oid] for oid in recorder.live if oid in session._objs
+        }
+        for oid in recorder.live:
+            if oid not in session._objs:
+                result["mismatches"].append(f"{oid}: not in the document")
+        # The document pins a pose to nine decimals, so a reparented object
+        # is where it was to a nanometre, not to the last bit.
+        result["mismatches"] += compare(
+            recorder.live, again, pose_atol=1e-8, field_rtol=1e-6, field_scale=1e-7
+        )
+    except Exception as e:  # noqa: BLE001
+        where = traceback.extract_tb(e.__traceback__)[-1]
+        result["replay_error"] = (
+            f"{type(e).__name__}: {str(e)[:120]} @ line {where.lineno}"
+        )
+    return result
 
 
 def quiet_display():
@@ -334,6 +390,14 @@ def run_page(page, mode):
     here = os.getcwd()
     os.chdir(tmp / "docs" / rel)
 
+    if mode == "studio":
+        namespace = {"__name__": "__main__"}
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = run_page_studio(page, result, cells, namespace)
+        os.chdir(here)
+        shutil.rmtree(tmp, ignore_errors=True)
+        result["seconds"] = round(time.perf_counter() - start, 1)
+        return result
     recorder = Recorder()
     listening = contextlib.nullcontext()
     if mode == "record":
@@ -405,6 +469,12 @@ def main():
     parser.add_argument(
         "--one", nargs=2, metavar=("PAGE", "MODE"), help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--studio",
+        action="store_true",
+        help="run each page through studio's own recorder instead of the stand-in: "
+        "the document's objects set beside the live ones",
+    )
     args = parser.parse_args()
 
     if args.one:  # the child: one page, one mode
@@ -420,8 +490,9 @@ def main():
     )
     results = collections.defaultdict(dict)
     sink = args.out.open("w", encoding="utf-8") if args.out else None
+    modes = ("plain", "studio") if args.studio else ("plain", "record")
     for page in pages:
-        for mode in ("plain", "record"):
+        for mode in modes:
             try:
                 proc = subprocess.run(  # noqa: S603 - this file, with the given interpreter
                     [python, __file__, str(args.magpylib), "--one", str(page), mode],
@@ -447,7 +518,7 @@ def main():
             if sink:
                 sink.write(json.dumps(res) + "\n")
                 sink.flush()
-        plain, recorded = results[page.name]["plain"], results[page.name]["record"]
+        plain, recorded = results[page.name]["plain"], results[page.name][modes[1]]
         print(
             f"{page.name[:44]:44} {recorded.get('objects', '-'):>5} {recorded.get('steps', '-'):>6}"
             f"  {verdict(plain, recorded)}",
@@ -455,11 +526,11 @@ def main():
         )
 
     counts = collections.Counter(
-        verdict(m["plain"], m["record"]) for m in results.values()
+        verdict(m["plain"], m[modes[1]]) for m in results.values()
     )
     print("\n" + ", ".join(f"{n} {v}" for v, n in counts.most_common()))
     for name, m in sorted(results.items()):
-        plain, recorded = m["plain"], m["record"]
+        plain, recorded = m["plain"], m[modes[1]]
         v = verdict(plain, recorded)
         if v == "cannot run here":
             print(f"  {name}: {plain.get('error')}")

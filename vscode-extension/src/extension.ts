@@ -43,7 +43,7 @@ let sceneDocEmitter: vscode.EventEmitter<vscode.Uri> | undefined;
 // document out of the engine, through the same API an editor tab would.
 const SCENE_JSON_URI = vscode.Uri.parse('magpylib-studio:/scene.json');
 
-// The script tab, unlike scene.json, is editable — builder code, applied on a
+// The script tab, unlike scene.json, is editable — the scene as a function, applied on a
 // deliberate save — so it is a real file (a content provider has no write
 // side) kept in extension storage: scratch space, not something to litter the
 // user's workspace with.
@@ -74,11 +74,11 @@ let scriptRendered: string | undefined;
 /** What the script tab says before the code: what it is, and what a save does
  *  to it, said where it happens rather than in a notification. */
 const SCRIPT_TAB_HEADER = [
-  '# The scene as builder code. Save to apply it: the scene becomes what this',
-  '# builds, as one step to undo. The tab is regenerated from the scene after',
-  '# a save, so a helper or a loop written here comes back as the steps it',
-  '# made, and comments go. Code to keep belongs in a file of its own:',
-  '# Magpylib Studio: Export as Builder Script...',
+  '# The scene as a function. Save to apply it: the scene becomes what the',
+  '# function builds, as one step to undo. The tab is regenerated from the',
+  '# scene after a save, so a helper or a loop written here comes back as the',
+  '# steps it made, and comments go. Code to keep belongs in a file of its own:',
+  '# Magpylib Studio: Export as Scene Script...',
   '',
 ].join('\n');
 
@@ -3187,7 +3187,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.textDocuments.find((d) => d.uri.fsPath === scriptFile!.fsPath);
 
   /**
-   * Write the scene's builder script into the tab. Edits are never clobbered:
+   * Write the scene's script into the tab. Edits are never clobbered:
    * a scene change while the user is mid-edit leaves their text alone, unsaved
    * or held (see scriptHeld). `force` re-renders anyway — used when opening
    * the tab, and after a save the engine applied, where the scene is by
@@ -3270,10 +3270,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /**
-   * Saving the script tab applies it: the engine runs the builder code and the
-   * scene it builds replaces this one, as one undo step (`docs/roadmap.md` R1).
-   * Nothing is read back — the code is executed through the operations the
-   * panel uses — and builder code is lossless, so a number edited here comes
+   * Saving the script tab applies it: the engine runs the scene function and
+   * the scene it builds replaces this one, as one undo step (`docs/roadmap.md`
+   * R1). Nothing is read back — the code is executed through the operations
+   * the panel uses — and the function is lossless, so a number edited here comes
    * back as that number with every variable and pattern intact. That is what
    * plain magpylib could not do, and why #12 took apply-on-save away
    * (`docs/direction.md` §5.1); the engine refuses plain magpylib for the same
@@ -3362,7 +3362,7 @@ export function activate(context: vscode.ExtensionContext): void {
   /**
    * Export, not save: neither script is what Save writes, and neither becomes
    * the scene's file. Plain magpylib is for anyone, studio or not, and carries
-   * no slider bounds and no hidden flags. The builder script is for whoever
+   * no slider bounds and no hidden flags. The scene script is for whoever
    * keeps the scene as code: it builds the same document, variables and
    * patterns included, and unlike the script tab nothing regenerates it.
    */
@@ -3377,7 +3377,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const target = await vscode.window.showSaveDialog({
       filters: { 'Python script': ['py'] },
       defaultUri: folder && vscode.Uri.joinPath(folder, file),
-      saveLabel: kind === 'builder' ? 'Export Builder Script' : 'Export Script',
+      saveLabel: kind === 'builder' ? 'Export Scene Script' : 'Export Script',
     });
     if (!target) {
       return;

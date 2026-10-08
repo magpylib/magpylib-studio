@@ -16,16 +16,23 @@ All notable changes to the Magpylib Studio extension.
   over a studio session in the kernel, with nothing of the extension needed:
   `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
   per settled edit, and `variable_sliders()` for a scene with variables.
-- **Writing a scene in code.** `magpylib_studio.build.Scene`: magpylib's
-  spelling with variables that stay variables, patterns instead of loops,
-  `sampled` for a run of points as a formula, `Scene(values=...)` to keep the
-  sliders a saved scene holds. A call the scene cannot take fails at its line
-  and says why. **Open in Magpylib Studio** on a builder script opens the scene
-  it built, whole, and `to_builder_script()` writes any scene back as builder
-  code.
+- **Writing a scene in code.** A scene is a plain magpylib function under
+  `@scene`: its parameters are the variables, with their bounds and kinds in
+  `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and
+  `.build()` records what the body does into the document through a hook on
+  magpylib's objects. Called, the same function is plain magpylib. Studio's own
+  words — `derived`, `duplicate_around`, `duplicate_along`, `mirror`, `place`,
+  `sampled`, `hide`, `show`, `remove`, `TriangularMesh`, `name` — are one step
+  each. A call the scene cannot take fails at its line and says why; a property
+  read inside the scene is today's number, and a warning says so. **Open in
+  Magpylib Studio** on a scene script opens the scene it built, whole, and
+  `to_builder_script()` writes any scene back as such a function. Works on
+  released magpylib through a copy of the hook, and on magpylib's own when it
+  ships it. Checked on magpylib's own docs: nineteen of the twenty-three pages
+  that run here come back exact through the recorder.
 - **An Agent Skill** inside the package, `magpylib_studio/.agents/skills/`,
-  teaching coding agents to write scenes with the builder, read the field, sweep
-  a variable and hand the result over; its API reference is generated from the
+  teaching coding agents to write scenes as functions, read the field, sweep a
+  variable and hand the result over; its API reference is generated from the
   code and checked by the tests. `uvx library-skills` links it into a project.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
@@ -74,6 +81,15 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- **The legend says what each row is and how many it stands for.** A row that is
+  not a group shows its kind as the tree's own icon -- the wireframe of a
+  cuboid, a cylinder, a loop, a sensor -- drawn in the colour the object is
+  drawn in, so a magnet shows its polarization colours through its own outline;
+  and a dot in the caret's slot, so a sensor at the top level no longer reads as
+  part of the group above it. A collection counts what is drawn under it, the
+  copies its patterns make included, and the source of a pattern says how many
+  it stands for (`×10`), where before a ring of ten listed one magnet and
+  counted one.
 - A selection is drawn in a bright green, in lines a pixel and a half wide: the
   object's own edges, and its path apart, with larger markers. It used to be a
   thin blue box round everything drawn for the object, path included: a magnet
@@ -84,19 +100,19 @@ All notable changes to the Magpylib Studio extension.
   out, of the outline and of F's framing alike. The magnets' colours, which say
   their magnetization, and a sensor's pixels, coloured by the field, are left as
   they are. In the notebook widget too.
-- **The script tab is builder code, and saving it applies it.** _Edit Python
-  Script_ shows the scene written with `magpylib_studio.build`, and a save
-  replaces the scene with the one it builds, as one undo step, keeping every
-  variable, formula and pattern. A save that changes nothing records nothing,
-  and one that would change more than you edited is refused, naming the line
-  where the tab cannot say the scene exactly. A script that fails is refused
-  with the line it failed at and stays in the tab; plain magpylib is refused
-  rather than flattened (open it with **Open in Magpylib Studio**). If the scene
-  changed after the tab was written — an edit in the panel, an agent's, an undo
-  — a save asks first, since applying the tab would undo those changes.
-  Auto-save does not apply the tab, and the text it saves is not written over by
-  an edit elsewhere. **Export as Builder Script…** writes the builder code to a
-  file of its own, and opening that file finds the meshes beside it.
+- **The script tab is the scene as a function, and saving it applies it.** _Edit
+  Python Script_ shows the scene as a `@scene` function, and a save replaces the
+  scene with the one it builds, as one undo step, keeping every variable,
+  formula and pattern. A save that changes nothing records nothing, and one that
+  would change more than you edited is refused, naming the line where the tab
+  cannot say the scene exactly. A script that fails is refused with the line it
+  failed at and stays in the tab; plain magpylib is refused rather than
+  flattened (open it with **Open in Magpylib Studio**). If the scene changed
+  after the tab was written — an edit in the panel, an agent's, an undo — a save
+  asks first, since applying the tab would undo those changes. Auto-save does
+  not apply the tab, and the text it saves is not written over by an edit
+  elsewhere. **Export as Scene Script…** writes the function to a file of its
+  own, and opening that file finds the meshes beside it.
 - **The studio's 3D view is the notebook widget**, as the script panel already
   was: one view, with the same controls and keys everywhere. The tools show on
   the view's top-right corner when the pointer is on it; the editing handles
@@ -122,12 +138,11 @@ All notable changes to the Magpylib Studio extension.
 
 - **`parse_script` and the old `apply_script`.** Script generation is one-way:
   nothing parses code back into the document, and the matched emitter/parser
-  idioms went with it. The script tab applies builder code instead (above);
+  idioms went with it. The script tab applies a scene function instead (above);
   plain magpylib comes in through **Open in Magpylib Studio**, by execution.
 - **The Copilot Chat tools** (`#magpyAdd`, `#magpyEdit` and the 22 others). A
-  coding agent now writes the scene with the builder, taught by the Agent Skill
-  the Python package carries, and **Open in Magpylib Studio** opens what it
-  wrote.
+  coding agent now writes the scene as a function, taught by the Agent Skill the
+  Python package carries, and **Open in Magpylib Studio** opens what it wrote.
 
 ### Fixed
 

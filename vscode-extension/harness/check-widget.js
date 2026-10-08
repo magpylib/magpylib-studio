@@ -81,3 +81,54 @@ if (actual !== stamped[1]) {
 }
 
 console.log("check-widget: the widget bundle matches its sources.");
+
+// The legend's type icons are the tree's (`media/icons`), carried in the
+// widget's own stylesheet as masks, since the package cannot read the
+// extension's files. Generated here, and checked here, so an icon redrawn for
+// the tree cannot leave the legend on the old one. `--write-icons` writes.
+const ICONS = path.join(EXT, "media", "icons");
+const CSS = path.join(STATIC, "widget.css");
+const BEGIN =
+  "/* --- the legend's type icons: generated from vscode-extension/media/icons";
+const END = "/* --- end of the generated icons --- */";
+const rules = fs
+  .readdirSync(ICONS)
+  .filter((name) => name.endsWith(".svg"))
+  .sort()
+  .map((name) => {
+    const svg = fs
+      .readFileSync(path.join(ICONS, name), "utf8")
+      .replace(/\s+/g, " ")
+      .replace(/> </g, "><")
+      .replace(/stroke="#[0-9a-fA-F]+"/, 'stroke="black"') // a mask: alpha is all
+      .trim();
+    const stem = name.replace(/\.svg$/, "");
+    return `.magpy-legend-swatch.icon-${stem} {\n  --magpy-icon: url("data:image/svg+xml,${encodeURIComponent(svg)}");\n}`;
+  });
+const block = `${BEGIN} by harness/check-widget.js --write-icons --- */\n${rules.join("\n")}\n${END}`;
+const css = fs.readFileSync(CSS, "utf8");
+const start = css.indexOf(BEGIN);
+const end = css.indexOf(END);
+const current =
+  start >= 0 && end >= 0 ? css.slice(start, end + END.length) : null;
+if (process.argv.includes("--write-icons")) {
+  const written =
+    current === null
+      ? css.replace(
+          "\n.magpy-legend-label {",
+          `\n${block}\n\n.magpy-legend-label {`,
+        )
+      : css.slice(0, start) + block + css.slice(end + END.length);
+  fs.writeFileSync(CSS, written);
+  console.log(
+    `check-widget: wrote ${rules.length} icons into ${path.relative(REPO, CSS)}.`,
+  );
+} else if (current !== block) {
+  console.error(
+    "check-widget: the legend's icons in magpylib_studio/static/widget.css " +
+      "are not the tree's in media/icons. Run node harness/check-widget.js --write-icons.",
+  );
+  process.exit(1);
+} else {
+  console.log("check-widget: the legend's icons are the tree's.");
+}

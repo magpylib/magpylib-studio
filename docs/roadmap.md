@@ -27,35 +27,35 @@ Done 2026-10-06:
 Done 2026-10-06 and 07: [decision 0008](decisions.md#0008-units-are-metadata).
 The emitters' side of the boundary waits for R7.
 
-### R3 — The agent interface: builder code, on its own copy first, then on the open scene
+### R3 — The agent interface: scene functions, on its own copy first, then on the open scene
 
 **Decided 2026-10-07**:
 [decision 0009](decisions.md#0009-agents-write-builder-code-through-a-skill).
 The code is the interface, and how it reaches the engine comes second.
 
-**What.** One way in: the agent's Python, written with the builder. In scope for
-that code:
+**What.** One way in: the agent's Python, a scene function. In scope for that
+code:
 
-| In scope              | What it is                                                                                                      |
-| --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| a `Scene`             | builder calls: `Scene()` on its own copy; on the open scene (step 2), one undo step per run, refused whole (R1) |
-| reads                 | the scene as builder code (`to_builder_script`), and the variables                                              |
-| the field             | `get_field` and `sweep` on the scene's session; summaries as helpers if R4 shows they are worth having          |
-| `validate` (after R7) | the FEM job API, refusal-first, per `plans/fem.md` §12–13                                                       |
+| In scope              | What it is                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| a scene function      | `fn.build()` on its own copy; on the open scene (step 2), one undo step per run, refused whole (R1)    |
+| reads                 | the scene as a function (`to_builder_script`), and the variables                                       |
+| the field             | `get_field` and `sweep` on the scene's session; summaries as helpers if R4 shows they are worth having |
+| `validate` (after R7) | the FEM job API, refusal-first, per `plans/fem.md` §12–13                                              |
 
 **Step 1 — on its own copy: the skill ✅** (2026-10-07). An Agent Skill inside
 the package, `magpylib_studio/.agents/skills/magpylib-studio/`, in the
 library-skills layout, so it ships with the version it describes and
-`uvx library-skills` links it into a project. The agent writes a builder script,
+`uvx library-skills` links it into a project. The agent writes a scene function,
 runs it with plain Python, reads the field through the scene's session, and the
 person opens the result in the studio. Its API reference is generated from the
-builder with a test that the two agree, and the tests run every example in it.
+code with a test that the two agree, and the tests run every example in it.
 
 **Step 2 — on the open scene: a way in.** The person sees the agent's edits
 arrive in the panel, each one an undo away. Today only the extension reaches the
 engine, through the stdio of the process it started. The engine also listens on
 a local connection only the person's account can use (with a token, as Jupyter's
-kernels and marimo's server have one), and a small command runs builder code
+kernels and marimo's server have one), and a small command runs a scene script
 against the open scene — `magpylib-studio run script.py`, the counterpart of
 marimo pair's `execute-code`. The engine then has to tell the panel that its
 scene changed, which the panel today learns only from its own calls; FEM's jobs
@@ -66,7 +66,7 @@ open scenes (R9) changes nothing about it.
 **In a marimo notebook the way in exists already.** Through marimo pair an agent
 runs code in the kernel that holds an editable `SceneWidget`'s session, reads
 `widget.selected` and assigns it. Missing there: the view follows edits made
-through its own calls only, so builder code run against its session from outside
+through its own calls only, so a scene built against its session from outside
 leaves it stale until the next. A change hook on the session closes that — step
 2's message, in the kernel.
 
@@ -105,17 +105,19 @@ in the skill, measured again; three runs each for a spread; the other ten tasks.
 
 **What, first: the person points, and the agent points back.** Mark a magnet, a
 collection or a region of the 3D view and leave a note; the agent receives the
-object ids, the steps that made them (the log's events, and the builder lines
-that write them), the variables they depend on, and an image. The other way, the
-agent outlines objects, frames them, and walks the person through a design, one
-object and one sentence at a time. Lens's rule holds here too: pointing edits
-nothing; the agent edits, through R3. Two routes, sharing that provenance:
+object ids, the steps that made them (the log's events, and the lines of the
+scene function that write them), the variables they depend on, and an image. The
+other way, the agent outlines objects, frames them, and walks the person through
+a design, one object and one sentence at a time. Lens's rule holds here too:
+pointing edits nothing; the agent edits, through R3. Two routes, sharing that
+provenance:
 
 - **in marimo**, the widget as a source of Lens targets: its legend rows carry
   `data-marimo-lens-target`, the object's label, and a `render-source` naming
-  the builder line that creates the object, so Lens points at magnets with
-  nothing of studio's own in between. Check first that Lens finds them inside
-  the widget's own DOM, and what its image capture makes of the WebGL canvas.
+  the line of the scene function that creates the object, so Lens points at
+  magnets with nothing of studio's own in between. Check first that Lens finds
+  them inside the widget's own DOM, and what its image capture makes of the
+  WebGL canvas.
 - **in VS Code**, the same channel natively: the tree's and the view's
   selection, and a note, handed to the agent through R3's way in.
 
@@ -133,8 +135,8 @@ more place, at the price of a host bridge.
 
 **Folded into R3** and started as its step 1. What it says: magpylib's
 conventions (SI units, diameter not radius, polarization in the object's own
-frame), the builder's rules, what each refusal means and how to fix it, and,
-once R5 exists, how to point and be pointed at. Present tense and current
+frame), the scene function's rules, what each refusal means and how to fix it,
+and, once R5 exists, how to point and be pointed at. Present tense and current
 capability only (`plans/fem.md` §13.1): authoring and the field now, the open
 scene when step 2 exists, FEM when FEM exists.
 
@@ -170,7 +172,7 @@ back is lossy and wrong without saying so.
 
 ### R9 — Several scenes: a project is a folder, a scene is a file
 
-**What.** No container format. A scene is one `.magpy.json` (and the builder
+**What.** No container format. A scene is one `.magpy.json` (and the scene
 script it came from, where there is one); a project is the folder that holds
 them. Several projects open is several windows or a multi-root workspace, and
 needs nothing built. Several scenes open is the work:
@@ -201,11 +203,12 @@ nothing before R7 needs it.
 
 ### R10 and later
 
-- **Structure kept in sync as a layer** (`plans/builder.md` §7, level 2) —
-  designed, not started; it is an override layer, and `plans/instancing.md`
-  warns where those go wrong.
+- **Structure kept in sync as a layer** (decision 0006's level 2) — designed,
+  not started; it is an override layer, and `plans/instancing.md` warns where
+  those go wrong.
 - **Instancing** (`plans/instancing.md`, F2; the GUI as its parameter binder,
-  F3) — unchanged; a placed instance is one more builder call when it exists.
+  F3) — unchanged; a placed instance is one more call in a scene function when
+  it exists.
 - **A scene as a page anyone can open** — `to_html` with the views for listed
   variable values computed ahead, as marimo-studio's prepared exports do; and
   the widget inside a marimo-studio view.
@@ -247,6 +250,10 @@ describe an API that exists).
 
 ## 3. Decisions waiting on Alex
 
+The scene-as-a-function plan is built (decision 0017); what is left of it is
+proposing the hook upstream, `magpylib.record`, which needs a magpylib
+maintainer's yes.
+
 Ask each one as a plain question with a recommended answer; the R3 four went
 unanswered for two days because nobody asked them.
 
@@ -254,5 +261,3 @@ unanswered for two days because nobody asked them.
 - **R5's order:** pointing at the scene before the view in the chat.
 - **A project is a folder of scene files** (R9), rather than a container format;
   and whether variants are named value sets inside a scene.
-- **`plans/recording.md`, as a whole:** go ahead with P0 upstream and P1, or
-  stay on the builder's own spelling.

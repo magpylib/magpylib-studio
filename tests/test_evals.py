@@ -213,21 +213,30 @@ def _wrong_twelve_made_sixteen(work):
 
 
 def _wrong_repair_hard_coded(work):
-    from magpylib_studio.build import Scene
+    from typing import Annotated
 
-    s = Scene()
-    s.variable("n", 12, bounds=(4, 36), integer=True)
-    radius = s.variable("radius", 0.03, bounds=(0.01, 0.1), unit="length")
-    ring = s.Collection(id="ring")
-    magnet = s.magnet.Cuboid(
-        id="magnet",
-        dimension=(0.008,) * 3,
-        polarization=(1.2, 0, 0),
-        position=(radius, 0, 0),
-    )
-    ring.add(magnet)
-    magnet.duplicate_around(count=12, axis="z", spin=30)  # n no longer counts
-    s.save(work / "ring.magpy.json")
+    import magpylib as magpy
+
+    from magpylib_studio import Count, Length, duplicate_around, name, scene
+
+    @scene
+    def ring(
+        n: Annotated[int, Count(4, 36)] = 12,
+        radius: Annotated[float, Length(0.01, 0.1)] = 0.03,
+    ):
+        group = name(magpy.Collection(), "ring")
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.008,) * 3,
+                polarization=(1.2, 0, 0),
+                position=(radius, 0, 0),
+            ),
+            "magnet",
+        )
+        group.add(magnet)
+        duplicate_around(magnet, count=12, axis="z", spin=30)  # n no longer counts
+
+    ring.save(work / "ring.magpy.json")
 
 
 WRONG = [

@@ -833,7 +833,8 @@ def quiver_scene(density=12, steps=51):
             {
                 "target": "magnet",
                 "op": "rotate_from_angax",
-                "angle": [round(360 * i / (steps - 1), 6) for i in range(steps)],
+                # linspace's own bits, so the script tab writes the call back
+                "angle": np.linspace(0, 360, steps).tolist(),
                 "axis": "y",
                 "start": 0,
             }
@@ -1077,6 +1078,51 @@ def _overwrite_param(create, name, value):
 _MIRRORABLE = ("Cuboid", "Cylinder", "CylinderSegment", "Sphere", "Dipole", "Sensor")
 
 _MIRROR_NORMALS = {"xy": [0, 0, 1], "xz": [0, 1, 0], "yz": [1, 0, 0]}
+
+
+def reflected(source, plane="xy", normal=None, anchor=0):
+    """One reflected copy of `source` across `plane`, or the plane with
+    `normal`, through `anchor`: the maths of `_mirror`, for the fold and for
+    a scene function called plainly (`scene.mirror`). See `_mirror` for why
+    it is not a matter of flipping a sign."""
+    normal = np.array(_MIRROR_NORMALS[plane] if normal is None else normal, dtype=float)
+    length = np.linalg.norm(normal)
+    if length < 1e-12:
+        raise ValueError("a mirror plane needs a non-zero normal")
+    normal = normal / length
+    unanchored = anchor is None or (np.isscalar(anchor) and anchor == 0)
+    anchor = np.array([0.0, 0.0, 0.0] if unanchored else anchor, dtype=float)
+    reflect = np.eye(3) - 2 * np.outer(normal, normal)
+    flip = np.diag([1.0, 1.0, -1.0])
+
+    copy = source.copy()
+    leaves = list(copy.children_all) if isinstance(copy, magpy.Collection) else [copy]
+    for leaf in leaves:
+        kind = type(leaf).__name__
+        if kind not in _MIRRORABLE:
+            raise ValueError(
+                f"{kind} cannot be mirrored: its shape has no mirror "
+                f"symmetry to borrow, so the reflection would have to "
+                f"flip its vertices"
+            )
+    for leaf in leaves:
+        if isinstance(leaf, magpy.Collection):
+            continue  # its pose setter would move the children again
+        position = np.array(leaf.position, dtype=float)
+        leaf.position = anchor + (position - anchor) @ reflect.T
+        leaf.orientation = R.from_matrix(reflect @ leaf.orientation.as_matrix() @ flip)
+        polarization = getattr(leaf, "polarization", None)
+        if polarization is not None:
+            leaf.polarization = -(np.array(polarization, dtype=float) @ flip.T)
+    return copy
+
+
+def name_copy(copy, source, index):
+    """Name a generated copy after the object it came from, numbered like
+    its id (`r1#3` -> "Magnet 1 #3"); see `_name_copy`."""
+    label = source.style.label
+    copy.style.label = f"{label} #{index}" if label else None
+
 
 # "no parent was given", which is not the same as "the scene root": a copy
 # with no destination belongs beside what it was copied from. JSON cannot
@@ -2522,44 +2568,14 @@ class MagpylibStudioSession:
         which reproduces the field a mirror image would have: B is axial too,
         and B'(S·p) comes out as 2(B·n)n - B. There is a test.
         """
-        normal = event.get("normal") or _MIRROR_NORMALS[event.get("plane", "xy")]
-        normal = np.array(self._resolve(normal), dtype=float)
-        length = np.linalg.norm(normal)
-        if length < 1e-12:
-            raise ValueError("a mirror plane needs a non-zero normal")
-        normal = normal / length
-        anchor = event.get("anchor", 0)
-        anchor = np.array(
-            [0.0, 0.0, 0.0] if anchor in (0, None) else anchor, dtype=float
-        )
-        reflect = np.eye(3) - 2 * np.outer(normal, normal)
-        flip = np.diag([1.0, 1.0, -1.0])
-
         source = self._objs[object_id]
         container = self._container_for_copies(object_id)
-        copy = source.copy()
-        leaves = (
-            list(copy.children_all) if isinstance(copy, magpy.Collection) else [copy]
+        copy = reflected(
+            source,
+            event.get("plane", "xy"),
+            self._resolve(event["normal"]) if event.get("normal") else None,
+            self._resolve(event.get("anchor", 0)),
         )
-        for leaf in leaves:
-            kind = type(leaf).__name__
-            if kind not in _MIRRORABLE:
-                raise ValueError(
-                    f"{kind} cannot be mirrored: its shape has no mirror "
-                    f"symmetry to borrow, so the reflection would have to "
-                    f"flip its vertices"
-                )
-        for leaf in leaves:
-            if isinstance(leaf, magpy.Collection):
-                continue  # its pose setter would move the children again
-            position = np.array(leaf.position, dtype=float)
-            leaf.position = anchor + (position - anchor) @ reflect.T
-            leaf.orientation = R.from_matrix(
-                reflect @ leaf.orientation.as_matrix() @ flip
-            )
-            polarization = getattr(leaf, "polarization", None)
-            if polarization is not None:
-                leaf.polarization = -(np.array(polarization, dtype=float) @ flip.T)
         self._name_copy(copy, source, 1)
         self._track_inherited(source, copy)
         copy_id = f"{object_id}#1"
@@ -2581,8 +2597,7 @@ class MagpylibStudioSession:
         answer for a pattern, where the copies are instances of a source, not
         new objects in their own right.
         """
-        label = source.style.label
-        copy.style.label = f"{label} #{index}" if label else None
+        name_copy(copy, source, index)
 
     def _container_for_copies(self, object_id):
         """Where a pattern's copies go: the group the source is in.
@@ -3135,6 +3150,9 @@ class MagpylibStudioSession:
                 "kind": entry["type"].rsplit(".", 1)[-1],
                 "visible": entry["visible"],
                 "children": [],
+                # the copies its pattern makes, which are drawn on it and
+                # not listed: the legend counts them
+                **({"copies": entry["copies"]} if entry.get("copies") else {}),
             }
             for entry in entries
         }
@@ -4174,8 +4192,12 @@ class MagpylibStudioSession:
             f"clear path {object_id}",
         )
 
-    def _unique_id(self, base):
-        used = {s["id"] for s, _ in self._iter_specs()}
+    def _unique_id(self, base, taken=()):
+        """An id for a copy of `base`: its stem numbered past every id the
+        scene holds, and past `taken`, the ids a copy in progress has already
+        given its other objects -- a copied collection's children used to be
+        numbered against the scene alone, and collided."""
+        used = {s["id"] for s, _ in self._iter_specs()} | set(taken)
         stem = re.sub(r"_\d+$", "", base) or "obj"
         n = 1
         while f"{stem}_{n}" in used:
@@ -4220,7 +4242,7 @@ class MagpylibStudioSession:
         # redirected onto the new objects as they are replayed
         renamed = {object_id: new_id}
         for spec in _walk_specs(src.get("children") or []):
-            renamed[spec["id"]] = self._unique_id(spec["id"])
+            renamed[spec["id"]] = self._unique_id(spec["id"], renamed.values())
 
         def mutate(doc):
             source_events = list(doc.get("events") or [])
@@ -4386,6 +4408,84 @@ class MagpylibStudioSession:
         state = "show" if visible else "hide"
         return self._mutate_doc(mutate, f"{state} {object_id}")
 
+    def _adopt_fresh(self, object_id, parent):
+        """`parent.add(child)` written in code (`scene.py`): a child nothing has
+        happened to since it was made is created inside `parent` -- its create
+        step, and its subtree's, move to the end of the log under the new
+        parent, as if it had been made there -- and the answer says so
+        (`fresh`). One with steps of its own is left alone and `fresh` is
+        False: the caller reparents it, which keeps its pose as numbers."""
+        spec = self._spec(object_id)
+        if parent is not None:
+            family_ids = {s["id"] for s, _ in self._iter_specs([spec])}
+            if parent in family_ids:
+                return {
+                    "ok": False,
+                    "error": f"cannot move {object_id!r} into its own subtree",
+                }
+            if self._spec(parent)["type"] != "Collection":
+                return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+        family = {s["id"] for s, _ in self._iter_specs([spec])}
+        events = self.doc.get("events") or []
+        creates = [
+            i
+            for i, e in enumerate(events)
+            if e.get("op") == "create" and e.get("target") in family
+        ]
+        if not creates:
+            return {"ok": False, "error": f"unknown object id {object_id!r}"}
+        touched = any(
+            e.get("op") != "create" and e.get("target") in family
+            for e in events[creates[0] :]
+        )
+        if touched:
+            return {"ok": True, "fresh": False}
+
+        def mutate(doc):
+            log = doc["events"]
+            moved = [log[i] for i in creates]
+            for i in reversed(creates):
+                del log[i]
+            first = {k: v for k, v in moved[0].items() if k != "parent"}
+            if parent is not None:
+                first["parent"] = parent
+            log.extend([first, *moved[1:]])
+
+        result = self._mutate_doc(mutate, f"adopt {object_id}")
+        return {**result, "fresh": True} if result["ok"] else result
+
+    def _rename_fresh(self, object_id, new_id):
+        """Give an object another id, while nothing but its own create (and
+        its children's) names it: `scene.name`. Later, an id is what every
+        step refers to, and is not renamed."""
+        self._spec(object_id)
+        if any(s["id"] == new_id for s, _ in self._iter_specs()):
+            return {"ok": False, "error": f"object id {new_id!r} already exists"}
+        if not isinstance(new_id, str) or not new_id:
+            return {"ok": False, "error": "an object id is a non-empty string"}
+        events = self.doc.get("events") or []
+        if any(
+            e.get("op") != "create" and e.get("target") == object_id for e in events
+        ):
+            return {
+                "ok": False,
+                "error": f"{object_id!r} already has steps, so its id is what "
+                f"they refer to: name it before anything else touches it",
+            }
+
+        def mutate(doc):
+            for event in doc["events"]:
+                if event.get("target") == object_id:
+                    event["target"] = new_id
+                if event.get("parent") == object_id:
+                    event["parent"] = new_id
+                if object_id in (event.get("children") or []):
+                    event["children"] = [
+                        new_id if c == object_id else c for c in event["children"]
+                    ]
+
+        return self._mutate_doc(mutate, f"name {object_id} {new_id}")
+
     def move_object(self, object_id, parent=None):
         """Reparent an object: into a Collection, or to the root
         (parent=None). Position and orientation in world coordinates are
@@ -4543,11 +4643,11 @@ class MagpylibStudioSession:
         try:
             with build.resolving_against(folder):
                 namespace, captured, code = importer.run_script(path)
-            # A script written with the builder made a document, not objects
-            # to guess one from: that is the scene, whole -- variables,
-            # formulas and patterns -- and nothing has to be said about what
-            # running it lost, because nothing was.
-            built = build.scenes_in(namespace)
+                # A script that defined a scene function made a document, not
+                # objects to guess one from: that is the scene, whole --
+                # variables, formulas and patterns -- and nothing has to be
+                # said about what running it lost, because nothing was.
+                built = build.scenes_in(namespace)
             if built:
                 self._captured_scenes = [
                     {
@@ -4668,7 +4768,7 @@ class MagpylibStudioSession:
                 return {
                     "ok": False,
                     "error": "the script tab does not build this scene back "
-                    f"exactly -- it differs at `{drift}` -- so saving it would "
+                    f"exactly -- it differs at `{drift.strip()}` -- so saving it would "
                     "change more than you edited. Make this change in the panel",
                 }
         lost = build.not_written(self)
@@ -4708,9 +4808,9 @@ class MagpylibStudioSession:
         try:
             with build.resolving_against(self._base_dir):
                 namespace, captured, _ = importer.run_script(path)
+                built = build.scenes_in(namespace)
         except Exception as e:  # noqa: BLE001 - report script errors, don't crash
             return _script_failure(e, path)
-        built = build.scenes_in(namespace)
         if not built:
             plain = captured or any(
                 not name.startswith("_") and importer._is_scene_object(value)

@@ -1,46 +1,36 @@
-"""Write a studio scene in Python: magpylib's spelling, with variables that
-stay variables.
+"""The document builder underneath a scene function: a `Scene` is a studio
+document written one operation at a time, through the session the panel uses.
 
     from magpylib_studio.build import Scene
 
     s = Scene()
     radius = s.variable("radius", 0.023, bounds=(0.005, 0.08))
-    n = s.variable("n", 10, integer=True)
-    magnet = s.magnet.Cuboid(
-        dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
-    )
-    magnet.duplicate_around(count=n, axis="z", spin=360 / n)
 
-`radius` is not a number. Arithmetic on it writes an expression, and the
-document keeps `"=radius"` where a script run would have kept 0.023 -- so the
-scene stays parametric: change `radius` in the panel and the ring follows, and
-an export to Maxwell has a design variable to write. Anything that needs the
-value now (an `if`, `range(n)`, `float(radius)`, `math.sin`) raises at that
-line and says what to write instead. Evaluating quietly would hand back a scene
-that looks right and has lost its variables, which is the cliff this replaces.
+`radius` is a handle, not a number: arithmetic on it writes an expression
+(`"=radius / 2"`), and anything that needs the value now -- `if radius > 0.01`,
+`range(n)`, `float(radius)`, `math.sin(radius)` -- raises at that line and
+says what to write instead. Evaluating quietly would hand back a scene that
+looks right and has lost its variables.
 
-Every call goes through the session operation the panel uses, so there is one
-implementation of what an edit means. A call the session refuses raises
-`BuildError` with the session's own message. Steps go where they are written:
-`magnet.move(...)` after `magnet.duplicate_around(...)` moves that magnet alone,
-as magpylib reads it, where the panel puts a drag in front of the pattern so the
-copies follow. See `docs/plans/builder.md`.
+Objects are not made here. A scene is written as a plain magpylib function
+(`magpylib_studio.recording`): its parameters are the variables, and the
+recorder turns each magpylib call the function makes into a step on this
+document, through `Object` and `Collection` below. `scenes_in` finds the scene
+a script left behind, and `script_of` writes a document back as such a
+function, which run builds the same document.
 """
 
 from __future__ import annotations
 
 import ast
 import contextlib
-import inspect
 import json
 import pathlib
 import sys
-import warnings
 
-import magpylib as magpy
 import numpy as np
 
-from magpylib_studio import expressions, units
+from magpylib_studio import expressions, hook, units
 from magpylib_studio.session import (
     _HIDE_STYLE,
     MagpylibStudioSession,
@@ -251,6 +241,8 @@ _UFUNC_FUNCTIONS = {
     np.degrees: "degrees",
     np.rad2deg: "degrees",
     np.absolute: "abs",
+    np.minimum: "min",
+    np.maximum: "max",
 }
 
 
@@ -267,6 +259,10 @@ def _function(name):
     function.__name__ = name
     function.__doc__ = f"`{name}` over numbers and variables."
     return staticmethod(function)
+
+
+#: `degrees(x)` over a number or a handle, for a turn given in radians.
+_degrees = _function("degrees").__func__
 
 
 class Sampled:
@@ -310,14 +306,10 @@ def _arg(value):
 
 
 class Object:
-    """A magpylib object as the scene records it.
-
-    Constructing one records nothing. Its create step is written when it
-    first enters the scene -- added to a collection, touched by any other
-    call, or when the scene is read -- because magpylib groups after it
-    builds (`ring.add(magnet)`), and the session's reparent keeps a moved
-    object's world pose as numbers: a position written in variables would
-    stop following them. Created inside its collection, it never moves."""
+    """A magpylib object as the document records it: one step per call,
+    through the session operation the panel uses. The recorder
+    (`magpylib_studio.recording`) makes one for each magpylib object a scene
+    function constructs, and calls these as the function calls magpylib."""
 
     def __init__(self, scene, type_, object_id, params, style):
         self._scene = scene
@@ -326,19 +318,14 @@ class Object:
         self._params = params
         self._style = style
         self._entered = False
-        #: The collection it was given to at construction, which creates it.
-        self._owner = None
 
     def __repr__(self):
         return f"<{self._type} {self.id!r}>"
 
     def _enter(self, parent=None):
+        """Its create step, at the scene's root, once."""
         if self._entered:
             return
-        if parent is None and self._owner is not None:
-            self._owner._enter()  # which creates it, inside
-            if self._entered:
-                return
         self._scene._create(self, parent)
 
     def move(self, displacement, start="auto", spacing=None):
@@ -355,7 +342,7 @@ class Object:
     ):
         """As magpylib's `rotate_from_angax`, recorded as a step."""
         if not degrees:
-            angle = Scene.degrees(angle)
+            angle = _degrees(angle)
         self._enter()
         self._scene._call(
             "rotate",
@@ -371,7 +358,7 @@ class Object:
     def rotate_from_rotvec(self, rotvec, anchor=None, start="auto", degrees=True):
         """As magpylib's `rotate_from_rotvec`, recorded as a step."""
         if not degrees:
-            rotvec = [Scene.degrees(component) for component in rotvec]
+            rotvec = [_degrees(component) for component in rotvec]
         op = {"op": "rotate_from_rotvec", "rotvec": _arg(rotvec)}
         if anchor is not None:
             op["anchor"] = _arg(anchor)
@@ -463,64 +450,16 @@ class Object:
 
 
 class Collection(Object):
-    """magpylib's `Collection`: `Collection(*children)`, and `add`."""
+    """magpylib's `Collection`, as the document records it. What is in it is
+    the recorder's to say: a child made at the root is moved in as it is
+    added (`session._adopt_fresh`)."""
 
-    def __init__(self, scene, object_id, style, children):
+    def __init__(self, scene, object_id, style, children=()):
         super().__init__(scene, "Collection", object_id, {}, style)
-        self._children = []
-        for child in children:
-            self._claim(child)
-
-    def _claim(self, child):
-        if not isinstance(child, Object):
-            raise TypeError(f"a collection holds objects, not {child!r}")
-        if not child._entered:
-            child._owner = self
-        self._children.append(child)
-
-    def add(self, *children):
-        """As magpylib's `add`. A child that is already in the scene is
-        reparented, which keeps its world pose as numbers; the builder warns,
-        since a position written in variables then stops following them."""
-        for child in children:
-            if not isinstance(child, Object):
-                raise TypeError(f"a collection holds objects, not {child!r}")
-            child._owner = None
-        self._enter()
-        for child in children:
-            if child._entered:
-                warnings.warn(
-                    f"{child.id!r} is already in the scene, so adding it to "
-                    f"{self.id!r} moves it and keeps its pose as numbers: a "
-                    f"position written in variables stops following them. Add "
-                    f"it before anything else touches it.",
-                    stacklevel=2,
-                )
-                self._scene._call("move_object", child.id, parent=self.id)
-            else:
-                child._enter(parent=self)
-        return self
-
-
-class _Namespace:
-    """`s.magnet`, `s.current`, `s.misc`: magpylib's classes, as the scene's."""
-
-    def __init__(self, scene, name):
-        self._scene = scene
-        self._name = name
-
-    def __getattr__(self, name):
-        if name.startswith("_") or not isinstance(
-            getattr(getattr(magpy, self._name), name, None), type
-        ):
-            raise AttributeError(f"magpylib has no {self._name}.{name}")
-        type_ = f"{self._name}.{name}"
-
-        def construct(id=None, style=None, **kwargs):  # noqa: A002 - the document's word
-            return self._scene._object(type_, id, style, kwargs)
-
-        construct.__name__ = name
-        return construct
+        if children:
+            raise TypeError(
+                "a recorded collection is given its children by the recorder"
+            )
 
 
 # --- the scene ----------------------------------------------------------------
@@ -570,24 +509,8 @@ class Scene:
         #: enter at the root when the scene is read.
         self._objects = []
         self._ids = {spec["id"] for spec, _ in self._session._iter_specs()}
-        self.magnet = _Namespace(self, "magnet")
-        self.current = _Namespace(self, "current")
-        self.misc = _Namespace(self, "misc")
-
-    # The constants an expression has; its functions are set below the class,
-    # one per name in the allow-list, so the two cannot drift.
-    pi = Expression("pi")
-    tau = Expression("tau")
-    e = Expression("e")
-
-    def add(self, *objects):
-        """Put these in the scene at its root, now. Most never need it --
-        an object enters when it is first used, or when the scene is read --
-        but a script that wants one created at this point in the log says
-        so, which is what `to_builder_script` writes."""
-        for obj in objects:
-            obj._enter()
-        return self
+        #: The scene function this was built from, if any.
+        self._built_from = None
 
     def variable(
         self,
@@ -668,19 +591,6 @@ class Scene:
         spec["of"] = _arg(list(made) if isinstance(made, tuple) else made)
         return Sampled(spec)
 
-    def Collection(self, *children, id=None, style=None, **kwargs):  # noqa: A002
-        """magpylib's `Collection`, as the scene's."""
-        if kwargs.keys() - {k for k in kwargs if k.startswith("style_")}:
-            raise TypeError("a collection takes children and style, nothing else")
-        object_id, style = self._named(id, "Collection", style, kwargs)
-        obj = Collection(self, object_id, style, children)
-        self._objects.append(obj)
-        return obj
-
-    def Sensor(self, id=None, style=None, **kwargs):  # noqa: A002
-        """magpylib's `Sensor`, as the scene's."""
-        return self._object("Sensor", id, style, kwargs)
-
     @property
     def session(self):
         """The session the scene is written into, with everything
@@ -704,14 +614,7 @@ class Scene:
         path.write_text(text, encoding="utf-8")
         return path
 
-    # -- what the objects call
-
-    def _object(self, type_, object_id, style, kwargs):
-        object_id, style = self._named(object_id, type_, style, kwargs)
-        params = {key: _value(value) for key, value in kwargs.items()}
-        obj = Object(self, type_, object_id, expressions.normalized(params), style)
-        self._objects.append(obj)
-        return obj
+    # -- what the recorder calls
 
     def _named(self, object_id, type_, style, kwargs):
         """The object's id, reserved now so that a clash is reported at the
@@ -750,11 +653,6 @@ class Scene:
         except BuildError:
             obj._entered = False
             raise
-        if isinstance(obj, Collection):
-            waiting = [child for child in obj._children if child._owner is obj]
-            obj._children = []
-            if waiting:
-                obj.add(*waiting)
 
     def _call(self, method, *args, **kwargs):
         # In the order written: a step after a pattern comes after it, as in
@@ -762,18 +660,15 @@ class Scene:
         session = self._session
         before, session._in_order = session._in_order, True
         try:
-            result = getattr(session, method)(*args, **kwargs)
+            # The session builds magpylib objects of its own on every call;
+            # with a scene function recording, those are not the script's.
+            with hook.nested():
+                result = getattr(session, method)(*args, **kwargs)
         finally:
             session._in_order = before
         if isinstance(result, dict) and result.get("ok") is False:
             raise BuildError(result.get("error"))
         return result
-
-
-# `s.sin(x)`, `s.max(a, b)`, ...: what an expression may call, taking variables.
-for _name in expressions._FUNCTIONS:
-    setattr(Scene, _name, _function(_name))
-del _name
 
 
 #: What a relative mesh path in a `Scene()` of its own is relative to; see
@@ -798,12 +693,22 @@ def resolving_against(base_dir):
 def scenes_in(namespace):
     """The scenes a script left behind, as (name, scene), each once however
     many names it has."""
+    from magpylib_studio.recording import SceneFunction
+
     found = []
     for name, value in namespace.items():
         if name.startswith("_") or not isinstance(value, Scene):
             continue
         if all(value is not scene for _, scene in found):
             found.append((name, value))
+    # A scene function is a scene once built; one the script built itself
+    # (`ring.build()` left in a name) counts once.
+    for name, value in namespace.items():
+        if name.startswith("_") or not isinstance(value, SceneFunction):
+            continue
+        if any(scene._built_from is value for _, scene in found):
+            continue
+        found.append((name, value.build()))
     return found
 
 
@@ -843,15 +748,86 @@ def rebuilt(session):
         contextlib.redirect_stdout(sys.stderr),
     ):
         exec(code, namespace)  # noqa: S102 - code this module wrote
-    ((_, scene),) = scenes_in(namespace)
+        ((_, scene),) = scenes_in(namespace)
     return scene.session
 
 
 #: A variable's limits as `Scene.variable` takes them.
 _LIMITS = ("min", "max", "soft_min", "soft_max", "integer", "options", "unit")
 
+#: What a step of each kind may say in the function form. A key outside the
+#: list is one this engine does not know: named at the top, not written.
+_STEP_KEYS = {
+    "move": ("displacement", "start", "spacing"),
+    "rotate_from_angax": ("angle", "axis", "anchor", "start", "spacing"),
+    "rotate_from_rotvec": ("rotvec", "anchor", "start"),
+    "duplicate_around": ("count", "axis", "anchor", "spin"),
+    "duplicate_along": ("count", "step"),
+    "mirror": ("plane", "normal", "anchor"),
+    "reparent": ("parent",),
+    "remove": (),
+}
+
+#: The expression functions as numpy spells them over a handle. `abs` and
+#: `round` are builtins a handle answers, and stay as written.
+_NUMPY_NAMES = {
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "asin": "arcsin",
+    "acos": "arccos",
+    "atan": "arctan",
+    "atan2": "arctan2",
+    "sqrt": "sqrt",
+    "exp": "exp",
+    "log": "log",
+    "hypot": "hypot",
+    "radians": "radians",
+    "degrees": "degrees",
+    "min": "minimum",
+    "max": "maximum",
+}
+
+#: Studio's words, imported as used; a variable of the same name has the
+#: import aliased, so the script's own names and the scene's never clash.
+_WORDS = (
+    "scene",
+    "derived",
+    "name",
+    "sampled",
+    "place",
+    "hide",
+    "show",
+    "remove",
+    "duplicate_around",
+    "duplicate_along",
+    "mirror",
+    "TriangularMesh",
+    "Length",
+    "Angle",
+    "Count",
+    "Bounds",
+)
+_RESERVED = (*_WORDS, "pi", "tau", "e", "Annotated", "Literal", "np", "magpy")
+
+
+def _nested(flat):
+    """A style with dotted paths, as magpylib's constructor takes it."""
+    root = {}
+    for path, value in flat.items():
+        node = root
+        *parts, last = path.split(".")
+        for part in parts:
+            node = node.setdefault(part, {})
+        node[last] = value
+    return root
+
 
 class _ScriptWriter:
+    """The document as a scene function: `@scene def design(...)`, its
+    parameters the variables, its body plain magpylib and studio's words,
+    one line per step of the log, in its order."""
+
     def __init__(self, doc, broken=()):
         self.doc = doc
         self.variables = doc.get("variables") or {}
@@ -862,13 +838,21 @@ class _ScriptWriter:
         self.broken = {entry["id"]: entry for entry in broken}
         self.numpy = False
         self.unwritten = []
+        self.words = set()
+        self.typing = set()
+        self.constants = set()
+        self.ids = set()
         from magpylib_studio import importer
 
-        taken = {*self.variables, "np", "Scene"}
-        self.scene = next(
-            name for name in ("s", "scene", "studio") if name not in taken
+        self._unique_id = importer._unique_id
+        self.alias = {
+            word: f"{word}_" if word in self.variables else word for word in _RESERVED
+        }
+        taken = set(self.variables) | set(self.alias.values())
+        self.function = next(
+            fn for fn in ("design", "the_scene", "studio_scene") if fn not in taken
         )
-        taken.add(self.scene)
+        taken.add(self.function)
         self.names = {}
         for event in self.events:
             if event.get("op") == "create" and event["target"] not in self.names:
@@ -876,41 +860,54 @@ class _ScriptWriter:
                     event["target"], taken
                 )
 
+    # -- names
+
+    def word(self, word):
+        self.words.add(word)
+        return self.alias[word]
+
+    def np(self):
+        self.numpy = True
+        return self.alias["np"]
+
+    def constant(self, name):
+        self.constants.add(name)
+        return self.alias[name]
+
     # -- values
 
     def expression(self, source):
-        """Document expression text as builder code: the variables are the
-        script's own, and a function or a constant is the scene's."""
+        """Document expression text as the function's code: the variables are
+        its parameters, a function is numpy's, a constant the scene's."""
         tree = ast.parse(source, mode="eval")
-        variables, scene = self.variables, self.scene
+        variables, writer = self.variables, self
 
-        class Builderise(ast.NodeTransformer):
+        class Rewrite(ast.NodeTransformer):
             def visit_Call(self, node):
                 self.generic_visit(node)
                 if (
                     isinstance(node.func, ast.Name)
                     and node.func.id in expressions._FUNCTIONS
+                    and node.func.id in _NUMPY_NAMES
                 ):
                     node.func = ast.Attribute(
-                        value=ast.Name(scene, ast.Load()),
-                        attr=node.func.id,
+                        value=ast.Name(writer.np(), ast.Load()),
+                        attr=_NUMPY_NAMES[node.func.id],
                         ctx=ast.Load(),
                     )
                 return node
 
             def visit_Name(self, node):
                 if node.id in expressions._CONSTANTS and node.id not in variables:
-                    return ast.Attribute(
-                        value=ast.Name(scene, ast.Load()), attr=node.id, ctx=ast.Load()
-                    )
+                    return ast.Name(writer.constant(node.id), ast.Load())
                 return node
 
-        return ast.unparse(Builderise().visit(tree).body)
+        return ast.unparse(Rewrite().visit(tree).body)
 
     def value(self, value, table=False):
-        """A document value as builder code. `table` lets a run of points be
-        written as the call that made it, as `to_script` does -- never a
-        vector: `(1, 1, 1)` is one box, not a ramp from 1 to 1."""
+        """A document value as code. `table` lets a run of points be written
+        as the call that made it, as `to_script` does -- never a vector:
+        `(1, 1, 1)` is one box, not a ramp from 1 to 1."""
         if expressions.is_expression(value):
             return self.expression(expressions.source_of(value))
         if expressions.is_sampled(value):
@@ -924,7 +921,7 @@ class _ScriptWriter:
             if table and value and isinstance(value[0], list):
                 ramp = _linspace_lit(value)
                 if ramp:
-                    self.numpy = True
+                    self.np()
                     return ramp
             inner = ", ".join(self.value(item) for item in value)
             return f"({inner},)" if len(value) == 1 else f"({inner})"
@@ -938,7 +935,7 @@ class _ScriptWriter:
                 _arange_lit(value) if spacing == "arange" else None
             ) or _linspace_lit(value)
         if ramp:
-            self.numpy = True
+            self.np()
             return ramp
         return self.value(value)
 
@@ -949,7 +946,7 @@ class _ScriptWriter:
         for key in ("count", "over"):
             if key in spec:
                 parts.append(f"{key}={self.value(spec[key])}")
-        return f"{self.scene}.sampled({', '.join(parts)})"
+        return f"{self.word('sampled')}({', '.join(parts)})"
 
     @staticmethod
     def keywords(pairs):
@@ -958,31 +955,77 @@ class _ScriptWriter:
     # -- the script
 
     def write(self):
-        drawn = []
+        decorator = []
         for key, known in (
             ("model_unit", units.MODEL_UNITS),
             ("field_unit", units.FIELD_UNITS),
         ):
             unit = self.doc.get(key)
             if unit in known:
-                drawn.append(f"{key}={unit!r}")
+                decorator.append(f"{key}={unit!r}")
             elif unit is not None:
                 self.unwritten.append(f"{key} ({unit!r})")
-        lines = [f"{self.scene} = Scene({', '.join(drawn)})"]
-        lines += self.write_variables()
-        body, creates = self.write_events()
-        lines += ["", *body]
+        parameters, derived = self.write_variables()
+        steps, creates = self.write_events()
+        body = [*derived, *steps]
         shown = self.write_visibility(creates)
         if shown:
-            lines += ["", "# hidden in the view, as the scene was saved", *shown]
-        header = ["from magpylib_studio.build import Scene"]
-        if self.numpy:
-            header.insert(0, "import numpy as np\n")
+            body += ["", "# hidden in the view, as the scene was saved", *shown]
+        roots = [
+            self.names[target]
+            for target, parent in self.parents_at_end().items()
+            if parent is None and target in creates
+        ]
+        if roots:
+            body += ["", f"return {', '.join(roots)}"]
+        if not body:
+            body = ["pass"]
+        mark = self.word("scene")
+        head = f"@{mark}({', '.join(decorator)})" if decorator else f"@{mark}"
+        if parameters:
+            signature = [
+                f"def {self.function}(",
+                *(f"    {p}," for p in parameters),
+                "):",
+            ]
+        else:
+            signature = [f"def {self.function}():"]
+        function = [head, *signature, *(f"    {line}" if line else "" for line in body)]
         notes = [f"# not written: {what}" for what in self.unwritten]
-        return "\n".join([*notes, *([""] if notes else []), *header, "", *lines]) + "\n"
+        return (
+            "\n".join(
+                [*notes, *([""] if notes else []), *self.header(), "", "", *function]
+            )
+            + "\n"
+        )
+
+    def header(self):
+        lines = []
+        if self.typing:
+            lines.append(f"from typing import {', '.join(sorted(self.typing))}")
+        if self.numpy:
+            lines.append(self._import("numpy", "np"))
+        lines.append(self._import("magpylib", "magpy"))
+        words = ", ".join(
+            word if self.alias[word] == word else f"{word} as {self.alias[word]}"
+            for word in sorted(self.words)
+        )
+        lines.append(f"from magpylib_studio import {words}")
+        if self.constants:
+            constants = ", ".join(
+                name if self.alias[name] == name else f"{name} as {self.alias[name]}"
+                for name in sorted(self.constants)
+            )
+            lines.append(f"from magpylib_studio.recording import {constants}")
+        return lines
+
+    def _import(self, module, word):
+        return f"import {module} as {self.alias[word]}"
 
     def write_variables(self):
-        lines, done = [], set()
+        """The parameters, and the `derived` lines for variables defined by
+        a formula, each after the variables it names."""
+        parameters, derived, done, order = [], [], set(), []
 
         def visit(name, seen=()):
             if name in done or name not in self.variables or name in seen:
@@ -990,31 +1033,63 @@ class _ScriptWriter:
             for needed in expressions.referenced_names([self.variables[name]]):
                 visit(needed, (*seen, name))
             done.add(name)
+            order.append(name)
+
+        for name in self.variables:
+            visit(name)
+        for name in order:
             limits = self.limits.get(name) or {}
             for key, item in limits.items():
                 if key not in _LIMITS:
                     self.unwritten.append(f"{key} on {name}'s limits ({item!r})")
-            parts = [repr(name), self.value(self.variables[name])]
-            for keyword, (low, high) in (
-                ("bounds", ("min", "max")),
-                ("slider", ("soft_min", "soft_max")),
-            ):
-                if low in limits or high in limits:
-                    pair = (limits.get(low), limits.get(high))
-                    parts.append(f"{keyword}={self.value(list(pair))}")
-            if limits.get("integer"):  # not a whole number is what not saying so says
-                parts.append("integer=True")
-            if "options" in limits:
-                parts.append(f"options={self.value(limits['options'])}")
-            if limits.get("unit") in units.KINDS:
-                parts.append(f"unit={limits['unit']!r}")
-            elif "unit" in limits:
-                self.unwritten.append(f"unit on {name} ({limits['unit']!r})")
-            lines.append(f"{name} = {self.scene}.variable({', '.join(parts)})")
+            unit = limits.get("unit")
+            if unit is not None and unit not in units.KINDS:
+                self.unwritten.append(f"unit on {name} ({unit!r})")
+                unit = None
+            value = self.variables[name]
+            if expressions.is_expression(value):
+                parts = [repr(name), self.expression(expressions.source_of(value))]
+                if unit:
+                    parts.append(f"unit={unit!r}")
+                derived.append(f"{name} = {self.word('derived')}({', '.join(parts)})")
+            else:
+                annotation = self.annotation(limits, unit)
+                parameters.append(f"{name}: {annotation} = {self.value(value)}")
+        return parameters, derived
 
-        for name in self.variables:
-            visit(name)
-        return lines
+    def annotation(self, limits, unit):
+        if "options" in limits:
+            self.typing.add("Literal")
+            return f"Literal[{', '.join(repr(o) for o in limits['options'])}]"
+        integer = bool(limits.get("integer"))
+        base = "int" if integer else "float"
+        bounded = "min" in limits or "max" in limits
+        slider = "soft_min" in limits or "soft_max" in limits
+        if not (bounded or slider or unit):
+            return base
+        args = []
+        if bounded:
+            args.append(self.value(limits.get("min")))
+            if "max" in limits:
+                args.append(self.value(limits["max"]))
+        if slider:
+            args.append(
+                f"slider={self.value([limits.get('soft_min'), limits.get('soft_max')])}"
+            )
+        if integer and unit is None:
+            call = self.word("Count")
+        elif unit == "length" and not integer:
+            call = self.word("Length")
+        elif unit == "angle" and not integer:
+            call = self.word("Angle")
+        else:
+            call = self.word("Bounds")
+            if unit is not None:
+                args.append(f"unit={unit!r}")
+            if integer:
+                args.append("integer=True")
+        self.typing.add("Annotated")
+        return f"Annotated[{base}, {call}({', '.join(args)})]"
 
     def write_events(self):
         lines, creates = [], {}
@@ -1033,8 +1108,7 @@ class _ScriptWriter:
                 creates[event["target"]] = event
             elif op in ("position", "orientation"):
                 # A pose stated outright is one step of the studio's, and one
-                # call: written as two, the second would not merge into a pin
-                # the way the panel's did, and the log would differ.
+                # call: `place`, with both halves where the panel pinned both.
                 pose = {op: event}
                 following = events[index + 1] if index + 1 < len(events) else {}
                 if (
@@ -1051,19 +1125,15 @@ class _ScriptWriter:
                     parts.append(
                         ("orientation", self.value(pose["orientation"]["rotvec"]))
                     )
-                lines.append(f"{name}.set_transform({self.keywords(parts)})")
+                lines.append(f"{self.word('place')}({name}, {self.keywords(parts)})")
             else:
                 lines.append(self.write_step(event, name))
             index += 1
         return lines, creates
 
-    def write_visibility(self, creates):
-        """What is hidden, as calls at the end. Hiding a collection hides every
-        leaf in it at the time, and a leaf can be shown again on its own or
-        join the collection later, so the collections that were hidden are
-        hidden first and each leaf is then put the way the scene has it:
-        shown where it is shown, hidden (and marked hidden) where it is. What
-        is in what is read at the end of the log, where these calls run."""
+    def parents_at_end(self):
+        """What is in what when the log has run: present objects, each with
+        its parent or None."""
         parent = {}
         for event in self.events:
             if event.get("id") in self.broken:
@@ -1080,6 +1150,15 @@ class _ScriptWriter:
                     gone |= inside
                 for name in gone:
                     parent.pop(name, None)
+        return parent
+
+    def write_visibility(self, creates):
+        """What is hidden, as calls at the end. Hiding a collection hides every
+        leaf in it at the time, and a leaf can be shown again on its own or
+        join the collection later, so the collections that were hidden are
+        hidden first and each leaf is then put the way the scene has it:
+        shown where it is shown, hidden (and marked hidden) where it is."""
+        parent = self.parents_at_end()
 
         def ancestors(target):
             seen, up = set(), parent.get(target)
@@ -1094,21 +1173,20 @@ class _ScriptWriter:
             for target, event in there.items()
             if event.get("type") == "Collection" and event.get("visible") is False
         ]
-        lines = [f"{self.names[target]}.hide()" for target in groups]
+        lines = [f"{self.word('hide')}({self.names[target]})" for target in groups]
         for target, event in there.items():
             if event.get("type") == "Collection":
                 continue
             hidden = "hidden_style" in event
             by_group = any(up in groups for up in ancestors(target))
             if hidden and (event.get("visible") is False or not by_group):
-                lines.append(f"{self.names[target]}.hide()")
+                lines.append(f"{self.word('hide')}({self.names[target]})")
             elif not hidden and by_group:
-                lines.append(f"{self.names[target]}.show()")
+                lines.append(f"{self.word('show')}({self.names[target]})")
         return lines
 
     def write_create(self, event, name):
         kind = event["type"]
-        call = f"{self.scene}.{kind}"
         style = dict(event.get("style") or {})
         # Hidden, its style holds the switches that hide it, and what they
         # replaced is set aside: written as it was, and hidden at the end.
@@ -1132,67 +1210,82 @@ class _ScriptWriter:
                 "hidden_style",
             ):
                 self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
-        parts = [("id", repr(event["target"]))]
+        params = dict(event.get("params") or {})
+        parts = []
+        if kind == "magnet.TriangularMesh" and "mesh_source" in params:
+            call = self.word("TriangularMesh")
+            parts.append(("mesh_source", self.value(params.pop("mesh_source"))))
+        else:
+            call = f"{self.alias['magpy']}.{kind}"
+        parts += [(key, self.value(value, table=True)) for key, value in params.items()]
         if style:
-            parts.append(("style", repr(style)))
-        parts += [
-            (key, self.value(value, table=True))
-            for key, value in (event.get("params") or {}).items()
-        ]
+            parts.append(("style", repr(_nested(style))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
+        # The id the recorder would give it, from its label or its class; where
+        # the document's differs, the script says so.
+        base = style.get("label") or kind.rsplit(".", 1)[-1].lower()
+        expected = self._unique_id(base, self.ids)
+        if expected != event["target"]:
+            self.ids.discard(expected)
+            self.ids.add(event["target"])
+            lines.append(f"{self.word('name')}({name}, {event['target']!r})")
         parent = event.get("parent")
-        lines.append(
-            f"{self.names[parent]}.add({name})"
-            if parent
-            else f"{self.scene}.add({name})"
-        )
+        if parent:
+            lines.append(f"{self.names[parent]}.add({name})")
         return lines
 
     def write_step(self, event, name):
-        op = event.get("op")
+        op, target = event.get("op"), event.get("target")
         given = {
             key: item
             for key, item in event.items()
             if key not in ("id", "op", "target")
         }
+        allowed = _STEP_KEYS.get(op)
+        if allowed is None:
+            self.unwritten.append(f"a {op} step on {target}")
+            return f"# {op} on {name}: no call says this yet"
+        for key in [key for key in given if key not in allowed]:
+            self.unwritten.append(
+                f"{key} on a {op} step on {target} ({given.pop(key)!r})"
+            )
+        # magpylib's calls have no `spacing`: the ramp is written as the call
+        # it came from, and the hint itself is let go of, with a word.
+        spacing = given.pop("spacing", None)
+        if spacing:
+            self.unwritten.append(f"spacing on a {op} step on {target} ({spacing!r})")
         if op == "move":
-            parts = [self.path(given.pop("displacement"), given.get("spacing"))]
+            call = f"{name}.move"
+            parts = [self.path(given.pop("displacement"), spacing)]
         elif op == "rotate_from_angax":
+            call = f"{name}.rotate_from_angax"
             parts = [
-                self.path(given.pop("angle"), given.get("spacing")),
+                self.path(given.pop("angle"), spacing),
                 self.value(given.pop("axis", "z")),
             ]
         elif op == "rotate_from_rotvec":
+            call = f"{name}.rotate_from_rotvec"
             parts = [self.path(given.pop("rotvec"))]
         elif op == "duplicate_around":
-            parts = [self.value(given.pop("count"))]
+            call = self.word("duplicate_around")
+            parts = [name, self.value(given.pop("count"))]
         elif op == "duplicate_along":
-            parts = [self.value(given.pop("count")), self.value(given.pop("step"))]
+            call = self.word("duplicate_along")
+            parts = [
+                name,
+                self.value(given.pop("count")),
+                self.value(given.pop("step")),
+            ]
         elif op == "mirror":
-            parts = []
+            call = self.word("mirror")
+            parts = [name]
         elif op == "reparent":
             parent = given.pop("parent", None)
-            return f"{name}.reparent({self.names[parent] if parent else None})"
-        elif op == "remove":
-            return f"{name}.remove()"
-        else:
-            self.unwritten.append(f"a {op} step on {event.get('target')}")
-            return f"# {op} on {name}: no call says this yet"
-        # A key the call does not take is one this engine does not know: as a
-        # keyword it would fail the whole script at this line.
-        accepted = inspect.signature(getattr(Object, op)).parameters
-        for key in [key for key in given if key not in accepted]:
-            self.unwritten.append(
-                f"{key} on a {op} step on {event.get('target')} ({given.pop(key)!r})"
-            )
+            return f"{name}.parent = {self.names[parent] if parent else None}"
+        else:  # remove
+            return f"{self.word('remove')}({name})"
         rest = [
-            (
-                key,
-                repr(item)
-                if key in ("start", "spacing", "plane")
-                else self.value(item),
-            )
+            (key, repr(item) if key in ("start", "plane") else self.value(item))
             for key, item in given.items()
         ]
-        arguments = ", ".join([*parts, *(f"{key}={code}" for key, code in rest)])
-        return f"{name}.{op}({arguments})"
+        return f"{call}({', '.join([*parts, *(f'{k}={c}' for k, c in rest)])})"

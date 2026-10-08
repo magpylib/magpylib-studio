@@ -125,9 +125,12 @@ def test_the_object_tree_is_what_a_legend_draws():
     ring = next(node for node in walk(tree) if node["id"] == "ring1")
     assert ring["kind"] == "Collection" and ring["children"]
     fields = {"id", "label", "kind", "visible", "children"}
-    assert all(set(node) == fields for node in walk(tree))
+    assert all(set(node) - {"copies"} == fields for node in walk(tree))
     listed = {e["id"] for e in s.list_objects(copies="count")}
     assert {node["id"] for node in walk(tree)} == listed  # no copies
+    # a pattern's source says how many copies are drawn on it, for the count
+    r1 = next(node for node in walk(tree) if node["id"] == "r1")
+    assert r1["copies"] == 9 and "copies" not in ring
     s.set_visible("ring1", False)
     hidden = next(n for n in walk(s.object_tree()) if n["id"] == "ring1")
     assert hidden["visible"] is False

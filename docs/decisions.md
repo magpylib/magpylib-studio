@@ -25,6 +25,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0014](#0014-the-window-stamp-says-where-never-whether)           | The window stamp says where, never whether          | accepted, August 2026 (v0.4.0)                                       |
 | [0015](#0015-the-name-stays-magpylib-studio)                      | The name stays magpylib-studio                      | accepted 2026-10-06                                                  |
 | [0016](#0016-released-magpylib-through-a-shim-until-the-release)  | Released magpylib through a shim until the release  | accepted, August 2026 (`style_compat.py`); the same pattern is       |
+| [0017](#0017-the-scene-is-a-function-in-plain-magpylib-recorded)  | The scene is a function in plain magpylib, recorded | accepted 2026-10-09, as built                                        |
 
 ---
 
@@ -812,3 +813,95 @@ A shim reaches into `magpylib._src`, which is private; it is tested on each
 magpylib studio supports, and it can be slower (recording on 5.2.3 was 15 ms
 against 4 ms for one scene). The 3D scene graph has no shim: without the
 display-backend API the studio draws the plotly figure instead.
+
+---
+
+## 0017. The scene is a function in plain magpylib, recorded
+
+**Status:** accepted 2026-10-09, as built; supersedes the spelling of
+[0006](#0006-a-scene-written-in-code-records-through-the-session), whose rules
+carry over. **Record of:** the recording plan, now deleted.
+
+### Context
+
+The builder's objects were stand-ins: `s.magnet.Cuboid` recorded, but `getB` on
+it was nothing, and the spelling had to be kept in step with magpylib's by hand.
+The agent evaluations counted the cost of every place the spelling differed.
+Plain magpylib an agent already knows, and magpylib's own docs are the widest
+set of real scripts there is.
+
+### Decision
+
+- **A scene is a function whose parameters are the variables.** Bounds are
+  `annotated_types` constraints inside `Annotated`, as pydantic and wigglystuff
+  read them; a choice is `Literal`; the unit and the slider range ride along as
+  studio's metadata; `Length`, `Angle`, `Count` and `Bounds` are grouped
+  metadata that expand to the standard constraints. A variable defined by a
+  formula is `derived(name, formula)` in the body. Parameters need a default
+  each; a `bool`, or a name without its `Literal`, is refused at the decorator.
+- **One function, three callers.** Called plainly it is magpylib: numbers in,
+  objects out, patterns as real copies. `fn.build()` calls it with the
+  parameters as handles and records what it does into the document;
+  `fn.build(values=path)` takes a saved scene's values. A notebook renders the
+  same signature as draggable numbers. The decorator returns a wrapper that is
+  the plain function when called; one that recorded at definition time would
+  make `ring(n=12)` a document.
+- **magpylib reports its calls through a hook**, `record(on_event, resolve)`:
+  every top-level construction, property assignment and transformation, with the
+  arguments as written; magpylib's own nested calls are not. `resolve` turns a
+  handle into a number before magpylib sees it. The hook is proposed upstream
+  (`magpylib.record`, always on, about 0.1 µs a call); until it ships, studio
+  carries a copy and wraps magpylib's classes from outside
+  ([0016](#0016-released-magpylib-through-a-shim-until-the-release)). The two
+  write the same documents, checked on released 5.2.3 and main.
+- **The call is the recording scope.** Whatever is constructed during it is the
+  scene, whoever constructed it; an object made before is refused by name. The
+  session's own rebuilds, the mesh resolver and a pattern's copies run as
+  magpylib's own work and are not recorded.
+- **A construction is a create step at the root.** `group.add(obj)` on a fresh
+  object moves its create inside the group, as if made there; on one with steps
+  it is a reparent, with a warning. `obj.parent = group` is a reparent outright,
+  keeping the pose, as the tree's drag does. Arguments are kept in the order
+  written. Ids come from the label, else the class; `name(obj, id)` says an id
+  the label does not give, and the writer emits it only where the document's id
+  differs.
+- **Style is read between calls**, as magpylib keeps what an object was given
+  before its style is ever made, and written as edits by dotted path; the
+  recorder never creates a style, since `copy()` labels a copy differently once
+  one exists.
+- **A property read is today's number, and a warning says so** where the value a
+  scene holds there is a variable: the one silent cliff the function form cannot
+  close.
+- **Studio's words**: `derived`, `duplicate_around`, `duplicate_along`,
+  `mirror`, `place`, `sampled`, `hide`, `show`, `remove`, `TriangularMesh`,
+  `name`. Everything else is magpylib's.
+- **The writer emits the same form**: `@scene def design(...)`, parameters
+  annotated, `derived` lines, one line per step, `place` for a pose pin,
+  `obj.parent = group` for a reparent, `hide` and `show` at the end, and a
+  `return` of the root objects, with imports aliased where a variable takes a
+  word's name. The tab, Open in Magpylib Studio and the skill moved with it.
+
+### Rejected
+
+- The listening object (`Scene()` recording from the moment it is made): global
+  state, a `paused()` block, a takeover and a warning on save, where the
+  function needs none of it.
+- The builder's spelling kept as an alias: never released, so nothing used it.
+- Recording magpylib calls as a new document format, and array-API tracing (the
+  plan's §4).
+- A grouped-metadata sugar in bare annotation position: an invalid type form to
+  pyright and Pylance.
+
+### Measured
+
+Every built-in example round-trips through the writer to the same document on
+magpylib main and on released 5.2.3; the Halbach function builds the example's
+document and, called plainly, its field at the defaults and at other values.
+magpylib's own docs through the recorder
+(`tools/replay-magpylib-docs.py --studio`, each page's cells as one scene
+function's body, the document's objects set beside the live ones): of the 23
+pages that run in this environment, 19 are exact, pose and field, one differs
+only in `model3d` traces (the data gap), two are refused at their line for a
+`CustomSource` (the code gap), and one, with 1,215 objects, times out at ten
+minutes, since every recorded call rebuilds the scene. Twelve pages need a
+package this environment lacks.

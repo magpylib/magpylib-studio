@@ -81,6 +81,37 @@ function mostCommon(values) {
   return best;
 }
 
+/** The tree's icon for a kind of object (`media/icons`, carried in the
+ *  stylesheet as masks): the shape says what it is, the colour behind it what
+ *  it is drawn in. A magnet shows its polarization colours through its own
+ *  outline. A kind without an icon of its own gets the nearest. */
+const ICONS = {
+  Cuboid: "cuboid",
+  Cylinder: "cylinder",
+  CylinderSegment: "cylinder-segment",
+  Sphere: "sphere",
+  Tetrahedron: "tetrahedron",
+  TriangularMesh: "mesh",
+  Triangle: "mesh",
+  TriangleSheet: "mesh",
+  TriangleStrip: "mesh",
+  Circle: "loop",
+  Polyline: "polyline",
+  Dipole: "dipole",
+  CustomSource: "custom",
+  Sensor: "sensor",
+};
+
+/** How many objects a row stands for in the view: itself and the copies its
+ *  pattern makes, times what a patterned collection repeats. A pattern's
+ *  copies are drawn on their source and not listed, so a ring of ten lists
+ *  one magnet; the count says ten. */
+function drawnUnder(node) {
+  const own = 1 + (node.copies || 0);
+  if (!node.children.length) return own;
+  return own * node.children.reduce((sum, child) => sum + drawnUnder(child), 0);
+}
+
 /** How many things a collection can hold and still be shown open when it is
  *  first seen. Past this it starts folded: a ring of sixty-four would
  *  otherwise be the whole list, and its row still says what is inside -- how
@@ -210,12 +241,28 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     if (colour) swatch.style.background = colour;
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.
-    else swatch.classList.add(node.children.length ? "collection" : "none");
+    if (node.children.length) swatch.classList.add("collection");
+    else if (colour)
+      swatch.classList.add("icon", `icon-${ICONS[node.kind] || "custom"}`);
+    else swatch.classList.add("none");
     row.append(caret, swatch, label);
+    const drawn = drawnUnder(node);
     if (node.children.length) {
-      // What a folded row would otherwise hide: how much is in it.
+      // What a folded row would otherwise hide: how much is in it, the
+      // copies its patterns make included.
       const count = part("magpy-legend-count");
-      count.textContent = String(node.children.length);
+      count.textContent = String(drawn);
+      if (drawn !== node.children.length) {
+        count.title = `${node.children.length} listed, ${drawn} drawn: a pattern's copies are drawn on their source`;
+      }
+      row.append(count);
+    } else if (node.copies) {
+      // The source of a pattern: one listed, this many drawn.
+      const count = part(
+        "magpy-legend-count",
+        `${node.copies} copies, made by its pattern`,
+      );
+      count.textContent = `×${drawn}`;
       row.append(count);
     }
     // At the end of the row, as Figma's layers and VS Code's trees put a

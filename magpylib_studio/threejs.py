@@ -384,10 +384,13 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
         raise RuntimeError(UNAVAILABLE)
     _captured.clear()
     DisplayBackend.backends[_BACKEND] = _CAPTURE
+    # While a script is being opened in the studio, show() is a stand-in that
+    # captures the script's own calls; the one it replaced still draws.
+    show = getattr(magpy.show, "original", magpy.show)
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            magpy.show(
+            show(
                 objects,
                 backend=_BACKEND,
                 return_fig=True,
@@ -401,6 +404,11 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
             str(warning.message).replace(_BACKEND, on_behalf_of),
             warning.category,
             stacklevel=3,
+        )
+    if "scene" not in _captured:
+        raise RuntimeError(
+            "magpylib did not hand the scene to the studio's backend: show() "
+            "has been replaced by something that does not draw"
         )
     scene = _captured.pop("scene")
     _mark_paths(scene, objects)

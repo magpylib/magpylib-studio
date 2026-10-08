@@ -214,13 +214,11 @@ def test_units_come_back_from_builder_code():
     s = Scene(model_unit="cm")
     s.variable("gap", 0.015, slider=(0.01, 0.03), unit="length")
     script = s.session.to_builder_script()
-    assert "s = Scene(model_unit='cm')" in script
-    assert (
-        "gap = s.variable('gap', 0.015, slider=(0.01, 0.03), unit='length')" in script
-    )
+    assert "@scene(model_unit='cm')" in script
+    assert "gap: Annotated[float, Length(slider=(0.01, 0.03))] = 0.015," in script
     namespace = {}
-    exec(compile(script, "<builder>", "exec"), namespace)  # noqa: S102
-    back = namespace["s"].to_dict()
+    exec(compile(script, "<scene>", "exec"), namespace)  # noqa: S102
+    back = namespace["design"].build().to_dict()
     assert back["model_unit"] == "cm"
     assert back["variable_bounds"] == s.to_dict()["variable_bounds"]
 
@@ -294,13 +292,13 @@ def test_greek_mu_is_read_as_the_micro_sign():
 
 
 def test_a_tab_save_that_changes_only_the_length_unit_applies(tmp_path):
-    """The script tab writes `Scene(model_unit='cm')`; an edit to that alone is
-    an edit, not a save that changes nothing."""
+    """The script tab writes `@scene(model_unit='cm')`; an edit to that alone
+    is an edit, not a save that changes nothing."""
     session = halbach()
     script = session.to_builder_script()
-    assert script.count("s = Scene()") == 1
+    assert script.count("@scene\n") == 1
     tab = tmp_path / "scene.py"
-    tab.write_text(script.replace("s = Scene()", "s = Scene(model_unit='cm')"))
+    tab.write_text(script.replace("@scene\n", "@scene(model_unit='cm')\n"))
 
     assert session.apply_builder_script(str(tab)) == {"ok": True}
     assert session.to_dict()["model_unit"] == "cm"
@@ -539,10 +537,10 @@ def test_the_sensor_plot_is_in_the_scenes_field_unit():
 def test_the_field_unit_comes_back_from_builder_code():
     s = Scene(model_unit="mm", field_unit="mT")
     script = s.session.to_builder_script()
-    assert "s = Scene(model_unit='mm', field_unit='mT')" in script
+    assert "@scene(model_unit='mm', field_unit='mT')" in script
     namespace = {}
-    exec(compile(script, "<builder>", "exec"), namespace)  # noqa: S102
-    back = namespace["s"].to_dict()
+    exec(compile(script, "<scene>", "exec"), namespace)  # noqa: S102
+    back = namespace["design"].build().to_dict()
     assert (back["model_unit"], back["field_unit"]) == ("mm", "mT")
 
 
@@ -550,7 +548,7 @@ def test_a_tab_save_that_changes_only_the_field_unit_applies(tmp_path):
     session = halbach()
     tab = tmp_path / "scene.py"
     tab.write_text(
-        session.to_builder_script().replace("s = Scene()", "s = Scene(field_unit='mT')")
+        session.to_builder_script().replace("@scene\n", "@scene(field_unit='mT')\n")
     )
     assert session.apply_builder_script(str(tab)) == {"ok": True}
     assert session.to_dict()["field_unit"] == "mT"

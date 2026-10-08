@@ -2,13 +2,14 @@
 has a plain script in front of it."""
 
 import pathlib
+from typing import Annotated
 
 import magpylib as magpy
 import numpy as np
 
 from evals import kit
 from evals.tasks import _scenes
-from magpylib_studio.build import Scene
+from magpylib_studio import Count, Length, duplicate_around, name, scene
 
 TITLE = "A plain magpylib ring turned into a scene with sliders"
 KIND = "studio"
@@ -103,16 +104,22 @@ def check(work, condition):
 
 
 def reference(work, condition):
-    s = Scene()
-    n = s.variable("n", 8, bounds=(4, 24), integer=True)
-    radius = s.variable("radius", 0.02, bounds=(0.015, 0.04), unit="length")
-    ring = s.Collection(id="ring")
-    magnet = s.magnet.Cuboid(
-        id="magnet",
-        dimension=(0.006, 0.006, 0.006),
-        polarization=(0, 0, 1.0),
-        position=(radius, 0, 0),
-    )
-    ring.add(magnet)
-    magnet.duplicate_around(count=n, axis="z")
-    s.save(pathlib.Path(work) / "ring.magpy.json")
+    @scene
+    def ring(
+        n: Annotated[int, Count(4, 24)] = 8,
+        radius: Annotated[float, Length(0.015, 0.04)] = 0.02,
+    ):
+        group = name(magpy.Collection(), "ring")
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.006, 0.006, 0.006),
+                polarization=(0, 0, 1.0),
+                position=(radius, 0, 0),
+            ),
+            "magnet",
+        )
+        group.add(magnet)
+        duplicate_around(magnet, count=n, axis="z")
+        return group
+
+    ring.save(pathlib.Path(work) / "ring.magpy.json")

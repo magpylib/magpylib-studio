@@ -432,8 +432,19 @@
   transform: translateX(2px);
 }
 
+/* A leaf's slot: a dot where a group has its caret, in the caret's own
+   width, so the names stay in line and a row with nothing under it still
+   reads as an item of the list. Blank, a top-level leaf after a nested branch
+   read as a stray of the group above it. */
 .magpy-legend-caret.leaf {
-  border-left-color: transparent;
+  width: 4px;
+  height: 4px;
+  border: none;
+  border-radius: 50%;
+  margin: 0 2px;
+  background: currentColor;
+  opacity: 0.3;
+  transform: none;
   cursor: default;
 }
 
@@ -469,10 +480,21 @@
 
 .magpy-legend-swatch {
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 13px;
+  height: 13px;
   border-radius: 3px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* What it is, in what it is drawn in: the tree's wireframe for its kind, as
+   a mask over its colour -- a magnet's polarization colours show through its
+   own outline, a sensor's green through the sensor's. The masks are the
+   generated block below. */
+.magpy-legend-swatch.icon {
+  box-shadow: none;
+  border-radius: 0;
+  -webkit-mask: no-repeat center / 13px var(--magpy-icon);
+  mask: no-repeat center / 13px var(--magpy-icon);
 }
 
 /* A collection has no colour of its own; the space stays so labels line up. */
@@ -487,14 +509,50 @@
   border-radius: 0;
   opacity: 0.5;
   background-color: currentColor;
-  -webkit-mask: no-repeat center / 10px
+  -webkit-mask: no-repeat center / 12px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2 14.5 5.5 8 9 1.5 5.5z'/%3E%3Cpath d='M1.5 9 8 12.5 14.5 9'/%3E%3C/svg%3E");
-  mask: no-repeat center / 10px
+  mask: no-repeat center / 12px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2 14.5 5.5 8 9 1.5 5.5z'/%3E%3Cpath d='M1.5 9 8 12.5 14.5 9'/%3E%3C/svg%3E");
 }
 
 /* The name takes whatever the row has spare, which lines the counts and the
    eyes up in columns at the right edge. */
+/* --- the legend's type icons: generated from vscode-extension/media/icons by harness/check-widget.js --write-icons --- */
+.magpy-legend-swatch.icon-cuboid {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%205.5%208%203l5%202.5v5L8%2013l-5-2.5Z%22%2F%3E%3Cpath%20d%3D%22M3%205.5%208%208l5-2.5M8%208v5%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-custom {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%202.5%2013.5%208%208%2013.5%202.5%208Z%22%2F%3E%3Cpath%20d%3D%22M2.5%208h11M8%202.5v11%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-cylinder-segment {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M3%205.5h6a4%204%200%200%201%204%204H7a4%204%200%200%200-4-4Z%22%2F%3E%3Cpath%20d%3D%22M3%205.5v3.5a4%204%200%200%200%204%204h6v-3.5%22%2F%3E%3Cpath%20d%3D%22M7%209.5v3.5%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-cylinder {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cellipse%20cx%3D%228%22%20cy%3D%224.6%22%20rx%3D%224.5%22%20ry%3D%221.9%22%2F%3E%3Cpath%20d%3D%22M3.5%204.6v6.8c0%201.05%202.02%201.9%204.5%201.9s4.5-.85%204.5-1.9V4.6%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-dipole {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%225.6%22%20cy%3D%2210.4%22%20r%3D%221.4%22%2F%3E%3Cpath%20d%3D%22M6.6%209.4%2012.4%203.6M12.4%203.6l-2.6.4M12.4%203.6l-.4%202.6%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-loop {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12.9%208.6A5%203.4%200%201%201%2013%207.4%22%2F%3E%3Cpath%20d%3D%22m13%207.4-1.5-1M13%207.4l-1.7.6%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-mesh {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%202.6%2013.4%2012.4H2.6Z%22%2F%3E%3Cpath%20d%3D%22M5.3%207.5h5.4M5.3%207.5%208%2012.4l2.7-4.9%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-polyline {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2.5%2011.5%206%205.5l4%204%203.5-5%22%2F%3E%3Cpath%20d%3D%22m13.5%204.5-2.1.3M13.5%204.5l-.4%202.1%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-sensor {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%208.2V3M8%208.2l-4.4%202.9M8%208.2l4.4%202.9%22%2F%3E%3Cpath%20d%3D%22m8%203-.9%201.5M8%203l.9%201.5M3.6%2011.1l1.7-.2M12.4%2011.1l-1.7-.2%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-sphere {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%225%22%2F%3E%3Cellipse%20cx%3D%228%22%20cy%3D%228%22%20rx%3D%225%22%20ry%3D%221.8%22%2F%3E%3C%2Fsvg%3E");
+}
+.magpy-legend-swatch.icon-tetrahedron {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M8%202.6%2013.4%2012.4H2.6Z%22%2F%3E%3Cpath%20d%3D%22M8%202.6%205.6%2012.4%22%2F%3E%3C%2Fsvg%3E");
+}
+/* --- end of the generated icons --- */
+
 .magpy-legend-label {
   flex: 1 1 auto;
   min-width: 0;

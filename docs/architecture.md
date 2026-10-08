@@ -11,7 +11,8 @@ what is next is in [roadmap.md](roadmap.md)._
 | Part                   | Where                                             | What it is                                                                                                                                 |
 | ---------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | the engine             | `magpylib_studio/session.py`                      | `MagpylibStudioSession`: the document, the build, and every operation the GUI, the widget, the builder and the RPC call                    |
-| the builder            | `magpylib_studio/build.py`                        | `Scene`: a studio document written as code, with variables that stay variables; `to_builder_script` lives beside it                        |
+| the scene function     | `magpylib_studio/recording.py`, `hook.py`         | `@scene` and studio's words: a plain magpylib function recorded into a document through magpylib's hook, or a copy of it from outside      |
+| the document builder   | `magpylib_studio/build.py`                        | `Scene`: a document written one operation at a time, underneath the recorder; the writer that turns a document back into a function        |
 | expressions            | `magpylib_studio/expressions.py`                  | the hermetic expression language of the document                                                                                           |
 | units                  | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                               |
 | meshes                 | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                 |
@@ -165,31 +166,38 @@ which is what makes sliders live and `sweep` affordable.
 
 ## Writing a scene in code
 
-`magpylib_studio.build.Scene` is magpylib's spelling over the session
-([0006](decisions.md#0006-a-scene-written-in-code-records-through-the-session)):
-`s.variable(...)` returns a handle, arithmetic on it writes an expression, and
-anything that needs the value now raises at its line. Every call goes through
-the session operation the panel uses and raises `BuildError` with the session's
-message. A create is recorded lazily, when the object first enters the scene.
-`s.sampled` writes a formula for a run of points; `Scene(values=path)` takes a
-saved scene's slider values as the variables' values. `s.session` is the session
-underneath, for `get_field` and `sweep`.
+A scene is a plain magpylib function under `@scene`
+([0017](decisions.md#0017-the-scene-is-a-function-in-plain-magpylib-recorded)).
+Its parameters are the variables, each with a default and, in `Annotated`, its
+bounds and kind (`Length`, `Angle`, `Count`, `Bounds`; a `Literal` for a
+choice). Called, it is the plain function: magpylib objects at those values.
+`fn.build()` calls it with the parameters as handles inside a `record` block
+(`hook.py`: magpylib's hook where it has one, the same wrapping put on
+magpylib's classes from outside where it does not) and maps each event onto the
+document builder underneath (`build.py`): a construction is a create step at the
+root, `group.add(obj)` moves a fresh create inside the group,
+`obj.parent = group` is a reparent, a transformation is its step, a property
+assignment a parameter edit or a pose pin, `copy()` the document's copy, and the
+style each object was given is read between calls and written as edits.
+Arithmetic on a handle writes an expression; what needs the value now raises at
+its line; a property read is today's number, with a warning. Studio's own words
+(`derived`, the patterns, `place`, `sampled`, `hide`, `show`, `remove`,
+`TriangularMesh`, `name`) are one step each when recording and plain magpylib
+when called. `fn.build(values=path)` takes a saved scene's slider values.
 
 Three ways between code and the document, none of which parses code
 ([0004](decisions.md#0004-script-generation-is-one-way)):
 
 - `to_script()` writes plain magpylib, for anyone, patterns as loops, folding
   the log in order. An export: it loses `variable_bounds` and `visible`.
-- `to_builder_script()` writes the scene as builder code, one call per step,
+- `to_builder_script()` writes the scene as such a function, one call per step,
   which run builds the same document. The script tab shows it, and a deliberate
   save applies it as one undo step
   ([0007](decisions.md#0007-the-script-tab-is-builder-code)).
-- `load_script(path)` runs any script with `show()` intercepted. A builder
-  script opens as the scene it built, whole; plain magpylib opens as its
-  objects, and the import names the variables it turned into numbers.
-
-The builder's spelling is proposed to change to a plain magpylib function
-recorded through a hook in magpylib: [plans/recording.md](plans/recording.md).
+- `load_script(path)` runs any script with `show()` intercepted. A script that
+  defined a scene function opens as the scene it builds, whole; plain magpylib
+  opens as its objects, and the import names the variables it turned into
+  numbers.
 
 ## The views
 
@@ -259,16 +267,16 @@ against a real engine (`npm run inspect -- halbach`). All of it runs in
 `npm run compile`. `npm test` runs the integration tests in a real Extension
 Development Host. The 24 language-model tools for Copilot Chat were removed
 ([0009](decisions.md#0009-agents-write-builder-code-through-a-skill)); agents
-reach the studio through builder code and the skill.
+reach the studio through scene functions and the skill.
 
 ## Agents
 
-An agent writes a builder script, runs it with plain Python, reads the field
-through `s.session`, and hands the person the script or the saved `.magpy.json`,
-which the studio opens whole. The skill teaches that and what each refusal
-means; its reference is generated from the docstrings and tested, and every
-example in it is run by the tests. `evals/` measures the same tasks with and
-without studio (`evals/README.md`).
+An agent writes a scene function, runs it with plain Python, reads the field
+through `fn.build().session`, and hands the person the script or the saved
+`.magpy.json`, which the studio opens whole. The skill teaches that and what
+each refusal means; its reference is generated from the docstrings and tested,
+and every example in it is run by the tests. `evals/` measures the same tasks
+with and without studio (`evals/README.md`).
 
 ## JSON-RPC protocol (stdio)
 

@@ -3,20 +3,29 @@
 A scene is one parametric document, saved as `.magpy.json`: magnets, currents
 and sensors, the variables they are written in, and the steps that placed them.
 The studio -- a VS Code panel, a notebook widget -- edits it, with a slider per
-variable. In Python, write one with the builder, in magpylib's spelling, and
-open one with a session:
+variable. In Python, write one as a plain magpylib function whose parameters
+are the variables, and open one with a session:
 
-    from magpylib_studio.build import Scene
+    from typing import Annotated
 
-    s = Scene()
-    n = s.variable("n", 12, bounds=(4, 48), integer=True)
-    ring = s.Collection(id="ring")
-    magnet = s.magnet.Cuboid(
-        dimension=(0.01, 0.01, 0.01), polarization=(1.2, 0, 0), position=(0.03, 0, 0)
-    )
-    ring.add(magnet)
-    magnet.duplicate_around(count=n, axis="z", spin=360 / n)  # n stays a variable
-    s.save("ring.magpy.json")
+    import magpylib as magpy
+    from magpylib_studio import Count, Length, duplicate_around, scene
+
+    @scene
+    def ring(
+        n: Annotated[int, Count(4, 48)] = 12,
+        radius: Annotated[float, Length(0.01, 0.1)] = 0.03,
+    ):
+        group = magpy.Collection(style_label="Ring")
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.01, 0.01, 0.01), polarization=(1.2, 0, 0), position=(radius, 0, 0)
+        )
+        group.add(magnet)
+        duplicate_around(magnet, count=n, axis="z", spin=360 / n)  # n stays a variable
+        return group
+
+    ring(n=16).getB((0, 0, 0))  # plain magpylib: real objects, a real field
+    ring.build().save("ring.magpy.json")  # the document, n and radius as sliders
 
     from magpylib_studio.session import MagpylibStudioSession
 
@@ -24,21 +33,44 @@ open one with a session:
     session.load_scene("ring.magpy.json")
     session.get_field(points=[(0, 0, 0)])  # B in tesla, every source summed
     session.sweep("n", [8, 12, 16], points=[(0, 0, 0)])
-    print(session.to_builder_script())  # the scene as builder code, to edit
+    print(session.to_builder_script())  # the scene as a function again, to edit
 
 A `.magpy.json` is the log of the steps that built a scene, not a list of
-objects: make one with `Scene`, never by hand. Values are SI -- metres, tesla,
-amperes, degrees. The guide for coding agents -- the builder's rules, the field,
+objects: make one with a scene function, never by hand. Values are SI -- metres,
+tesla, amperes, degrees. The guide for coding agents -- the words, the field,
 what each refusal means -- is `magpylib_studio.guide()`, and ships beside this
 file, in `.agents/skills/magpylib-studio/SKILL.md`; `uvx library-skills` links it
 into a project.
 """
 
-__all__ = ["MagpylibStudioSession", "guide"]
+#: Studio's words for a scene written as a function (`magpylib_studio.recording`).
+_WORDS = (
+    "scene",
+    "derived",
+    "name",
+    "sampled",
+    "place",
+    "hide",
+    "show",
+    "remove",
+    "duplicate_around",
+    "duplicate_along",
+    "mirror",
+    "TriangularMesh",
+    "Length",
+    "Angle",
+    "Count",
+    "Bounds",
+    "Unit",
+    "Slider",
+    "SceneFunction",
+)
+
+__all__ = ["MagpylibStudioSession", "guide", *_WORDS]
 
 
 def __dir__():
-    return ["MagpylibStudioSession", "build", "guide", "session"]
+    return ["MagpylibStudioSession", "build", "guide", "recording", "session", *_WORDS]
 
 
 def guide():
@@ -68,13 +100,18 @@ def __getattr__(name):
         import importlib
 
         return importlib.import_module(f"{__name__}.{name}")
+    if name == "recording" or name in _WORDS:
+        import importlib
+
+        module = importlib.import_module(f"{__name__}.recording")
+        return module if name == "recording" else getattr(module, name)
     msg = f"module {__name__!r} has no attribute {name!r}"
     if not name.startswith("_"):
         # most often an agent guessing how to open a scene: name the way
         msg += (
             ". To open a saved .magpy.json -- its field, a sweep, an edit -- use "
             "MagpylibStudioSession().load_scene(path), then get_field or sweep; "
-            "to write a scene, magpylib_studio.build.Scene. "
+            "to write a scene, a function under magpylib_studio.scene. "
             "magpylib_studio.guide() prints the whole guide"
         )
     raise AttributeError(msg)

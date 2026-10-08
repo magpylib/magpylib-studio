@@ -30,7 +30,7 @@ dynamic = ["version"]
 # The 3D scene graph additionally needs magpylib's display-backend API, which
 # is newer than 5.2.3. Without it the studio runs as before and the view draws
 # the plotly figure; nothing else here depends on it.
-dependencies = ["magpylib>=5.2", "plotly>=5"]
+dependencies = ["annotated-types>=0.6", "magpylib>=5.2", "plotly>=5"]
 
 [project.entry-points."magpylib.backends"]
 # Enough for `magpy.show(backend="studio")` to work on a pip install. Magpylib

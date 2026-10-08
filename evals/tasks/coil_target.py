@@ -8,7 +8,7 @@ import numpy as np
 
 from evals import kit
 from evals.tasks import _scenes
-from magpylib_studio.build import Scene
+from magpylib_studio import Bounds, duplicate_along, name, scene
 
 TITLE = "A coil giving 1 mT on its axis, 50 mm out"
 KIND = "design"
@@ -79,12 +79,17 @@ def reference(work, condition):
             encoding="utf-8",
         )
         return
-    s = Scene()
-    coil = s.Collection(id="coil")
-    amps = s.variable("current", current, bounds=(0, 5), unit="current")
-    loop = s.current.Circle(
-        id="loop", diameter=0.1, current=amps, position=(0, 0, -0.01)
-    )
-    coil.add(loop)
-    loop.duplicate_along(count=100, step=(0, 0, 0.02 / 99))
-    s.save(path / "design.magpy.json")
+    from typing import Annotated
+
+    @scene
+    def design(amps: Annotated[float, Bounds(0, 5, unit="current")] = current):
+        coil = name(magpy.Collection(), "coil")
+        loop = name(
+            magpy.current.Circle(diameter=0.1, current=amps, position=(0, 0, -0.01)),
+            "loop",
+        )
+        coil.add(loop)
+        duplicate_along(loop, count=100, step=(0, 0, 0.02 / 99))
+        return coil
+
+    design.save(path / "design.magpy.json")

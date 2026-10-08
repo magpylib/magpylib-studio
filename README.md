@@ -66,36 +66,47 @@ More in the
 
 ## Write a scene in code
 
-It reads like magpylib, but the variables stay variables:
+A scene is a plain magpylib function whose parameters are the variables:
 
 ```python
-from magpylib_studio.build import Scene
+from typing import Annotated
 
-s = Scene()
-n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
-radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), unit="length")
+import magpylib as magpy
+from magpylib_studio import Count, Length, duplicate_around, scene
 
-ring = s.Collection(id="ring")
-magnet = s.magnet.Cuboid(
-    dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
-)
-ring.add(magnet)
-magnet.duplicate_around(count=n, axis="z", spin=360 / n)
 
-s.save("ring.magpy.json")  # open it in the studio: n and radius are sliders there
+@scene
+def ring(
+    n: Annotated[int, Count(2, 60, slider=(4, 20))] = 10,
+    radius: Annotated[float, Length(0.005, 0.08)] = 0.023,
+):
+    group = magpy.Collection(style_label="Ring")
+    magnet = magpy.magnet.Cuboid(
+        dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
+    )
+    group.add(magnet)
+    duplicate_around(magnet, count=n, axis="z", spin=360 / n)
+    return group
+
+
+ring(n=12).getB((0, 0, 0))  # plain magpylib: real objects, a real field
+ring.build().save(
+    "ring.magpy.json"
+)  # the document: n and radius are sliders in the studio
 ```
 
-More in
-[docs/plans/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/plans/builder.md),
+Called, it is magpylib. Built, it is the studio's document, every parameter a
+slider. More in
+[the guide](https://github.com/magpylib/magpylib-studio/blob/main/magpylib_studio/.agents/skills/magpylib-studio/SKILL.md),
 and a complete example in
-[examples/builder_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/builder_demo.py).
+[examples/scene_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/scene_demo.py).
 
 ## Let a coding agent write it
 
 The package carries an [Agent Skill](https://agentskills.io) that teaches coding
-agents — Claude Code, Codex, Copilot and others — to write scenes with the
-builder, read the field and sweep a variable, and hand you the result to open in
-the studio. In a project that depends on `magpylib-studio`:
+agents — Claude Code, Codex, Copilot and others — to write scenes as such
+functions, read the field and sweep a variable, and hand you the result to open
+in the studio. In a project that depends on `magpylib-studio`:
 
 ```sh
 uvx library-skills  # pick magpylib-studio; for Claude Code, install into .claude/skills
@@ -111,15 +122,15 @@ Python 3.11 or newer, and magpylib 5.2 or newer.
 
 ## Learn more
 
-| If you want to…                | Read                                                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| use the VS Code extension      | [the extension's guide](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/README.md) |
-| use the 3D view in a notebook  | [docs/guide/notebook.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/guide/notebook.md)    |
-| write scenes in code           | [docs/plans/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/plans/builder.md)      |
-| know how it works inside       | [docs/architecture.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/architecture.md)        |
-| contribute                     | [CONTRIBUTING.md](https://github.com/magpylib/magpylib-studio/blob/main/CONTRIBUTING.md)                  |
-| see where the project is going | [docs/roadmap.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/roadmap.md)                  |
-| see what was decided, and why  | [docs/decisions.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md)              |
+| If you want to…                | Read                                                                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| use the VS Code extension      | [the extension's guide](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/README.md)                  |
+| use the 3D view in a notebook  | [docs/guide/notebook.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/guide/notebook.md)                     |
+| write scenes in code           | [the guide](https://github.com/magpylib/magpylib-studio/blob/main/magpylib_studio/.agents/skills/magpylib-studio/SKILL.md) |
+| know how it works inside       | [docs/architecture.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/architecture.md)                         |
+| contribute                     | [CONTRIBUTING.md](https://github.com/magpylib/magpylib-studio/blob/main/CONTRIBUTING.md)                                   |
+| see where the project is going | [docs/roadmap.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/roadmap.md)                                   |
+| see what was decided, and why  | [docs/decisions.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md)                               |
 
 ## License
 

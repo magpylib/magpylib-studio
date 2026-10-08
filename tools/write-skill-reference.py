@@ -15,7 +15,7 @@ allow-list that enforces it.
 import inspect
 import pathlib
 
-from magpylib_studio import build, expressions
+from magpylib_studio import build, expressions, recording
 from magpylib_studio.session import MagpylibStudioSession
 
 OUT = (
@@ -29,28 +29,21 @@ OUT = (
 
 # What the skill teaches, in the order it teaches it. A name the code no longer
 # has fails here, and so does the test.
-SCENE = (
-    "variable",
-    "sampled",
-    "Collection",
-    "Sensor",
-    "add",
-    "session",
-    "save",
-    "to_script",
-)
-OBJECT = (
-    "move",
-    "rotate_from_angax",
-    "rotate_from_rotvec",
-    "set_transform",
-    "reparent",
-    "hide",
-    "show",
-    "remove",
+MARK = ("scene",)
+FUNCTION = ("build", "save")
+KINDS = ("Length", "Angle", "Count", "Bounds")
+WORDS = (
+    "derived",
     "duplicate_around",
     "duplicate_along",
     "mirror",
+    "place",
+    "sampled",
+    "hide",
+    "show",
+    "remove",
+    "TriangularMesh",
+    "name",
 )
 SESSION = (
     "get_field",
@@ -86,48 +79,43 @@ def _entry(owner, name, prefix):
 def reference():
     """The reference, as the file should hold it."""
     allowed = expressions.reference()
-    functions = ", ".join(f"`s.{name}`" for name in allowed["functions"])
-    constants = ", ".join(f"`s.{name}`" for name in allowed["constants"])
+    functions = ", ".join(f"`{name}`" for name in allowed["functions"])
+    constants = ", ".join(f"`{name}`" for name in allowed["constants"])
     numpy = ", ".join(f"`np.{ufunc.__name__}`" for ufunc in build._UFUNC_FUNCTIONS)
     parts = [
-        "# The builder and the session, as the skill uses them\n",
+        "# A scene function, its words, and the session, as the skill uses them\n",
         "Generated from the code by `tools/write-skill-reference.py`: edit the\n"
         "docstrings, not this file. What follows is what this version of\n"
         "magpylib-studio has.\n",
-        "## The scene\n",
-        f"### `Scene{inspect.signature(build.Scene)}`\n\n"
-        f"{_doc(build.Scene, 'Scene')}\n",
-        *(_entry(build.Scene, name, "s.") for name in SCENE),
-        "## Objects\n",
-        "### `s.magnet.<Class>(id=None, style=None, **kwargs)`, "
-        "`s.current.<Class>(...)`, `s.misc.<Class>(...)`\n\n"
-        "Any class of `magpylib.magnet`, `magpylib.current` or `magpylib.misc`,\n"
-        "taking magpylib's own keywords. `id=` names the object, unique in the\n"
-        "scene (left out: its label, else its class); `style=` takes magpylib's\n"
-        "style as a dict, and each `style_label=`-shaped keyword sets one field\n"
-        "of it.\n\n"
-        f"{_doc(build.Object, 'Object')}\n",
-        *(_entry(build.Object, name, "obj.") for name in OBJECT),
-        _entry(build.Collection, "add", "group."),
+        "## The mark\n",
+        *(_entry(recording, name, "") for name in MARK),
+        "What `@scene` makes:\n",
+        *(_entry(recording.SceneFunction, name, "fn.") for name in FUNCTION),
+        "## A parameter's kind and bounds\n",
+        "Inside `Annotated[float, ...]` or `Annotated[int, ...]`; a choice of\n"
+        "names is `Literal[...]`. A parameter without an annotation is a plain\n"
+        "number with no bounds.\n",
+        *(_entry(recording, name, "") for name in KINDS),
+        "## Studio's words\n",
+        "Imported from `magpylib_studio`. Each is one step in the document when\n"
+        "the scene is built, and plain magpylib when the function is called.\n",
+        *(_entry(recording, name, "") for name in WORDS),
         "## What an expression may call\n",
-        f"{functions}, and the constants {constants}. Each takes numbers and\n"
-        "variables alike; these are the expression allow-list's own names, and\n"
-        f"all a scene can hold. On a variable, numpy's {numpy} write the same\n"
-        "expressions, as does its arithmetic; any other numpy function refuses.\n",
+        f"{functions}, and the constants {constants}: the expression\n"
+        "allow-list's own names, and all a scene can hold. Over a variable,\n"
+        f"numpy's {numpy} write these expressions, as does arithmetic, and\n"
+        "the builtins `abs` and `round`; any other numpy function refuses. The\n"
+        "constants as handles are `from magpylib_studio.recording import pi, tau, e`.\n",
         "## The session\n",
-        "`s.session` is the scene's `MagpylibStudioSession`;\n"
+        "`fn.build().session` is the scene's `MagpylibStudioSession`;\n"
         "`MagpylibStudioSession()` is an empty one, to open a saved scene into.\n"
         "Most of its calls report a refusal rather than raise it:\n"
-        '`{"ok": False, "error": ...}`. Reading the field raises `ValueError`\n'
-        "when there is nothing to read.\n",
+        '`{"ok": False, "error": "..."}`.\n',
         *(_entry(MagpylibStudioSession, name, "session.") for name in SESSION),
-        "## When a call fails\n",
-        f"### `BuildError`\n\n{_doc(build.BuildError, 'BuildError')}\n",
     ]
     return "\n".join(parts)
 
 
 if __name__ == "__main__":
-    OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(reference(), encoding="utf-8")
     print(f"wrote {OUT}")

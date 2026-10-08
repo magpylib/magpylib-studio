@@ -1047,16 +1047,18 @@ def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
 @needs_scene_graph
 def test_a_scene_written_in_code_is_edited_as_it_is():
     """Its own session, not a copy: what a drag does is in the scene after."""
-    from magpylib_studio.build import Scene
+    from magpylib_studio import name, scene
 
-    s = Scene()
-    r = s.variable("r", 0.02)
-    s.magnet.Cuboid(
-        id="cube",
-        polarization=(0, 0, 1),
-        dimension=(0.01, 0.01, 0.01),
-        position=(r, 0, 0),
-    )
+    @scene
+    def design(r: float = 0.02):
+        name(
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(r, 0, 0)
+            ),
+            "cube",
+        )
+
+    s = design.build()
     studio = widget.SceneWidget(s, editable=True)
     assert studio._session is s.session
     assert list(studio.objects) == ["cube"]
@@ -1079,19 +1081,28 @@ def test_a_views_variables_get_controls_bound_both_ways():
     """A slider per variable with a range, a dropdown for one with options,
     nothing for one that follows the others or has nowhere to slide; moved,
     they set the variable, and an undo in the view moves them back."""
-    from magpylib_studio.build import Scene
+    from typing import Annotated, Literal
 
-    s = Scene()
-    n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
-    r = s.variable("r", 0.02, bounds=(0.005, 0.08))
-    s.variable("half", r / 2)
-    axis = s.variable("axis", "z", options=("x", "y", "z"))
-    s.variable("free", 3.0)
-    magnet = s.magnet.Cuboid(
-        id="m", dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
-    )
-    s.Collection(magnet, id="ring")
-    magnet.duplicate_around(count=n, axis=axis)
+    from magpylib_studio import Bounds, Count, derived, duplicate_around, name, scene
+
+    @scene
+    def design(
+        n: Annotated[int, Count(2, 60, slider=(4, 20))] = 10,
+        r: Annotated[float, Bounds(0.005, 0.08)] = 0.02,
+        axis: Literal["x", "y", "z"] = "z",
+        free: float = 3.0,
+    ):
+        derived("half", r / 2)
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
+            ),
+            "m",
+        )
+        name(magpy.Collection(magnet), "ring")
+        duplicate_around(magnet, count=n, axis=axis)
+
+    s = design.build()
     studio = widget.SceneWidget(s, editable=True)
     controls = {c.description: c for c in studio.variable_sliders().children}
     assert {name: type(c).__name__ for name, c in controls.items()} == {
@@ -1115,16 +1126,22 @@ def test_a_length_slides_in_the_unit_it_is_shown_in():
     """In a scene shown in mm, `gap (mm)` from 10 to 30, as the panel shows
     it, not 0.01 to 0.03 -- and what it sets is the exact number of metres,
     not 23.4 * 0.001. In metres, the default, it is `gap (m)`."""
-    from magpylib_studio.build import Scene
+    from typing import Annotated
 
-    s = Scene(model_unit="mm")
-    gap = s.variable("gap", 0.015, bounds=(0, 0.06), slider=(0.01, 0.03), unit="length")
-    s.magnet.Cuboid(
-        id="m",
-        dimension=(0.01, 0.01, 0.01),
-        polarization=(0, 0, 1),
-        position=(gap, 0, 0),
-    )
+    from magpylib_studio import Length, name, scene
+
+    @scene(model_unit="mm")
+    def design(gap: Annotated[float, Length(0, 0.06, slider=(0.01, 0.03))] = 0.015):
+        name(
+            magpy.magnet.Cuboid(
+                dimension=(0.01, 0.01, 0.01),
+                polarization=(0, 0, 1),
+                position=(gap, 0, 0),
+            ),
+            "m",
+        )
+
+    s = design.build()
     studio = widget.SceneWidget(s, editable=True)
     (control,) = studio.variable_sliders().children
     assert control.description == "gap (mm)"
@@ -1139,11 +1156,18 @@ def test_a_length_slides_in_the_unit_it_is_shown_in():
 @needs_scene_graph
 def test_a_field_slides_in_the_scenes_field_unit():
     """`j (mT)` from 800 to 1400 in a scene shown in mT, setting tesla."""
-    from magpylib_studio.build import Scene
+    from typing import Annotated
 
-    s = Scene(field_unit="mT")
-    j = s.variable("j", 1.2, slider=(0.8, 1.4), unit="field")
-    s.magnet.Cuboid(id="m", dimension=(0.01, 0.01, 0.01), polarization=(0, 0, j))
+    from magpylib_studio import Bounds, name, scene
+
+    @scene(field_unit="mT")
+    def design(j: Annotated[float, Bounds(slider=(0.8, 1.4), unit="field")] = 1.2):
+        name(
+            magpy.magnet.Cuboid(dimension=(0.01, 0.01, 0.01), polarization=(0, 0, j)),
+            "m",
+        )
+
+    s = design.build()
     studio = widget.SceneWidget(s, editable=True)
     (control,) = studio.variable_sliders().children
     assert control.description == "j (mT)"
