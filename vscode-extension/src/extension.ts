@@ -123,7 +123,7 @@ const KIND_LABEL: Record<VariableKind, string> = {
   choice: 'One of a few choices',
 };
 
-/** What a variable may measure (`docs/fem.md` §6), as the picker offers it.
+/** What a variable may measure (`docs/decisions.md#0008-units-are-metadata`), as the picker offers it.
  *  The value stays SI whichever it is; the unit is how it is shown and read. */
 const UNIT_KINDS: {
   unit: string | null;
@@ -2101,7 +2101,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // so `show()` can draw into *this* window rather than guessing at one. The
   // address only, never a backend name: `pytest` in the same terminal is
   // stamped identically to a human run, and nothing the stamp can see tells
-  // them apart (CONTINUE.md, design decision 8). A stamp that selected the
+  // them apart (docs/decisions.md#0014-the-window-stamp-says-where-never-whether). A stamp that selected the
   // backend would change what every test suite in this window drew with.
   const drop = (context.storageUri ?? context.globalStorageUri).fsPath;
   context.environmentVariableCollection.description =

@@ -1,10 +1,11 @@
 # Parameterised instancing — design
 
-**Status: design, not implemented.** The highest-design-risk item in `TASKS.md`,
-written up before code because the open questions in §5 are real and would
-otherwise get answered by accident.
+**Status: design, not implemented**, scheduled after the agent and FEM work
+(`roadmap.md` R10). The highest-design-risk item in `../roadmap.md`, written up
+before code because the open questions in §5 are real and would otherwise get
+answered by accident.
 
-Why it exists: `docs/direction.md` §5.2. All four wanted units of reuse —
+Why it exists: `../direction.md` §5.2. All four wanted units of reuse —
 component library, study recipe, agent workflow, provenance harness — are
 _composition_ units, and §4 finding 5 is that a structured format can compose if
 it has instancing plus exported parameters. Studio has neither today, which is
@@ -76,8 +77,8 @@ is what makes a definition exportable as a function.
 
 - **Component library** — a folder of definition documents.
 - **Study recipe** — sweep an instance's `args` rather than a global variable.
-- **FEM** (`docs/fem.md`) — validated assemblies become definitions; the
-  `sha256` is already the pin a fixture needs.
+- **FEM** (`fem.md`) — validated assemblies become definitions; the `sha256` is
+  already the pin a fixture needs.
 - **Provenance** — a scene names exactly which version of which part it used.
 
 ---
@@ -85,7 +86,7 @@ is what makes a definition exportable as a function.
 ## 4. What it does not change
 
 The document stays the artifact. This is not a step toward code-as-truth — it is
-the feature that makes code-as-truth unnecessary, which is `docs/direction.md`
+the feature that makes code-as-truth unnecessary, which is `../direction.md`
 §7's whole argument.
 
 ---
@@ -95,7 +96,7 @@ the feature that makes code-as-truth unnecessary, which is `docs/direction.md`
 1. **What a hash mismatch does.** _Whether_ to record one is not open: an
    instance puts part of the scene in a file that can change underneath it, so
    without a hash the same document stops describing the same scene over time —
-   and `docs/fem.md` §12.1 keys the FEM cache on field-affecting events, so an
+   and `fem.md` §12.1 keys the FEM cache on field-affecting events, so an
    unpinned instance lets the cache hand back a solve computed for geometry that
    is no longer there. The precedent is already in the repo rather than in an
    argument: `mesh_source` carries `sha256` for exactly this, and `meshes.py`

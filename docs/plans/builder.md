@@ -3,10 +3,11 @@
 **Status: B1 is built**, with formulas (`s.sampled`) and saved values
 (`Scene(values=…)`) (`magpylib_studio/build.py`, `tests/test_build.py`,
 `examples/builder_demo.py`), and so are B2 (`to_builder_script`) and B3 (the
-script tab shows builder code and a deliberate save applies it). Written on the
-one-way branch (#12) because #12 removes the only way to write parametric code
-and get a document back, and this is what replaces it. #12 should be judged with
-it, not without.
+script tab shows builder code and a deliberate save applies it). Written for the
+one-way branch (#12, merged 2026-10-06) because #12 removed the only way to
+write parametric code and get a document back, and this is what replaced it. The
+spelling is proposed to change, to a plain magpylib function recorded through a
+hook in magpylib: see `recording.md`.
 
 ---
 
@@ -273,7 +274,7 @@ a pattern, moves, turns, a reparent, a hidden ring, an object made and removed),
 come back as the same document.
 
 **B3 — the script tab ✅.** Builder code, applied on a deliberate save (§5,
-`docs/roadmap.md` R1): `apply_builder_script` in the session, the tab rendering
+`../roadmap.md` R1): `apply_builder_script` in the session, the tab rendering
 `to_builder_script()` under a header that says it is regenerated, auto-save not
 applying, and **Export as Builder Script…** for code someone keeps. Tested in
 the engine (an edit applies as one step and changes nothing else; a reflexive

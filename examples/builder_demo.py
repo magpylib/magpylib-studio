@@ -50,7 +50,7 @@ stack = s.Collection(id="stack", style_label="Halbach stack")
 rings = {}
 for number, z in ((1, -gap / 2), (2, gap / 2)):
     rings[number] = s.Collection(id=f"ring{number}", style_label=f"Ring {number}")
-    stack.add(rings[number])  # the outermost first: see docs/builder.md §3
+    stack.add(rings[number])  # the outermost first: see docs/plans/builder.md §3
     magnet = s.magnet.Cuboid(
         id=f"magnet{number}",
         style_label=f"Magnet {number}",

@@ -5803,7 +5803,7 @@ class MagpylibStudioSession:
         """The scene as a `magpylib_studio.build` script which, run, builds
         this document again -- variables, formulas and patterns included.
         `to_script` is for anyone with magpylib; this is for whoever keeps
-        the scene as code. See `docs/builder.md`."""
+        the scene as code. See `docs/plans/builder.md`."""
         from magpylib_studio import build
 
         return build.script_of(self)

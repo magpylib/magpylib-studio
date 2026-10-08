@@ -5,7 +5,7 @@
 The skill (`magpylib_studio/.agents/skills/magpylib-studio/`) is what a coding
 agent reads before it writes a scene, and the agent takes what it reads there as
 true. A reference written by hand drifts from the code the first time a keyword
-is renamed, and goes on reading as authoritative (`docs/fem.md` §13.1, §13.4).
+is renamed, and goes on reading as authoritative (`docs/plans/fem.md` §13.1, §13.4).
 So this one is generated: each entry is the signature and the docstring of what
 it names, read off the code, and `tests/test_skill.py` fails when the file is
 not what this would write today -- as `expression_help` is read off the

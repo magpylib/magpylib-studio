@@ -2,7 +2,7 @@
 
 The document stays bare SI -- metres, tesla, amperes -- and degrees for
 angles, which is how magpylib turns things. A variable may say what kind of
-quantity it is (`docs/fem.md` §6), stored beside `integer` in its limits:
+quantity it is (`docs/decisions.md#0008-units-are-metadata`), stored beside `integer` in its limits:
 
     "variable_bounds": {"gap": {"min": 0.001, "max": 0.06, "unit": "length"}}
 

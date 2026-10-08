@@ -1,11 +1,12 @@
 # Direction — what magpylib-studio is for, and what follows for the model
 
-**Status.** §1 (positioning) is settled. §5 (the architectural proposal) follows
-from the evidence in §4; §5.1 is implemented, the rest is not. §7 records the
-alternative that was argued first and rejected — kept because the reasoning is
-worth having, and because it is how this file's conclusion arrived. Companion to
-`CONTINUE.md` (what is built), `docs/fem.md` (where validation goes) and
-`TASKS.md` (what to do).
+**What this is.** The positioning (§1) and the model that follows from the
+evidence (§4, §5). §7 records the alternative that was argued first and
+rejected, kept because the reasoning is worth having, and because it is how this
+file's conclusion arrived. What came of it is recorded in
+[decisions.md](decisions.md) — one-way generation (0004), the builder (0006),
+the agent interface (0009) — and built as [architecture.md](architecture.md)
+says; what is next is in [roadmap.md](roadmap.md).
 
 ---
 
@@ -38,11 +39,27 @@ below depends on it:
 > **Data is the artifact. A small, deterministic language generates it. The GUI
 > edits the data. Nobody round-trips.**
 
+**Sharpened (2026-10-05)**, after looking at the field around agents:
+
+> **Studio is the verifiable magnetics design loop: humans, code and agents edit
+> one parametric document; every candidate gets an exact field in milliseconds;
+> FEM validation is one step away; the log replays.**
+
+What agents lack in most engineering tools is exactly that loop — a fast, exact,
+checkable answer to "is this design any good", and a trail that replays.
+Text-to-geometry is not the gap: it is crowded and unsolved, and studio's edge
+there would be nil. **Not to build:** a text-to-geometry generator; a general
+CAD tool; a second stored representation, or any parsing of code back into one;
+more one-call-per-operation agent tools; a framework for building pages, reports
+or dashboards out of a scene — marimo-studio builds those from a notebook, and
+studio's part is a view that works inside one.
+
 ---
 
 ## 2. The problem is the round trip, not the document
 
-`CONTINUE.md` states the principle that governs the document model:
+The principle that governs the document model
+([decision 0001](decisions.md#0001-the-document-is-the-log)):
 
 > **"Two stored representations of one structure would drift, so there is only
 > one."**
@@ -381,9 +398,9 @@ added.
 | `to_script`, as export and recording   | the matched emitter/parser pairs               |
 | field, figures, field maps, sweeps     | the two-tier cliff                             |
 | `expressions.py` — and §5.4 grows it   | the script tab applying plain magpylib on save |
-| the whole of `docs/fem.md`             |                                                |
+| the whole of `plans/fem.md`            |                                                |
 
-`docs/fem.md` is unaffected in particular: §12.1 already assumes the document
+`plans/fem.md` is unaffected in particular: §12.1 already assumes the document
 stays the artifact, keys its cache on source-affecting events, and treats `undo`
 and `set_rollback` as free navigation over the same fold.
 

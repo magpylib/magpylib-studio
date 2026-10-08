@@ -1,7 +1,7 @@
 # The 3D view in a notebook
 
 _The full guide. The short version is in the
-[README](../README.md#use-it-in-a-notebook)._
+[README](../../README.md#use-it-in-a-notebook)._
 
 ```sh
 pip install "magpylib-studio[widget]"
@@ -79,11 +79,11 @@ that still plays, because its motion — or, for a run that changes shape, its
 frames — travels in the file. `write_html(path)` does the same from a cell.
 Either way the page opens where the view was looking.
 
-Which is [direction.md](direction.md) §5.3 — _a viewer with parameter binding_ —
-with the notebook's own reactivity in place of a protocol: a slider rebuilds the
-objects, the view redraws them, and a click is an input to the next cell.
-`examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb` the
-same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
+Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
+binding_ — with the notebook's own reactivity in place of a protocol: a slider
+rebuilds the objects, the view redraws them, and a click is an input to the next
+cell. `examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb`
+the same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
 reactivity.
 
 ## Editing a scene in the notebook
@@ -132,8 +132,9 @@ view's right-hand side has the same. The corner reads out the numbers a drag is
 changing, and takes a typed value in their place; the keys button lists every
 key. A collection has handles of its own: select it — its row in the legend, or
 **C** from something in it, and **C** again for the one round that — and a drag
-moves and turns it whole, as one edit to the collection. The variables come
-later — [editable-widget.md](editable-widget.md).
+moves and turns it whole, as one edit to the collection. A slider per variable
+is `variable_sliders()`; how the editable view is built is
+[decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`

@@ -1,11 +1,13 @@
 # FEM integration — plan
 
-Companion to `CONTINUE.md`. Written to be committed and edited in place as
-decisions land. Where a decision is made, the reason it was made _and_ the
+Companion to `../architecture.md`. Written to be committed and edited in place
+as decisions land. Where a decision is made, the reason it was made _and_ the
 reason the alternative was rejected are both recorded — the alternatives here
 are all defensible, so a bare verdict would be re-litigated in six months.
 
-Status: **nothing is built yet.** This is M0.
+Status: **units are built** (§6, as `roadmap.md` R2); nothing else is. The order
+is amended in `roadmap.md` R7: tier 0 on the Maxwell seat before the open
+solver.
 
 ---
 
@@ -263,9 +265,9 @@ rather than one plus regret.
 
 ## 6. Units — resolve, with the cheapest correct answer
 
-`CONTINUE.md` flags units as "the one open question on the parametric side" and
-warns that migrating variables later will hurt. FEM export forces the issue:
-AEDT wants `"5mm"`, solvers want consistent SI.
+The handoff notes flagged units as "the one open question on the parametric
+side" and warned that migrating variables later would hurt. FEM export forces
+the issue: AEDT wants `"5mm"`, solvers want consistent SI.
 
 ### The decision
 
@@ -289,7 +291,7 @@ worth more than dimensional analysis.
 ### What this buys, and what it does not
 
 **Buys:** zero document migration (every existing document stays valid — the
-`CONTINUE.md` worry becomes moot), untouched evaluator semantics, readable AEDT
+handoff notes' worry becomes moot), untouched evaluator semantics, readable AEDT
 output, readable sliders.
 
 **Does not buy:** dimensional _checking_. `gap * current` will not be caught.
@@ -380,7 +382,7 @@ strictly worse than having no tool at all, because it is believed. Building the
 Ansys emitter first means the translation is only ever validated by eyeball —
 and eyeball validation of a plausible-looking field is not validation.
 
-**Amended 2026-10-05, pending a yes** (`docs/roadmap.md` R7): tier 0's oracle is
+**Amended 2026-10-05, pending a yes** (`../roadmap.md` R7): tier 0's oracle is
 magpylib itself, exact for μr = 1, so the AEDT export can be checked numerically
 against it on the Maxwell seat before the open solver exists. That answers this
 section's concern — validation by eye — at the cost of keeping tier-0 validation
@@ -765,7 +767,7 @@ studio; that is §4's handoff artifact doing its job.
 
 ### 12.3 Human + agent
 
-**Amended 2026-10-07** (`docs/roadmap.md` R3): the LM tools, and the
+**Amended 2026-10-07** (`../roadmap.md` R3): the LM tools, and the
 `registerLmTools` factories this section builds on, are gone. What carries over
 is the split by cost — reading free, a solve confirmed, the caveats in the
 payload — now for the job API as the agent's code calls it: the confirmation is
@@ -867,7 +869,7 @@ and runs an analysis unattended. It is a good fit, with two hard constraints.
 
 ### 13.1 This document is not that file, and must not become it
 
-`docs/fem.md` is a **plan**: it argues, records the alternatives it rejected,
+`plans/fem.md` is a **plan**: it argues, records the alternatives it rejected,
 carries open questions, and above all **describes a system that does not exist
 yet**. Hand it to an autonomous agent today and the agent will call `validate()`
 and `read_result()` in good faith, with a citation. Plausible hallucination
@@ -923,7 +925,7 @@ presentation, and it extends a principle the README already states — **"One
 schema contract: the same JSON Schema drives the inspector widgets _and_ the LLM
 tool inputs."**
 
-**Amended 2026-10-07** (`docs/roadmap.md` R3, §6): the LM tools are gone. The
+**Amended 2026-10-07** (`../roadmap.md` R3, §6): the LM tools are gone. The
 hosts are the skill, a command that runs builder code in the running engine, and
 MCP when a chat host needs it; the skill's authoring half exists now, and its
 FEM half waits for M7 as below.
@@ -959,3 +961,26 @@ running unattended.
   be computed with a 3rd party FE tool"_. Not planned; noted because the docs
   asked for it first.
 - **Is tier 4 (force) worth the trouble at all**, given §10.5.
+
+---
+
+## 15. Why an emitter, and not an LLM translating magpylib to PyAEDT
+
+An LLM will write a plausible PyAEDT script from a magpylib one, and for a
+one-off draft that is fine. As the workflow it is not:
+
+1. **The traps are silent.** Diameter vs radius, centre vs corner, polarization
+   in the object's frame composed with its orientation, J→Hc, mm vs m, the size
+   of the air region (§3.1, §10.1): each gives a field that looks right and is
+   not — §10.8's "looks authoritative" trap.
+2. **A plain script does not say which numbers are design variables.** The
+   quiver's import showed it; the LLM guesses. The document knows.
+3. **It is not repeatable.** Fifty variants are fifty translations to check, and
+   tokens each time; an emitter is deterministic and free to run.
+4. **PyAEDT drifts** (`pyaedt` → `ansys.aedt.core`, renamed keywords). The
+   emitter's CI check catches it; a model's training lags.
+5. **Checking the LLM's output needs tier 0 anyway** — which is this machinery.
+
+So the agent calls the tested emitter, through R3's way in. And none of it needs
+studio's GUI: §4 puts the object-level translation in `magpylib-fem`, which
+works on plain magpylib objects; studio adds the parametric half.

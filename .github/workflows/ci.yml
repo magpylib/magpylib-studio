@@ -142,7 +142,7 @@ jobs:
       # A fresh environment with the wheel and nothing of the checkout: no
       # editable install, no node, no vscode-extension/, and none of the
       # checkout's uv sources. The editable widget has to work with the
-      # package alone (docs/editable-widget.md §2).
+      # package alone (docs/decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
       - name: Install the wheel alone
         run: |
           uv venv "$RUNNER_TEMP/alone"

@@ -5,7 +5,7 @@
  *
  * The document holds metres; the panel shows a length in the scene's length
  * unit and reads what is typed back through the engine (`quantity`), so the
- * units live in one place (`docs/fem.md` §6). The extension tests cannot open
+ * units live in one place (`docs/decisions.md#0008-units-are-metadata`). The extension tests cannot open
  * this panel, so this is where that is held to, on the real engine and the
  * panel's own script:
  *

@@ -5,7 +5,7 @@
 Run by CI's `package alone` job, from outside the checkout, in an environment
 where the wheel is all there is of this repository: no node, no
 `vscode-extension/`, and nothing of the source tree on the path. The editable
-widget has to work there (`docs/editable-widget.md` §2), and a dependency on
+widget has to work there (`docs/decisions.md#0010-the-notebook-widget-edits-with-the-package-alone`), and a dependency on
 the extension that crept in -- a file the bundle fetches, a module only the
 checkout has -- would pass every other check, because every other check runs
 in the checkout.

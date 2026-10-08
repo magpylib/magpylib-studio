@@ -2,7 +2,7 @@
 every example in it runs, and that its reference is what the code says today.
 
 A skill is read as authoritative, so a claim in it that the code no longer
-makes is worse than no skill (`docs/fem.md` §13.1). These are the checks that
+makes is worse than no skill (`docs/plans/fem.md` §13.1). These are the checks that
 keep it current: its examples are executed, top to bottom, as an agent would
 copy them, and its reference is regenerated and compared. That it ships in the
 wheel is `tools/check-package-alone.py`'s to check, on the built wheel.

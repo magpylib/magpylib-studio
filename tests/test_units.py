@@ -1,4 +1,4 @@
-"""Units: what a variable measures, said beside its number (`docs/fem.md` §6).
+"""Units: what a variable measures, said beside its number (`docs/decisions.md#0008-units-are-metadata`).
 
 The document stays SI; a unit kind on a variable and a model unit on the
 document are what a view needs to show `gap: 15 mm` and read `15` back."""

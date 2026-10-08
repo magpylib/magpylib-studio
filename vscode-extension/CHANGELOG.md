@@ -6,6 +6,32 @@ All notable changes to the Magpylib Studio extension.
 
 ### Added
 
+- **The 3D view in a notebook.** `SceneWidget(objects)` from
+  `magpylib_studio.widget`, or `magpy.show(..., backend="widget")`, draws the
+  studio's view in a Jupyter, marimo, VS Code or Colab cell: a legend nesting
+  the objects, the panel's keys, animation, export to one HTML file and to PNG.
+  `pip install "magpylib-studio[widget]"`, and magpylib main for the
+  display-backend API.
+- **Editing in a notebook.** `SceneWidget(..., editable=True)` puts the handles
+  over a studio session in the kernel, with nothing of the extension needed:
+  `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
+  per settled edit, and `variable_sliders()` for a scene with variables.
+- **Writing a scene in code.** `magpylib_studio.build.Scene`: magpylib's
+  spelling with variables that stay variables, patterns instead of loops,
+  `sampled` for a run of points as a formula, `Scene(values=...)` to keep the
+  sliders a saved scene holds. A call the scene cannot take fails at its line
+  and says why. **Open in Magpylib Studio** on a builder script opens the scene
+  it built, whole, and `to_builder_script()` writes any scene back as builder
+  code.
+- **An Agent Skill** inside the package, `magpylib_studio/.agents/skills/`,
+  teaching coding agents to write scenes with the builder, read the field, sweep
+  a variable and hand the result over; its API reference is generated from the
+  code and checked by the tests. `uvx library-skills` links it into a project.
+- **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
+  run by Claude Code headless with plain magpylib and with the skill, results
+  kept in the repository.
+- An import of plain magpylib (`load_script`) now names the variables it turned
+  into numbers, where it used to say nothing.
 - **Units.** A variable can say what it measures — length, angle, field, current
   — chosen when **New Variable…** asks what it holds, or later under **Variable
   Properties…**. Each prompt for a value says the unit a bare number is read in
@@ -94,6 +120,10 @@ All notable changes to the Magpylib Studio extension.
 
 ### Removed
 
+- **`parse_script` and the old `apply_script`.** Script generation is one-way:
+  nothing parses code back into the document, and the matched emitter/parser
+  idioms went with it. The script tab applies builder code instead (above);
+  plain magpylib comes in through **Open in Magpylib Studio**, by execution.
 - **The Copilot Chat tools** (`#magpyAdd`, `#magpyEdit` and the 22 others). A
   coding agent now writes the scene with the builder, taught by the Agent Skill
   the Python package carries, and **Open in Magpylib Studio** opens what it

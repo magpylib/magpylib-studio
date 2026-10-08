@@ -16,7 +16,7 @@ instead of a second set appearing beside them.
 Nothing here runs unless something was asked to draw. The stamp is an
 address, not an instruction: `pytest` in the same terminal carries it too, and
 a default set from an environment variable would have applied to every figure
-the interpreter drew. See CONTINUE.md, design decision 8.
+the interpreter drew. See docs/decisions.md#0014-the-window-stamp-says-where-never-whether.
 
 Deliberately free of plotly, and of anything else heavy. `backend.py` is
 loaded while magpylib imports — an entry point is resolved before the defaults
@@ -91,7 +91,7 @@ def _in_notebook() -> bool:
 
     Kernels are started by the editor, not from a terminal, so they never carry
     the window's address -- measured, and the reason the Interactive Window came
-    up clean when the stamp was probed (CONTINUE.md, design decision 8).
+    up clean when the stamp was probed (docs/decisions.md#0014-the-window-stamp-says-where-never-whether).
     """
     try:
         from IPython import get_ipython

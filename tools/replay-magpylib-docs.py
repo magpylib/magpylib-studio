@@ -2,7 +2,7 @@
 
     python tools/replay-magpylib-docs.py ~/path/to/magpylib [--python PY] [--page NAME]
 
-The guard rail for `docs/recording.md`: magpylib's docs examples are the widest
+The guard rail for `docs/plans/recording.md`: magpylib's docs examples are the widest
 set of real magpylib scripts there is. Every page with code cells runs twice,
 each in a process of its own and with the checkout's Python unless `--python`
 says otherwise:
@@ -18,7 +18,7 @@ A page is **exact** when every object comes back the same. What JSON cannot
 hold -- a Python function, a `model3d` trace -- is listed apart, so a known gap
 does not read as a wrong replay.
 
-The recorder here is a stand-in for studio's (`docs/recording.md` P1): it logs
+The recorder here is a stand-in for studio's (`docs/plans/recording.md` P1): it logs
 magpylib's calls as they are, without mapping them onto session operations. It
 needs a magpylib with the hook (`magpylib.record`, or `magpylib._src.recording`
 on the `spike/record-calls` branch).

@@ -24,7 +24,7 @@ implementation of what an edit means. A call the session refuses raises
 `BuildError` with the session's own message. Steps go where they are written:
 `magnet.move(...)` after `magnet.duplicate_around(...)` moves that magnet alone,
 as magpylib reads it, where the panel puts a drag in front of the pattern so the
-copies follow. See `docs/builder.md`.
+copies follow. See `docs/plans/builder.md`.
 """
 
 from __future__ import annotations
@@ -817,7 +817,7 @@ def script_of(session):
     same document -- variables, formulas and patterns included -- and not
     the flattened scene running a plain magpylib export gives. Nothing reads
     this back: it is executed, through the operations the panel uses (see
-    `docs/builder.md` §5). What has no call of its own -- an expression a
+    `docs/plans/builder.md` §5). What has no call of its own -- an expression a
     resize set aside, a key this engine does not know, a step that no longer
     applies -- is named in a comment at the top rather than written.
     """

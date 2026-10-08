@@ -1,5 +1,5 @@
 // The studio's 3D view: the notebook widget, the same view, controls and keys
-// as a notebook cell and the script panel (docs/one-view.md), run against a
+// as a notebook cell and the script panel (docs/decisions.md#0011-one-view), run against a
 // model this panel holds and an editor that goes through the extension host.
 //
 // Through the host rather than straight to the engine, because an edit here is

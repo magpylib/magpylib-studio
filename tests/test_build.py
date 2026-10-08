@@ -1,5 +1,5 @@
 """The builder: a scene written in code, with variables that stay variables
-(`docs/builder.md`)."""
+(`docs/plans/builder.md`)."""
 
 import io
 import json
@@ -21,7 +21,7 @@ CUBE_POL = {"polarization": [0, 0, 1]}
 
 def halbach():
     """The built-in halbach example, written with the builder -- the listing
-    `docs/builder.md` §2 shows."""
+    `docs/plans/builder.md` §2 shows."""
     s = Scene()
     n = s.variable("n", 10, bounds=(2, 60), slider=(4, 20), integer=True)
     radius = s.variable(

@@ -264,7 +264,7 @@ Load one of the built-in scenes; see list_examples().
 The scene as a `magpylib_studio.build` script which, run, builds
 this document again -- variables, formulas and patterns included.
 `to_script` is for anyone with magpylib; this is for whoever keeps
-the scene as code. See `docs/builder.md`.
+the scene as code. See `docs/plans/builder.md`.
 
 ## When a call fails
 

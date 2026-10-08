@@ -62,7 +62,7 @@ SceneWidget(cube, editable=True)  # or move, turn and resize it, with undo
 ```
 
 More in the
-[notebook guide](https://github.com/magpylib/magpylib-studio/blob/main/docs/notebook.md).
+[notebook guide](https://github.com/magpylib/magpylib-studio/blob/main/docs/guide/notebook.md).
 
 ## Write a scene in code
 
@@ -86,7 +86,7 @@ s.save("ring.magpy.json")  # open it in the studio: n and radius are sliders the
 ```
 
 More in
-[docs/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/builder.md),
+[docs/plans/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/plans/builder.md),
 and a complete example in
 [examples/builder_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/builder_demo.py).
 
@@ -114,11 +114,12 @@ Python 3.11 or newer, and magpylib 5.2 or newer.
 | If you want to…                | Read                                                                                                      |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------- |
 | use the VS Code extension      | [the extension's guide](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/README.md) |
-| use the 3D view in a notebook  | [docs/notebook.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/notebook.md)                |
-| write scenes in code           | [docs/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/builder.md)                  |
+| use the 3D view in a notebook  | [docs/guide/notebook.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/guide/notebook.md)    |
+| write scenes in code           | [docs/plans/builder.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/plans/builder.md)      |
 | know how it works inside       | [docs/architecture.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/architecture.md)        |
 | contribute                     | [CONTRIBUTING.md](https://github.com/magpylib/magpylib-studio/blob/main/CONTRIBUTING.md)                  |
 | see where the project is going | [docs/roadmap.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/roadmap.md)                  |
+| see what was decided, and why  | [docs/decisions.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md)              |
 
 ## License
 
