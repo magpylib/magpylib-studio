@@ -1,12 +1,14 @@
 ---
 name: magpylib-studio
 description: >-
-  Use when building, changing or studying a magnet, coil or sensor arrangement
-  that should stay parametric — a Halbach ring, a magnet array, a coil stack, a
-  sensor placement — in a project with magpylib-studio installed, or whenever a
-  task touches a `.magpy.json` scene or a script using `magpylib_studio.build`.
-  Covers writing the scene with the builder (magpylib's spelling, with variables
-  that stay variables), patterns instead of loops, reading the field and
+  Read first whenever a task touches a `.magpy.json` scene (opening it, its
+  field, sweeping a variable, changing it) or a script using `magpylib_studio`:
+  its API is not plain magpylib, and guessing it costs many failed tries. Also
+  use when building a magnet, coil or sensor arrangement that should stay
+  parametric — a Halbach ring, a magnet array, a coil stack, a sensor
+  placement — in a project with magpylib-studio installed. Covers writing the
+  scene with the builder (magpylib's spelling, with variables that stay
+  variables), patterns instead of loops, reading the field and
   sweeping a variable, changing a saved scene, and handing the result to the
   person in the studio. A scene written in plain magpylib loses its variables:
   every number is frozen, and the studio's sliders have nothing to move.
@@ -95,6 +97,9 @@ s.save("halbach.magpy.json")
   collection — for a grid) and `obj.mirror(plane="xy")`. Each is one step that
   stays a pattern: change `n` and the ring rebuilds. The copies are generated;
   to change them, change the source object, its pattern step, or a variable.
+  `spin` is the extra turn of each copy about its own axis, on top of the turn
+  that going round the ring already gives it: a Halbach ring takes
+  `spin=360 / n`, not twice that.
 - **Starting points:** `MagpylibStudioSession().list_examples()` names the
   built-in scenes; `load_example(name)` and `to_builder_script()` show how each
   is written.

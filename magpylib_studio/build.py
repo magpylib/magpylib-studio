@@ -185,8 +185,10 @@ class Expression:
         raise TypeError(
             f"`{self._source}` cannot count a loop or index a list: that would "
             f"run once, for today's value, and nothing would follow it. A "
-            f"pattern stays parametric: duplicate_around(count={self._source}) "
-            f"or duplicate_along(count={self._source})"
+            f"pattern stays parametric: duplicate_around(count={self._source}, "
+            f"spin=...) -- spin is each copy's extra turn about its own axis, on "
+            f"top of going round the ring -- or duplicate_along(count="
+            f"{self._source}, step=...)"
         )
 
     def _not_a_number(self, *args):
@@ -429,7 +431,11 @@ class Object:
 
     def duplicate_around(self, count, axis="z", anchor=0, spin=0):
         """`count` of it about `axis` through `anchor`, each copy turned by
-        `spin` degrees more than the last: one step, which stays a pattern."""
+        `spin` degrees more than the last: one step, which stays a pattern.
+
+        Going round the ring already turns each copy with it. `spin` is the extra
+        turn about the copy's own axis, on top of that: a Halbach ring, whose
+        magnets turn twice as fast as they go round, takes `spin=360 / count`."""
         self._enter()
         self._scene._call(
             "duplicate_around",
@@ -526,6 +532,9 @@ class Scene:
     `Scene()` builds one of its own; `Scene(session)` writes into a session
     that already holds a scene, as another way to edit it. Read it with
     `to_dict`, `to_script` or `save`, or show it: `SceneWidget(s, editable=True)`.
+    To open a saved `.magpy.json` -- its field, a sweep of a variable -- use
+    the session: `MagpylibStudioSession().load_scene(path)`, then `get_field`
+    or `sweep`.
 
     `values` is where the variables' values come from when there are some: a
     saved scene, or a mapping of names to values. The script says what the

@@ -130,7 +130,7 @@ def test_arithmetic_on_a_variable_writes_an_expression():
     [
         (lambda n, r: bool(r), "Branch on something fixed"),
         (lambda n, r: r > 0.01, "Branch on something fixed"),
-        (lambda n, r: list(range(n)), r"duplicate_around\(count=n\)"),
+        (lambda n, r: list(range(n)), r"duplicate_around\(count=n, spin="),
         (lambda n, r: float(r), "not a number"),
         (lambda n, r: math.sin(r), r"np\.sin"),
         (lambda n, r: np.linspace(0, r, 3), "fixed ends"),

@@ -13,6 +13,9 @@ A studio document, written in code.
 `Scene()` builds one of its own; `Scene(session)` writes into a session
 that already holds a scene, as another way to edit it. Read it with
 `to_dict`, `to_script` or `save`, or show it: `SceneWidget(s, editable=True)`.
+To open a saved `.magpy.json` -- its field, a sweep of a variable -- use
+the session: `MagpylibStudioSession().load_scene(path)`, then `get_field`
+or `sweep`.
 
 `values` is where the variables' values come from when there are some: a
 saved scene, or a mapping of names to values. The script says what the
@@ -158,6 +161,10 @@ there still happened.
 
 `count` of it about `axis` through `anchor`, each copy turned by
 `spin` degrees more than the last: one step, which stays a pattern.
+
+Going round the ring already turns each copy with it. `spin` is the extra
+turn about the copy's own axis, on top of that: a Halbach ring, whose
+magnets turn twice as fast as they go round, takes `spin=360 / count`.
 
 ### `obj.duplicate_along(count, step)`
 
