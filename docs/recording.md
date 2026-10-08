@@ -30,22 +30,33 @@ it already knows.
 import magpylib as magpy
 from magpylib_studio.build import Scene
 
-s = Scene()
+s = Scene()  # from here on, magpylib calls are recorded into s
 radius = s.variable("radius", 0.023, bounds=(0.005, 0.08), unit="length")
 n = s.variable("n", 10, integer=True)
 
-with s.recording():  # plain magpylib inside
-    ring = magpy.Collection(style_label="Ring")
-    magnet = magpy.magnet.Cuboid(
-        dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
-    )
-    ring.add(magnet)
-    s.duplicate_around(magnet, count=n, axis="z", spin=360 / n)  # studio's word
-    ring.rotate_from_angax(15, "x")
-    print(ring.getB((0, 0, 0)))  # a real field, at today's values
+ring = magpy.Collection(style_label="Ring")
+magnet = magpy.magnet.Cuboid(
+    dimension=(0.01, 0.01, 0.01), polarization=(1, 0, 0), position=(radius, 0, 0)
+)
+ring.add(magnet)
+s.duplicate_around(magnet, count=n, axis="z", spin=360 / n)  # studio's word
+ring.rotate_from_angax(15, "x")
+print(ring.getB((0, 0, 0)))  # a real field, at today's values
+
+with s.paused():  # scratch, not in the scene
+    probe = magpy.misc.Dipole(moment=(0, 0, 1))
 
 s.save("ring.magpy.json")
 ```
+
+**The scene listens from the moment it is made**, as pyplot draws into the
+current figure: no block to open, so none to forget. Forgetting a
+`with s.recording():` would have been a silent failure — objects built, a
+document without them — and the agent evaluations say an agent finds every
+silent failure in time. A new `Scene()` takes over from the one before; objects
+that should stay out go under `with s.paused():`; and `save()` warns when
+magpylib objects were made while no scene was listening, so what is left of the
+edge is not silent either.
 
 **magpylib's half: a recording hook.** Inside `record(on_event, resolve)`, every
 top-level construction, property assignment and transformation is reported with
@@ -144,7 +155,7 @@ it does not.
 has the classes and methods the hook wraps — `BaseGeo`, the eight `move` and
 `rotate_*`, `Collection.add` and `remove` — but neither the hook nor
 `__init_subclass__`. Studio carries a copy of magpylib's `recording.py` and, on
-the first `Scene.recording()`, wraps every object class from outside once, and
+the first `Scene()`, wraps every object class from outside once, and
 chains a `BaseGeo.__init_subclass__` so classes made later are wrapped too. Style
 needs no shim (§2).
 
@@ -176,10 +187,13 @@ goes. Nothing a user wrote or saved changes.
 
 **P0 — magpylib: the hook, public.** As `magpylib.record` (§4), docs, tests (the
 spike's three, plus "type in, type out" for every class and transform), a
-release. Not a blocker: studio ships on `record_compat` (§5) until then.
+release. A scene listens for as long as it lives (§2), not for a block, so
+`record` needs a start/stop form beside `with`. Not a blocker: studio ships on
+`record_compat` (§5) until then.
 
-**P1 — the recorder.** `Scene.recording()`, mapping each magpylib event onto the
-builder's internals, on `record_compat`. Acceptance, as B1's was: each built-in
+**P1 — the recorder.** `Scene()` starts listening, mapping each magpylib event
+onto the builder's internals, on `record_compat`; `s.paused()`, the takeover by
+a newer scene, and `save()`'s warning go with it. Acceptance, as B1's was: each built-in
 example written in plain magpylib builds the same document as its builder script
 — same variables, bounds and steps, and the same field (`same_field`) — on every
 magpylib studio supports, and the documents are byte-identical across them.
@@ -206,6 +220,12 @@ spelling's whole point is fewer turns.
 3. **The hook reads as studio's in magpylib.** It must stand alone: undo stacks,
    serializers and teaching tools can use it. If it cannot be argued without
    studio, it does not belong in magpylib.
+4. **A notebook drops the listener between cells.** The hook keeps the active
+   recorder in a context variable; if a kernel runs each cell in a context of
+   its own, a scene built over several cells stops recording after the first,
+   without a word. Not checked yet: P1 tests it in a real kernel before
+   anything else, and if it holds, studio keeps its current scene in a plain
+   global and the hook's start/stop form (P0) takes one.
 
 ---
 
