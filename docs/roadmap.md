@@ -36,6 +36,10 @@ Ansys both ways.
   unless the scene says otherwise, and read in whatever unit is typed (`15 mm`).
 - **R3, step 1 started** (2026-10-07): the skill, shipped inside the package;
   the 24 LM tools removed the same day.
+- **R4 started** (2026-10-07): `evals/`, the runner and the first ten tasks.
+  First pass (2026-10-08, one run each, sonnet): plain 8/8, studio 10/10, studio
+  at 1.9× the cost on the shared tasks
+  (`evals/results/2026-10-08-first-pass-sonnet/notes.md`).
 - **On `main`**: the first-fit zoom fix (`0af7f01`) — the axes' `Box3Helper` was
   measured as the unit cube it is built as, so scenes in centimetres opened as a
   speck. A browser-harness check guards it.

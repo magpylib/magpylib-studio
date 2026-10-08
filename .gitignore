@@ -24,3 +24,8 @@ sandbox/*
 !sandbox/view_from_script.py
 
 .ipynb_checkpoints/
+
+# The agent evaluation's Python environments, and each run's folders and
+# transcripts; a run's summary.md and summary.json are kept.
+evals/.envs/
+evals/results/*/runs/

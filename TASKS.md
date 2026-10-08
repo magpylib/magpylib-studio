@@ -269,6 +269,17 @@ About twenty magnetics tasks with checkable targets, run first by an agent with
 plain magpylib and by the same agent with the skill, headless; then through step
 2 and marimo pair. Success, tokens, turns and refusals recorded and kept.
 
+**Started (2026-10-07):** [evals/](evals/README.md) — the runner (Claude Code
+headless, sandboxed, in a temporary folder, with a Python environment per
+condition) and the first ten tasks: four analyses, three designs, an edit and
+two studio-only, each check held to a reference solution and to wrong answers in
+`tests/test_evals.py`. **First pass (2026-10-08):** plain 8/8, studio 10/10;
+studio costs 1.9× on the shared tasks, most on the open design, where the agent
+searched one guess per turn
+([notes](evals/results/2026-10-08-first-pass-sonnet/notes.md)). **Next:** a
+multi-variable search in the skill, measured again; three runs each for a
+spread; the other ten tasks.
+
 ### A3 — Pointing, then the view in the chat (R5)
 
 The person marks magnets in the 3D view and leaves a note; the agent gets their
