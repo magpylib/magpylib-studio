@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "started": "2026-10-08-1343",
+    "model": "qwen3-8b-64k",
+    "repeats": 1,
+    "commit": "619259b",
+    "budget_usd": 2.0,
+    "local": "http://localhost:11434"
+  },
+  "results": [
+    {
+      "task": "field_above_magnet",
+      "kind": "analysis",
+      "condition": "plain",
+      "ok": false,
+      "ran": true,
+      "notes": [
+        "B = 0.7213 mT; 206.8 mT \u00b1 0.5 %"
+      ],
+      "tools": {
+        "Write": 1
+      },
+      "refusals": 0,
+      "skill_read": false,
+      "skills_offered": [
+        "deep-research",
+        "dataviz",
+        "update-config",
+        "verify",
+        "debug",
+        "code-review",
+        "simplify",
+        "batch",
+        "fewer-permission-prompts",
+        "doctor",
+        "loop",
+        "claude-api",
+        "workflow-authoring",
+        "run",
+        "run-skill-generator",
+        "plugin-authoring"
+      ],
+      "tools_offered": [
+        "Bash",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Skill",
+        "Write"
+      ],
+      "mcp_servers": [],
+      "model": "qwen3-8b-64k",
+      "cwd": "/private/var/folders/y7/jpjh34p94mx6xpv2fn1rkc400000gn/T/magpy-eval-field_above_magnet-plain-_0iywd0m",
+      "finished": "success",
+      "turns": 2,
+      "cost_usd": 0.271603,
+      "seconds": 269.568,
+      "input_tokens": 17560,
+      "output_tokens": 7256,
+      "cache_read_tokens": 4806,
+      "cache_write_tokens": 0,
+      "answer": "The magnetic flux density $ B $ at the specified point is calculated by modeling the magnet as a magnetic dipole. The dipole moment $ m = M \\times V $, where $ M = 1.2 \\, \\text{A/m} $ and $ V = 500 \\, \\text{mm}^3 = 500 \\times 10^{-9} \\, \\text{m}^3 $. The distance $ r = 5.5 \\, \\text{mm} = 5.5 \\times 10^{-3} \\, \\text{m} $. Using the dipole formula $ B = \\frac{\\mu_0}{4\\pi} \\cdot \\frac{2m}{r^3} $, we find:\n\n$$\nB = \\frac{4\\pi \\times 10^{-7}}{4\\pi} \\cdot \\frac{2 \\times 1.2 \\times 500 \\times 10^{-9}}{(5.5 \\times 10^{-3})^3} \\approx 0.7213 \\, \\text{mT}\n$$\n\n**Answer:**  \n```json\n{\"B_mT\": 0.7213}\n```"
+    },
+    {
+      "task": "field_above_magnet",
+      "kind": "analysis",
+      "condition": "studio",
+      "ok": false,
+      "ran": true,
+      "notes": [
+        "B = 8890.0 mT; 206.8 mT \u00b1 0.5 %"
+      ],
+      "tools": {
+        "Skill": 1,
+        "Write": 1
+      },
+      "refusals": 0,
+      "skill_read": true,
+      "skills_offered": [
+        "magpylib-studio",
+        "deep-research",
+        "dataviz",
+        "update-config",
+        "verify",
+        "debug",
+        "code-review",
+        "simplify",
+        "batch",
+        "fewer-permission-prompts",
+        "doctor",
+        "loop",
+        "claude-api",
+        "workflow-authoring",
+        "run",
+        "run-skill-generator",
+        "plugin-authoring"
+      ],
+      "tools_offered": [
+        "Bash",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "Skill",
+        "Write"
+      ],
+      "mcp_servers": [],
+      "model": "qwen3-8b-64k",
+      "cwd": "/private/var/folders/y7/jpjh34p94mx6xpv2fn1rkc400000gn/T/magpy-eval-field_above_magnet-studio-i8v1sive",
+      "finished": "success",
+      "turns": 4,
+      "cost_usd": 0.37345249999999997,
+      "seconds": 367.19,
+      "input_tokens": 26433,
+      "output_tokens": 9446,
+      "cache_read_tokens": 10275,
+      "cache_write_tokens": 0,
+      "answer": "The magnetic flux density $ B $ at the specified point is calculated using the dipole formula for a magnetic moment $ \\mu = 1.2 \\, \\text{A\u00b7m}^2 $ and distance $ r = 3 \\, \\text{mm} $. The result is:\n\n$$\nB = \\frac{\\mu_0}{4\\pi} \\cdot \\frac{2\\mu}{r^3} = 8.89 \\, \\text{T} = 8890 \\, \\text{mT}\n$$\n\n**Answer:**  \n`{\"B_mT\": 8890.0}`"
+    }
+  ]
+}

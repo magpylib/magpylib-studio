@@ -513,6 +513,11 @@ def main(argv=None):
     parser.add_argument("--rebuild-envs", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--recheck", type=pathlib.Path, help="a results folder")
+    parser.add_argument(
+        "--resume",
+        type=pathlib.Path,
+        help="a results folder: keep its finished runs, run only the rest",
+    )
     args = parser.parse_args(argv)
     # A local model reads Claude Code's long system prompt at laptop speed.
     args.timeout = args.timeout or (3600 if args.local else 1200)
@@ -559,7 +564,7 @@ def main(argv=None):
     conditions = args.conditions.split(",")
     started = datetime.datetime.now().strftime("%Y-%m-%d-%H%M")
     label = re.sub(r"[^A-Za-z0-9.]+", "-", args.model)  # qwen3:8b -> qwen3-8b
-    out = RESULTS / f"{started}-{label}{'-dry' if args.dry_run else ''}"
+    out = args.resume or RESULTS / f"{started}-{label}{'-dry' if args.dry_run else ''}"
     envs = None if args.dry_run else environments(args.rebuild_envs)
     commit = subprocess.run(  # noqa: S603 - git, on this checkout
         ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],  # noqa: S607
@@ -583,6 +588,13 @@ def main(argv=None):
                 continue
             for k in range(1, args.repeats + 1):
                 folder = out / "runs" / name / f"{condition}-{k}"
+                done = folder / "result.json"
+                if args.resume and done.is_file():
+                    kept = json.loads(done.read_text(encoding="utf-8"))
+                    if kept.get("ran", True):
+                        print(f"kept  {name} [{condition}-{k}]")
+                        results.append(kept)
+                        continue
                 result = run_one(name, task, condition, folder, args, envs)
                 if result is not None:
                     results.append(result)
