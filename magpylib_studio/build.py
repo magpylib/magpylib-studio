@@ -722,7 +722,8 @@ def script_of(session):
     same document -- variables, formulas and patterns included -- and not
     the flattened scene running a plain magpylib export gives. Nothing reads
     this back: it is executed, through the operations the panel uses (see
-    `docs/plans/builder.md` §5). What has no call of its own -- an expression a
+    decision 0017 in `docs/decisions.md`). What has no call of its own -- an
+    expression a
     resize set aside, a key this engine does not know, a step that no longer
     applies -- is named in a comment at the top rather than written.
     """

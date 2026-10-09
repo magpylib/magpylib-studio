@@ -1426,6 +1426,25 @@ def test_load_scene_from_dict_and_file(session, tmp_path):
     assert session.list_objects() == []
 
 
+def test_a_load_starts_the_history_and_a_replacement_is_a_step(session):
+    """Opening a scene is where it begins, not an edit of what was open: the
+    first undo after it takes back the first edit, never the scene. The
+    script tab's save and a view's reset replace the document too, but as
+    edits, one step each."""
+    assert session.load_example("halbach")["ok"]
+    assert session.undo() == {"ok": False, "error": "nothing to undo"}
+    opened = json.loads(json.dumps(session.doc))
+    assert session.clear_scene()["ok"]
+    assert session.restore(opened)["ok"]
+    assert session.get_history()["undo"] == ["clear scene", "reset"]
+    assert session.doc == opened
+    assert session.undo()["ok"] and session.list_objects() == []
+    assert session.undo()["ok"] and session.doc == opened
+    assert session.undo() == {"ok": False, "error": "nothing to undo"}
+    assert session.load_scene(opened)["ok"]
+    assert session.get_history()["undo"] == []
+
+
 def test_default_scene_is_empty_and_renders():
     s = MagpylibStudioSession()
     assert s.list_objects() == []
@@ -2267,8 +2286,9 @@ def test_load_script_captures_show_call(tmp_path):
     res2 = s.load_captured(1)
     assert res2["ok"] is True
     assert s._objs["sensor"].position.shape == (3, 3)
-    # each import is one undoable step; scene renders; script round-trips
-    assert [h.startswith("import ") for h in s.get_history()["undo"]] == [True, True]
+    # an import is where the scene starts, not a step: undo has nothing to
+    # take back; scene renders; script round-trips
+    assert s.get_history()["undo"] == []
     assert len(s.get_figure()["data"]) > 0
     ns = exec_script(s.to_script())
     assert np.allclose(ns["halbach"].children[2].position, m.position)

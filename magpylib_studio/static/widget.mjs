@@ -348,6 +348,8 @@ const ICONS = {
     '<path d="M4 6.75h1M7.5 6.75h1M11 6.75h1M4.5 9.5h7"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
   redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H9"/>',
+  edit: '<path d="M11.5 2.5l2 2-8 8h-2v-2z"/><path d="M10 4l2 2"/>',
+  revert: '<path d="M2.5 3v3.5H6"/><path d="M3.2 6.5a5 5 0 1 1-.5 3.5"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
 };
 
@@ -529,6 +531,26 @@ function render({ model, el }) {
     () => showProjection(api?.toggleProjection()),
   );
   pressed(projectionButton, false); // perspective, until it is switched
+  // A view is read only until someone asks: the pencil asks, and the handles
+  // come out; pressed again, they go away, and the edits stay. Where the
+  // objects are the cell's own, python first copies them into a studio
+  // session, as `editable=True` does when the view is made; a view of a
+  // session has one already. Shown only where there is something to edit
+  // and a python to keep the edits -- see `showEditing`.
+  const editButton = iconButton(
+    "edit",
+    "Edit — move, turn, resize and aim the objects, with undo, in a studio " +
+      "session in the kernel; again to put the handles away",
+    () => {
+      const out = !editable();
+      notify(
+        out
+          ? "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away"
+          : "Handles away — the edits stay; the pencil brings them back",
+      );
+      commit("editable", out);
+    },
+  );
   // Python writes the file -- it has every piece of it on disk -- and hands
   // it back to be saved. A page that is itself an export has no python
   // behind it to ask, and no button.
@@ -627,6 +649,14 @@ function render({ model, el }) {
   const redoButton = iconButton("redo", "Redo (⇧⌘Z / Ctrl+Shift+Z)", () =>
     settle(editor.redo()),
   );
+  // Every edit since this view's editing started, taken back in one step --
+  // which undo takes back in turn. A host's own editor may have no such
+  // start; then there is no button.
+  const resetButton = iconButton(
+    "revert",
+    "Back to where editing started — one step, which undo takes back",
+    () => editor.reset && settle(editor.reset()),
+  );
   const rule = () => {
     const line = document.createElement("div");
     line.className = "magpy-scene-rule";
@@ -638,12 +668,14 @@ function render({ model, el }) {
     rule(),
     undoButton,
     redoButton,
+    resetButton,
   );
   tools.append(
     legendButton,
     axesButton,
     fitButton,
     projectionButton,
+    editButton,
     themeButton,
     pictureButton,
     exportButton,
@@ -1389,9 +1421,25 @@ function render({ model, el }) {
 
   function dressEditing() {
     editBar.hidden = !editable();
+    resetButton.hidden = !editor.reset;
+    showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
     if (!editable() && drawing()) api.setGizmoMode("none");
+  }
+
+  /** The pencil, where it can do something: a view with objects named to
+   *  edit and a python behind it to keep the edits -- so not on a saved
+   *  page, nor a bare `show` that handed over no objects, nor the studio's
+   *  panel, where the view is the editor. Pressed while the handles are
+   *  out, as the projection button is while the view is orthographic. */
+  function showEditing() {
+    editButton.hidden =
+      model.get("editable") === null || // made for looking only
+      model.editor !== undefined ||
+      Boolean(model.get("standalone")) ||
+      !(model.get("tree") || []).length;
+    pressed(editButton, editable());
   }
 
   // Each view numbers its own calls, under a name of its own: python answers
@@ -1624,6 +1672,7 @@ function render({ model, el }) {
     scene: () => call("get_scene"),
     undo: () => call("undo"),
     redo: () => call("redo"),
+    reset: () => call("reset"),
   };
 
   const stopDrags = watchDrags(view, {
@@ -1723,8 +1772,10 @@ function render({ model, el }) {
       wanted = null;
       shown = 0;
     }
-    if (scene || now.has("tree")) dressLegend();
-    else legend.sync(stateOf());
+    if (scene || now.has("tree")) {
+      dressLegend();
+      showEditing(); // a view pointed at objects, or away from them
+    } else legend.sync(stateOf());
     if (scene) {
       dressTransport();
       draw(); // which applies the hiding and the selection itself

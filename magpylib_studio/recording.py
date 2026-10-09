@@ -295,6 +295,9 @@ class SceneFunction:
             recorder.finish()
         finally:
             _BUILDING.reset(token)
+        # The build is where the scene starts, not a run of edits: undone a
+        # step at a time it would come apart, which nobody asked for.
+        document.session.forget_history()
         document._built_from = self
         return document
 

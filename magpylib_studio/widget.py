@@ -23,8 +23,16 @@ edit -- and `picked` gives back the magpylib objects that were clicked.
 ``editable=True`` is the other way round: the objects are copied into a
 studio session in the kernel rather than left to the cell, so an edit has
 somewhere to be kept. Dragged there, a magnet moves in the session, can be
-undone, and comes back out as code. A path in place of the objects opens a
-script's objects, or a scene the studio saved, the same way.
+undone, and comes back out as code. A scene written in code, or a path -- a
+script's objects, or a scene the studio saved -- is a session already, and
+the view shows that session itself, nothing copied, with the handles away
+until asked.
+
+The pencil among the view's tools asks: it puts the handles out. On a view
+of a session, that is all it does. On a view of the cell's own objects, the
+objects are copied into a session first, under the cell's names for them,
+and ``editable`` reads True from that moment -- the one way a view changes
+what it shows after it is made.
 
 Imported only when a widget is actually drawn: the entry point magpylib
 resolves while it is importing names `backend.py`, which stays down to
@@ -204,11 +212,17 @@ class SceneWidget(anywidget.AnyWidget):
     frames = traitlets.Int(1).tag(sync=True)
     duration = traitlets.Float(5.0).tag(sync=True)
     repeat = traitlets.Bool(False).tag(sync=True)
-    #: Whether the view offers its handles: ``SceneWidget(..., editable=True)``.
-    #: Its objects are then a studio session's, which keeps what a
-    #: drag does to them -- see `objects`. Chosen when the view is made: a view
-    #: of the cell's own objects has nowhere to keep an edit.
-    editable = traitlets.Bool(False).tag(sync=True)
+    #: Whether the view's handles are out. Out, its objects are a studio
+    #: session's, which keeps what a drag does to them -- see `objects`:
+    #: ``SceneWidget(..., editable=True)`` from the start, or the pencil among
+    #: the view's tools later, which is ``view.editable = True`` from code. A
+    #: view of the cell's own objects copies them into a session at that
+    #: moment; one of a scene written in code, or of a path, has a session
+    #: already and only puts the handles out. A view of nothing refuses,
+    #: having nothing to edit. Set back -- the pencil pressed again -- the
+    #: handles go away; the session, and the edits in it, stay. ``None`` is
+    #: a view for looking only: no pencil, and the trait refuses to turn on.
+    editable = traitlets.Bool(False, allow_none=True).tag(sync=True)
     #: Counts the edits the notebook has been told of, in an editable view: a
     #: drag's end, an undo, a redo, a `set` or a `set_variable` -- each that
     #: changed something. A cell that reads the widget in marimo re-runs when
@@ -233,6 +247,7 @@ class SceneWidget(anywidget.AnyWidget):
             "apply_edits",
             "undo",
             "redo",
+            "reset",
             "get_scene",
         }
     )
@@ -262,6 +277,15 @@ class SceneWidget(anywidget.AnyWidget):
         the objects is a magpylib script, run to find its objects, or a
         ``.magpy.json`` scene the studio saved. A scene written in code
         (`magpylib_studio.build.Scene`) is edited as it is, not copied.
+
+        A scene written in code, or a path, given without ``editable`` is
+        shown as it is -- its own session, the handles away -- and the pencil
+        among the view's tools puts them out. On a view of the cell's own
+        objects the pencil first copies them into a session, under the names
+        the cell gave them, and `editable` reads True from that moment.
+        ``view.editable = True`` is the pencil from code. ``editable=None``
+        is a view for looking only, a figure handed to someone else: no
+        pencil, and `editable` refuses to turn on.
         """
         traits, kwargs = self._split(kwargs)
         editable = traits.pop("editable", False)
@@ -280,50 +304,60 @@ class SceneWidget(anywidget.AnyWidget):
         #: trait, for the reason given where the view sends it. Kept for
         #: `to_html`, so a file saved from a cell opens on the same view.
         self._camera = None
+        #: The objects the view was last pointed at, and the caller's names
+        #: for them: what a session is made of when editing is asked for
+        #: after the view is made -- the pencil, or `editable = True`.
+        self._given = []
+        self._named = {}
         self.on_msg(self._on_message)
-        if editable:
+        # The caller's names -- its own variables, then its module's -- so the
+        # script that comes back out says `ring` where the cell did. Read here,
+        # while the caller is the frame above.
+        named = _names_above()
+        given = list(threejs._given(objects))
+        # A scene written in code, or a path, is a session of its own: the
+        # view shows that session, drawn by the engine, and nothing else
+        # beside it -- the cell's objects would have no place in it.
+        own = [
+            obj
+            for obj in given
+            if _is_built(obj) or isinstance(obj, (str, os.PathLike))
+        ]
+        if own and len(given) > 1:
+            raise TypeError(
+                "a scene written in code, or a path, is shown on its own: "
+                "SceneWidget(scene)"
+            )
+        if editable or own:
             if animation or kwargs:
-                given = ", ".join(["animation"] * bool(animation) + list(kwargs))
+                words = ", ".join(["animation"] * bool(animation) + list(kwargs))
                 raise TypeError(
-                    f"an editable view takes objects and traits, not {given}"
+                    f"a view of a scene's session takes objects and traits, not {words}"
                 )
-            given = list(threejs._given(objects))
-            if len(given) == 1 and isinstance(given[0], (str, os.PathLike)):
-                self._edit(_session_from(pathlib.Path(given[0])))
-            elif len(given) == 1 and _is_built(given[0]):
-                # Its own session, not a copy: the scene the code wrote is the
-                # one the view edits, so a drag shows in `to_dict()` after.
-                self._edit(given[0].session)
-            elif not given:
+            if not given:
                 raise TypeError(
                     "nothing to edit: SceneWidget(*objects, editable=True), "
                     "or a script or a saved scene in their place"
                 )
+            if isinstance(given[0], (str, os.PathLike)):
+                self._edit(_session_from(pathlib.Path(given[0])), handles=editable)
+            elif _is_built(given[0]):
+                # Its own session, not a copy: the scene the code wrote is the
+                # one the view edits, so a drag shows in `to_dict()` after.
+                self._edit(given[0].session, handles=editable)
             else:
-                # The caller's names -- its own variables, then its module's --
-                # so the script that comes back out says `ring` where it did.
-                caller = sys._getframe(1)
-                named = {**caller.f_globals, **caller.f_locals}
                 self._edit(_session_of(given, named))
-        elif any(_is_built(obj) for obj in threejs._given(objects)):
-            raise TypeError(
-                "a scene written in code is shown to edit: "
-                "SceneWidget(scene, editable=True)"
-            )
-        elif any(isinstance(obj, (str, os.PathLike)) for obj in objects):
-            raise TypeError(
-                "a script or a saved scene is opened to edit: "
-                "SceneWidget(path, editable=True)"
-            )
         elif objects:
             # The traits again, after the scene: drawing one sets the run's
             # length, pace and repeat from what magpylib says, and a `repeat`
             # given here is the caller's word, not magpylib's.
-            self.update(*objects, animation=animation, **kwargs, **traits)
+            self._repoint(objects, named, animation, {**kwargs, **traits})
         elif kwargs:
             # Nothing to draw them with, and dropped quietly they would look
             # like they had been ignored when the objects came.
             raise TypeError(f"no objects to draw with {', '.join(kwargs)}")
+        if editable is None and self._session is None:
+            self.editable = None  # never: a session's view said so in `_edit`
 
     @classmethod
     def _split(cls, kwargs):
@@ -388,6 +422,10 @@ class SceneWidget(anywidget.AnyWidget):
         widget, and renders -- draws a *second* live view of the same scene
         under the one being updated, with its own WebGL context.
         """
+        self._repoint(objects, _names_above(), animation, kwargs)
+
+    def _repoint(self, objects, named, animation, kwargs):
+        """`update`, with the caller's names for the objects already read."""
         # `_capture` is what `scene_payload` uses for the same reason: it is
         # the one path that hands back the `Scene` a display backend is given,
         # with the capabilities this view declares, without a second widget
@@ -403,6 +441,11 @@ class SceneWidget(anywidget.AnyWidget):
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
                 setattr(self, name, value)
+        # Only the names of what is shown: the rest of the namespace is the
+        # notebook's, and a view that held it would hold everything in it.
+        self._named = {
+            name: obj for name, obj in named.items() if str(id(obj)) in self._objects
+        }
 
     def identify(self, *objects):
         """Name the objects the scene was drawn from, and return self.
@@ -423,6 +466,7 @@ class SceneWidget(anywidget.AnyWidget):
         nowhere to go is dropped.
         """
         self._not_editable("identify")
+        given = list(threejs._given(objects))
         before = dict(_positions(self.tree))
         tree, objects = threejs.object_tree(objects)
         after = {path: key for key, path in _positions(tree)}
@@ -444,6 +488,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.selected = carried(self.selected)
             self.hidden = carried(self.hidden)
         self._objects = objects
+        self._given = given
         return self
 
     @property
@@ -635,8 +680,25 @@ class SceneWidget(anywidget.AnyWidget):
 
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
-        Returns whether there was one."""
+        Returns whether there was one. Stops where this view's editing
+        started: a built scene's own building, or a session's steps from
+        before the view, are not the view's to undo."""
         return self._step("undo")
+
+    def reset(self):
+        """Take the scene back to where this view's editing started -- every
+        drag, undo, redo and `set` since -- in one step, which `undo` takes
+        back. Returns whether there was anything to take back."""
+        return self._reset() and self._show({"by": "reset"})
+
+    def _reset(self):
+        session = self._editing("reset")
+        if json.dumps(session.doc, sort_keys=True, default=str) == self._start:
+            return False
+        result = session.restore(json.loads(self._start))
+        if not result.get("ok", True):
+            raise ValueError(f"reset: {result.get('error')}")
+        return True
 
     def redo(self):
         """Put back what `undo` took. Returns whether there was anything."""
@@ -657,25 +719,53 @@ class SceneWidget(anywidget.AnyWidget):
         pathlib.Path(file).write_text(text, encoding="utf-8")
 
     @traitlets.validate("editable")
-    def _editable_when_made(self, proposal):
-        # Handles on a view of the cell's own objects would reach nothing that
-        # keeps an edit: every drag would end in "no answer from Python".
-        if proposal["value"] and getattr(self, "_session", None) is None:
+    def _something_to_edit(self, proposal):
+        # Handles over nothing would reach nothing that keeps an edit: every
+        # drag would end in "no answer from Python". And a view made for
+        # looking only stays that: whoever made it said so.
+        if proposal["value"] and self.editable is None:
             raise traitlets.TraitError(
-                "a view is editable from when it is made: "
-                "SceneWidget(..., editable=True)"
+                "a view made with editable=None is never edited: make another, "
+                "with editable=False for the pencil"
+            )
+        if proposal["value"] and self._session is None and not self._given:
+            raise traitlets.TraitError(
+                "nothing to edit: SceneWidget(*objects, editable=True), or "
+                "point the view at objects first"
             )
         return proposal["value"]
 
-    def _edit(self, session):
-        """Make this the view of `session`'s scene, with its handles out."""
+    @traitlets.observe("editable")
+    def _editing_asked_for(self, change):
+        """The handles asked for after the view was made -- the pencil among
+        its tools, or ``view.editable = True``. A view of a session has them
+        out from here on, and nothing else changes. A view of the cell's own
+        objects copies them into a session now, under the names the cell
+        gave them, as it would have at the start; a run it was playing is
+        left behind with the capture, and the session draws the objects,
+        paths and all."""
+        if not change["new"] or self._session is not None:
+            return
+        with self.hold_sync():
+            self._scene = None
+            self.frames = 1
+            self._edit(_session_of(self._given, self._named))
+
+    def _edit(self, session, handles=True):
+        """Make this the view of `session`'s scene, with its handles out --
+        or away, until the pencil; or, `handles=None`, for looking only."""
         self._session = session
         #: The document as last drawn, to tell an edit from a gesture or an
         #: undo that changed nothing.
         self._shown = None
         #: The edits of the drag in progress, as the view last sent them.
         self._dragged = None
-        self.editable = True
+        # Where editing starts: undo stops here, and `reset` comes back here.
+        # What the session did before the view -- a scene function's build,
+        # steps made from code -- is its starting point, not edits.
+        session.forget_history()
+        self._start = json.dumps(session.doc, sort_keys=True, default=str)
+        self.editable = handles
         self._show(None)
 
     def _show(self, edit):
@@ -705,15 +795,19 @@ class SceneWidget(anywidget.AnyWidget):
         """The session, for what only an editable view can do."""
         if self._session is None:
             raise TypeError(
-                f"{what} is for an editable view: SceneWidget(..., editable=True)"
+                f"{what} is for a view with a scene of its own: a scene written "
+                "in code, a path, SceneWidget(..., editable=True), or the pencil "
+                "among the view's tools"
             )
         return self._session
 
     def _not_editable(self, what):
         if self._session is not None:
             raise TypeError(
-                f"an editable view is edited, not re-pointed: no {what}(). "
-                "Make another for other objects."
+                f"a view with a scene of its own is not re-pointed: no {what}(). "
+                "Its objects are a studio session's -- a scene written in code, "
+                "a path, editable=True, or the pencil among the view's tools -- "
+                "so make another view for other objects."
             )
 
     def to_html(self, title="magpylib scene"):
@@ -816,6 +910,19 @@ class SceneWidget(anywidget.AnyWidget):
             }
             self.send({"kind": "rpc", **answer})
             return
+        if method == "reset":
+            # Not a session call: the view's own start is what it goes back
+            # to. Answered first, as below, and the notebook told after.
+            try:
+                changed = self._reset()
+            except ValueError as e:
+                answer = {"error": {"type": "ValueError", "message": str(e)}}
+            else:
+                answer = {"result": {"ok": True, "changed": changed}}
+            self.send({"kind": "rpc", "id": content.get("id"), **answer})
+            if answer.get("result", {}).get("changed"):
+                self._show({"by": "reset"})
+            return
         edit = None
         if method in ("undo", "redo"):
             waiting = self._session.get_history()[method]
@@ -866,6 +973,15 @@ def _drag_news(edits):
     return {"by": "drag", "objects": list(changed), "changed": changed}
 
 
+def _names_above():
+    """The variables of whoever called the widget's method that called this:
+    its own, then its module's. What the objects are named by in a session
+    made of them, so the script that comes back out says `ring` where the
+    cell did."""
+    caller = sys._getframe(2)
+    return {**caller.f_globals, **caller.f_locals}
+
+
 def _is_built(obj):
     """Whether `obj` is a scene written in code (`magpylib_studio.build`)."""
     from magpylib_studio.build import Scene
@@ -905,9 +1021,6 @@ def _loaded(load, said, what):
     ]
     for text in [*said, *(loaded.get("warnings") or []), *skipped]:
         warnings.warn(f"magpylib-studio: {text}", stacklevel=4)
-    # The scene as loaded is where editing starts, not an edit: undone, it
-    # would leave the view empty.
-    session.forget_history()
     return session
 
 

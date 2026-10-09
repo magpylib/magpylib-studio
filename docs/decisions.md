@@ -905,3 +905,69 @@ only in `model3d` traces (the data gap), two are refused at their line for a
 `CustomSource` (the code gap), and one, with 1,215 objects, times out at ten
 minutes, since every recorded call rebuilds the scene. Twelve pages need a
 package this environment lacks.
+
+## 0018. A view is read only until its pencil is pressed
+
+**Status:** accepted 2026-10-09, as built; supersedes the sentence in
+[0010](#0010-the-notebook-widget-edits-with-the-package-alone) that a view
+cannot be made editable after the fact. The rest of 0010 stands. **Record of:**
+where `editable` is decided, raised over the view's toolbar.
+
+### Context
+
+`editable` was decided when the view was made, and most views are read only: a
+cell shows objects to look at, and only now and then does someone want to move
+one. Asking for the handles meant going back to the cell and writing
+`editable=True` into a view already on the page. The session is still the only
+place an edit can be kept: a view of the cell's own objects has nowhere to put a
+drag.
+
+### Decision
+
+- **Read only by default, with a pencil among the view's tools that puts the
+  handles out.** `editable` is whether they are out: `editable=True` from the
+  start, the pencil later, `view.editable = True` from code. The view sets the
+  trait itself and saves it, so in marimo the cells that read the view re-run as
+  they do for a selection. `editable=None` is a view for looking only, a figure
+  handed to someone else: no pencil, and the trait refuses to turn on.
+- **A scene written in code, or a path, is shown as its own session.** Nothing
+  is copied: the document is the one source, so its field, its file and its code
+  read the same session the view draws, a drag is a step in that scene, and a
+  variable set from a notebook control rebuilds it with the drag's pins on top.
+  The pencil only puts the handles out there.
+- **The cell's own objects are copied on the press**, under the names the cell
+  gave them, as `editable=True` does at the start. `update` reads its caller's
+  variables when the objects are given and keeps only the names of what is
+  shown, so the view holds nothing else of the namespace. The session's first
+  drawing is no edit: `revision` stays.
+- **One way for the session.** A view with a scene of its own is not re-pointed:
+  `update` after the pencil is refused, naming the pencil, since re-pointing
+  would throw the edits away. Set back, `editable` only puts the handles away;
+  the session stays. A view of other objects is a new one.
+- **Undo stops where the scene started, and `reset` goes back there.** A load is
+  where a scene begins, not an edit of what was open: `load_scene` starts the
+  history itself, so in the panel the first undo after opening a file or a
+  script takes back the first edit, never the scene. A scene function's build
+  forgets its own steps once built, and the view forgets what a session did
+  before it: neither is an edit. The script tab's save and a reset replace the
+  document too, but as edits, kept as one step each. The view keeps a snapshot
+  from its start, and `reset()`, or the arrow under the undo buttons, restores
+  it as one step that undo takes back.
+- **Shown only where it can act**: not on a saved page, which has no python, and
+  not on a bare `show` that handed over no objects. The studio panel is left as
+  it was, the view being the editor there.
+
+### Rejected
+
+- A pencil that forks every view into a copy, a built scene's included: built
+  first. After a press the notebook's field, file and code described the
+  function's document while the view showed a copy, and the next knob drag
+  rebuilt the document and stranded the edits. A built scene is a session
+  already; the view shows that one.
+- A pencil that only shows and hides the handles everywhere, with
+  `editable=True` still deciding at construction whether a session exists: the
+  common case, a cell's own objects already on the page, would still have to be
+  declared in code to be edited.
+- A module-level default read when the argument is left out: it moves the choice
+  out of each call but still decides at construction, and is a second place a
+  notebook's behaviour comes from.

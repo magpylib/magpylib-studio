@@ -57,8 +57,8 @@ import magpylib as magpy
 from magpylib_studio.widget import SceneWidget
 
 cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
-SceneWidget(cube)  # look around it
-SceneWidget(cube, editable=True)  # or move, turn and resize it, with undo
+SceneWidget(cube)  # look around it; the pencil in its corner edits it
+SceneWidget(cube, editable=True)  # or move, turn and resize it from the start
 ```
 
 More in the

@@ -948,6 +948,48 @@ async function studioDrag(port, base) {
   );
 }
 
+/** The pencil: a read-only view of named objects offers one, and pressing
+ *  it saves `editable` for python and brings the edit bar out; a saved page
+ *  and a view of nothing offer none. */
+async function pencil(port, base) {
+  await check("the pencil puts a read-only view into editing", async () => {
+    const tab = await openTab(port);
+    try {
+      for (const [query, offered] of [
+        ["", true],
+        ["?standalone", false],
+        ["?empty", false],
+        ["?never", false],
+      ]) {
+        const page = query || "a plain view";
+        await tab.navigate(`${base}/pages/pencil.html${query}`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return `${page}: never finished`;
+        const { before, after, again, saved, notice } = result;
+        if (before.pencil !== offered) {
+          return `${page} ${offered ? "offered no pencil" : "offered a pencil"}`;
+        }
+        if (before.bar) return `${page}: the edit bar was out before a press`;
+        if (!offered) continue;
+        if (!after.bar || !after.pencil || after.pressed !== "true") {
+          return `after the press: ${JSON.stringify(after)}`;
+        }
+        if (!notice.includes("Editing"))
+          return `it said ${JSON.stringify(notice)}`;
+        if (again.bar || again.pressed !== "false") {
+          return `pressed again: ${JSON.stringify(again)}`;
+        }
+        if (saved.join() !== "true,false") {
+          return `the presses saved ${saved.join()}`;
+        }
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** An editable view against a fake kernel: a drag goes to the session
  *  as the studio's panel sends one -- the undo group opened, each pose
  *  recorded with the scene redrawn between, the release, the group closed --
@@ -1033,6 +1075,9 @@ async function editing(port, base) {
       if (asked.some((a) => a.method.startsWith("kernel:"))) {
         return `a host's editor was passed over for the kernel: ${said}`;
       }
+      const reset = asked.some((a) => a.method === "reset");
+      if (!query && !reset) return `the revert button sent nothing: ${said}`;
+      if (query && reset) return "a host's editor without a reset was sent one";
       return problem;
     });
   }
@@ -1694,6 +1739,7 @@ try {
   await heldReadings(browser.port, base);
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
+  await pencil(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);

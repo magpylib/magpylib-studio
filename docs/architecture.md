@@ -213,11 +213,15 @@ the session, batched into one undo step, for every host.
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is
 that renderer as an anywidget with a legend that nests the objects, tools,
-export to one HTML file (`write_html`) and PNG. `editable=True` puts a session
-in the kernel: the view calls `rpc.handle` over its connection, restricted to a
-short allow-list, the objects are copied into the session rather than edited in
-place, and a `revision` trait and `last_edit` fire once per settled edit, never
-per preview frame. `variable_sliders()` is a control per variable. The bundle
+export to one HTML file (`write_html`) and PNG. A scene written in code, or a
+path, is shown as its own session with the handles away; `editable=True`, or the
+pencil among the view's tools later
+([0018](decisions.md#0018-a-view-is-read-only-until-its-pencil-is-pressed)),
+puts them out, and for the cell's own objects first copies them into a session
+in the kernel, named from the cell's variables as read when they were given. The
+view calls `rpc.handle` over its connection, restricted to a short allow-list,
+and a `revision` trait and `last_edit` fire once per settled edit, never per
+preview frame. `variable_sliders()` is a control per variable. The bundle
 `static/widget.js` is committed so installing needs no node;
 `npm run check:widget` fails when it no longer matches its sources, and a CI job
 installs the wheel alone and runs an edit through a fake connection.

@@ -169,6 +169,10 @@
       }
       button("Keys").click();
       const keys = el.querySelector(".magpy-scene-keys")?.textContent ?? "";
+      // The revert button, where the editor has a start to go back to.
+      const revert = button("Back to");
+      if (revert && !revert.closest("[hidden]")) revert.click();
+      await wait(200);
 
       // Shift+H: the probe alone; then the magnet alone, though something is
       // hidden already; then, the magnet being all that shows, everything

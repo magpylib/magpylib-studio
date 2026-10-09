@@ -5,14 +5,17 @@ Needs the widget extra, marimo, and wigglystuff for the draggable call:
     uv pip install -e ".[widget]" marimo wigglystuff
 
 One function, three callers, in one notebook. `halbach` below is a plain
-magpylib function marked `@scene`: its parameters are the variables. Called,
-it gives the magpylib objects the 3D view draws. Built, it gives the studio's
-document, which the field, the sweep, the code tab and the saved file come
-from. And its signature is what the controls are rendered from -- as a call
-expression whose numbers drag (wigglystuff's `TangleFunction`), or as
-marimo's own sliders, with nothing of studio's in between. Drag a number and
-every cell that depends on it re-runs: the view is re-pointed, the numbers
-update, the field map redraws.
+magpylib function marked `@scene`: its parameters are the variables. Built
+once, it gives the studio's document, which the 3D view, the field, the sweep,
+the code tab and the saved file all read. Called, it is plain magpylib:
+objects to compute with, shown beside the document's numbers. And its
+signature is what the controls are rendered from -- as a call expression whose
+numbers drag (wigglystuff's `TangleFunction`), or as marimo's own sliders,
+with nothing of studio's in between. Drag a number and it is set on the
+document's variable: the view redraws, the numbers update, the field map
+follows. The view is read only until its pencil puts the handles out; a drag
+is then a step in the same document, pinned on top of the knobs, and the
+field, the code and the downloads carry it.
 """
 
 import marimo
@@ -203,41 +206,114 @@ def _(halbach, mo):
 
 
 @app.cell
-def _(halbach, knobs):
+def _(knobs):
     # The values the controls hold, whichever element renders them.
     values = dict(knobs.value.get("values", knobs.value))
-    # Called: magpylib objects, for the view. Built: the document, for the
-    # field, the sweep, the code and the file. Both from the same function.
-    stack, bore = halbach(**values)
-    s = halbach.build(values=values)
-    session = s.session
-    return bore, s, session, stack, values
+    return (values,)
 
 
 @app.cell
-def _(SceneWidget, mo):
-    # Made once and re-pointed below, so the camera stays where you left it.
-    view = mo.ui.anywidget(SceneWidget(height=560))
+def _(halbach):
+    # Built once: the document, with the parameters as its variables. The
+    # view, the field, the code and the file all read this one session, and
+    # the knobs set its variables rather than build another -- so a drag made
+    # in the view is kept, pinned on top of whatever the knobs say next.
+    s = halbach.build()
+    session = s.session
+    return s, session
+
+
+@app.cell
+def _(SceneWidget, mo, s):
+    # The view of the document itself -- its own session, nothing copied --
+    # made once, so the camera stays where you left it. Read only until the
+    # pencil among its tools puts the handles out.
+    view = mo.ui.anywidget(SceneWidget(s, height=560))
     view
     return (view,)
 
 
 @app.cell
-def _(bore, stack, view):
-    view.widget.update(stack, bore)
+def _(session, values, view):
+    # The knobs drive the one document: a value that changed is set on it, as
+    # the studio's Variables panel sets one, and everything written in terms
+    # of it follows; a drag's pins stay on top. The view redraws and tells the
+    # notebook, so the cells that read it re-run -- this one too, which then
+    # finds nothing left to set.
+    _written = {v["name"]: v["value"] for v in session.get_variables()["variables"]}
+    for _name, _value in values.items():
+        if _value != _written.get(_name):
+            view.widget.set_variable(_name, _value)
     return
 
 
 @app.cell(hide_code=True)
-def _(mo, np, session, values, view):
+def _(mo, view):
+    # Reads the view, so it re-runs when the pencil is pressed -- the view
+    # sets `editable` itself and saves it, which to marimo is a value changed
+    # in the browser, as a click is -- and then once per settled edit:
+    # `revision` counts a drag's end, an undo, a redo and a knob's change,
+    # never a frame of a drag in progress.
+    mo.stop(
+        not view.value.get("editable"),
+        mo.callout(
+            mo.md(
+                "**Edit the stack in place.** Press the pencil among the view's "
+                "tools (top right, with the pointer on the view): the handles come "
+                "out on the document itself -- **W** moves, **E** turns, **R** "
+                "resizes, **P** aims, ⌘Z / ctrl-Z undoes a whole drag, and the "
+                "arrow under the undo buttons takes every edit back to where "
+                "editing started -- the knobs then set their values again. A drag "
+                "is a step in the same document the field, the code and the file "
+                "come from, pinned on top of the knobs, which keep working. The "
+                "pencil again puts the handles away; the edits stay."
+            ),
+            kind="info",
+        ),
+    )
+    _edit = view.value.get("last_edit") or {}
+    mo.vstack(
+        [
+            mo.md(
+                f"**Editing.** {view.value['revision']} settled edits so far, each "
+                "told once; the numbers, the field, the code tab and the downloads "
+                "follow them. `view.widget.objects` are the objects as edited, to "
+                "compute with."
+            ),
+            *([mo.json(_edit, label="the last edit")] if _edit else []),
+        ]
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(halbach, magpy, mo, np, session, values, view):
+    # From the document, as the knobs and the handles left it -- and, beside
+    # it, from the function called plainly at the knobs' values: magpylib
+    # objects with nothing of studio's in them. The two agree until a magnet
+    # is dragged; then the first follows the drag and the second does not.
+    _ = view.value["revision"]  # re-run after each edit
     _centre = np.linalg.norm(session.get_field(points=[[0, 0, 0]])["values"][0]) * 1e3
+    _stack, _ = halbach(**values)
+    _plain = np.linalg.norm(magpy.getB(_stack, (0, 0, 0))) * 1e3
     _bore = np.asarray(session.get_field(sensor_id="bore")["values"], dtype=float)
     _magnitude = np.linalg.norm(_bore.reshape(-1, 3), axis=1)
     _spread = np.ptp(_magnitude) / _magnitude.mean() * 100
     _picked = view.value["selected"] and view.widget.picked
     mo.hstack(
         [
-            mo.stat(f"{_centre:.1f} mT", label="|B| at the centre", bordered=True),
+            mo.stat(
+                f"{_centre:.1f} mT",
+                label="|B| at the centre",
+                caption="from the document, edits included",
+                bordered=True,
+            ),
+            mo.stat(
+                f"{_plain:.1f} mT",
+                label="the function, called plainly",
+                caption="at the knobs' values, no edits",
+                bordered=True,
+            ),
             mo.stat(
                 f"{_spread:.2f} %",
                 label="spread across the bore",
@@ -259,7 +335,8 @@ def _(mo, np, session, values, view):
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, s, session):
+def _(go, mo, np, s, session, view):
+    _ = view.value["revision"]  # re-run after each edit
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
 
     def _figure(spec):
@@ -300,7 +377,8 @@ def _(go, mo, np, s, session):
 
 
 @app.cell(hide_code=True)
-def _(mo, session):
+def _(mo, session, view):
+    _ = view.value["revision"]  # re-run after each edit
     _rows = []
     for _entry in session.list_objects():
         if _entry.get("type") != "magnet.Cuboid":
@@ -433,25 +511,29 @@ def _(mo, np, session):
 
 
 @app.cell(hide_code=True)
-def _(json, mo, s, session):
+def _(json, mo, s, session, view):
+    # Re-run after each edit, so the files hold the scene as it is now, pins
+    # included. The data is given, not a callable: a few kilobytes, ready
+    # before the click, with no request left to go wrong on it.
+    _ = view.value["revision"]
     mo.sidebar(
         [
             mo.md("# Magpylib Studio"),
             mo.md(
-                "_One function: the controls, the view, the field and the file all "
-                "follow it._"
+                "_One function, one document: the controls, the view, the field "
+                "and the file all follow it._"
             ),
             mo.outline(),
             mo.vstack(
                 [
                     mo.download(
-                        data=lambda: json.dumps(s.to_dict(), indent=2),
+                        data=json.dumps(s.to_dict(), indent=2),
                         filename="halbach.magpy.json",
                         mimetype="application/json",
                         label="The scene, to open in the studio",
                     ),
                     mo.download(
-                        data=lambda: session.to_builder_script(),
+                        data=session.to_builder_script(),
                         filename="halbach_scene.py",
                         mimetype="text/x-python",
                         label="The scene as code, to keep",
@@ -482,8 +564,10 @@ def _(mo):
     **7** look from the front, the right and the top, **5** switches the
     projection, **H** hides the selection and **shift-H** shows only it,
     **space** plays a run. Its tools sit in the top-right corner: legend,
-    axes, framing, projection, theme, a PNG, an export to one HTML file
-    that works without this notebook, and full screen.
+    axes, framing, projection, the pencil that opens the objects to edit,
+    theme, a PNG, an export to one HTML file that works without this
+    notebook, and full screen. The pencil is not on a saved page, which has
+    no python to copy the objects into a session.
     """)
     return
 
@@ -552,10 +636,15 @@ def _(SceneWidget, magpy, mo, np):
         return mo.vstack(
             [
                 mo.md(
-                    "`editable=True` puts out the studio's handles over a studio "
-                    "session in this kernel: **W** moves, **E** turns, **R** resizes, "
-                    "**P** aims, and ⌘Z / ctrl-Z undoes a whole drag. The widget's "
-                    "`objects` are the scene as edited, `to_script()` what was done."
+                    "`editable=True` puts out the studio's handles from the start, "
+                    "over a studio session in this kernel: **W** moves, **E** turns, "
+                    "**R** resizes, **P** aims, and ⌘Z / ctrl-Z undoes a whole drag. "
+                    "The widget's `objects` are the scene as edited, `to_script()` "
+                    "what was done. These are this cell's own objects, so the "
+                    "session holds copies and `rotor` and `pickup` stay as made; "
+                    "the pencil would copy them the same way later. The stack's "
+                    "view above is of a document, so its pencil only puts the "
+                    "handles out, and a drag there is a step in the document."
                 ),
                 SceneWidget(rotor, pickup, editable=True, height=380),
             ]

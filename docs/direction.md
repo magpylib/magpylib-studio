@@ -221,15 +221,15 @@ limits, even on a save that changed nothing. For a while saving the tab offered
 with the `Scene` it built, as one undo step. The degradation above was what
 plain magpylib cannot say, and builder code says it: that running
 `to_builder_script()` rebuilds the same document is tested over every example
-and the scenes the panel leaves (`builder.md` §5). Where it does not -- a gap
-not found yet -- the save is refused rather than carried: it compares the edit
-with the open scene built back from its own tab, so a degradation cannot ride
-along with an edit unnoticed, and a reflexive save never changes anything. It is
-still not a round trip. Nothing is parsed; the tab is executed through the
-panel's own operations; and the tab is the studio's view, regenerated after a
-save, so a helper or a loop typed into it comes back as the steps it made. Plain
-magpylib saved in the tab is refused with a pointer to Open in Magpylib Studio,
-never flattened.
+and the scenes the panel leaves (decision 0017, as measured). Where it does not
+-- a gap not found yet -- the save is refused rather than carried: it compares
+the edit with the open scene built back from its own tab, so a degradation
+cannot ride along with an edit unnoticed, and a reflexive save never changes
+anything. It is still not a round trip. Nothing is parsed; the tab is executed
+through the panel's own operations; and the tab is the studio's view,
+regenerated after a save, so a helper or a loop typed into it comes back as the
+steps it made. Plain magpylib saved in the tab is refused with a pointer to Open
+in Magpylib Studio, never flattened.
 
 ### 5.2 Parameterised instancing
 

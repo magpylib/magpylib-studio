@@ -15,7 +15,13 @@ All notable changes to the Magpylib Studio extension.
 - **Editing in a notebook.** `SceneWidget(..., editable=True)` puts the handles
   over a studio session in the kernel, with nothing of the extension needed:
   `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
-  per settled edit, and `variable_sliders()` for a scene with variables.
+  per settled edit, and `variable_sliders()` for a scene with variables. A view
+  is read only until the pencil among its tools puts the handles out: a scene
+  written in code or a path is shown as its own session from the start, and the
+  cell's own objects are copied into one when the pencil is pressed. Undo stops
+  where the view started, and `reset()`, or the arrow under the undo buttons,
+  takes every edit since back in one undoable step. `editable=None` is a view
+  for looking only: no pencil, and `editable` refuses to turn on.
 - **Writing a scene in code.** A scene is a plain magpylib function under
   `@scene`: its parameters are the variables, with their bounds and kinds in
   `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and
@@ -81,6 +87,11 @@ All notable changes to the Magpylib Studio extension.
 
 ### Changed
 
+- **Opening a scene starts the undo history.** A file, a script or an example
+  loaded is where the scene begins, not an edit of what was open, so the first
+  undo after it takes back the first edit and never the whole scene. The script
+  tab's save and a view's reset still replace the document as one undoable step
+  each.
 - **The legend says what each row is and how many it stands for.** A row that is
   not a group shows its kind as the tree's own icon -- the wireframe of a
   cuboid, a cylinder, a loop, a sensor -- drawn in the colour the object is

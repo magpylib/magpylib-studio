@@ -4551,8 +4551,23 @@ class MagpylibStudioSession:
         return self._mutate_doc(mutate, f"reset {object_id} {path or 'style'}")
 
     def load_scene(self, scene, base_dir=None):
-        """Replace the whole document. `scene` is a document dict or a path to
-        a JSON file containing one. (Script -> document is deferred by design.)
+        """Open `scene` as the document, and start the undo history there: a
+        load is where a scene begins, not an edit of what was open, so the
+        first undo after it takes back the first edit, never the scene. For
+        a replacement that *is* an edit -- the script tab's save, a reset --
+        see `_replace`, which keeps the step.
+
+        `scene` is a document dict or a path to a JSON file containing one.
+        (Script -> document is deferred by design.)
+        """
+        result = self._replace(scene, base_dir, "load scene")
+        if result["ok"]:
+            self.forget_history()
+        return result
+
+    def _replace(self, scene, base_dir, label):
+        """Replace the whole document with `scene`, as one step labelled
+        `label` to undo.
 
         A host with its own filesystem access should pass the dict: reading
         the file here only works where this process can open() it, which is
@@ -4620,7 +4635,7 @@ class MagpylibStudioSession:
         previous_base = self._base_dir
         if base_dir is not None:
             self._base_dir = base_dir
-        result = self._mutate_doc(mutate, "load scene", tolerant=True)
+        result = self._mutate_doc(mutate, label, tolerant=True)
         if not result["ok"]:
             self._base_dir = previous_base
         return result
@@ -4708,8 +4723,6 @@ class MagpylibStudioSession:
             json.loads(json.dumps(entry["doc"])), base_dir=entry.get("base_dir")
         )
         if result["ok"]:
-            if not self._history_paused and self._undo:
-                self._undo[-1]["label"] = f"import {entry['label']}"
             result["scene"] = scene
             result["scenes"] = [c["label"] for c in self._captured_scenes]
             if entry["warnings"]:
@@ -4782,14 +4795,12 @@ class MagpylibStudioSession:
         # put them at its bar instead (`_reposition_for_rollback`): ahead of
         # the objects they move, as often as not.
         rollback, self._rollback = self._rollback, None
-        result = self.load_scene(written)
+        result = self._replace(written, None, "apply builder script")
         if not result["ok"]:
             if rollback is not None:
                 self._rollback = rollback
                 self._build()
             return result
-        if not self._history_paused and self._undo:
-            self._undo[-1]["label"] = "apply builder script"
         warnings = [f"not kept, as no builder call writes it: {what}" for what in lost]
         if unchecked:
             warnings.append(
@@ -4863,11 +4874,8 @@ class MagpylibStudioSession:
                 "ok": False,
                 "error": f"unknown example {name!r}; try one of {sorted(EXAMPLES)}",
             }
-        label, _, build = EXAMPLES[name]
-        result = self.load_scene(build())
-        if result["ok"] and not self._history_paused and self._undo:
-            self._undo[-1]["label"] = f"load {label.lower()}"
-        return result
+        _, _, build = EXAMPLES[name]
+        return self.load_scene(build())
 
     def clear_scene(self):
         """Empty the document: every object, every step and every variable.
@@ -4876,12 +4884,9 @@ class MagpylibStudioSession:
         what they parameterise is gone — and a variable nothing refers to
         cannot be removed by name while anything still does, so leaving them
         would leave a scene that reads as empty and a sidebar that does not.
-        Undo brings the whole document back.
+        Undo brings the whole document back: an edit, not a load.
         """
-        result = self.load_scene({"objects": []})
-        if result["ok"] and not self._history_paused and self._undo:
-            self._undo[-1]["label"] = "clear scene"
-        return result
+        return self._replace({"objects": []}, None, "clear scene")
 
     def batch(self, operations):
         """Apply several mutating operations in one call, e.g.
@@ -4926,12 +4931,18 @@ class MagpylibStudioSession:
         return {"ok": True}
 
     def forget_history(self):
-        """Start the undo history here: what is loaded now is where undo
-        stops. For a host that loads a scene as its starting point rather
-        than as an edit -- a notebook's `edit` -- where undoing the load
-        would take the whole scene away and leave an empty view."""
+        """Start the undo history here: what is in the document now is where
+        undo stops. `load_scene` does this itself; this is for a host that
+        arrives at its starting point another way -- a scene function's
+        build, a notebook view taking a session it did not make."""
         self._undo = []
         self._redo = []
+
+    def restore(self, doc):
+        """Put the document back to `doc`, a snapshot of this session's own,
+        as one step to undo: a view's reset to where its editing started.
+        Where the document lives stays known, so a mesh path still resolves."""
+        return self._replace(json.loads(json.dumps(doc)), self._base_dir, "reset")
 
     def redo(self, steps=1):
         for _ in range(steps):
@@ -5903,7 +5914,7 @@ class MagpylibStudioSession:
         """The scene as a `magpylib_studio.build` script which, run, builds
         this document again -- variables, formulas and patterns included.
         `to_script` is for anyone with magpylib; this is for whoever keeps
-        the scene as code. See `docs/plans/builder.md`."""
+        the scene as code. See decision 0017 in `docs/decisions.md`."""
         from magpylib_studio import build
 
         return build.script_of(self)

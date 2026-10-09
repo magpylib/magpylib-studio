@@ -100,6 +100,24 @@ studio  # W moves, E turns, R resizes, P aims; L for the object's own axes
 `SceneWidget("scene.py", editable=True)` is the same view of a script's objects,
 or of a `.magpy.json` the studio saved.
 
+Most views are left read only, and the pencil among the view's tools (top right,
+with the pointer on the view) puts the handles out. On a view of a scene written
+in code, or of a path — `SceneWidget(s)`, `SceneWidget("scene.py")` — that is
+all it does: the view shows the scene's own session from the start, nothing
+copied, and a drag is a step in that scene, which its field, its file and its
+code then carry. On a view of the cell's own objects, the objects are copied
+into a session first, under the names the cell gave them, and `editable` reads
+True from then on — in marimo the cells that read the view re-run, as they do
+for a selection. `studio.editable = True` is the pencil from code, though in
+marimo only the pencil's own press re-runs cells. Pressed again, the handles go
+away and the session stays: a view with a scene of its own is never re-pointed,
+so a cell that `update`s the view on a slider is refused once there is a
+session, and a view of other objects is a new one. Undo stops where the view
+started — a built scene's own building is not an edit — and `studio.reset()`, or
+the arrow under the undo buttons, takes every edit since back in one step,
+itself one undo away. `editable=None` is a view for looking only, a figure
+handed to someone else: no pencil, and `editable` refuses to turn on.
+
 ```python
 studio.objects["probe"]  # the objects as edited, to compute with
 print(studio.to_script())  # what was built, and every edit, as magpylib code

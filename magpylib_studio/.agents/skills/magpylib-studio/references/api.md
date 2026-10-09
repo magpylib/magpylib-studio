@@ -186,20 +186,14 @@ that moves nothing, and to offer the way back. See `restore_variable`.
 
 ### `session.load_scene(scene, base_dir=None)`
 
-Replace the whole document. `scene` is a document dict or a path to
-a JSON file containing one. (Script -> document is deferred by design.)
+Open `scene` as the document, and start the undo history there: a
+load is where a scene begins, not an edit of what was open, so the
+first undo after it takes back the first edit, never the scene. For
+a replacement that *is* an edit -- the script tab's save, a reset --
+see `_replace`, which keeps the step.
 
-A host with its own filesystem access should pass the dict: reading
-the file here only works where this process can open() it, which is
-not everywhere a document can live. It should pass `base_dir` with
-it — the directory the document was read from, which is what a
-relative mesh path is relative to. Passing the *path* fills it in;
-passing the dict cannot, which is why the parameter exists.
-
-Versions: older documents (including every one written before the
-field existed) are migrated; a newer one is refused, because reading
-it with this engine's vocabulary and saving it back would drop
-whatever it added. See DOC_VERSION.
+`scene` is a document dict or a path to a JSON file containing one.
+(Script -> document is deferred by design.)
 
 ### `session.list_examples()`
 
@@ -216,4 +210,4 @@ Load one of the built-in scenes; see list_examples().
 The scene as a `magpylib_studio.build` script which, run, builds
 this document again -- variables, formulas and patterns included.
 `to_script` is for anyone with magpylib; this is for whoever keeps
-the scene as code. See `docs/plans/builder.md`.
+the scene as code. See decision 0017 in `docs/decisions.md`.

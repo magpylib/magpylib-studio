@@ -1062,8 +1062,14 @@ def test_a_scene_written_in_code_is_edited_as_it_is():
     studio = widget.SceneWidget(s, editable=True)
     assert studio._session is s.session
     assert list(studio.objects) == ["cube"]
-    with pytest.raises(TypeError, match=r"SceneWidget\(scene, editable=True\)"):
-        widget.SceneWidget(s)
+    # Shown without `editable`, it is the same session with the handles
+    # away, and the pencil -- `editable = True` -- only puts them out.
+    looked_at = widget.SceneWidget(s)
+    assert not looked_at.editable and looked_at._session is s.session
+    looked_at.editable = True
+    assert looked_at.editable and looked_at._session is s.session
+    with pytest.raises(TypeError, match="on its own"):
+        widget.SceneWidget(s, magpy.Sensor())
 
     # A variable set from the notebook moves what is written in it, as the
     # panel's slider does, and is one step to take back.
@@ -1193,28 +1199,140 @@ def test_a_studio_is_not_re_pointed():
 
 
 @needs_scene_graph
-def test_a_view_is_editable_from_when_it_is_made(scene_objects):
-    """Handles on a view of the cell's own objects would reach nothing that
-    keeps an edit, so a view is made editable or not -- and what only an
-    editable view can do says so on any other."""
-    view = widget.SceneWidget(*scene_objects)
-    with pytest.raises(traitlets.TraitError, match="editable=True"):
-        view.editable = True
-    assert not view.editable
+def test_the_pencil_puts_a_view_into_editing_later(scene_objects):
+    """A view of the cell's own objects is read only until asked: `editable`
+    set later -- the pencil among the view's tools sets it -- copies the
+    objects into a session at that moment, under the names the cell gave
+    them, as `editable=True` would have at the start. The session's first
+    drawing is no edit, so nothing re-runs for it; and from then on the view
+    is an editable one, not re-pointed and not read only again."""
+    magnet, sensor = scene_objects
+    view = widget.SceneWidget(magnet, sensor)
     with pytest.raises(TypeError, match="editable=True"):
         view.to_script()
-    magnet, sensor = scene_objects
     assert view.objects == {str(id(magnet)): magnet, str(id(sensor)): sensor}
+
+    view.set_state({"editable": True})  # as the pencil's press arrives
+    assert view.editable
+    assert [node["id"] for node in view.tree] == ["magnet", "sensor"]
+    assert view.revision == 0
+    assert isinstance(view.objects["sensor"], magpy.Sensor)
+    assert view.objects["sensor"] is not sensor  # a copy: the cell's stays
+    assert "sensor" in view.to_script()
+    with pytest.raises(TypeError, match="pencil"):
+        view.update(magpy.Sensor())
+    # Set back, the handles go away; the session, and the edits, stay.
+    view.editable = False
+    assert not view.editable and view._session is not None
+    with pytest.raises(TypeError, match="not re-pointed"):
+        view.update(magpy.Sensor())
 
 
 @needs_scene_graph
-def test_a_path_is_opened_to_edit(scene_objects, tmp_path):
-    """A path is a scene to edit, not objects to draw -- and an editable view
-    takes objects and traits, not magpylib's drawing options."""
-    with pytest.raises(TypeError, match="editable=True"):
-        widget.SceneWidget(tmp_path / "scene.py")
+def test_a_view_of_nothing_has_nothing_to_edit(scene_objects):
+    """Handles over nothing would reach nothing that keeps an edit; pointed
+    at objects later, the view has them, named as the cell names them then."""
+    view = widget.SceneWidget()
+    with pytest.raises(traitlets.TraitError, match="nothing to edit"):
+        view.editable = True
+    assert not view.editable
+    magnet, sensor = scene_objects
+    view.update(sensor, magnet)
+    view.editable = True
+    assert [node["id"] for node in view.tree] == ["sensor", "magnet"]
+    assert view._scene is None and view.frames == 1
+
+
+@needs_scene_graph
+def test_a_view_made_with_editable_none_is_never_edited(scene_objects):
+    """`editable=None` is a view for looking only, a figure handed to
+    someone else: no pencil, and the trait refuses to turn on -- of the
+    cell's objects, which it still re-points at will, or of a built scene,
+    shown as its session with nothing to press."""
+    from magpylib_studio import name, scene
+
+    magnet, sensor = scene_objects
+    view = widget.SceneWidget(magnet, sensor, editable=None)
+    assert view.editable is None
+    with pytest.raises(traitlets.TraitError, match="never"):
+        view.editable = True
+    view.update(sensor)
+    assert view.editable is None and len(view.tree) == 1
+
+    @scene
+    def design(r: float = 0.02):
+        name(
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(r, 0, 0)
+            ),
+            "cube",
+        )
+
+    looked_at = widget.SceneWidget(design.build(), editable=None)
+    assert looked_at.editable is None and list(looked_at.objects) == ["cube"]
+    with pytest.raises(traitlets.TraitError, match="never"):
+        looked_at.editable = True
+
+
+@needs_scene_graph
+def test_undo_stops_where_the_view_started_and_reset_goes_back_there():
+    """A built scene's own building is not the view's to undo; and `reset`
+    takes every edit since the view started back in one step, which is
+    itself one undo away -- from code, and from the view's button."""
+    from magpylib_studio import name, scene
+
+    @scene
+    def design(r: float = 0.02):
+        name(
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(r, 0, 0)
+            ),
+            "cube",
+        )
+
+    s = design.build()
+    assert s.session.get_history()["undo"] == []
+    studio = widget.SceneWidget(s, editable=True)
+    studio.sent = []
+    studio.send = lambda message, buffers=None: studio.sent.append(message)
+    assert not studio.undo()
+    assert not studio.reset()  # nothing to take back yet
+
+    studio.set("cube", position=(0.03, 0, 0))
+    studio.set("cube", position=(0.04, 0, 0))
+    revision = studio.revision
+    assert studio.reset()
+    assert studio.revision == revision + 1 and studio.last_edit == {"by": "reset"}
+    assert np.allclose(s.session.get_transform("cube")["position"], (0.02, 0, 0))
+    assert studio.undo()  # the reset itself, in one step
+    assert np.allclose(s.session.get_transform("cube")["position"], (0.04, 0, 0))
+
+    answer = _ask(studio, "reset")
+    assert answer["result"] == {"ok": True, "changed": True}
+    assert studio.last_edit == {"by": "reset"}
+    assert np.allclose(s.session.get_transform("cube")["position"], (0.02, 0, 0))
+
+
+@needs_scene_graph
+def test_a_path_is_opened_as_a_scene_of_its_own(scene_objects, tmp_path):
+    """A path is a scene with a session of its own, shown with the handles
+    away until the pencil -- and a view of a session takes objects and
+    traits, not magpylib's drawing options."""
+    script = tmp_path / "scene.py"
+    script.write_text(
+        "import magpylib as magpy\n"
+        "cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))\n"
+        "magpy.show(cube)\n"
+    )
+    view = widget.SceneWidget(script)
+    assert not view.editable
+    assert list(view.objects) == ["cube"]
+    view.editable = True
+    assert view.editable and list(view.objects) == ["cube"]
     with pytest.raises(TypeError, match="animation"):
         widget.SceneWidget(*scene_objects, editable=True, animation=True)
+    with pytest.raises(TypeError, match="on its own"):
+        widget.SceneWidget(script, *scene_objects)
 
 
 # --- the editable view, as the review of #20 found it ----------------------
