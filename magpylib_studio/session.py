@@ -3773,16 +3773,24 @@ class MagpylibStudioSession:
 
     # --- editing -----------------------------------------------------------
     def apply_edit(self, object_id, path, value):
+        """Set one style path on `object_id`, and rebuild. A pattern's copies
+        are made from their source at the step that copies it, so a style set
+        on the source reaches them only through the replay, as a drag's pose
+        does; set on the live object alone, it changed the source and left the
+        copies as they were until the next rebuild. Tried on the live object
+        first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
-        before = json.loads(json.dumps(self.doc))
         try:
             style_compat.set_style(obj, path, value)
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
             return {"ok": False, "error": str(e)}
-        self._create_event(object_id)["style"] = style_compat.set_values(obj)
-        self.doc["objects"] = self._project()  # keep the projection in step
-        self._record_state(f"edit {object_id} {path}", before)
-        return {"ok": True}
+        style = style_compat.set_values(obj)
+
+        def mutate(doc):
+            self._create_event(object_id)["style"] = style
+            doc["objects"] = self._project()  # keep the projection in step
+
+        return self._mutate_doc(mutate, f"edit {object_id} {path}")
 
     # --- scene structure ---------------------------------------------------
     def add_object(

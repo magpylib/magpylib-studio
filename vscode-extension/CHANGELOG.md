@@ -48,6 +48,10 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **A pattern's copies follow a style edit.** A colour or any style set on the
+  source of a pattern reaches its copies, as a drag's pose does: the edit
+  replays the scene, where before it changed the source alone until the next
+  rebuild.
 - **The panels dock beside the view.** The variables and object panels open in a
   column beside the view, which refits to what is left, rather than floating
   over it: a float had nowhere to go on a narrow view. A handle on the column's

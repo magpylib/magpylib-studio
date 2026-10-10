@@ -5132,3 +5132,26 @@ def test_a_bare_name_in_a_segments_angle_is_made_as_an_angle():
     assert made["thick"]["value"] == pytest.approx(0.01)
     assert made["start"]["bounds"]["unit"] == "angle"
     assert made["start"]["value"] == pytest.approx(0)
+
+
+@needs_scene_graph
+def test_a_style_set_on_a_patterns_source_reaches_its_copies(session):
+    """A pattern's copies are made from their source at the step that copies
+    it: a colour set on the source has to come through to them, as a drag's
+    pose does, an undo take it back, and a reset take it away again."""
+    session.add_object("ring", "Collection")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
+    session.move("r2", [3, 0, 0])
+    assert session.duplicate_around("r2", count=4, spin=90)["ok"]
+    assert "r2#1" in session._objs
+    assert session.apply_edit("r2", "color", "#ff0000")["ok"]
+    assert session._objs["r2"].style.color == "#ff0000"
+    assert session._objs["r2#1"].style.color == "#ff0000"
+    assert session.undo()["ok"]
+    assert session._objs["r2#1"].style.color is None
+    assert session.apply_edit("r2", "color", "#00ff00")["ok"]
+    assert session.reset_style("r2", "color")["ok"]
+    assert session._objs["r2#2"].style.color is None
+    assert session.apply_edit("r2", "color", "no such colour")["ok"] is False
