@@ -48,7 +48,9 @@ scene.widget.picked  # a third: what was clicked
 it, so a `SceneWidget(...)` in one of them is a _new widget per drag_: a new
 element, controls rebuilt from nothing, and the camera back at its opening
 framing — you lose the zoom you were working in. `update()` replaces the drawn
-objects and leaves the view alone, which is what makes a slider smooth.
+objects and leaves the view alone, which is what makes a slider smooth. Such a
+view is made with `editable=None`: no pencil, since an edit would be lost at the
+next move of a slider; `examples/jupyter_demo.ipynb` does that for its sliders.
 
 **The legend** floats over the view: the objects as they are nested, with a
 caret to fold a collection, an eye to hide it and everything in it — shown on
@@ -67,9 +69,10 @@ tree — "the lower ring" is still the one below after a slider has remade both.
 **Keys**, once the view has focus, are the panel's: **F** frames the selection
 and **Home** everything, **1**/**3**/**7** look from the front, right and top,
 **5** switches the projection, **H** hides the selection and **shift-H** shows
-only it, **Esc** lets go, **space** plays. They come from one table in
-`scene3d.mjs` that both hosts use. Tab is the one the widget does not take: in a
-notebook it moves between cells.
+only it, **Esc** lets go, **space** plays. On a view that offers the pencil,
+**W**, **E**, **R** or **P** put the handles out, as the pencil does, in that
+mode. They come from one table in `scene3d.mjs` that both hosts use. Tab is the
+one the widget does not take: in a notebook it moves between cells.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.
@@ -147,11 +150,40 @@ with `write_html` is read only. The handles and their keys are the panel's —
 them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
 swaps the world's axes for the object's own, **S** snaps — and a column down the
 view's right-hand side has the same. The corner reads out the numbers a drag is
-changing, and takes a typed value in their place; the keys button lists every
-key. A collection has handles of its own: select it — its row in the legend, or
-**C** from something in it, and **C** again for the one round that — and a drag
-moves and turns it whole, as one edit to the collection. A slider per variable
-is `variable_sliders()`; how the editable view is built is
+changing, in the scene's units, and takes a typed value in their place —
+`15 mm`, `5°`, or a variable's name, which binds the number to it; a name the
+scene lacks is made at the value it replaces; the keys button lists every key. A
+collection has handles of its own: select it — its row in the legend, or **C**
+from something in it, and **C** again for the one round that — and a drag moves
+and turns it whole, as one edit to the collection. A scene with variables — a
+scene function's parameters, or a saved scene's sliders — has a **sliders**
+toggle at the foot of the edit column, on the right with the handles: a panel
+beside it with a slider per variable, a dropdown for a choice, and a box that
+takes `15 mm` or an expression; drag one and the scene follows, as one edit to
+undo. `view.variables` is `{name: value}` as the scene has them now: a trait a
+marimo cell reads, and one a cell assigns — `view.variables = {"n": 12}` is one
+edit — so another control is tied to it both ways with
+`traitlets.link((call, "values"), (view3d, "variables"))`, the view owning the
+numbers. `call` and `view3d` are the widgets themselves, not the
+`mo.ui.anywidget` elements around them: a marimo cell that names an element
+re-runs on its every change, and would make the link again each time;
+`examples/marimo_demo.py` does it with wigglystuff's call expression. In marimo
+a cell that names the view re-runs on its every change, a click included; one
+that should follow edits alone reads a `mo.state` fed by
+`view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
+whose style says no size is drawn five millimetres across; `style_size=` says
+another. Beside the sliders, the **object** toggle opens the selection's
+parameters and pose, in the scene's units, with expressions as written: type
+`12`, `1.5 cm` or a variable's name into any of them, and a name the scene lacks
+is made at the value it replaces. Under them, **style** folds the object's style
+tree — colour, opacity, label, the magnetization arrows, the path — read when
+opened; a value set there is one step to undo, and the view's own objects carry
+it. One of the two panels is open at a time, and both go with the handles. They
+open in a column beside the view, which refits to what is left; drag the
+column's inner edge to widen it. Narrower than 720 pixels the column is a sheet
+below the view. `V` and `O` open and close them from the keyboard, and while the
+object panel shows the pose the readout stays away, back only for a drag. How
+the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —

@@ -129,6 +129,24 @@
   transition: opacity 0.15s;
 }
 
+/* The tools in groups, a rule between: the camera, what is shown, editing,
+   what you take away, the window. A group with nothing to show -- every
+   button hidden -- takes its rule with it. */
+.magpy-scene-tool-group {
+  display: flex;
+  gap: 1px;
+}
+
+.magpy-scene-tool-group + .magpy-scene-tool-group {
+  margin-left: 3px;
+  padding-left: 3px;
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-scene-tool-group:not(:has(.magpy-icon:not([hidden]))) {
+  display: none;
+}
+
 /* The editing tools, for a view whose objects are a session's: a column on
    the right-hand edge, always in sight -- which handles are out is the state
    of the view, not a tool to reach for. Centred in the height the other tools
@@ -148,6 +166,17 @@
 
 .magpy-animated .magpy-scene-edit {
   bottom: 44px;
+}
+
+/* The toggles of the editor's panels, at the foot of the column. */
+.magpy-scene-edit-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.magpy-scene-edit-panels[hidden] {
+  display: none;
 }
 
 .magpy-scene-edit[hidden] {
@@ -203,6 +232,12 @@
   background: transparent;
   border: none;
   border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* An expression where a number is: the variable deciding the element. */
+.magpy-scene-readout input.expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
 }
 
 .magpy-scene-readout input:focus {
@@ -601,4 +636,648 @@
 /* Nothing drawn under it -- an empty collection -- so nothing to hide. */
 .magpy-legend-row.empty > .magpy-legend-eye {
   visibility: hidden;
+}
+
+/* --- the variables -------------------------------------------------------
+   The scene's variables as a panel: in the widget, the dock's content (see
+   the dock, below), shown with the handles; in the VS Code sidebar, the
+   same rows filling a webview of their own. The rows are `variables.mjs`'s
+   and dressed here once, in the three colours the widget declares and the
+   editor's own where it is the editor (`--vscode-input-*`). */
+.magpy-scene-variables {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 10px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* --- the object panel ----------------------------------------------------
+   The selection's pose, parameters and style, the dock's content as the
+   variables are. The rows are `inspector.mjs`'s, dressed here once for the
+   widget and for the VS Code sidebar, which shows the fuller form. */
+.magpy-scene-inspector {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 10px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.magpy-scene-inspector[hidden] {
+  display: none;
+}
+
+.magpy-ins-name {
+  font-weight: 600;
+}
+
+.magpy-ins-what {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.magpy-ins-generated {
+  font-size: 11px;
+  opacity: 0.8;
+  color: var(--vscode-charts-blue, #3987e5);
+  padding-top: 2px;
+}
+
+.magpy-ins-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 2px;
+}
+
+.magpy-ins details {
+  margin: 6px 0 2px;
+}
+
+.magpy-ins summary {
+  cursor: pointer;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 2px 0;
+}
+
+.magpy-ins summary:hover {
+  opacity: 1;
+}
+
+/* the units in a heading set in capitals keep their case: mm is not MM */
+.magpy-ins summary .magpy-ins-unit {
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+.magpy-ins-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 84px) 1fr 18px;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0 2px 6px;
+}
+
+.magpy-ins-row label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.magpy-ins-unit {
+  opacity: 0.5;
+}
+
+.magpy-ins-set label {
+  font-weight: 600;
+}
+
+.magpy-ins-widget {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  min-width: 0;
+}
+
+.magpy-ins input,
+.magpy-ins select,
+.magpy-ins textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid
+    var(
+      --vscode-input-border,
+      color-mix(in srgb, currentColor 25%, transparent)
+    );
+  border-radius: 3px;
+  padding: 1px 3px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.magpy-ins input[type="color"] {
+  padding: 0;
+  width: 22px;
+  height: 18px;
+  flex: none;
+}
+
+.magpy-ins input[type="range"] {
+  padding: 0;
+}
+
+.magpy-ins-num {
+  width: 48px;
+  flex: none;
+}
+
+.magpy-ins-reset {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.7;
+  padding: 0;
+  font-size: 12px;
+  visibility: hidden;
+}
+
+.magpy-ins-set .magpy-ins-reset {
+  visibility: visible;
+}
+
+.magpy-ins-status {
+  color: var(--vscode-errorForeground, #d13438);
+  white-space: pre-wrap;
+  margin-top: 6px;
+}
+
+.magpy-ins-status:empty {
+  display: none;
+}
+
+.magpy-ins-empty {
+  opacity: 0.7;
+  margin-top: 10px;
+}
+
+.magpy-ins-vec {
+  display: grid;
+  grid-template-columns: repeat(3, 11px 1fr);
+  gap: 3px;
+  align-items: center;
+}
+
+.magpy-ins-vec span {
+  opacity: 0.55;
+  text-align: right;
+  font-size: 10px;
+}
+
+.magpy-ins-readonly input {
+  opacity: 0.6;
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+}
+
+/* a field holding an expression rather than a number; hovering shows its value */
+.magpy-ins input.magpy-ins-expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+.magpy-ins-hint {
+  opacity: 0.6;
+  padding: 0 0 3px 6px;
+  font-size: 11px;
+}
+
+/* A hint that is not an aside: a mesh whose field cannot be trusted has to
+   read differently from the line above it saying how many faces it has. */
+.magpy-ins-warning {
+  opacity: 1;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.magpy-ins textarea {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  resize: vertical;
+}
+
+.magpy-ins-matrix summary {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  opacity: 0.85;
+  padding-left: 6px;
+}
+
+/* the selected construction step, so it is obvious what just changed */
+.magpy-ins-step:not(:empty) {
+  border-left: 2px solid var(--vscode-focusBorder, #3987e5);
+  padding-left: 6px;
+  margin: 4px 0;
+}
+
+.magpy-ins-step summary {
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+/* Over the view, the rows read as the readout and the variables do: the
+   name, then the numbers underlined rather than boxed, and no reset slot; a
+   group's heading is a quiet line, not a capitalised section. (The panel's
+   element is the module's `.magpy-ins` itself, so the rules below name the
+   dock alone.) */
+.magpy-scene-inspector summary {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.magpy-scene-inspector .magpy-ins-row {
+  grid-template-columns: minmax(52px, auto) 1fr;
+  gap: 5px;
+  padding: 1px 0;
+}
+
+.magpy-scene-inspector .magpy-ins-row > :last-child:empty {
+  display: none;
+}
+
+.magpy-scene-inspector details {
+  margin: 3px 0 1px;
+}
+
+.magpy-scene-inspector input[type="text"],
+.magpy-scene-inspector input[type="number"],
+.magpy-scene-inspector select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0;
+  padding: 0 1px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.magpy-scene-inspector input[type="text"]:focus,
+.magpy-scene-inspector input[type="number"]:focus,
+.magpy-scene-inspector select:focus {
+  outline: none;
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-inspector .magpy-ins-empty {
+  margin-top: 2px;
+  padding: 2px 0;
+}
+
+.magpy-scene-inspector .magpy-ins-hint {
+  padding-left: 0;
+}
+
+/* The style tree, folded under its heading: its groups a step in, a slot
+   for the reset mark, the sliders in the view's colour. */
+.magpy-scene-inspector .magpy-ins-props details {
+  margin: 1px 0 1px 8px;
+}
+
+.magpy-scene-inspector .magpy-ins-props .magpy-ins-row {
+  grid-template-columns: minmax(52px, auto) 1fr 14px;
+}
+
+.magpy-scene-inspector .magpy-ins-filter {
+  margin: 2px 0 1px;
+}
+
+.magpy-scene-inspector input[type="range"] {
+  accent-color: var(--vscode-focusBorder);
+}
+
+/* Over the view, the rows read as the readout does: a name, a slider and a
+   number underlined rather than boxed, tabular so a drag does not jitter. */
+.magpy-scene-variables .magpy-vars-row {
+  grid-template-columns: minmax(36px, auto) 1fr 44px;
+  gap: 7px;
+  padding: 1px 0;
+}
+
+.magpy-scene-variables .magpy-vars-acts:empty,
+.magpy-scene-variables .magpy-vars-row input[hidden] {
+  display: none;
+}
+
+/* A choice is its dropdown: it takes the value's column as well. */
+.magpy-scene-variables .magpy-vars-row select {
+  grid-column: 2 / 4;
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="text"],
+.magpy-scene-variables .magpy-vars-row select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0;
+  padding: 0 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="text"]:focus,
+.magpy-scene-variables .magpy-vars-row select:focus {
+  outline: none;
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="range"] {
+  accent-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-variables .magpy-vars-empty {
+  padding: 2px 0;
+}
+
+.magpy-scene-variables[hidden] {
+  display: none;
+}
+
+.magpy-vars-row {
+  display: grid;
+  grid-template-columns: minmax(52px, auto) 1fr 54px auto;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.magpy-vars-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What the value is in -- mm, ° -- quieter than the name it qualifies. */
+.magpy-vars-unit {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+/* Deciding nothing. The row still works -- the value is still the
+   variable's, and other things may come to be written in terms of it -- so
+   this is dimmed rather than disabled: a statement about what it currently
+   reaches, not a control taken away. */
+.magpy-vars-inert .magpy-vars-name,
+.magpy-vars-inert input {
+  opacity: 0.55;
+}
+
+.magpy-vars-row input[type="range"] {
+  width: 100%;
+  min-width: 40px;
+  margin: 0;
+  padding: 0;
+}
+
+.magpy-vars-row input[type="text"],
+.magpy-vars-row select {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid
+    var(
+      --vscode-input-border,
+      color-mix(in srgb, currentColor 25%, transparent)
+    );
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+.magpy-vars-row input.magpy-vars-expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+.magpy-vars-hint {
+  opacity: 0.5;
+  font-size: 10px;
+}
+
+.magpy-vars-acts {
+  display: flex;
+  gap: 2px;
+}
+
+.magpy-vars-acts button {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.magpy-vars-acts button:hover {
+  opacity: 1;
+}
+
+.magpy-vars-range {
+  grid-column: 2 / 4;
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: -3px;
+}
+
+.magpy-vars-empty {
+  opacity: 0.75;
+  padding: 6px 0;
+  line-height: 1.4;
+}
+
+.magpy-vars-help {
+  margin-top: 8px;
+  opacity: 0.85;
+}
+
+.magpy-vars-help summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.magpy-vars-help dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-top: 5px;
+}
+
+.magpy-vars-help dd {
+  margin: 1px 0 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  word-spacing: 4px;
+}
+
+.magpy-vars-help-note {
+  opacity: 0.7;
+  margin-top: 6px;
+}
+
+.magpy-vars-status {
+  color: var(--vscode-errorForeground, #d13438);
+  min-height: 14px;
+  padding-top: 4px;
+}
+
+.magpy-vars-status:empty {
+  display: none;
+}
+
+/* --- the dock ------------------------------------------------------------
+   The panels open in a column beside the view, which refits to what is
+   left; narrower than 720px (`.magpy-narrow`, set by the widget), in a sheet
+   below it, the widget growing by it. One line of title and the mark that
+   closes it; a handle on the column's inner edge drags its width. */
+.magpy-scene.magpy-docked {
+  flex-direction: row;
+}
+
+.magpy-docked .magpy-scene-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.magpy-scene-dock {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--magpy-dock-width, clamp(15em, 34%, 26em));
+  max-width: 70%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  background: var(--vscode-editor-background);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.magpy-scene-dock[hidden],
+.magpy-scene-dock > [hidden] {
+  display: none;
+}
+
+.magpy-scene-dock-head {
+  display: flex;
+  align-items: center;
+  padding: 6px 6px 3px 10px;
+}
+
+.magpy-scene-dock-title {
+  flex: 1 1 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.magpy-scene-dock-close {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  padding: 0 5px 1px;
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.magpy-scene-dock-close:hover,
+.magpy-scene-dock-close:focus-visible {
+  opacity: 1;
+  outline: none;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.magpy-scene-dock-handle {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.magpy-scene-dock-handle:hover {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+}
+
+/* the sheet below a narrow view: the view keeps its height, and the edit
+   column beside it its room */
+.magpy-scene.magpy-docked.magpy-narrow {
+  flex-direction: column;
+}
+
+.magpy-docked.magpy-narrow .magpy-scene-dock {
+  width: auto;
+  max-width: none;
+  max-height: 260px;
+  border-left: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.magpy-docked.magpy-narrow .magpy-scene-dock-handle {
+  display: none;
+}
+
+/* Pose and properties are always there: headings, not folds. Style folds. */
+.magpy-scene-inspector .magpy-ins-transform > details > summary,
+.magpy-scene-inspector .magpy-ins-params > details > summary {
+  list-style: none;
+  pointer-events: none;
+}
+
+.magpy-scene-inspector
+  .magpy-ins-transform
+  > details
+  > summary::-webkit-details-marker,
+.magpy-scene-inspector
+  .magpy-ins-params
+  > details
+  > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* What a panel says about itself as a whole, in the title line: the one
+   restore for the variables a drag or a step took over, plain to see. */
+.magpy-scene-dock-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+}
+
+.magpy-scene-dock-actions[hidden] {
+  display: none;
+}
+
+.magpy-vars-restore {
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent);
+  border: 1px solid
+    color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+  border-radius: 10px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.magpy-vars-restore:hover,
+.magpy-vars-restore:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent);
 }

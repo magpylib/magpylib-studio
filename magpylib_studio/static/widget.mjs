@@ -43,6 +43,8 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
+import { createInspector } from "./inspector.mjs";
+import { QUANTITY, createVariables } from "./variables.mjs";
 
 /** How many renderers may be live on a page at once: pythreejs's number,
  *  half what a browser allows, leaving room for anything else drawing in
@@ -346,11 +348,18 @@ const ICONS = {
   keys:
     '<rect x="1.5" y="4" width="13" height="8" rx="1.5"/>' +
     '<path d="M4 6.75h1M7.5 6.75h1M11 6.75h1M4.5 9.5h7"/>',
+  object:
+    '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/>' +
+    '<path d="M5 6h6M5 8.5h6M5 11h4"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
   redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H9"/>',
   edit: '<path d="M11.5 2.5l2 2-8 8h-2v-2z"/><path d="M10 4l2 2"/>',
   revert: '<path d="M2.5 3v3.5H6"/><path d="M3.2 6.5a5 5 0 1 1-.5 3.5"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
+  sliders:
+    '<path d="M2 4h12M2 8h12M2 12h12"/>' +
+    '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
+    '<circle cx="5" cy="12" r="1.6"/>',
 };
 
 function setIcon(button, icon) {
@@ -416,11 +425,23 @@ const DRAG_WRITES = {
  *  change the length of a number as it crosses a scale, which at pointer
  *  rate reads as a twitch. */
 const FIELD_READS = {
-  position: { unit: "m", decimals: 4, width: "7ch", from: "anchors" },
-  orientation: { unit: "°", decimals: 1, width: "6ch", from: "orientations" },
-  shape: { unit: "m", decimals: 4, width: "7ch", from: "shapes" },
-  polarization: { unit: "T", decimals: 4, width: "7ch", from: "polarizations" },
+  position: { kind: "length", width: "7ch", from: "anchors" },
+  orientation: { kind: "angle", width: "6ch", from: "orientations" },
+  shape: { kind: "length", width: "7ch", from: "shapes" },
+  polarization: { kind: "field", width: "7ch", from: "polarizations" },
 };
+
+/** The unit a kind is shown in when the scene says nothing: SI, and
+ *  degrees. The scene's own choice arrives in the payload (`units`). */
+const SI = {
+  length: { symbol: "m", scale: 1 },
+  angle: { symbol: "°", scale: 1 },
+  field: { symbol: "T", scale: 1 },
+};
+
+/** How much of a number is worth showing in each unit: a tenth of a
+ *  millimetre whether the box says metres or millimetres. */
+const DECIMALS = { m: 4, cm: 2, mm: 2, µm: 1, "°": 1, T: 4, mT: 1, µT: 1 };
 
 /** The keys, as the key list says them: the view's everywhere, and the
  *  handles' where the view edits. */
@@ -437,6 +458,7 @@ const KEY_LIST = {
   edit: [
     ["W · E · R · P", "move, turn, resize, aim the polarization"],
     ["Q", "put the handles away"],
+    ["V · O", "the variables panel, the object panel — again: away"],
     ["X · Y · Z", "along one axis — A: all of them"],
     ["L", "the world's axes, or the object's own"],
     ["C", "select the collection it is in — again: the one round that"],
@@ -551,6 +573,99 @@ function render({ model, el }) {
       commit("editable", out);
     },
   );
+  // The scene's variables as a panel over the view: a slider each, and the
+  // scene following as one is dragged (`variables.mjs`, the same rows as the
+  // studio's Variables view). With the handles, since moving a variable is an
+  // edit like a drag: its toggle is at the foot of the edit column and the
+  // panel docks beside it, so everything about editing hangs on the right
+  // edge and the hover bar above is the view's. Not on a saved page, nor in
+  // the studio panel, whose host has a Variables view of its own. See
+  // `dressEditing`.
+  // the dock the panels open in: made below, once the stage is in place
+  let dock = null;
+  let dockTitle = null;
+  const variablesEl = document.createElement("div");
+  variablesEl.className = "magpy-scene-variables";
+  variablesEl.hidden = true;
+  const variablesButton = iconButton(
+    "sliders",
+    "Variables — drag a value and the scene follows; a typed value takes a " +
+      "unit, 15 mm or 2 cm",
+    () => showVariables(variablesEl.hidden),
+  );
+  pressed(variablesButton, false);
+  // Compact over the view: the rows and nothing else. The limits ride in
+  // the tooltips, and the expression help is the sidebar's.
+  // what the panel says about itself as a whole, in the dock's title line:
+  // the one restore for the variables a drag or a step took over
+  const dockActions = document.createElement("span");
+  dockActions.className = "magpy-scene-dock-actions";
+  const variables = createVariables(variablesEl, {
+    // a preview asks for the scene in the same message, and redraws from it
+    rpc: (method, params, { preview = false } = {}) =>
+      call(method, params, { preview, scene: preview }),
+    onPreview: redrawFromSession,
+    empty: "No variables: a scene function's parameters are its variables.",
+    compact: true,
+    head: dockActions,
+  });
+  function showVariables(open) {
+    variablesEl.hidden = !open;
+    pressed(variablesButton, open);
+    if (open) {
+      if (!inspectorEl.hidden) showInspector(false); // one panel at a time
+      variables.refresh();
+    }
+    syncDock();
+  }
+  // The selection's properties -- its parameters, its pose and, folded under
+  // one heading, its style, as the studio's Inspector shows them
+  // (`inspector.mjs`), compact: no step editor, a cell being a bounded box.
+  // Beside the column with the variables, one of the two open at a time; it
+  // follows the selection.
+  const inspectorEl = document.createElement("div");
+  inspectorEl.className = "magpy-scene-inspector";
+  inspectorEl.hidden = true;
+  const inspectorButton = iconButton(
+    "object",
+    "Object — the selection's parameters, pose and style; type 15 mm, 5° " +
+      "or a variable's name",
+    () => showInspector(inspectorEl.hidden),
+  );
+  pressed(inspectorButton, false);
+  const inspector = createInspector(inspectorEl, {
+    rpc: (method, params) => call(method, params),
+    onEdited: (result) => {
+      if (result?.defined?.length) {
+        const made = result.defined.join(", ");
+        notify(`${made} made, at the value it replaces — the sliders have it`);
+      }
+    },
+    compact: true,
+    empty: "Select an object: its parameters and pose come here.",
+  });
+  function showInspector(open) {
+    inspectorEl.hidden = !open;
+    pressed(inspectorButton, open);
+    if (open) {
+      if (!variablesEl.hidden) showVariables(false); // one panel at a time
+      inspector.show((model.get("selected") || [])[0]);
+    }
+    syncDock();
+    showReadout(); // put away while the panel says the pose, or back
+  }
+  /** The scene as the session has it now, drawn: after a previewed value,
+   *  which python answers without redrawing the view or telling the
+   *  notebook, as it answers a pose mid-drag. The answer carries the scene
+   *  when the call asked for it; else it is asked for. */
+  async function redrawFromSession(answer) {
+    try {
+      const payload = answer?.scene ?? (await editor.scene());
+      if (drawing()) api.render(view, payload);
+    } catch {
+      // the release reports; a preview nobody answered is not worth saying
+    }
+  }
   // Python writes the file -- it has every piece of it on disk -- and hands
   // it back to be saved. A page that is itself an export has no python
   // behind it to ask, and no button.
@@ -604,6 +719,10 @@ function render({ model, el }) {
       ...KEY_LIST.view,
       ...(model.tabWalks
         ? [["Tab", "select the next object — ⇧Tab: the one before"]]
+        : []),
+      // where the pencil is, the handle keys are the pencil
+      ...(!editable() && !editButton.hidden
+        ? [["W · E · R · P", "edit — the handles come out, in that mode"]]
         : []),
       ...(editable() ? KEY_LIST.edit : []),
     ];
@@ -662,6 +781,12 @@ function render({ model, el }) {
     line.className = "magpy-scene-rule";
     return line;
   };
+  // The editor's panels hang on this column, toggled from its foot: the
+  // variables now, the selection later. One home for everything about
+  // editing; the bar above is the view's.
+  const panelToggles = document.createElement("div");
+  panelToggles.className = "magpy-scene-edit-panels";
+  panelToggles.append(rule(), variablesButton, inspectorButton);
   editBar.append(
     ...Object.values(modeButtons),
     spaceButton,
@@ -669,18 +794,23 @@ function render({ model, el }) {
     undoButton,
     redoButton,
     resetButton,
+    panelToggles,
   );
+  // In groups, left to right: the camera; what is shown; editing; what
+  // you take away; the window. A group whose every button is hidden -- the
+  // pencil on a saved page -- goes with them, rule and all (see the CSS).
+  const group = (...buttons) => {
+    const span = document.createElement("span");
+    span.className = "magpy-scene-tool-group";
+    span.append(...buttons);
+    return span;
+  };
   tools.append(
-    legendButton,
-    axesButton,
-    fitButton,
-    projectionButton,
-    editButton,
-    themeButton,
-    pictureButton,
-    exportButton,
-    keysButton,
-    fullscreenButton,
+    group(fitButton, projectionButton),
+    group(legendButton, axesButton, themeButton),
+    group(editButton),
+    group(pictureButton, exportButton),
+    group(keysButton, fullscreenButton),
   );
 
   const transport = document.createElement("div");
@@ -705,7 +835,15 @@ function render({ model, el }) {
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(tools, editBar, keyList, transport, notice);
+  stage.append(
+    tools,
+    editBar,
+    variablesEl,
+    inspectorEl,
+    keyList,
+    transport,
+    notice,
+  );
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -729,12 +867,80 @@ function render({ model, el }) {
     pressed(fullscreenButton, on);
     setIcon(fullscreenButton, on ? "shrink" : "expand");
     name(fullscreenButton, on ? "Leave full screen (Esc)" : "Full screen");
-    // The view's height is the cell's while in the cell, and the screen's
-    // otherwise; the renderer watches its element and follows either way.
-    view.style.height = on ? "" : `${model.get("height")}px`;
+    sizeView();
     el.classList.toggle("magpy-fullscreen", on);
   }
   document.addEventListener("fullscreenchange", onFullscreenChange);
+
+  // --- the dock: the panels in a column beside the view ------------------
+  // A panel is a column beside the view, which refits to what is left, not
+  // a float over it: a float has nowhere to go on a narrow view, where the
+  // trouble is room, not position. The column takes a third of the width,
+  // and a handle on its inner edge drags it. Narrower than 720px it is a
+  // sheet below the view instead, and the widget grows by it: a view of
+  // 460px cannot hold the edit column and a sheet both, and a notebook's
+  // outputs grow with what is in them.
+  // One line of title and the mark that closes it; the column's toggles,
+  // pressed, say which panel is open, so the dock has no tabs of its own.
+  dock = document.createElement("div");
+  dock.className = "magpy-scene-dock";
+  dock.hidden = true;
+  const dockHandle = document.createElement("div");
+  dockHandle.className = "magpy-scene-dock-handle";
+  dockHandle.title = "Drag to resize";
+  const dockHead = document.createElement("div");
+  dockHead.className = "magpy-scene-dock-head";
+  dockTitle = document.createElement("span");
+  dockTitle.className = "magpy-scene-dock-title";
+  const dockClose = document.createElement("button");
+  dockClose.type = "button";
+  dockClose.className = "magpy-scene-dock-close";
+  dockClose.textContent = "×";
+  name(dockClose, "Close the panel");
+  dockClose.addEventListener("click", () => {
+    showVariables(false);
+    showInspector(false);
+  });
+  dockHead.append(dockTitle, dockActions, dockClose);
+  dock.append(dockHandle, dockHead, variablesEl, inspectorEl);
+  el.append(dock);
+  const dockRoom = new ResizeObserver(() =>
+    el.classList.toggle("magpy-narrow", el.clientWidth < 720),
+  );
+  dockRoom.observe(el);
+  dockHandle.addEventListener("pointerdown", (e) => {
+    if (el.classList.contains("magpy-narrow")) return; // the sheet has no edge to drag
+    e.preventDefault();
+    dockHandle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = dock.getBoundingClientRect().width;
+    const move = (ev) => {
+      const w = Math.max(
+        160,
+        Math.min(el.clientWidth * 0.7, startW - (ev.clientX - startX)),
+      );
+      el.style.setProperty("--magpy-dock-width", `${w}px`);
+    };
+    const up = () => {
+      dockHandle.removeEventListener("pointermove", move);
+      dockHandle.removeEventListener("pointerup", up);
+    };
+    dockHandle.addEventListener("pointermove", move);
+    dockHandle.addEventListener("pointerup", up);
+  });
+  /** The dock: open with whichever panel is, and named for it. */
+  function syncDock() {
+    if (!dock) return;
+    dock.hidden = variablesEl.hidden && inspectorEl.hidden;
+    el.classList.toggle("magpy-docked", !dock.hidden);
+    dockTitle.textContent = variablesEl.hidden ? "Object" : "Variables";
+    dockActions.hidden = variablesEl.hidden;
+  }
+  /** The view's height: the cell's while in the cell, and the screen's
+   *  otherwise; the renderer watches its element and follows either way. */
+  function sizeView() {
+    view.style.height = isFullscreen() ? "" : `${model.get("height")}px`;
+  }
 
   // What selection and visibility *mean* is the widget's: they are traitlets.
   // The legend reports what a click would make them, as the view does.
@@ -1022,8 +1228,30 @@ function render({ model, el }) {
    *  and A frees it; L swaps the world's axes for the object's own; S snaps
    *  to round steps. Cmd/Ctrl+Z undoes -- with Shift, redoes. */
   function editKey(event) {
-    if (!editable() || event.altKey) return false;
+    if (event.altKey) return false;
     const key = event.key.toLowerCase();
+    if (!editable()) {
+      // A handle key on a view that offers the pencil does what the pencil
+      // does, and comes up in that mode: pressing W means "move it", and a
+      // keyboard hand need not reach for the mouse once.
+      const mode = HANDLE_KEYS[key];
+      if (
+        !mode ||
+        mode === "none" ||
+        editButton.hidden ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey
+      ) {
+        return false;
+      }
+      handles = mode;
+      notify(
+        "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away",
+      );
+      commit("editable", true);
+      return true;
+    }
     if ((event.metaKey || event.ctrlKey) && key === "z") {
       // A host that has its own undo key -- VS Code runs its keybinding on
       // Cmd+Z in the studio panel -- says so, and the view leaves the key to
@@ -1038,6 +1266,8 @@ function render({ model, el }) {
     else if (key === "a") constrain(null);
     else if (key === "l") toggleSpace();
     else if (key === "s") toggleSnap();
+    else if (key === "v") showVariables(variablesEl.hidden);
+    else if (key === "o") showInspector(inspectorEl.hidden);
     else return false;
     return true;
   }
@@ -1422,6 +1652,11 @@ function render({ model, el }) {
   function dressEditing() {
     editBar.hidden = !editable();
     resetButton.hidden = !editor.reset;
+    // The panels go with the handles, on the column that goes with them.
+    // Not in the studio panel, whose host shows them in its sidebar.
+    panelToggles.hidden = model.editor !== undefined;
+    if (!editable() && !variablesEl.hidden) showVariables(false);
+    if (!editable() && !inspectorEl.hidden) showInspector(false);
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
@@ -1449,7 +1684,7 @@ function render({ model, el }) {
   let nextCall = 0;
   const calls = new Map(); // id -> { timer, settle }
   let dragActive = false; // between a drag's first move and its release
-  function call(method, params = {}) {
+  function call(method, params = {}, { preview = false, scene = false } = {}) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
       const timer = setTimeout(() => {
@@ -1464,7 +1699,18 @@ function render({ model, el }) {
           else resolve(message.result);
         },
       });
-      model.send({ kind: "rpc", id, method, params });
+      // `preview` marks a value the pointer is still on: python applies
+      // it and says nothing to the notebook, as for a pose mid-drag.
+      // `scene` asks for the scene in the same answer, sparing a second
+      // message on a host where every message costs.
+      model.send({
+        kind: "rpc",
+        id,
+        method,
+        params,
+        ...(preview ? { preview: true } : {}),
+        ...(scene ? { scene: true } : {}),
+      });
     });
   }
 
@@ -1493,6 +1739,12 @@ function render({ model, el }) {
     asked
       .then((result) => {
         if (result?.ok === false) notify(result.error);
+        else if (result?.defined?.length) {
+          const made = result.defined.join(", ");
+          notify(
+            `${made} made, at the value it replaces — the sliders have it`,
+          );
+        }
       })
       .catch((error) => {
         if (error.message !== NO_EDIT_ANSWER) notify(error.message);
@@ -1531,7 +1783,22 @@ function render({ model, el }) {
     const numbers = field === "shape" ? value.value : value;
     if (!Array.isArray(numbers) || Array.isArray(numbers[0])) return null;
     const attr = field === "shape" ? value.attr : field;
-    return { objectId: chosen[0], field, attr, numbers, ...read };
+    // in the scene's unit, as the Inspector and the variables show it
+    const unit = model.get("payload")?.units?.[read.kind] || SI[read.kind];
+    // and the expression written where a number is, where one was
+    const expressions =
+      model.get("payload")?.expressions?.[chosen[0]]?.[attr] || null;
+    return {
+      objectId: chosen[0],
+      field,
+      attr,
+      numbers,
+      expressions,
+      unit: unit.symbol,
+      scale: unit.scale,
+      decimals: DECIMALS[unit.symbol] ?? 4,
+      ...read,
+    };
   }
 
   function showReadout() {
@@ -1545,12 +1812,16 @@ function render({ model, el }) {
     readoutTakes.textContent = names.length
       ? `${names.join(", ")} ${decide} this — a drag takes it over`
       : "";
-    const shown = readable();
+    // With the object panel open the pose is in its rows, so the readout is
+    // put away, and comes back for a drag, when the numbers move faster
+    // than a panel reads them.
+    const spoken = inspectorEl.hidden || dragActive;
+    const shown = spoken ? readable() : null;
     if (!shown) {
       readoutKey = "";
       readoutHead.textContent = "";
       readoutFields.replaceChildren();
-      readout.hidden = !readoutTakes.textContent;
+      readout.hidden = !spoken || !readoutTakes.textContent;
       el.classList.toggle("magpy-reading", !readout.hidden);
       return;
     }
@@ -1566,7 +1837,7 @@ function render({ model, el }) {
         unit,
       );
     }
-    fillReadout(shown.numbers, shown.decimals);
+    fillReadout(shown);
     readout.hidden = false;
     el.classList.add("magpy-reading");
   }
@@ -1577,9 +1848,10 @@ function render({ model, el }) {
     // Not `type="number"`: its spinners are noise at this size, and one on a
     // value in metres steps by a metre.
     box.type = "text";
-    box.inputMode = "decimal";
     box.dataset.index = String(index);
-    box.title = "Type a value, or drag the handles";
+    box.title =
+      "Type a value — 15 mm, 5° — or a variable's name; a new name is made " +
+      "at the value it replaces";
     // Enter needs nothing of its own: the browser fires `change` for it, and
     // a second commit of the same value is a second step to undo.
     box.addEventListener("change", commitReadout);
@@ -1588,20 +1860,30 @@ function render({ model, el }) {
       // Back to what the scene says, this box too -- before the blur, whose
       // `change` would otherwise send what was typed.
       const shown = readable();
-      if (shown) {
-        fillReadout(shown.numbers, shown.decimals, { typedOver: true });
-      }
+      if (shown) fillReadout(shown, { typedOver: true });
       box.blur();
     });
     return box;
   }
 
-  function fillReadout(numbers, decimals, { typedOver = false } = {}) {
+  /** The boxes as the scene has them: the number in the scene's unit, or
+   *  the expression written there -- `gap` -- in place of it. */
+  function fillReadout(shown, { typedOver = false, numbers = null } = {}) {
+    const values = numbers ?? shown.numbers;
     for (const box of readoutFields.querySelectorAll("input")) {
       // the box being typed in keeps what is typed, until it is given up
       if (!typedOver && box === box.getRootNode().activeElement) continue;
-      const value = numbers[Number(box.dataset.index)];
-      box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
+      const index = Number(box.dataset.index);
+      const expression = numbers ? null : shown.expressions?.[index];
+      if (expression) {
+        box.value = expression;
+      } else {
+        const value = values[index] * shown.scale;
+        box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(
+          shown.decimals,
+        );
+      }
+      box.classList.toggle("expr", Boolean(expression));
       box.dataset.shown = box.value; // to tell a typed value from a shown one
     }
   }
@@ -1621,36 +1903,61 @@ function render({ model, el }) {
       live = value && !Array.isArray(value[0]) ? [].concat(value) : null;
     }
     if (live?.length === shown.numbers.length) {
-      fillReadout(live, shown.decimals);
+      fillReadout(shown, { numbers: live });
     }
   }
 
   /** What was typed, as the same edit a drag's release sends -- through the
    *  view, which knows whether the object is on a path: a typed pose moves a
-   *  path the way a drag does, rather than replacing it with one pose. */
-  function commitReadout() {
+   *  path the way a drag does, rather than replacing it with one pose.
+   *
+   *  A number is read by the engine, in the scene's unit or the one typed
+   *  with it (`15 mm`, `5°`), so the units live in one place. Anything else
+   *  is an expression: a variable's name binds the element to it, and a name
+   *  the scene lacks is made at the value it replaces. */
+  async function commitReadout() {
     const shown = readable();
     if (!shown || !drawing()) return;
-    // A box left as it was shown sends the value itself, not the rounding
-    // it is shown at: typing x must not round y and z to four decimals. So
-    // does one emptied, or holding something that is not a number.
-    const typed = [...readoutFields.querySelectorAll("input")].map(
-      (box, index) => {
-        const value = box.value.trim() ? Number(box.value) : NaN;
-        return box.value === box.dataset.shown || !Number.isFinite(value)
-          ? shown.numbers[index]
-          : value;
-      },
+    // What each box holds now, as the scene has it: the expression where
+    // one is written, else the number itself rather than the rounding it is
+    // shown at -- typing x must not round y and z to four decimals.
+    const current = shown.numbers.map((value, index) =>
+      shown.expressions?.[index] ? `=${shown.expressions[index]}` : value,
     );
-    if (typed.every((value, index) => value === shown.numbers[index])) {
-      showReadout(); // nothing said, and anything unreadable typed goes back
+    const boxes = [...readoutFields.querySelectorAll("input")];
+    let refused = null;
+    const typed = await Promise.all(
+      boxes.map(async (box, index) => {
+        const text = box.value.trim();
+        if (!text || box.value === box.dataset.shown) return current[index];
+        if (QUANTITY.test(text)) {
+          const read = await editor.quantity(text, shown.kind);
+          if (read?.ok) return read.value;
+          refused = read?.error || `${text} is not a value`;
+          return current[index];
+        }
+        return `=${text.replace(/^=/, "")}`;
+      }),
+    );
+    if (refused) {
+      notify(refused);
+      showReadout(); // what was typed goes back to what the scene says
+      return;
+    }
+    if (typed.every((value, index) => value === current[index])) {
+      showReadout(); // nothing said
       return;
     }
     const edit = { objectId: shown.objectId };
+    const bound = typed.some((value) => typeof value === "string");
     if (shown.field === "shape") {
       edit.shape = { attr: shown.attr, value: typed };
-    } else edit[shown.field] = api.poseEdit(shown.objectId, shown.field, typed);
-    settle(editor.commit([edit]));
+    } else if (bound) {
+      edit[shown.field] = typed; // the engine reads the expression
+    } else {
+      edit[shown.field] = api.poseEdit(shown.objectId, shown.field, typed);
+    }
+    settle(editor.commit([edit], { define: true }));
   }
 
   /** What the view edits through: `begin`, `preview`, `commit`, `scene`,
@@ -1662,13 +1969,19 @@ function render({ model, el }) {
    *  `undoKeys: false` on it leaves Cmd/Ctrl+Z to a host that has its own. */
   const editor = model.editor ?? {
     begin: () => call("begin_interaction"),
-    preview: (edits) => call("apply_edits", { edits }),
-    commit(edits) {
-      const done = call("apply_edits", { edits });
+    // the scene comes back with the pose, and the drag redraws from it
+    preview: (edits) => call("apply_edits", { edits }, { scene: true }),
+    commit(edits, { define = false } = {}) {
+      const done = call("apply_edits", {
+        edits,
+        ...(define ? { define: true } : {}),
+      });
       // after the pose, which the session answers in order
       call("end_interaction").catch(() => {});
       return done;
     },
+    // typed text as a number of `kind`, in the scene's unit or the one typed
+    quantity: (text, kind) => call("quantity", { name: "", text, unit: kind }),
     scene: () => call("get_scene"),
     undo: () => call("undo"),
     redo: () => call("redo"),
@@ -1680,6 +1993,7 @@ function render({ model, el }) {
     patterned: () => new Set(model.get("payload")?.patterned ?? []),
     begin({ objectIds, mode }) {
       dragActive = true;
+      if (!inspectorEl.hidden) showReadout(); // the numbers, for the drag
       if (playing) setPlaying(false); // the pointer is the one being asked
       editor.begin({ objectIds, mode }).catch(() => {});
     },
@@ -1691,6 +2005,7 @@ function render({ model, el }) {
     },
     commit(pose) {
       dragActive = false;
+      if (!inspectorEl.hidden) showReadout(); // and away again
       settle(editor.commit(pose.edits));
     },
   });
@@ -1748,6 +2063,21 @@ function render({ model, el }) {
     if (now.has("axes")) showAxes();
     if (now.has("theme")) retheme();
     if (now.has("editable")) dressEditing();
+    // An edit settled -- an undo, a drag, a value set from python -- and the
+    // rows may say something else now. Not mid-drag: the panel declines
+    // itself, and reads its rows back at the release.
+    if ((now.has("payload") || now.has("revision")) && !variablesEl.hidden) {
+      variables.refresh();
+    }
+    // The object panel follows the selection, and reads the scene back
+    // after an edit settled -- once, since a re-pointed view is both.
+    if (!inspectorEl.hidden) {
+      if (now.has("selected")) {
+        inspector.show((model.get("selected") || [])[0]);
+      } else if (now.has("payload") || now.has("revision")) {
+        inspector.refresh();
+      }
+    }
     if (now.has("payload") || now.has("selected")) showReadout();
     if (now.has("revision") && model.get("revision") !== echoed) {
       // An edit python settled. marimo re-runs the cells that read a widget
@@ -1890,9 +2220,7 @@ function render({ model, el }) {
     }
   }
 
-  model.on("change:height", () => {
-    if (!isFullscreen()) view.style.height = `${model.get("height")}px`;
-  });
+  model.on("change:height", sizeView);
   // Before the first await, so the controls and the legend arrive with the
   // element rather than a frame after it, and dressed for where they are.
   dressTheme();

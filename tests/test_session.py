@@ -282,7 +282,7 @@ def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
 
     With magpylib's defaults an unrelated object can rescale everyone's
     vertices -- autosized objects follow the scene extent, and the SI prefix
-    the whole scene is drawn in follows it too. `pin_scene_units` stops both.
+    the whole scene is drawn in follows it too. `pinned_scene_units` stops both.
     """
     before = session.get_scene()
     cube_before = next(m for m in before["meshes"] if m["object_id"] == "cube")
@@ -336,7 +336,7 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     Asserted on what is *drawn*, not on what is declared, because the two can
     part company: a Sensor's glyph is sized absolutely -- the studio pins it
     that way so moving one object cannot rescale every other, see
-    `threejs.pin_scene_units` -- so it kept magpylib's default size of 1 and
+    `threejs.pinned_scene_units` -- so it kept magpylib's default size of 1 and
     arrived a metre across beside 10 mm magnets, in every example at once.
     """
     session = MagpylibStudioSession()
@@ -1099,7 +1099,7 @@ def test_inspector_offers_only_planes_the_engine_knows():
     from magpylib_studio.session import _MIRROR_NORMALS
 
     source = (
-        pathlib.Path(__file__).parent.parent / "vscode-extension/media/inspector.js"
+        pathlib.Path(__file__).parent.parent / "magpylib_studio/static/inspector.mjs"
     )
     if not source.exists():  # engine installed without the extension beside it
         pytest.skip("extension source not present")
@@ -1195,14 +1195,15 @@ def test_the_variables_panel_uses_every_bound_the_engine_can_write():
     import inspect
     import pathlib
 
+    # The panel the studio's sidebar and the notebook widget both mount.
     panel = (
         pathlib.Path(__file__).parent.parent
-        / "vscode-extension"
-        / "media"
-        / "variables.js"
+        / "magpylib_studio"
+        / "static"
+        / "variables.mjs"
     )
-    if not panel.exists():  # engine installed on its own, no extension beside it
-        pytest.skip("extension sources not present")
+    if not panel.exists():  # tests run against an installed wheel, no checkout
+        pytest.skip("the package's static sources are not beside the tests")
     source = panel.read_text()
 
     limits = [
@@ -5007,3 +5008,165 @@ def test_jsonrpc_roundtrip():
     assert responses[1]["result"] == {"ok": True}
     assert responses[2]["result"]["set"]["opacity"] == 0.5
     assert responses[3]["error"]["type"] == "MethodError"  # unknown method rejected
+
+
+@needs_scene_graph
+def test_a_sensors_pixels_are_drawn_as_instances():
+    """A sensor whose pixels read the field is no longer a mesh of every
+    arrow: its pixels come as one `pixels` item -- a position, a direction,
+    a size and a colour each -- for the view to draw as instances. The
+    sensor keeps its axes, the ranges reach the arrows, the style is as it
+    was, and the 2D arrow symbol stays magpylib's own drawing."""
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    sensor = s._objs["field"]
+    pixels = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
+    before = sensor.style.pixel.size
+    scene = s.get_scene()
+    assert sensor.style.pixel.size == before, "the style is put back"
+    items = [p for p in scene["pixels"] if p["object_id"] == "field"]
+    assert items and sum(len(p["sizes"]) for p in items) == len(pixels)
+    arrows = next(p for p in items if p["symbol"] == "arrow3d")
+    n = len(arrows["sizes"])
+    assert len(arrows["origins"]) == 3 * n and len(arrows["vectors"]) == 3 * n
+    assert len(arrows["colors"]) == n and all(
+        c.startswith("#") for c in arrows["colors"]
+    )
+    assert min(arrows["sizes"]) > 0
+    faces = sum(
+        len(m["index"]) // 3 for m in scene["meshes"] if m["object_id"] == "field"
+    )
+    assert faces < 400, "the sensor's own mesh is its axes, not every arrow"
+    origins = np.asarray(arrows["origins"]).reshape(-1, 3)
+    for axis in range(3):
+        low, high = scene["ranges"][axis]
+        assert low <= origins[:, axis].min() and high >= origins[:, axis].max()
+    assert s.apply_edit("field", "pixel.field.symbol", "arrow")["ok"]
+    assert not [p for p in s.get_scene()["pixels"] if p["object_id"] == "field"]
+
+
+@needs_scene_graph
+def test_a_bare_name_typed_where_a_number_was_is_made_at_that_value():
+    """`apply_edits(define=True)`: a variable's name the document lacks,
+    typed as the whole of a pose's element, is made at the value it
+    replaces, in that kind of unit, in the same step; a name inside a
+    longer expression is still refused by name; the scene then says the
+    expression behind the field, and what unit it is shown in."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    before = s.get_transform("sensor")["position"]
+    result = s.apply_edits(
+        [{"objectId": "sensor", "position": ["=lift", before[1], before[2]]}],
+        define=True,
+    )
+    assert result == {"ok": True, "defined": ["lift"]}
+    variables = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert variables["lift"]["value"] == before[0]
+    assert variables["lift"]["bounds"]["unit"] == "length"
+    assert s.get_transform("sensor")["position"] == pytest.approx(before)
+    assert s.undo()["ok"], "one step"
+    assert "lift" not in {v["name"] for v in s.get_variables()["variables"]}
+    refused = s.apply_edits(
+        [{"objectId": "sensor", "position": ["=2 * lift", 0, 0]}], define=True
+    )
+    assert refused["ok"] is False and "lift" in refused["error"]
+    # the scene says the expression behind a field, and the scene's units
+    assert s.apply_edits([{"objectId": "sensor", "position": ["=gap", 0, 0]}])["ok"]
+    scene = s.get_scene()
+    assert scene["expressions"]["sensor"]["position"] == ["gap", None, None]
+    assert scene["units"]["length"]["symbol"] == "m"
+    s.set_model_unit("mm")
+    assert s.get_scene()["units"]["length"] == {
+        "unit": "length",
+        "symbol": "mm",
+        "scale": 1000.0,
+    }
+
+
+@needs_scene_graph
+def test_set_param_and_set_transform_make_a_bare_name_on_request():
+    """`define` on the two calls the Inspector makes, as on `apply_edits`:
+    a bare name the document lacks is made at the value it replaces, in the
+    field's kind of unit, and the answer names it; one step to undo. Without
+    it, refused by name as it was."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    dimension = next(p for p in s.get_params("r1") if p["name"] == "dimension")["value"]
+    result = s.set_param(
+        "r1", "dimension", ["=edge", dimension[1], dimension[2]], define=True
+    )
+    assert result == {"ok": True, "defined": ["edge"]}
+    made = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert made["edge"]["value"] == pytest.approx(dimension[0])
+    assert made["edge"]["bounds"]["unit"] == "length"
+    assert s.undo()["ok"]
+    assert "edge" not in {v["name"] for v in s.get_variables()["variables"]}
+    pose = s.get_transform("sensor")["orientation"]
+    result = s.set_transform(
+        "sensor", orientation=[pose[0], pose[1], "=twist"], define=True
+    )
+    assert result == {"ok": True, "defined": ["twist"]}
+    twist = {v["name"]: v for v in s.get_variables()["variables"]}["twist"]
+    assert twist["bounds"]["unit"] == "angle"
+    refused = s.set_param("r1", "dimension", ["=nope", 0.01, 0.01])
+    assert refused["ok"] is False and "nope" in refused["error"]
+
+
+@needs_scene_graph
+def test_a_bare_name_in_a_segments_angle_is_made_as_an_angle():
+    """A CylinderSegment's dimension is three lengths and two angles: a name
+    typed in its fourth place is made in degrees, as the field is shown, not
+    in metres as the parameter's kind would say."""
+    s = MagpylibStudioSession()
+    s.add_object(
+        "seg",
+        "magnet.CylinderSegment",
+        params={"dimension": [0.01, 0.02, 0.01, 0, 90], "polarization": [0, 0, 1]},
+    )
+    result = s.set_param(
+        "seg", "dimension", [0.01, 0.02, "=thick", "=start", 90], define=True
+    )
+    assert result == {"ok": True, "defined": ["thick", "start"]}
+    made = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert made["thick"]["bounds"]["unit"] == "length"
+    assert made["thick"]["value"] == pytest.approx(0.01)
+    assert made["start"]["bounds"]["unit"] == "angle"
+    assert made["start"]["value"] == pytest.approx(0)
+
+
+@needs_scene_graph
+def test_a_style_set_on_a_patterns_source_reaches_its_copies(session):
+    """A pattern's copies are made from their source at the step that copies
+    it: a colour set on the source has to come through to them, as a drag's
+    pose does, an undo take it back, and a reset take it away again."""
+    session.add_object("ring", "Collection")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
+    session.move("r2", [3, 0, 0])
+    assert session.duplicate_around("r2", count=4, spin=90)["ok"]
+    assert "r2#1" in session._objs
+    assert session.apply_edit("r2", "color", "#ff0000")["ok"]
+    assert session._objs["r2"].style.color == "#ff0000"
+    assert session._objs["r2#1"].style.color == "#ff0000"
+    assert session.undo()["ok"]
+    assert session._objs["r2#1"].style.color is None
+    assert session.apply_edit("r2", "color", "#00ff00")["ok"]
+    assert session.reset_style("r2", "color")["ok"]
+    assert session._objs["r2#2"].style.color is None
+    assert session.apply_edit("r2", "color", "no such colour")["ok"] is False
+
+
+@needs_scene_graph
+def test_a_copys_traces_say_which_copy_they_are(session):
+    """Drawn under its source's id, a copy's trace still names the copy, so
+    the view can outline the source full and the copies faint."""
+    session.add_object("ring", "Collection")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
+    session.move("r2", [3, 0, 0])
+    assert session.duplicate_around("r2", count=4, spin=90)["ok"]
+    assert "r2#1" in session._objs
+    meshes = [m for m in session.get_scene()["meshes"] if m["object_id"] == "r2"]
+    assert sorted(m.get("copy", "") for m in meshes) == ["", "r2#1", "r2#2", "r2#3"]

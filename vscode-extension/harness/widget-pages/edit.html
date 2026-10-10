@@ -58,9 +58,22 @@
             return;
           }
           const position = message.params?.edits?.[0]?.position;
-          asked.push({ method: message.method, x: position?.[0], position });
+          asked.push({
+            method: message.method,
+            x: position?.[0],
+            position,
+            scene: message.scene === true,
+          });
           if (silent) return;
-          const result = message.method === "get_scene" ? scene : { ok: true };
+          // a preview asks for the scene in its own answer
+          const result =
+            message.method === "get_scene"
+              ? scene
+              : message.method === "quantity"
+                ? { ok: true, value: Number(message.params.text) }
+                : message.scene
+                  ? { ok: true, scene }
+                  : { ok: true };
           setTimeout(
             () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
             20,
@@ -89,6 +102,8 @@
             return done;
           },
           scene: () => answered("get_scene"),
+          quantity: (text) =>
+            Promise.resolve({ ok: true, value: Number(text) }),
           undo: () => answered("undo"),
           redo: () => answered("redo"),
         };

@@ -14,6 +14,12 @@
  *   simulated as that host dresses itself (`widget-pages/hosts.html`);
  * - the renderer pool, as Jupyter and marimo hand the widget its element
  *   (`widget-pages/pool.html`);
+ * - the variables panel, against a fake kernel: offered with the handles,
+ *   a slider drag asking the session in the panel's order and redrawing
+ *   between, a dropdown committing once (`widget-pages/variables.html`);
+ * - the object panel, against a fake kernel: the selection's parameters and
+ *   pose, a value typed read through the engine, a bare name made at the
+ *   value it replaces and said (`widget-pages/inspector.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
  *   a run that plays with no python behind it;
@@ -950,7 +956,8 @@ async function studioDrag(port, base) {
 
 /** The pencil: a read-only view of named objects offers one, and pressing
  *  it saves `editable` for python and brings the edit bar out; a saved page
- *  and a view of nothing offer none. */
+ *  and a view of nothing offer none. W on a view that offers the pencil is
+ *  the pencil, and comes up moving; elsewhere it does nothing. */
 async function pencil(port, base) {
   await check("the pencil puts a read-only view into editing", async () => {
     const tab = await openTab(port);
@@ -965,12 +972,15 @@ async function pencil(port, base) {
         await tab.navigate(`${base}/pages/pencil.html${query}`);
         const result = await tab.until("return window.result", 20_000);
         if (!result) return `${page}: never finished`;
-        const { before, after, again, saved, notice } = result;
+        const { before, after, again, byKey, saved, notice } = result;
         if (before.pencil !== offered) {
           return `${page} ${offered ? "offered no pencil" : "offered a pencil"}`;
         }
         if (before.bar) return `${page}: the edit bar was out before a press`;
-        if (!offered) continue;
+        if (!offered) {
+          if (saved.length || byKey.bar) return `${page}: W did something`;
+          continue;
+        }
         if (!after.bar || !after.pencil || after.pressed !== "true") {
           return `after the press: ${JSON.stringify(after)}`;
         }
@@ -979,7 +989,10 @@ async function pencil(port, base) {
         if (again.bar || again.pressed !== "false") {
           return `pressed again: ${JSON.stringify(again)}`;
         }
-        if (saved.join() !== "true,false") {
+        if (!byKey.bar || byKey.pressed !== "true" || byKey.moving !== "true") {
+          return `W on the read-only view: ${JSON.stringify(byKey)}`;
+        }
+        if (saved.join() !== "true,false,true") {
           return `the presses saved ${saved.join()}`;
         }
       }
@@ -988,6 +1001,195 @@ async function pencil(port, base) {
       await tab.close();
     }
   });
+}
+
+/** The variables panel: an editable view of a scene with variables offers
+ *  it among its tools, and not a saved page or a view with its handles away.
+ *  Open, it lists a row per variable with the control its bounds call for;
+ *  a slider drag asks the session as the studio's Variables view does --
+ *  the undo group opened, previews with the scene redrawn between, the
+ *  release committed once, the group closed, the rows read back -- and a
+ *  dropdown commits its choice once. The handles put away take it along. */
+async function variablesPanel(port, base) {
+  await check("the variables panel edits through the session", async () => {
+    const tab = await openTab(port);
+    try {
+      for (const [query, offered] of [
+        ["?standalone", false],
+        ["?readonly", false],
+        ["", true],
+      ]) {
+        const page = query || "an editable view";
+        await tab.navigate(`${base}/pages/variables.html${query}`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return `${page}: never finished`;
+        if (result.offered !== offered) {
+          return `${page} ${offered ? "offered no variables" : "offered variables"}`;
+        }
+        if (!offered) continue;
+        const { rows, drag, redrawn, chose, afterPencil } = result;
+        const names = rows.map((r) => r.name.split(" ")[0]).join();
+        if (names !== "n,r,axis,free,half") return `the rows were ${names}`;
+        const by = (name) => rows.find((r) => r.name.split(" ")[0] === name);
+        if (!by("n").slider) return "n, a count with a range, has no slider";
+        if (!by("axis").select) return "axis, a choice, has no dropdown";
+        if (by("free").slider || by("free").select) {
+          return "free, with no range, got a control";
+        }
+        if (by("half").slider || by("half").select || !by("half").expression) {
+          return `half, an expression, was ${JSON.stringify(by("half"))}`;
+        }
+        const said = drag.join(" ");
+        if (drag[0] !== "begin_interaction") return `the drag began: ${said}`;
+        const sets = drag.filter((d) => d.startsWith("set_variable"));
+        if (sets.at(-1) !== "set_variable=16") {
+          return `the release committed ${sets.at(-1)}: ${said}`;
+        }
+        if (!sets.slice(0, -1).every((s) => s.startsWith("set_variable*"))) {
+          return `a value under the pointer was no preview: ${said}`;
+        }
+        if (!redrawn) return `nothing redrawn between the values: ${said}`;
+        const closed = drag.indexOf("end_interaction");
+        if (closed < 0 || closed < drag.indexOf("set_variable=16")) {
+          return `the group closed before the release: ${said}`;
+        }
+        if (!drag.slice(closed).includes("get_variables")) {
+          return `the rows were not read back after the release: ${said}`;
+        }
+        if (JSON.stringify(chose) !== JSON.stringify([["axis", "x", false]])) {
+          return `the dropdown sent ${JSON.stringify(chose)}`;
+        }
+        if (afterPencil.button || afterPencil.panel) {
+          return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
+        }
+      }
+      // a variable a step took over: one restore in the dock's title line,
+      // none in the rows, and the restoring one step to undo
+      await tab.navigate(`${base}/pages/variables.html?taken`);
+      const taken = await tab.until("return window.result", 20_000);
+      if (!taken) return "?taken: never finished";
+      if (!taken.restore?.inHead || taken.restore.inRows) {
+        return `the restore was ${JSON.stringify(taken.restore)}`;
+      }
+      if (JSON.stringify(taken.restored) !== JSON.stringify(["r"])) {
+        return `restore sent ${JSON.stringify(taken.restored)}`;
+      }
+      const grouped = taken.grouped;
+      if (
+        grouped[0] !== "begin_interaction" ||
+        !grouped.includes("end_interaction")
+      ) {
+        return `restore was not one step: ${grouped.join(" ")}`;
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** The object panel: toggled from the column, it shows the selection's
+ *  parameters and pose and follows the selection; a typed value is read
+ *  through the engine and set with `define`, a bare name is set as an
+ *  expression and what the engine made is said; the style tree is folded
+ *  and unread until opened, then a colour set goes through the engine;
+ *  opening it closes the variables panel, and the handles put away take it
+ *  along. The dock it opens in is a column beside the view, named for the
+ *  panel, with the readout put away; a 480px view has it as a sheet below,
+ *  the view keeping its height and the widget growing by the sheet. */
+async function objectPanel(port, base) {
+  await check(
+    "the object panel edits the selection through the session",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/inspector.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const {
+          offered,
+          header,
+          rows,
+          poseTitle,
+          oneAtATime,
+          typed,
+          named,
+          notice,
+          afterPencil,
+          style,
+          layout,
+        } = result;
+        if (!offered) return "no object toggle with the handles out";
+        if (header !== "m") return `the header said ${JSON.stringify(header)}`;
+        for (const name of ["dimension", "polarization"]) {
+          if (!rows.includes(name))
+            return `no row for ${name}: ${rows.join(", ")}`;
+        }
+        if (poseTitle !== "pose (m, °)")
+          return `the pose said ${JSON.stringify(poseTitle)}`;
+        if (!oneAtATime) return "the variables panel stayed open beside it";
+        const call = (c) => `${c.method}(${JSON.stringify(c.params)})`;
+        if (
+          typed?.method !== "set_param" ||
+          typed.params.name !== "dimension" ||
+          typed.params.value[0] !== 12 ||
+          typed.params.define !== true
+        ) {
+          return `a typed value sent ${typed ? call(typed) : "nothing"}`;
+        }
+        if (
+          named?.method !== "set_transform" ||
+          named.params.position?.[0] !== "=reach" ||
+          named.params.define !== true
+        ) {
+          return `a bare name sent ${named ? call(named) : "nothing"}`;
+        }
+        if (!notice.includes("reach made"))
+          return `it said ${JSON.stringify(notice)}`;
+        if (!style?.folded) return "the style tree was open unasked";
+        if (!style.lazy) return "the style tree was read before it was opened";
+        for (const name of ["color", "opacity", "label"]) {
+          if (!style.rows.includes(name))
+            return `no style row for ${name}: ${style.rows.join(", ")}`;
+        }
+        if (
+          style.edit?.method !== "apply_edit" ||
+          style.edit.params.path !== "color" ||
+          style.edit.params.value !== "#ff0000"
+        ) {
+          return `a colour set sent ${style.edit ? call(style.edit) : "nothing"}`;
+        }
+        if (afterPencil.button || afterPencil.panel) {
+          return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
+        }
+        if (layout?.narrow || !layout?.beside) {
+          return `the dock was not a column beside the view: ${JSON.stringify(layout)}`;
+        }
+        if (layout.title !== "Object")
+          return `the dock said ${JSON.stringify(layout.title)}`;
+        if (layout.readout) return "the readout stayed under the object panel";
+        if (layout.viewHeight !== layout.height) {
+          return `the view did not keep its height beside the column: ${layout.viewHeight} of ${layout.height}`;
+        }
+        // a narrow view: the sheet below, within the cell's height
+        await tab.navigate(`${base}/pages/inspector.html?narrow`);
+        const sheet = (await tab.until("return window.result", 20_000))?.layout;
+        if (!sheet) return "narrow: never finished";
+        if (!sheet.narrow || !sheet.below) {
+          return `a 480px view had no sheet below it: ${JSON.stringify(sheet)}`;
+        }
+        if (
+          sheet.viewHeight !== sheet.height ||
+          sheet.widgetHeight <= sheet.height
+        ) {
+          return `the sheet did not grow the widget under a whole view: ${JSON.stringify(sheet)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** An editable view against a fake kernel: a drag goes to the session
@@ -1016,7 +1218,10 @@ async function editing(port, base) {
     await check(name, async () => {
       const { result, problem } = await run(query);
       if (!result) return problem;
-      const { asked, buttons } = result;
+      const { buttons } = result;
+      // the edits, in order: a read on the way -- the readout asking what a
+      // typed value means -- is not one of them
+      const asked = result.asked.filter((a) => a.method !== "quantity");
       const said = asked.map((a) => a.method + (a.x ?? "")).join(" ");
       if (!buttons.shown) return "no editing buttons";
       if (buttons.turned !== "true" || buttons.moved !== "true") {
@@ -1047,7 +1252,9 @@ async function editing(port, base) {
       if (poses[0] !== 1 || poses.at(-1) !== 6 || poses.length > 4) {
         return `poses at ${poses.join(", ")}: ${said}`;
       }
-      if (!drag.some((a) => a.method === "get_scene")) {
+      // the scene asked for, in a preview's own answer or in a message of
+      // its own: the kernel editor spares the message, a host's own asks
+      if (!drag.some((a) => a.method === "get_scene" || a.scene)) {
         return `nothing redrawn around the drag: ${said}`;
       }
       const tail = drag.slice(-3).map((a) => a.method + (a.x ?? ""));
@@ -1740,6 +1947,8 @@ try {
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
   await pencil(browser.port, base);
+  await variablesPanel(browser.port, base);
+  await objectPanel(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);

@@ -2,6 +2,7 @@
  * Runs a webview's own script against the real engine, outside VS Code.
  *
  *   node harness/webview-harness.js inspector [example]
+ *   node harness/webview-harness.js variables [example]
  *
  * tsc and ESLint read the webview scripts now that they are files in media/,
  * and check-webview-scripts.js keeps them there — but neither of those runs
@@ -13,6 +14,12 @@
  *
  * The shim implements what the panels actually use and nothing more, so a
  * missing member is a finding, not a gap to paper over.
+ *
+ * The Variables panel and the Inspector are the package's own modules, which
+ * the sidebar and the notebook widget both mount (`magpylib_studio/static/`);
+ * each is imported and mounted against the shim directly (`mountVariables`,
+ * `mountInspector`), with its calls bridged to the engine and recorded in the
+ * shape the sidebar sends.
  */
 const Module = require("module");
 const path = require("path");
@@ -278,37 +285,10 @@ function dump(el, depth = 0, out = []) {
 }
 
 // ------------------------------------------------------------------- mount
-const PANELS = (request) => ({
-  inspector: {
-    elementIds: ["header", "step", "params", "transform", "props", "status"],
-    build: () => {
-      const { InspectorViewProvider } = require(
-        path.join(EXT, "out", "inspectorView.js"),
-      );
-      return new InspectorViewProvider(
-        uri(EXT),
-        request,
-        () => {},
-        () => undefined,
-      );
-    },
-  },
-  variables: {
-    elementIds: ["list", "empty", "help", "helpBody", "status"],
-    build: () => {
-      const { VariablesViewProvider } = require(
-        path.join(EXT, "out", "variablesView.js"),
-      );
-      return new VariablesViewProvider(
-        uri(EXT),
-        request,
-        () => {},
-        () => {},
-        () => {},
-      );
-    },
-  },
-});
+// Panels still mounted through their provider's HTML and a classic script.
+// None today: both panels are modules, mounted below. Kept for the next one
+// that is not.
+const PANELS = () => ({});
 
 /**
  * Run a panel's own script against `engine`, and hand back what a caller needs
@@ -399,6 +379,76 @@ async function mount(which, engine, overrides = {}) {
   return { panel, provider, webview, roots, settle, sent };
 }
 
+/**
+ * Mount the Variables panel -- the package's module -- against the shim, its
+ * `rpc` bridged to `engine`. Hands back the element it rendered into, a pump
+ * that lets the round trips land, and every call it made, in order and in the
+ * shape the sidebar posts them (`type: "rpcRequest"`, `method`, `params`,
+ * `preview`), so a check reads one record whichever host it is about.
+ *
+ * `overrides` replaces globals the module reads: a check that has to decide
+ * when a frame happens passes its own requestAnimationFrame. The module is
+ * ESM and reads the DOM as globals, so the shim is put on `globalThis` for
+ * the life of this process, which is the harness's own.
+ */
+/** The shim as the browser's globals, for a module that reads them. */
+function shimGlobals(overrides = {}) {
+  globalThis.document = document;
+  globalThis.Option = Option;
+  globalThis.requestAnimationFrame =
+    overrides.requestAnimationFrame ?? globals.requestAnimationFrame;
+}
+
+/** Let the rpc round trips settle; each one is a real subprocess call. */
+const settleFor =
+  () =>
+  async (rounds = 40, delay = 25) => {
+    for (let i = 0; i < rounds; i++) {
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  };
+
+async function mountVariables(engine, overrides = {}) {
+  const { pathToFileURL } = require("url");
+  const module = path.join(REPO, "magpylib_studio", "static", "variables.mjs");
+  shimGlobals(overrides);
+  const { createVariables } = await import(pathToFileURL(module).href);
+  const root = new El("div");
+  const sent = [];
+  const panel = createVariables(root, {
+    rpc(method, params = {}, { preview = false } = {}) {
+      sent.push({ type: "rpcRequest", method, params, preview });
+      return engine.request(method, params);
+    },
+  });
+  // The host asks the panel to read its rows once the webview says ready.
+  await panel.refresh();
+  return { panel, root, settle: settleFor(), sent };
+}
+
+/**
+ * Mount the Inspector -- the package's module, in full as the sidebar shows
+ * it -- against the shim, its `rpc` bridged to `engine`. Hands back the
+ * panel, the element it rendered into, a pump, and every call it made, as
+ * `mountVariables` does. `panel.show(id)` is what the host's `select`
+ * message comes to, `panel.refresh()` its `refresh`.
+ */
+async function mountInspector(engine, overrides = {}) {
+  const { pathToFileURL } = require("url");
+  const module = path.join(REPO, "magpylib_studio", "static", "inspector.mjs");
+  shimGlobals(overrides);
+  const { createInspector } = await import(pathToFileURL(module).href);
+  const root = new El("div");
+  const sent = [];
+  const panel = createInspector(root, {
+    rpc(method, params = {}) {
+      sent.push({ type: "rpcRequest", method, params });
+      return engine.request(method, params);
+    },
+  });
+  return { panel, root, settle: settleFor(), sent };
+}
+
 // -------------------------------------------------------------------- main
 async function main() {
   const which = process.argv[2] ?? "inspector";
@@ -407,6 +457,33 @@ async function main() {
 
   if (example) {
     await engine.request("load_example", { name: example });
+  }
+
+  if (which === "variables") {
+    // Nothing to select: the panel loads itself from the scene's variables.
+    const { root, settle } = await mountVariables(engine);
+    await settle(8);
+    console.log(`\n=== ${example ? `${example} variables` : "variables"} ===`);
+    console.log(dump(root).slice(0, 200).join("\n"));
+    engine.proc.kill();
+    process.exit(0);
+  }
+  if (which === "inspector") {
+    const { panel, root, settle } = await mountInspector(engine);
+    const objects = await engine.request("list_objects");
+    for (const target of [
+      objects.find((o) => !o.derived),
+      objects.find((o) => o.derived),
+    ].filter(Boolean)) {
+      await panel.show(target.id);
+      await settle(8);
+      console.log(
+        `\n=== ${target.id}${target.derived ? ` (copy of ${target.derived})` : ""} ===`,
+      );
+      console.log(dump(root).slice(0, 200).join("\n"));
+    }
+    engine.proc.kill();
+    process.exit(0);
   }
 
   const { panel, webview, settle } = await mount(which, engine);
@@ -422,12 +499,7 @@ async function main() {
     }
   };
 
-  if (which === "variables") {
-    // Nothing to select: the panel loads itself from the scene's variables,
-    // and the host asks it for the expression help on ready.
-    await settle();
-    show(example ? `${example} variables` : "variables");
-  } else {
+  {
     const objects = await engine.request("list_objects");
     for (const target of [
       objects.find((o) => !o.derived),
@@ -464,7 +536,7 @@ async function main() {
   process.exit(0);
 }
 
-module.exports = { mount, startEngine, El };
+module.exports = { mount, mountVariables, mountInspector, startEngine, El };
 
 if (require.main === module) {
   main().catch((err) => {

@@ -2,7 +2,9 @@
 
 ## 2026-10-08-1455-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task            | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | --------------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |
@@ -14,7 +16,9 @@ Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are i
 
 ## 2026-10-08-1458-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task           | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | -------------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |
@@ -26,7 +30,9 @@ Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are i
 
 ## 2026-10-08-1502-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task           | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | -------------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |
@@ -38,7 +44,9 @@ Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are i
 
 ## 2026-10-08-1509-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task      | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | --------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |
@@ -52,7 +60,9 @@ Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are i
 
 ## 2026-10-08-1514-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task      | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | --------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |
@@ -64,7 +74,9 @@ Model `haiku`, 1 run(s) per task and condition, checkout `e4d4a57`. Tokens are i
 
 ## 2026-10-08-1521-haiku
 
-Model `haiku`, 1 run(s) per task and condition, checkout `39f4e45`. Tokens are input + output, cache reads included; time is the median run's, in seconds; cost is what Claude Code reported.
+Model `haiku`, 1 run(s) per task and condition, checkout `39f4e45`. Tokens are
+input + output, cache reads included; time is the median run's, in seconds; cost
+is what Claude Code reported.
 
 | task      | condition | passed | turns | tokens | time s | cost $ | refusals | skill read |
 | --------- | --------- | ------ | ----- | ------ | ------ | ------ | -------- | ---------- |

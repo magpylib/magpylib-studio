@@ -145,13 +145,14 @@ except ImportError:
     kernel = None
 
 if kernel is not None:
-    import ipywidgets as widgets
     from IPython.display import display
 
     from magpylib_studio.widget import SceneWidget
 
+    # Editable from the start: the handles, and at the foot of the edit
+    # column the sliders toggle, which opens a slider per variable in the view.
     view = SceneWidget(s, editable=True, height=480)
-    display(widgets.VBox([view.variable_sliders(), view]))
+    display(view)
 else:
     print(
         "\nTo see it and drag its variables: Open in Magpylib Studio (the "

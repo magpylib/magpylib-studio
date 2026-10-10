@@ -785,6 +785,11 @@ const EDGE_ANGLE = 25;
  *  yellower than the green magpylib paints a magnet's south pole. */
 const SELECTION_COLOUR = "#39ff14";
 
+/** How faint a pattern's copies are outlined beside their source, drawn in
+ *  full: the family reads as one leader and its followers, and a click on
+ *  any of them selects the source. */
+const COPY_OUTLINE = 0.35;
+
 /** How wide, in pixels, the selection's lines are: an edge in view, a path or
  *  a wire, and an edge the shape hides, drawn faintly through it. A plain GL
  *  line is one pixel whatever it is asked for, which is easy to miss. */
@@ -811,7 +816,7 @@ const wideMaterials = new Set();
  *
  * Each part hangs on the trace it marks, so it moves with it.
  */
-function outline(objectIds, opacity) {
+function outline(objectIds, opacity, copyOpacity = opacity) {
   const added = [];
   const hang = (on, part) => {
     part.raycast = () => {}; // an indicator, not a target
@@ -825,8 +830,9 @@ function outline(objectIds, opacity) {
     if (!node?.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue; // a handle, or another node
+      const own = trace.userData.copy ? copyOpacity : opacity;
       if (trace.isMesh) {
-        outlineShape(trace, opacity, hang);
+        outlineShape(trace, own, hang);
         continue;
       }
       // A scatter: its lines take the selection's colour, and its markers
@@ -838,10 +844,10 @@ function outline(objectIds, opacity) {
             part.geometry.getAttribute("position").array,
           );
           if (pairs.length) {
-            hang(part, wideSegments(pairs, OUTLINE_WIDTH, opacity, true));
+            hang(part, wideSegments(pairs, OUTLINE_WIDTH, own, true));
           }
         } else if (trace.userData.path && part.isPoints) {
-          hang(part, pathMarkers(part, opacity));
+          hang(part, pathMarkers(part, own));
         }
       }
     }
@@ -1055,6 +1061,105 @@ export function withPenLifts(position) {
   return Float32Array.from(position, (value) => (value === null ? NaN : value));
 }
 
+/** One trace as the thing drawn: a mesh, a sensor's pixels, or a scatter.
+ *  A pattern's copy, drawn under its source, is marked as the copy it is,
+ *  for the outline to draw it fainter than the source. */
+function buildItem(item) {
+  const built =
+    item.kind === "mesh"
+      ? buildMesh(item)
+      : item.kind === "pixels"
+        ? buildPixels(item)
+        : buildScatter(item);
+  if (item.copy) built.userData.copy = item.copy;
+  return built;
+}
+
+/** A sensor's pixels, instanced: one shape -- the arrow magpylib draws, a
+ *  cone, or a cube -- placed, turned along its reading, scaled and coloured
+ *  per pixel from the matrices alone. A 7 x 7 probe was a mesh of 49
+ *  arrows, a hundred kilobytes a frame; this is a few hundred numbers and
+ *  one draw call a part. Picked as the sensor, like its axes; not outlined,
+ *  as its arrows were not. */
+function buildPixels(item) {
+  const group = new THREE.Group();
+  group.name = item.name;
+  group.userData.trace = true;
+  const count = item.sizes.length;
+  const material = new THREE.MeshLambertMaterial({
+    transparent: item.opacity < 1,
+    opacity: item.opacity,
+  });
+  const parts = pixelShape(item.symbol).map(
+    (geometry) => new THREE.InstancedMesh(geometry, material, count),
+  );
+  const matrix = new THREE.Matrix4();
+  const at = new THREE.Vector3();
+  const turn = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 0, 1);
+  const along = new THREE.Vector3();
+  const colour = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    at.set(
+      item.origins[i * 3],
+      item.origins[i * 3 + 1],
+      item.origins[i * 3 + 2],
+    );
+    if (item.vectors) {
+      along
+        .set(
+          item.vectors[i * 3],
+          item.vectors[i * 3 + 1],
+          item.vectors[i * 3 + 2],
+        )
+        .normalize();
+      turn.setFromUnitVectors(up, along);
+    } else {
+      turn.identity();
+    }
+    const size = item.sizes[i];
+    scale.set(size, size, size);
+    matrix.compose(at, turn, scale);
+    colour.set(Array.isArray(item.colors) ? item.colors[i] : item.colors);
+    for (const part of parts) {
+      part.setMatrixAt(i, matrix);
+      part.setColorAt(i, colour);
+    }
+  }
+  for (const part of parts) {
+    part.instanceMatrix.needsUpdate = true;
+    part.instanceColor.needsUpdate = true;
+    // so framing and picking see the instances, not the one shape at the origin
+    part.computeBoundingBox();
+    part.computeBoundingSphere();
+    part.userData.trace = true;
+    group.add(part);
+  }
+  return group;
+}
+
+/** The shape a pixel is drawn as, at size 1 and pointing along z, as
+ *  magpylib's `make_Pixels` draws it: an arrow is a five-sided shaft of
+ *  half the size behind a head as wide as the size, tail to tip two sizes
+ *  long with the pixel in the middle; a cone is two sizes tall, a cube one
+ *  size across. Built per sensor, so disposing a node disposes nothing shared. */
+function pixelShape(symbol) {
+  if (symbol === "cube") return [new THREE.BoxGeometry(1, 1, 1)];
+  if (symbol === "cone") {
+    const cone = new THREE.ConeGeometry(0.5, 2, 5);
+    cone.rotateX(Math.PI / 2); // three's cones stand on y; a reading points along z
+    return [cone];
+  }
+  const shaft = new THREE.CylinderGeometry(0.25, 0.25, 1, 5);
+  shaft.rotateX(Math.PI / 2);
+  shaft.translate(0, 0, -0.5);
+  const head = new THREE.ConeGeometry(0.5, 1, 5);
+  head.rotateX(Math.PI / 2);
+  head.translate(0, 0, 0.5);
+  return [shaft, head];
+}
+
 function buildScatter(item) {
   const geometry = new THREE.BufferGeometry();
   const position = withPenLifts(item.position);
@@ -1141,7 +1246,7 @@ function highlight(objectIds) {
 /** Outline the selection afresh, round whatever is drawn for it now. */
 function drawOutlines() {
   takeOff(outlines);
-  outlines = outline(selectedIds, 1);
+  outlines = outline(selectedIds, 1, COPY_OUTLINE);
 }
 
 /** Where a drag of several objects turns about: the middle of what is
@@ -1490,6 +1595,13 @@ function clearNode(node) {
   }
 }
 
+/** Every item a payload draws: its meshes, its scatters and -- in a scene
+ *  the engine drew -- its sensors' pixels. A frame of a run has no pixels
+ *  of its own; its sensors came as meshes. */
+function drawnItems(payload) {
+  return payload.meshes.concat(payload.scatters, payload.pixels ?? []);
+}
+
 function discard(held) {
   for (const [objectId, node] of byObjectId) {
     if (held.has(objectId)) continue;
@@ -1527,10 +1639,10 @@ function renderFrame(payload) {
   changes = [];
   changing = [];
   luts = payload.luts ?? [];
-  for (const item of payload.meshes.concat(payload.scatters)) {
+  for (const item of drawnItems(payload)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
-    node.add(item.kind === "mesh" ? buildMesh(item) : buildScatter(item));
+    node.add(buildItem(item));
   }
   placeCollections();
   // round the nodes just built, not the ones discarded
@@ -1568,7 +1680,7 @@ function poseFrame(index) {
       part.material?.map?.dispose();
       part.material?.dispose();
     });
-    entry.built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
+    entry.built = buildItem(item);
     entry.node.attach(entry.built);
   }
   // What moved carries its outline; what was built again needs a new one.
@@ -1772,10 +1884,10 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   luts = payload.luts ?? [];
   // `attach` keeps each trace where magpylib put it while re-parenting it, so
   // the baked world coordinates survive the move onto the object's own node.
-  for (const item of payload.meshes.concat(payload.scatters)) {
+  for (const item of drawnItems(payload)) {
     if (held.has(item.object_id) && !readings.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
-    const built = item.kind === "mesh" ? buildMesh(item) : buildScatter(item);
+    const built = buildItem(item);
     node.attach(built);
     if (item.track != null) {
       tracked.push({ built, rest: built.matrix.clone(), track: item.track });

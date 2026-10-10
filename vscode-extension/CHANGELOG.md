@@ -15,13 +15,18 @@ All notable changes to the Magpylib Studio extension.
 - **Editing in a notebook.** `SceneWidget(..., editable=True)` puts the handles
   over a studio session in the kernel, with nothing of the extension needed:
   `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
-  per settled edit, and `variable_sliders()` for a scene with variables. A view
-  is read only until the pencil among its tools puts the handles out: a scene
-  written in code or a path is shown as its own session from the start, and the
-  cell's own objects are copied into one when the pencil is pressed. Undo stops
-  where the view started, and `reset()`, or the arrow under the undo buttons,
-  takes every edit since back in one undoable step. `editable=None` is a view
-  for looking only: no pencil, and `editable` refuses to turn on.
+  per settled edit, and for a scene with variables a **sliders** toggle at the
+  foot of the edit column: the studio's Variables panel beside it — a slider
+  each, the scene following as one is dragged, a dropdown for a choice, `15 mm`
+  typed and read in its unit — with a `variables` trait a cell reads, assigns,
+  or ties another control to with `traitlets.link`. The studio's own Variables
+  view is that panel, mounted in the sidebar. A view is read only until the
+  pencil among its tools puts the handles out: a scene written in code or a path
+  is shown as its own session from the start, and the cell's own objects are
+  copied into one when the pencil is pressed. Undo stops where the view started,
+  and `reset()`, or the arrow under the undo buttons, takes every edit since
+  back in one undoable step. `editable=None` is a view for looking only: no
+  pencil, and `editable` refuses to turn on.
 - **Writing a scene in code.** A scene is a plain magpylib function under
   `@scene`: its parameters are the variables, with their bounds and kinds in
   `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and
@@ -43,8 +48,62 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **A pattern's copies follow a style edit.** A colour or any style set on the
+  source of a pattern reaches its copies, as a drag's pose does: the edit
+  replays the scene, where before it changed the source alone until the next
+  rebuild.
+- **The source is drawn full, its copies faint.** With a pattern's source
+  selected, the view outlines the source in full and its copies at a third, so
+  the family reads as one leader and its followers; a click on any of them
+  selects the source, as before.
+- **The panels dock beside the view.** The variables and object panels open in a
+  column beside the view, which refits to what is left, rather than floating
+  over it: a float had nowhere to go on a narrow view. A handle on the column's
+  inner edge drags its width; narrower than 720 pixels the column is a sheet
+  below the view, and the widget grows by it. The dock has one line of title and
+  a close mark; the column's toggles say which panel is open. `V` and `O` open
+  them from the keyboard. While the object panel shows the pose the readout
+  stays away, and comes back for the length of a drag; pose and properties are
+  headings, not folds.
+- **The object panel.** Beside the sliders toggle, an object toggle opens the
+  selection's parameters and pose over the view: the studio's Inspector, in its
+  compact form, in the scene's units with expressions as written. A value typed
+  is read by the engine, `12` or `1.5 cm`, and a variable's name binds the
+  number; a name the scene lacks is made at the value it replaces, which the
+  engine now does for the Inspector's own calls (`set_param` and `set_transform`
+  take `define`). Under them, the object's style tree folded under one heading,
+  read when opened: colour, opacity, label, the magnetization arrows, the path;
+  a value set there is one step to undo, told to the notebook as a `set` of
+  `style.<path>`. The studio's own Inspector is that panel, mounted in the
+  sidebar in full.
+- **The readout takes units and variables.** The numbers a drag writes, at the
+  foot of the view, show in the scene's units and take `15 mm`, `2 cm`, `5°` as
+  the Inspector's boxes do; a variable's name typed there binds the number to it
+  and shows in its place, and a name the scene lacks is made at the value it
+  replaces, one step to undo, name and all. The engine does the making
+  (`apply_edits(define=True)`), so the Inspector can ask the same.
+- **The view's tools in groups**, a rule between: the camera, what is shown, the
+  pencil, what you take away, the window. And **W**, **E**, **R** or **P** on a
+  view that offers the pencil put the handles out, as the pencil does, in that
+  mode.
 - An import of plain magpylib (`load_script`) now names the variables it turned
   into numbers, where it used to say nothing.
+- **A drag's frame is one message.** A slider's or a handle's preview asks for
+  the scene in its own answer, where the view used to ask for it in a second
+  message: half the wait per frame on a notebook host whose every message costs,
+  marimo's most of all.
+- **A sensor's field arrows are drawn as instances.** A sensor whose pixels read
+  the field was one mesh of every arrow, a hundred kilobytes of a frame for the
+  Halbach example's 7 × 7 probe; its pixels now travel as a position, a
+  direction, a size and a colour each, and the view draws one shape that many
+  times, sized and coloured as magpylib does. The frame is a third of the size.
+  A sensor switched to the 2D `arrow` symbol no longer fails to draw.
+- **A bare sensor draws at the studio's size.** A sensor or dipole whose style
+  says no size used to draw a metre across in a scene function's scene, since
+  the studio draws them at their stated size and magpylib's default is 1; it is
+  5 mm now, a size the style does say is kept, and magpylib's display defaults
+  are put back after each drawing, where the studio used to leave them changed
+  for the notebook's own figures.
 - **Units.** A variable can say what it measures — length, angle, field, current
   — chosen when **New Variable…** asks what it holds, or later under **Variable
   Properties…**. Each prompt for a value says the unit a bare number is read in
