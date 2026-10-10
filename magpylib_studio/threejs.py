@@ -1300,6 +1300,7 @@ def view_payload(scene, index=None, traces=None):
         "shapes": {},
         "polarizations": {},
         "patterned": [],
+        "copies": {},
         "collections": {},
     }
 
@@ -1429,6 +1430,9 @@ def scene_payload(objects, live=None, derived=None):
         "shapes": shapes,
         "polarizations": polarizations,
         "patterned": sorted({*derived, *split}),
+        # each pattern's copies in the order it made them, for the view to
+        # trace the path they were laid on
+        "copies": {source: list(made) for source, made in derived.items()},
         "readings": sorted(readings),
         "collections": collections,
     }
