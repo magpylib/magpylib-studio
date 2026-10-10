@@ -186,6 +186,8 @@ object panel shows the pose the readout stays away, back only for a drag. How
 the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
+![The widget with its variables panel open in the column beside the view, and with the object panel open on the ring's source, its copies outlined faint](../widget-panels.png)
+
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`
 bundles them with three.js into `magpylib_studio/static/widget.js`, which is
