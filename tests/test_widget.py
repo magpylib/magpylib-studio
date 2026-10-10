@@ -13,6 +13,7 @@ import io
 import json
 import re
 import tempfile
+from typing import Annotated
 
 import magpylib as magpy
 import numpy as np
@@ -898,14 +899,58 @@ def _studio(**traits):
     return studio
 
 
-def _ask(studio, method, **params):
-    """What the view sends when it calls the session, and the answer."""
-    studio._on_message(
-        studio,
-        {"kind": "rpc", "id": len(studio.sent), "method": method, "params": params},
-        [],
-    )
+def _ask(studio, method, preview=False, scene=False, **params):
+    """What the view sends when it calls the session, and the answer.
+    `preview` marks a value the pointer is still on, as the view marks one;
+    `scene` asks for the scene in the same answer, as a preview does."""
+    message = {
+        "kind": "rpc",
+        "id": len(studio.sent),
+        "method": method,
+        "params": params,
+    }
+    if preview:
+        message["preview"] = True
+    if scene:
+        message["scene"] = True
+    studio._on_message(studio, message, [])
     return studio.sent[-1]
+
+
+def _design():
+    """A scene with one variable of each kind: a count with a slider range, a
+    length with hard limits, a choice, a number with no range, and one that
+    follows the others."""
+    from typing import Annotated, Literal
+
+    from magpylib_studio import Count, Length, derived, duplicate_around, name, scene
+
+    @scene
+    def design(
+        n: Annotated[int, Count(2, 60, slider=(4, 20))] = 10,
+        r: Annotated[float, Length(0.005, 0.08)] = 0.02,
+        axis: Literal["x", "y", "z"] = "z",
+        free: float = 3.0,
+    ):
+        derived("half", r / 2)
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
+            ),
+            "m",
+        )
+        name(magpy.Collection(magnet), "ring")
+        duplicate_around(magnet, count=n, axis=axis)
+
+    return design
+
+
+def _studio_of(scene):
+    """An editable view of a scene written in code, its messages kept."""
+    studio = widget.SceneWidget(scene.build(), editable=True)
+    studio.sent = []
+    studio.send = lambda message, buffers=None: studio.sent.append(message)
+    return studio
 
 
 @needs_scene_graph
@@ -1483,3 +1528,236 @@ def test_a_saved_step_that_no_longer_applies_is_said(tmp_path):
     saved.write_text(json.dumps(doc))
     with pytest.warns(UserWarning, match="no longer applies"):
         widget.SceneWidget(saved, editable=True)
+
+
+@needs_scene_graph
+def test_the_views_variables_follow_the_scene():
+    """`variables` holds every variable as resolved, for a cell to read, and
+    follows a `set_variable` from code and an undo. A view of the cell's own
+    objects has none."""
+    studio = _studio_of(_design())
+    assert studio.variables == {
+        "n": 10,
+        "r": 0.02,
+        "axis": "z",
+        "free": 3.0,
+        "half": 0.01,
+    }
+    studio.set_variable("r", 0.03)
+    assert studio.variables["r"] == 0.03
+    assert studio.variables["half"] == 0.015
+    assert studio.undo()
+    assert studio.variables["r"] == 0.02
+    plain = widget.SceneWidget(magpy.Sensor(), editable=True)
+    assert plain.variables == {}
+
+
+@needs_scene_graph
+def test_the_views_variables_panel_edits_through_the_session():
+    """The panel in the view lists the variables and sets them as the studio's
+    Variables view does: a value the pointer is still on changes the scene
+    and tells the notebook nothing, the release settles once with its news,
+    and one undo takes the whole gesture back."""
+    studio = _studio_of(_design())
+    listed = _ask(studio, "get_variables")["result"]
+    assert [v["name"] for v in listed["variables"]] == [
+        "n",
+        "r",
+        "axis",
+        "free",
+        "half",
+    ]
+    revision = studio.revision
+
+    _ask(studio, "begin_interaction")
+    for value in (0.025, 0.03):
+        answer = _ask(studio, "set_variable", name="r", value=value, preview=True)
+        assert answer["result"]["ok"]
+    assert studio.objects["m"].position == pytest.approx([0.03, 0, 0])
+    assert studio.revision == revision, "a preview is no news"
+    assert studio.variables["r"] == 0.02, "nor is the trait moved by one"
+
+    _ask(studio, "set_variable", name="r", value=0.04)
+    _ask(studio, "end_interaction")
+    assert studio.revision == revision + 1, "the release is told once"
+    assert studio.last_edit == {"by": "set_variable", "variable": "r", "value": 0.04}
+    assert studio.variables["r"] == 0.04
+    assert studio.objects["m"].position == pytest.approx([0.04, 0, 0])
+
+    assert studio.undo(), "the whole drag is one step"
+    assert studio.variables["r"] == 0.02
+    assert not studio.undo(), "and nothing before it belongs to the view"
+
+
+@needs_scene_graph
+def test_a_choice_and_a_typed_value_commit_as_one_edit_each():
+    """A dropdown's pick and a typed `3 cm` are each one settled edit; the
+    typed text is read by the engine, in the variable's unit."""
+    studio = _studio_of(_design())
+    revision = studio.revision
+    read = _ask(studio, "quantity", name="r", text="3 cm")["result"]
+    assert read == {"ok": True, "value": 0.03}
+    _ask(studio, "set_variable", name="r", value=read["value"])
+    _ask(studio, "set_variable", name="axis", value="x")
+    assert studio.revision == revision + 2
+    assert studio.last_edit == {"by": "set_variable", "variable": "axis", "value": "x"}
+    assert studio.variables["axis"] == "x"
+    help_ = _ask(studio, "expression_help")["result"]
+    assert "sin" in help_["functions"]
+
+
+@needs_scene_graph
+def test_a_refused_variable_is_reported_and_changes_nothing():
+    """A value past the hard limits is refused in the answer, as the panel
+    shows it, and the notebook hears nothing."""
+    studio = _studio_of(_design())
+    revision = studio.revision
+    answer = _ask(studio, "set_variable", name="n", value=1000)
+    assert answer["result"]["ok"] is False
+    assert "n" in answer["result"]["error"]
+    assert studio.revision == revision
+    assert studio.variables["n"] == 10
+    # and a variable's other operations stay off limits
+    assert _ask(studio, "remove_variable", name="n")["error"]["type"] == "MethodError"
+
+
+@needs_scene_graph
+def test_variables_assigned_set_the_scene_and_read_it_back():
+    """`variables` assigned sets what differs, as one edit, and then holds
+    every variable as the scene has it; the same values are no edit; a name
+    the scene has no variable of, or a value past its limits, is refused and
+    nothing changes."""
+    studio = _studio_of(_design())
+    revision = studio.revision
+    studio.variables = {"n": 12, "axis": "x"}
+    assert studio.variables == {
+        "n": 12,
+        "r": 0.02,
+        "axis": "x",
+        "free": 3.0,
+        "half": 0.01,
+    }
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {"by": "set_variables", "values": {"n": 12, "axis": "x"}}
+    assert studio.undo(), "both in one step"
+    assert (studio.variables["n"], studio.variables["axis"]) == (10, "z")
+    studio.variables = {"r": 0.03}
+    assert studio.last_edit == {"by": "set_variable", "variable": "r", "value": 0.03}
+    assert studio.objects["m"].position == pytest.approx([0.03, 0, 0])
+    told = studio.revision
+    studio.variables = dict(studio.variables)  # the same values: no edit
+    studio.variables = {"r": 0.03}  # a part of them, unchanged: no edit either
+    assert studio.revision == told
+    assert studio.variables["half"] == 0.015, "and the trait still holds them all"
+    with pytest.raises(ValueError, match="n"):
+        studio.variables = {"n": 1000, "r": 0.04}
+    assert (studio.variables["n"], studio.variables["r"]) == (10, 0.03)
+    assert studio.revision == told
+    with pytest.raises(ValueError, match="typo"):
+        studio.variables = {"typo": 1}
+    assert "typo" not in studio.variables
+    plain = widget.SceneWidget(magpy.Sensor(), editable=False)
+    with pytest.raises(TypeError, match="scene of its own"):
+        plain.variables = {"n": 1}
+
+
+@needs_scene_graph
+def test_another_controls_trait_links_to_the_variables_both_ways():
+    """A `traitlets.link` from a control's trait -- a call expression's
+    values -- moves the scene when the control moves, and the control when
+    the view's own sliders, or python, move a variable."""
+    studio = _studio_of(_design())
+
+    class Knobs(traitlets.HasTraits):
+        values = traitlets.Dict()
+
+    knobs = Knobs(values={"n": 10, "r": 0.02, "axis": "z", "free": 3.0})
+    traitlets.link((knobs, "values"), (studio, "variables"))
+    assert studio.variables["half"] == 0.01, "the link's first copy is no edit"
+    knobs.values = {**knobs.values, "n": 14}
+    assert studio.variables["n"] == 14
+    assert len(studio.objects["ring"].children) == 14
+    # A link guards against an echo while it is the one updating, so the
+    # scene's read-back -- every variable, the derived one included -- reaches
+    # the control with the next change the view makes, not with its own.
+    assert "half" not in knobs.values
+    _ask(studio, "set_variable", name="r", value=0.03)  # the view's own slider
+    assert knobs.values["r"] == 0.03
+    assert knobs.values["half"] == 0.015
+    studio.set_variable("axis", "y")
+    assert knobs.values["axis"] == "y"
+
+
+@needs_scene_graph
+def test_a_bare_sensor_is_drawn_the_studios_size_and_magpylib_is_left_as_it_was():
+    """A sensor whose style says no size is drawn at the studio's default --
+    five millimetres, not magpylib's default of one, which the studio's
+    absolute sizing would make a metre -- and the drawing puts magpylib's
+    defaults back, so a notebook's own `show` after it is as it was."""
+    from magpylib_studio import Length, name, scene
+
+    display = magpy.defaults.display
+    before = (
+        display.units.length,
+        display.style.sensor.sizemode,
+        display.style.sensor.size,
+        display.style.dipole.sizemode,
+        display.style.dipole.size,
+    )
+
+    @scene
+    def ring(r: Annotated[float, Length(0.01, 0.08)] = 0.025):
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.008, 0.008, 0.008),
+                polarization=(0, 1, 0),
+                position=(r, 0, 0),
+            ),
+            "m",
+        )
+        probe = name(magpy.Sensor(style_label="Probe"), "probe")
+        sized = name(magpy.Sensor(style_label="Sized", style_size=0.002), "sized")
+        return magnet, probe, sized
+
+    studio = widget.SceneWidget(ring.build(), editable=True)
+    span = max(high - low for low, high in studio.payload["ranges"])
+    assert span < 0.08, f"a 25 mm ring with a 5 mm probe spans {span:.3f} m"
+    assert (
+        display.units.length,
+        display.style.sensor.sizemode,
+        display.style.sensor.size,
+        display.style.dipole.sizemode,
+        display.style.dipole.size,
+    ) == before
+    studio._session.get_figure()  # the chart draws under the same pin
+    assert display.style.sensor.sizemode == before[1]
+    # a size the style does say is kept
+    doc = studio._session.doc
+    sized = next(e for e in doc["events"] if e.get("target") == "sized")
+    assert sized["style"]["size"] == 0.002
+
+
+@needs_scene_graph
+def test_a_preview_carries_the_scene_in_its_own_answer():
+    """One message where there were two: a value under the pointer, or a
+    pose, asked with `scene` is answered with the scene as it is now -- the
+    trait untouched, the notebook told nothing until the release."""
+    studio = _studio_of(_design())
+    revision, drawn = studio.revision, studio.payload
+    answer = _ask(
+        studio, "set_variable", name="r", value=0.03, preview=True, scene=True
+    )
+    carried = answer["result"]["scene"]
+    assert answer["result"]["ok"] and "meshes" in carried
+    assert carried["anchors"]["m"] == pytest.approx([0.03, 0, 0])
+    assert studio.payload is drawn, "a preview moves no trait"
+    assert studio.revision == revision
+    posed = _ask(
+        studio,
+        "apply_edits",
+        edits=[{"objectId": "m", "position": [0.04, 0, 0]}],
+        scene=True,
+    )
+    assert posed["result"]["scene"]["anchors"]["m"] == pytest.approx([0.04, 0, 0])
+    plain = _ask(studio, "get_scene")
+    assert "scene" not in plain["result"], "only when asked"

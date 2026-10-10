@@ -8,14 +8,15 @@ One function, three callers, in one notebook. `halbach` below is a plain
 magpylib function marked `@scene`: its parameters are the variables. Built
 once, it gives the studio's document, which the 3D view, the field, the sweep,
 the code tab and the saved file all read. Called, it is plain magpylib:
-objects to compute with, shown beside the document's numbers. And its
-signature is what the controls are rendered from -- as a call expression whose
-numbers drag (wigglystuff's `TangleFunction`), or as marimo's own sliders,
-with nothing of studio's in between. Drag a number and it is set on the
-document's variable: the view redraws, the numbers update, the field map
-follows. The view is read only until its pencil puts the handles out; a drag
-is then a step in the same document, pinned on top of the knobs, and the
-field, the code and the downloads carry it.
+objects to compute with, shown beside the document's numbers. The view edits
+that document: its handles move the magnets, and the sliders button among its
+tools opens the variables, a slider each. The signature is also rendered as a
+call expression whose numbers drag (wigglystuff's `TangleFunction`), tied to
+the view's variables both ways with one `traitlets.link` -- the view's model
+owns the numbers, the call is one more place to drag them, and the two never
+disagree. Drag either and the view redraws, the numbers update, the field map
+follows; a drag of a magnet is a step in the same document, and the field, the
+code and the downloads carry it.
 """
 
 import marimo
@@ -32,6 +33,7 @@ def _():
     import marimo as mo
     import numpy as np
     import plotly.graph_objects as go
+    import traitlets
 
     from magpylib_studio import (
         Angle,
@@ -60,6 +62,7 @@ def _():
         np,
         sampled,
         scene,
+        traitlets,
     )
 
 
@@ -161,54 +164,42 @@ def _(
 
 @app.cell(hide_code=True)
 def _(halbach, mo):
-    # The controls, from the signature. wigglystuff renders the call itself:
-    # numbers drag, choices click. Without it, marimo's own elements do the
-    # same from the same metadata (`halbach.parameters`).
+    # The call itself, as a control: wigglystuff renders the signature as a
+    # call expression whose numbers drag and whose choices click. It is tied
+    # to the view's variables below, both ways. Without it, the sliders
+    # button among the view's tools is the knobs, and nothing is missing.
     try:
         from wigglystuff import TangleFunction
 
-        knobs = mo.ui.anywidget(TangleFunction(halbach, halbach.controls()))
-        _how = "Drag a number in the call, or click a choice."
+        call = TangleFunction(halbach, halbach.controls())
+        knobs = mo.ui.anywidget(call)
+        _shown = mo.vstack(
+            [
+                knobs,
+                mo.md(
+                    "_Drag a number in the call, or click a choice; the sliders "
+                    "in the view move with it, and it with them._"
+                ),
+            ]
+        )
     except ImportError:
-        _elements = {}
-        for _spec in halbach.parameters:
-            _name = _spec["name"]
-            if "options" in _spec:
-                _elements[_name] = mo.ui.dropdown(
-                    _spec["options"], value=_spec["value"], label=_name
-                )
-                continue
-            _low, _high = _spec.get("slider") or _spec.get("bounds") or (None, None)
-            if _low is None or _high is None:
-                _elements[_name] = mo.ui.number(value=_spec["value"], label=_name)
-            elif _spec.get("integer"):
-                _elements[_name] = mo.ui.slider(
-                    _low,
-                    _high,
-                    step=1,
-                    value=_spec["value"],
-                    label=_name,
-                    show_value=True,
-                )
-            else:
-                _elements[_name] = mo.ui.slider(
-                    _low,
-                    _high,
-                    step=(_high - _low) / 200,
-                    value=_spec["value"],
-                    label=_name,
-                    show_value=True,
-                )
-        knobs = mo.ui.dictionary(_elements)
-        _how = "`pip install wigglystuff` renders these as a call expression whose numbers drag."
-    mo.vstack([knobs, mo.md(f"_{_how}_")])
-    return (knobs,)
+        call = knobs = None
+        _shown = mo.md(
+            "_The sliders button among the view's tools (top right, pointer on "
+            "the view) is the knobs. `pip install wigglystuff` adds the call "
+            "itself as one, its numbers dragging._"
+        )
+    _shown
+    return call, knobs
 
 
 @app.cell
-def _(knobs):
-    # The values the controls hold, whichever element renders them.
-    values = dict(knobs.value.get("values", knobs.value))
+def _(edited, halbach, view3d):
+    # The parameters' values as the document holds them now, read from the
+    # widget -- which owns them -- once per settled edit, from whichever
+    # control made it, and not on a click.
+    _ = edited()
+    values = {p["name"]: view3d.variables[p["name"]] for p in halbach.parameters}
     return (values,)
 
 
@@ -226,59 +217,49 @@ def _(halbach):
 @app.cell
 def _(SceneWidget, mo, s):
     # The view of the document itself -- its own session, nothing copied --
-    # made once, so the camera stays where you left it. Read only until the
-    # pencil among its tools puts the handles out.
-    view = mo.ui.anywidget(SceneWidget(s, height=560))
+    # made once, so the camera stays where you left it. Editable from the
+    # start: the handles, and the sliders button among the tools. The widget
+    # has a name of its own beside the element around it, for the cell below.
+    view3d = SceneWidget(s, editable=True, height=560)
+    view = mo.ui.anywidget(view3d)
+    # The settled edits, counted, as state: a cell that names `view` re-runs
+    # on its every change -- a click, a hide -- and the field map, the sweep
+    # and the table are only worth remaking after an edit. They read this.
+    edited, set_edited = mo.state(0)
+    view3d.observe(lambda change: set_edited(change.new), names="revision")
     view
-    return (view,)
+    return edited, view, view3d
 
 
 @app.cell
-def _(session, values, view):
-    # The knobs drive the one document: a value that changed is set on it, as
-    # the studio's Variables panel sets one, and everything written in terms
-    # of it follows; a drag's pins stay on top. The view redraws and tells the
-    # notebook, so the cells that read it re-run -- this one too, which then
-    # finds nothing left to set.
-    _written = {v["name"]: v["value"] for v in session.get_variables()["variables"]}
-    for _name, _value in values.items():
-        if _value != _written.get(_name):
-            view.widget.set_variable(_name, _value)
+def _(call, traitlets, view3d):
+    # The call expression, where there is one, tied to the view's variables
+    # both ways: the view's model owns the numbers, the call is one more
+    # place to drag them, and an echo of the same value is no change. Made
+    # between the widgets themselves, in a cell that names no element: a
+    # cell naming `knobs` or `view` re-runs on their every change, and would
+    # have remade the view on each drag of a number.
+    if call is not None:
+        traitlets.link((call, "values"), (view3d, "variables"))
     return
 
 
 @app.cell(hide_code=True)
 def _(mo, view):
-    # Reads the view, so it re-runs when the pencil is pressed -- the view
-    # sets `editable` itself and saves it, which to marimo is a value changed
-    # in the browser, as a click is -- and then once per settled edit:
-    # `revision` counts a drag's end, an undo, a redo and a knob's change,
-    # never a frame of a drag in progress.
-    mo.stop(
-        not view.value.get("editable"),
-        mo.callout(
-            mo.md(
-                "**Edit the stack in place.** Press the pencil among the view's "
-                "tools (top right, with the pointer on the view): the handles come "
-                "out on the document itself -- **W** moves, **E** turns, **R** "
-                "resizes, **P** aims, ⌘Z / ctrl-Z undoes a whole drag, and the "
-                "arrow under the undo buttons takes every edit back to where "
-                "editing started -- the knobs then set their values again. A drag "
-                "is a step in the same document the field, the code and the file "
-                "come from, pinned on top of the knobs, which keep working. The "
-                "pencil again puts the handles away; the edits stay."
-            ),
-            kind="info",
-        ),
-    )
+    # Reads the view, so it re-runs once per settled edit -- a slider's
+    # release in the view or in the call above, a drag's end, an undo, a redo
+    # -- never a frame of a drag in progress.
     _edit = view.value.get("last_edit") or {}
     mo.vstack(
         [
             mo.md(
-                f"**Editing.** {view.value['revision']} settled edits so far, each "
-                "told once; the numbers, the field, the code tab and the downloads "
-                "follow them. `view.widget.objects` are the objects as edited, to "
-                "compute with."
+                f"**Editing the document.** {view.value['revision']} settled edits "
+                "so far, each told once. The sliders button among the view's "
+                "tools (top right, with the pointer on the view) opens the "
+                "variables; **W** moves, **E** turns, **R** resizes, **P** aims; "
+                "⌘Z / ctrl-Z undoes a whole gesture, and the arrow under the undo "
+                "buttons takes every edit back to where editing started. "
+                "`view.widget.objects` are the objects as edited, to compute with."
             ),
             *([mo.json(_edit, label="the last edit")] if _edit else []),
         ]
@@ -288,10 +269,11 @@ def _(mo, view):
 
 @app.cell(hide_code=True)
 def _(halbach, magpy, mo, np, session, values, view):
-    # From the document, as the knobs and the handles left it -- and, beside
-    # it, from the function called plainly at the knobs' values: magpylib
-    # objects with nothing of studio's in them. The two agree until a magnet
-    # is dragged; then the first follows the drag and the second does not.
+    # From the document, as the sliders and the handles left it -- and,
+    # beside it, from the function called plainly at the same values:
+    # magpylib objects with nothing of studio's in them. The two agree until
+    # a magnet is dragged; then the first follows the drag and the second
+    # does not.
     _ = view.value["revision"]  # re-run after each edit
     _centre = np.linalg.norm(session.get_field(points=[[0, 0, 0]])["values"][0]) * 1e3
     _stack, _ = halbach(**values)
@@ -311,7 +293,7 @@ def _(halbach, magpy, mo, np, session, values, view):
             mo.stat(
                 f"{_plain:.1f} mT",
                 label="the function, called plainly",
-                caption="at the knobs' values, no edits",
+                caption="at the variables' values, no drags",
                 bordered=True,
             ),
             mo.stat(
@@ -335,8 +317,8 @@ def _(halbach, magpy, mo, np, session, values, view):
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, s, session, view):
-    _ = view.value["revision"]  # re-run after each edit
+def _(edited, go, mo, np, s, session):
+    _ = edited()  # after each edit, not each click
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
 
     def _figure(spec):
@@ -344,32 +326,46 @@ def _(go, mo, np, s, session, view):
         figure.update_layout(template=_template, margin={"t": 40, "r": 20})
         return figure
 
-    _axis = np.linspace(-0.02, 0.02, 81)
-    _along = np.asarray(
-        session.get_field(points=[[0, 0, z] for z in _axis])["values"], dtype=float
-    )
-    _profile = go.Figure(
-        go.Scatter(x=_axis * 1e3, y=np.linalg.norm(_along, axis=1) * 1e3, mode="lines")
-    )
-    _profile.update_layout(
-        template=_template,
-        xaxis_title="z along the axis (mm)",
-        yaxis_title="|B| (mT)",
-        margin={"t": 40, "r": 20},
-    )
-    _radii = np.linspace(0.018, 0.04, 12).tolist()
+    def _profile():
+        _axis = np.linspace(-0.02, 0.02, 81)
+        _along = np.asarray(
+            session.get_field(points=[[0, 0, z] for z in _axis])["values"], dtype=float
+        )
+        figure = go.Figure(
+            go.Scatter(
+                x=_axis * 1e3, y=np.linalg.norm(_along, axis=1) * 1e3, mode="lines"
+            )
+        )
+        figure.update_layout(
+            template=_template,
+            xaxis_title="z along the axis (mm)",
+            yaxis_title="|B| (mT)",
+            margin={"t": 40, "r": 20},
+        )
+        return mo.ui.plotly(figure)
 
+    def _sweep():
+        _radii = np.linspace(0.018, 0.04, 12).tolist()
+        return mo.ui.plotly(
+            _figure(session.get_sweep_figure("radius", _radii, points=[[0, 0, 0]]))
+        )
+
+    # Each tab computed when it is opened, not when the cell runs: `lazy=True`
+    # defers the rendering, `mo.lazy` the work, and a sweep nobody is looking
+    # at would otherwise rebuild the scene twelve times after every edit.
     mo.ui.tabs(
         {
-            "Field map": mo.ui.plotly(_figure(session.get_field_map())),
-            "Along the axis": mo.ui.plotly(_profile),
-            "Sweep the radius": mo.ui.plotly(
-                _figure(session.get_sweep_figure("radius", _radii, points=[[0, 0, 0]]))
+            "Field map": mo.lazy(
+                lambda: mo.ui.plotly(_figure(session.get_field_map()))
             ),
-            "The scene as code": mo.ui.code_editor(
-                session.to_builder_script(), language="python", disabled=True
+            "Along the axis": mo.lazy(_profile),
+            "Sweep the radius": mo.lazy(_sweep),
+            "The scene as code": mo.lazy(
+                lambda: mo.ui.code_editor(
+                    session.to_builder_script(), language="python", disabled=True
+                )
             ),
-            "The document": mo.json(s.to_dict()),
+            "The document": mo.lazy(lambda: mo.json(s.to_dict())),
         },
         lazy=True,
     )
@@ -377,8 +373,8 @@ def _(go, mo, np, s, session, view):
 
 
 @app.cell(hide_code=True)
-def _(mo, session, view):
-    _ = view.value["revision"]  # re-run after each edit
+def _(edited, mo, session):
+    _ = edited()  # after each edit, not each click
     _rows = []
     for _entry in session.list_objects():
         if _entry.get("type") != "magnet.Cuboid":
@@ -511,11 +507,11 @@ def _(mo, np, session):
 
 
 @app.cell(hide_code=True)
-def _(json, mo, s, session, view):
+def _(edited, json, mo, s, session):
     # Re-run after each edit, so the files hold the scene as it is now, pins
     # included. The data is given, not a callable: a few kilobytes, ready
     # before the click, with no request left to go wrong on it.
-    _ = view.value["revision"]
+    _ = edited()  # after each edit, not each click
     mo.sidebar(
         [
             mo.md("# Magpylib Studio"),

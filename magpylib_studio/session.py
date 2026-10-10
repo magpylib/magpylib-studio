@@ -86,6 +86,7 @@ Protocol surface (all JSON-serializable in/out):
 from __future__ import annotations
 
 import ast
+import contextlib
 import difflib
 import json
 import os
@@ -227,11 +228,11 @@ def example_scene():
 
 
 #: How big a sensor is drawn, in metres — the size of a real Hall probe
-#: package. It has to be said: the studio pins `sensor.sizemode` to "absolute"
-#: so that moving one object cannot rescale every other (see
-#: `threejs.pin_scene_units`), and magpylib's default size of 1 is then one
-#: metre of glyph over assemblies measured in millimetres.
-SENSOR_SIZE = 0.005
+#: package, and what the studio draws a sensor at when its style says no
+#: size (`threejs.pinned_scene_units`). Written into the examples' sensors so
+#: that their scripts say it; a scene function's bare sensor gets the same
+#: without saying it.
+SENSOR_SIZE = threejs.SENSOR_SIZE
 
 
 def _bore_sensor(start, stop, steps=25, label="Sensor"):
@@ -3219,9 +3220,20 @@ class MagpylibStudioSession:
         resolved here because plotly.js has no named-template registry.
         The whole scene is always drawn: objects hidden via set_visible carry
         magpylib's own hide switches, keeping every colour assignment stable."""
-        fig = magpy.show(
-            self.scene, backend="plotly", animation=animation, return_fig=True
-        )
+        # Drawn as the 3D view draws, where magpylib can: a bare sensor the same
+
+        # size in the chart as in the view. On released magpylib the chart is all
+
+        # there is, and it draws as magpylib does.
+
+        with (
+            threejs.pinned_scene_units()
+            if threejs.available()
+            else contextlib.nullcontext()
+        ):
+            fig = magpy.show(
+                self.scene, backend="plotly", animation=animation, return_fig=True
+            )
         if template:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
@@ -3245,7 +3257,11 @@ class MagpylibStudioSession:
         methods already take. Selecting a mesh therefore names an object the
         protocol understands.
         """
-        threejs.pin_scene_units()
+        with threejs.pinned_scene_units():
+            return self._scene_as_drawn(frame)
+
+    def _scene_as_drawn(self, frame=None):
+        """`get_scene`, with the units pinned by the caller."""
         if frame is not None:
             # One step of the paths, whole: what a pose cannot express is a
             # sensor's arrows, which are read off the field and so turn as

@@ -602,3 +602,218 @@
 .magpy-legend-row.empty > .magpy-legend-eye {
   visibility: hidden;
 }
+
+/* --- the variables -------------------------------------------------------
+   The scene's variables as a panel: in the widget, floating bottom right,
+   left of the edit bar, shown with the handles; in the VS Code sidebar, the
+   same rows filling a webview of their own. The rows are `variables.mjs`'s
+   and dressed here once, in the three colours the widget declares and the
+   editor's own where it is the editor (`--vscode-input-*`). */
+.magpy-scene-variables {
+  position: absolute;
+  right: 44px;
+  bottom: 8px;
+  z-index: 3;
+  width: min(55%, 22em);
+  max-height: calc(100% - 60px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 5px 9px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 94%,
+    transparent
+  );
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 7px;
+}
+
+.magpy-animated .magpy-scene-variables {
+  bottom: 44px;
+}
+
+/* Over the view, the rows read as the readout does: a name, a slider and a
+   number underlined rather than boxed, tabular so a drag does not jitter. */
+.magpy-scene-variables .magpy-vars-row {
+  grid-template-columns: minmax(36px, auto) 1fr 44px;
+  gap: 7px;
+  padding: 1px 0;
+}
+
+.magpy-scene-variables .magpy-vars-acts:empty,
+.magpy-scene-variables .magpy-vars-row input[hidden] {
+  display: none;
+}
+
+/* A choice is its dropdown: it takes the value's column as well. */
+.magpy-scene-variables .magpy-vars-row select {
+  grid-column: 2 / 4;
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="text"],
+.magpy-scene-variables .magpy-vars-row select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0;
+  padding: 0 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="text"]:focus,
+.magpy-scene-variables .magpy-vars-row select:focus {
+  outline: none;
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-variables .magpy-vars-row input[type="range"] {
+  accent-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-variables .magpy-vars-empty {
+  padding: 2px 0;
+}
+
+.magpy-scene-variables[hidden] {
+  display: none;
+}
+
+.magpy-vars-row {
+  display: grid;
+  grid-template-columns: minmax(52px, auto) 1fr 54px auto;
+  gap: 5px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.magpy-vars-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What the value is in -- mm, ° -- quieter than the name it qualifies. */
+.magpy-vars-unit {
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+/* Deciding nothing. The row still works -- the value is still the
+   variable's, and other things may come to be written in terms of it -- so
+   this is dimmed rather than disabled: a statement about what it currently
+   reaches, not a control taken away. */
+.magpy-vars-inert .magpy-vars-name,
+.magpy-vars-inert input {
+  opacity: 0.55;
+}
+
+.magpy-vars-row input[type="range"] {
+  width: 100%;
+  min-width: 40px;
+  margin: 0;
+  padding: 0;
+}
+
+.magpy-vars-row input[type="text"],
+.magpy-vars-row select {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid
+    var(
+      --vscode-input-border,
+      color-mix(in srgb, currentColor 25%, transparent)
+    );
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+.magpy-vars-row input.magpy-vars-expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+.magpy-vars-hint {
+  opacity: 0.5;
+  font-size: 10px;
+}
+
+.magpy-vars-acts {
+  display: flex;
+  gap: 2px;
+}
+
+.magpy-vars-acts button {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.magpy-vars-acts button:hover {
+  opacity: 1;
+}
+
+.magpy-vars-range {
+  grid-column: 2 / 4;
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: -3px;
+}
+
+.magpy-vars-empty {
+  opacity: 0.75;
+  padding: 6px 0;
+  line-height: 1.4;
+}
+
+.magpy-vars-help {
+  margin-top: 8px;
+  opacity: 0.85;
+}
+
+.magpy-vars-help summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  opacity: 0.7;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.magpy-vars-help dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-top: 5px;
+}
+
+.magpy-vars-help dd {
+  margin: 1px 0 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  word-spacing: 4px;
+}
+
+.magpy-vars-help-note {
+  opacity: 0.7;
+  margin-top: 6px;
+}
+
+.magpy-vars-status {
+  color: var(--vscode-errorForeground, #d13438);
+  min-height: 14px;
+  padding-top: 4px;
+}
+
+.magpy-vars-status:empty {
+  display: none;
+}

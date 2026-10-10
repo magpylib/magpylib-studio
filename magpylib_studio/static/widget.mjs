@@ -43,6 +43,7 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
+import { createVariables } from "./variables.mjs";
 
 /** How many renderers may be live on a page at once: pythreejs's number,
  *  half what a browser allows, leaving room for anything else drawing in
@@ -351,6 +352,10 @@ const ICONS = {
   edit: '<path d="M11.5 2.5l2 2-8 8h-2v-2z"/><path d="M10 4l2 2"/>',
   revert: '<path d="M2.5 3v3.5H6"/><path d="M3.2 6.5a5 5 0 1 1-.5 3.5"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
+  sliders:
+    '<path d="M2 4h12M2 8h12M2 12h12"/>' +
+    '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
+    '<circle cx="5" cy="12" r="1.6"/>',
 };
 
 function setIcon(button, icon) {
@@ -551,6 +556,48 @@ function render({ model, el }) {
       commit("editable", out);
     },
   );
+  // The scene's variables as a panel over the view: a slider each, and the
+  // scene following as one is dragged (`variables.mjs`, the same rows as the
+  // studio's Variables view). With the handles, since moving a variable is an
+  // edit like a drag -- so not on a saved page, nor in the studio panel,
+  // whose host has a Variables view of its own. See `dressEditing`.
+  const variablesEl = document.createElement("div");
+  variablesEl.className = "magpy-scene-variables";
+  variablesEl.hidden = true;
+  const variablesButton = iconButton(
+    "sliders",
+    "Variables — drag a value and the scene follows; a typed value takes a " +
+      "unit, 15 mm or 2 cm",
+    () => showVariables(variablesEl.hidden),
+  );
+  pressed(variablesButton, false);
+  // Compact over the view: the rows and nothing else. The limits ride in
+  // the tooltips, and the expression help is the sidebar's.
+  const variables = createVariables(variablesEl, {
+    // a preview asks for the scene in the same message, and redraws from it
+    rpc: (method, params, { preview = false } = {}) =>
+      call(method, params, { preview, scene: preview }),
+    onPreview: redrawFromSession,
+    empty: "No variables: a scene function's parameters are its variables.",
+    compact: true,
+  });
+  function showVariables(open) {
+    variablesEl.hidden = !open;
+    pressed(variablesButton, open);
+    if (open) variables.refresh();
+  }
+  /** The scene as the session has it now, drawn: after a previewed value,
+   *  which python answers without redrawing the view or telling the
+   *  notebook, as it answers a pose mid-drag. The answer carries the scene
+   *  when the call asked for it; else it is asked for. */
+  async function redrawFromSession(answer) {
+    try {
+      const payload = answer?.scene ?? (await editor.scene());
+      if (drawing()) api.render(view, payload);
+    } catch {
+      // the release reports; a preview nobody answered is not worth saying
+    }
+  }
   // Python writes the file -- it has every piece of it on disk -- and hands
   // it back to be saved. A page that is itself an export has no python
   // behind it to ask, and no button.
@@ -676,6 +723,7 @@ function render({ model, el }) {
     fitButton,
     projectionButton,
     editButton,
+    variablesButton,
     themeButton,
     pictureButton,
     exportButton,
@@ -705,7 +753,7 @@ function render({ model, el }) {
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(tools, editBar, keyList, transport, notice);
+  stage.append(tools, editBar, variablesEl, keyList, transport, notice);
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -1422,6 +1470,10 @@ function render({ model, el }) {
   function dressEditing() {
     editBar.hidden = !editable();
     resetButton.hidden = !editor.reset;
+    // The variables go with the handles: an edit surface, like them. Not in
+    // the studio panel, whose host shows them in its sidebar.
+    variablesButton.hidden = !editable() || model.editor !== undefined;
+    if (variablesButton.hidden && !variablesEl.hidden) showVariables(false);
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
@@ -1449,7 +1501,7 @@ function render({ model, el }) {
   let nextCall = 0;
   const calls = new Map(); // id -> { timer, settle }
   let dragActive = false; // between a drag's first move and its release
-  function call(method, params = {}) {
+  function call(method, params = {}, { preview = false, scene = false } = {}) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
       const timer = setTimeout(() => {
@@ -1464,7 +1516,18 @@ function render({ model, el }) {
           else resolve(message.result);
         },
       });
-      model.send({ kind: "rpc", id, method, params });
+      // `preview` marks a value the pointer is still on: python applies
+      // it and says nothing to the notebook, as for a pose mid-drag.
+      // `scene` asks for the scene in the same answer, sparing a second
+      // message on a host where every message costs.
+      model.send({
+        kind: "rpc",
+        id,
+        method,
+        params,
+        ...(preview ? { preview: true } : {}),
+        ...(scene ? { scene: true } : {}),
+      });
     });
   }
 
@@ -1662,7 +1725,8 @@ function render({ model, el }) {
    *  `undoKeys: false` on it leaves Cmd/Ctrl+Z to a host that has its own. */
   const editor = model.editor ?? {
     begin: () => call("begin_interaction"),
-    preview: (edits) => call("apply_edits", { edits }),
+    // the scene comes back with the pose, and the drag redraws from it
+    preview: (edits) => call("apply_edits", { edits }, { scene: true }),
     commit(edits) {
       const done = call("apply_edits", { edits });
       // after the pose, which the session answers in order
@@ -1748,6 +1812,12 @@ function render({ model, el }) {
     if (now.has("axes")) showAxes();
     if (now.has("theme")) retheme();
     if (now.has("editable")) dressEditing();
+    // An edit settled -- an undo, a drag, a value set from python -- and the
+    // rows may say something else now. Not mid-drag: the panel declines
+    // itself, and reads its rows back at the release.
+    if ((now.has("payload") || now.has("revision")) && !variablesEl.hidden) {
+      variables.refresh();
+    }
     if (now.has("payload") || now.has("selected")) showReadout();
     if (now.has("revision") && model.get("revision") !== echoed) {
       // An edit python settled. marimo re-runs the cells that read a widget

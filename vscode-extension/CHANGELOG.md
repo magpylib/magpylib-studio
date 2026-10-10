@@ -15,13 +15,19 @@ All notable changes to the Magpylib Studio extension.
 - **Editing in a notebook.** `SceneWidget(..., editable=True)` puts the handles
   over a studio session in the kernel, with nothing of the extension needed:
   `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
-  per settled edit, and `variable_sliders()` for a scene with variables. A view
-  is read only until the pencil among its tools puts the handles out: a scene
-  written in code or a path is shown as its own session from the start, and the
-  cell's own objects are copied into one when the pencil is pressed. Undo stops
-  where the view started, and `reset()`, or the arrow under the undo buttons,
-  takes every edit since back in one undoable step. `editable=None` is a view
-  for looking only: no pencil, and `editable` refuses to turn on.
+  per settled edit, and for a scene with variables a **sliders** button among
+  the view's tools: the studio's Variables panel over the view — a slider each,
+  the scene following as one is dragged, a dropdown for a choice, `15 mm` typed
+  and read in its unit — with a `variables` trait a cell reads, assigns, or ties
+  another control to with `traitlets.link`, and `variable_sliders()` for the
+  same as ipywidgets controls. The studio's own Variables view is that panel,
+  mounted in the sidebar. A view is read only until the pencil among its tools
+  puts the handles out: a scene written in code or a path is shown as its own
+  session from the start, and the cell's own objects are copied into one when
+  the pencil is pressed. Undo stops where the view started, and `reset()`, or
+  the arrow under the undo buttons, takes every edit since back in one undoable
+  step. `editable=None` is a view for looking only: no pencil, and `editable`
+  refuses to turn on.
 - **Writing a scene in code.** A scene is a plain magpylib function under
   `@scene`: its parameters are the variables, with their bounds and kinds in
   `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and
@@ -45,6 +51,22 @@ All notable changes to the Magpylib Studio extension.
   kept in the repository.
 - An import of plain magpylib (`load_script`) now names the variables it turned
   into numbers, where it used to say nothing.
+- **A drag's frame is one message.** A slider's or a handle's preview asks for
+  the scene in its own answer, where the view used to ask for it in a second
+  message: half the wait per frame on a notebook host whose every message costs,
+  marimo's most of all.
+- **A sensor's field arrows are drawn as instances.** A sensor whose pixels read
+  the field was one mesh of every arrow, a hundred kilobytes of a frame for the
+  Halbach example's 7 × 7 probe; its pixels now travel as a position, a
+  direction, a size and a colour each, and the view draws one shape that many
+  times, sized and coloured as magpylib does. The frame is a third of the size.
+  A sensor switched to the 2D `arrow` symbol no longer fails to draw.
+- **A bare sensor draws at the studio's size.** A sensor or dipole whose style
+  says no size used to draw a metre across in a scene function's scene, since
+  the studio draws them at their stated size and magpylib's default is 1; it is
+  5 mm now, a size the style does say is kept, and magpylib's display defaults
+  are put back after each drawing, where the studio used to leave them changed
+  for the notebook's own figures.
 - **Units.** A variable can say what it measures — length, angle, field, current
   — chosen when **New Variable…** asks what it holds, or later under **Variable
   Properties…**. Each prompt for a value says the unit a bare number is read in

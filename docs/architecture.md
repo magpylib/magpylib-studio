@@ -20,7 +20,7 @@ what is next is in [roadmap.md](roadmap.md)._
 | transport              | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                  |
 | drawing                | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                |
 | the 3D view's data     | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                            |
-| the notebook widget    | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs` and `drag.mjs`                       |
+| the notebook widget    | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `drag.mjs` and `variables.mjs`      |
 | magpylib compatibility | `magpylib_studio/style_compat.py`                 | the style operations on released magpylib ([0016](decisions.md#0016-released-magpylib-through-a-shim-until-the-release))                   |
 | the agent skill        | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                   |
 | the VS Code extension  | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks |
@@ -202,13 +202,23 @@ Three ways between code and the document, none of which parses code
 ## The views
 
 **The 3D view** is `scene3d.mjs`, three.js, one node per studio id, drawn from
-`threejs.py`'s payload (`get_scene`). It picks, multi-selects, drags with
-handles (move, turn, resize, aim a polarization; world or object axes; one-axis
-locks; snapping), hides, plays paths, and has one keys table both hosts use. A
-drag goes through `static/drag.mjs`: open an undo group, pace previews with one
-request in flight, send the final pose through `apply_edits`, close the group.
-`apply_edits` turns the view's edits into `set_transform` / `set_param` calls in
-the session, batched into one undo step, for every host.
+`threejs.py`'s payload (`get_scene`), under `threejs.pinned_scene_units()`:
+lengths in metres, sensors and dipoles at their stated size and a bare one at
+`SENSOR_SIZE`, with magpylib's defaults put back after, so a notebook's own
+`show()` is untouched
+([0020](decisions.md#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone)).
+A sensor whose pixels read the field comes as a `pixels` item, a position, a
+direction, a size and a colour per pixel, that the renderer draws as instances
+of one shape, sized and coloured as magpylib sizes and colours them
+([0021](decisions.md#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances));
+the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
+drawing. It picks, multi-selects, drags with handles (move, turn, resize, aim a
+polarization; world or object axes; one-axis locks; snapping), hides, plays
+paths, and has one keys table both hosts use. A drag goes through
+`static/drag.mjs`: open an undo group, pace previews with one request in flight,
+send the final pose through `apply_edits`, close the group. `apply_edits` turns
+the view's edits into `set_transform` / `set_param` calls in the session,
+batched into one undo step, for every host.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is
@@ -221,7 +231,18 @@ puts them out, and for the cell's own objects first copies them into a session
 in the kernel, named from the cell's variables as read when they were given. The
 view calls `rpc.handle` over its connection, restricted to a short allow-list,
 and a `revision` trait and `last_edit` fire once per settled edit, never per
-preview frame. `variable_sliders()` is a control per variable. The bundle
+preview frame. With the handles, a sliders button opens **the variables panel**
+(`static/variables.mjs`,
+[0019](decisions.md#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)):
+a slider per variable with a range, a dropdown for a choice, a box that reads
+`15 mm` through `quantity`; a value under the pointer is a `set_variable` marked
+`preview`, applied without a word to the notebook, and answered with the scene
+when the message asks (`scene`), so a frame of a slider's or a handle's drag is
+one message where it was two; the release settles as one edit. A `variables`
+trait, `{name: value}` as resolved, follows the session, so a cell reads the
+knobs; assigned, it sets what differs as one edit, so another control's trait
+links to it both ways (`traitlets.link`), the view's model owning the numbers.
+`variable_sliders()` is the same as ipywidgets controls. The bundle
 `static/widget.js` is committed so installing needs no node;
 `npm run check:widget` fails when it no longer matches its sources, and a CI job
 installs the wheel alone and runs an edit through a fake connection.
@@ -257,12 +278,14 @@ grouped, with each object's steps under it, drag and drop to reparent, rename,
 copy, cut, paste, delete, hide), the Inspector (a webview whose widgets are
 built from the style schema; properties and pose take expressions, shown in the
 scene's units), the Variables view (a webview, because a tree row cannot hold a
-slider), the Undo view, and the Field panel on demand. The script tab is a real
-file in extension storage holding `to_builder_script()`, regenerated on every
-edit unless it is dirty or holds refused text, and restored across a window
-reload against the scene the engine has _now_. Scenes are files: save, Save As
-with mesh paths rebased, revert, a crash backup, reopen on activation; only
-`broadcastMutation()` marks the scene unsaved, redrawing does not.
+slider: the package's `variables.mjs`, the widget's own panel, with its calls
+routed through the extension host), the Undo view, and the Field panel on
+demand. The script tab is a real file in extension storage holding
+`to_builder_script()`, regenerated on every edit unless it is dirty or holds
+refused text, and restored across a window reload against the scene the engine
+has _now_. Scenes are files: save, Save As with mesh paths rebased, revert, a
+crash backup, reopen on activation; only `broadcastMutation()` marks the scene
+unsaved, redrawing does not.
 
 Webview JavaScript lives in `media/*.js|mjs` under a nonce CSP, never inside
 TypeScript template literals; `harness/` checks that, the message contract, the

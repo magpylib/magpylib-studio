@@ -2189,12 +2189,11 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!found) {
           return;
         }
+        // `restore` the panel does itself, as a call: it is one.
         if (action === 'edit') {
           await editVariableProperties(found);
         } else if (action === 'remove') {
           await mutateFromTree('remove_variable', { name });
-        } else if (action === 'restore') {
-          await mutateFromTree('restore_variable', { name });
         }
       })();
     },

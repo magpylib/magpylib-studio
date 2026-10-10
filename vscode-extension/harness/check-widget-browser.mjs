@@ -14,6 +14,9 @@
  *   simulated as that host dresses itself (`widget-pages/hosts.html`);
  * - the renderer pool, as Jupyter and marimo hand the widget its element
  *   (`widget-pages/pool.html`);
+ * - the variables panel, against a fake kernel: offered with the handles,
+ *   a slider drag asking the session in the panel's order and redrawing
+ *   between, a dropdown committing once (`widget-pages/variables.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
  *   a run that plays with no python behind it;
@@ -990,6 +993,73 @@ async function pencil(port, base) {
   });
 }
 
+/** The variables panel: an editable view of a scene with variables offers
+ *  it among its tools, and not a saved page or a view with its handles away.
+ *  Open, it lists a row per variable with the control its bounds call for;
+ *  a slider drag asks the session as the studio's Variables view does --
+ *  the undo group opened, previews with the scene redrawn between, the
+ *  release committed once, the group closed, the rows read back -- and a
+ *  dropdown commits its choice once. The handles put away take it along. */
+async function variablesPanel(port, base) {
+  await check("the variables panel edits through the session", async () => {
+    const tab = await openTab(port);
+    try {
+      for (const [query, offered] of [
+        ["?standalone", false],
+        ["?readonly", false],
+        ["", true],
+      ]) {
+        const page = query || "an editable view";
+        await tab.navigate(`${base}/pages/variables.html${query}`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return `${page}: never finished`;
+        if (result.offered !== offered) {
+          return `${page} ${offered ? "offered no variables" : "offered variables"}`;
+        }
+        if (!offered) continue;
+        const { rows, drag, redrawn, chose, afterPencil } = result;
+        const names = rows.map((r) => r.name.split(" ")[0]).join();
+        if (names !== "n,r,axis,free,half") return `the rows were ${names}`;
+        const by = (name) => rows.find((r) => r.name.split(" ")[0] === name);
+        if (!by("n").slider) return "n, a count with a range, has no slider";
+        if (!by("axis").select) return "axis, a choice, has no dropdown";
+        if (by("free").slider || by("free").select) {
+          return "free, with no range, got a control";
+        }
+        if (by("half").slider || by("half").select || !by("half").expression) {
+          return `half, an expression, was ${JSON.stringify(by("half"))}`;
+        }
+        const said = drag.join(" ");
+        if (drag[0] !== "begin_interaction") return `the drag began: ${said}`;
+        const sets = drag.filter((d) => d.startsWith("set_variable"));
+        if (sets.at(-1) !== "set_variable=16") {
+          return `the release committed ${sets.at(-1)}: ${said}`;
+        }
+        if (!sets.slice(0, -1).every((s) => s.startsWith("set_variable*"))) {
+          return `a value under the pointer was no preview: ${said}`;
+        }
+        if (!redrawn) return `nothing redrawn between the values: ${said}`;
+        const closed = drag.indexOf("end_interaction");
+        if (closed < 0 || closed < drag.indexOf("set_variable=16")) {
+          return `the group closed before the release: ${said}`;
+        }
+        if (!drag.slice(closed).includes("get_variables")) {
+          return `the rows were not read back after the release: ${said}`;
+        }
+        if (JSON.stringify(chose) !== JSON.stringify([["axis", "x", false]])) {
+          return `the dropdown sent ${JSON.stringify(chose)}`;
+        }
+        if (afterPencil.button || afterPencil.panel) {
+          return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
+        }
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** An editable view against a fake kernel: a drag goes to the session
  *  as the studio's panel sends one -- the undo group opened, each pose
  *  recorded with the scene redrawn between, the release, the group closed --
@@ -1047,7 +1117,9 @@ async function editing(port, base) {
       if (poses[0] !== 1 || poses.at(-1) !== 6 || poses.length > 4) {
         return `poses at ${poses.join(", ")}: ${said}`;
       }
-      if (!drag.some((a) => a.method === "get_scene")) {
+      // the scene asked for, in a preview's own answer or in a message of
+      // its own: the kernel editor spares the message, a host's own asks
+      if (!drag.some((a) => a.method === "get_scene" || a.scene)) {
         return `nothing redrawn around the drag: ${said}`;
       }
       const tail = drag.slice(-3).map((a) => a.method + (a.x ?? ""));
@@ -1740,6 +1812,7 @@ try {
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
   await pencil(browser.port, base);
+  await variablesPanel(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);

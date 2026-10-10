@@ -971,3 +971,182 @@ drag.
 - A module-level default read when the argument is left out: it moves the choice
   out of each call but still decides at construction, and is a second place a
   notebook's behaviour comes from.
+
+## 0019. The editor's panels are the widget's, and a host mounts them
+
+**Status:** accepted 2026-10-09, as built for the Variables panel
+(`feat/variables-in-widget`). **Record of:** `plans/variables-in-widget.md`,
+deleted when merged.
+
+### Context
+
+The VS Code extension carried the editor's chrome -- the Scene tree, the
+Inspector, the Variables view, the history, the script tab, the field view -- as
+sidebar views of its own: about eleven thousand lines with no life outside VS
+Code, while the direction says the package is the product and the extension one
+consumer ([direction.md](direction.md) §1, §5.3). The notebook widget had the
+view, the handles and the legend, and for the variables an ipywidgets control
+beside it (`variable_sliders()`); the marimo demo spent two cells explaining
+that its knobs let go of the view once the pencil was pressed, because the view
+had no knobs of its own. The sidebar's scripts turned out to be host-neutral in
+everything but transport: `inspector.js` and `variables.js` reach the engine
+through one `rpc(method, params)` that posts a message to VS Code, the seam the
+widget points at its kernel connection.
+
+### Decision
+
+- **The editor goes into the widget; the host keeps what is host-shaped.** A
+  panel about the scene the view draws -- the variables now; the Inspector and
+  the history next -- is a module in `magpylib_studio/static/`, handed an `rpc`
+  and what else it needs, knowing no host. The widget floats it over the view;
+  the VS Code sidebar mounts the same module in its webview
+  (`media/variables.mjs`, a wrapper routing the calls through the provider), so
+  the layout there stays and the logic lives once. The checks that drove the
+  sidebar's script under the DOM shim drive the module (`webview-harness.js`,
+  `mountVariables`).
+- **Field views and script editing stay with the host.** Every host renders a
+  plotly figure natively, and plotly.js would triple the bundle; a code editor
+  inside the widget fights the notebook for focus and keys, and the notebook has
+  one. So do the file, the process, the terminal stamp and the structural
+  dialogs built on QuickPick.
+- **The widget's variables panel shows with the handles**, as an edit surface: a
+  view is read only until its pencil is pressed
+  ([0018](#0018-a-view-is-read-only-until-its-pencil-is-pressed)), and moving a
+  variable is an edit like a drag. Not on a saved page, and not in the studio
+  panel, whose host shows the variables in its sidebar. A value under the
+  pointer is a `set_variable` marked `preview` on the view's message, applied
+  and answered without a word to the notebook, the view redrawing from
+  `get_scene`; the release settles once, `last_edit` reading
+  `{"by": "set_variable", "variable", "value"}`. A `variables` trait,
+  `{name: value}` as resolved, follows the session, so a cell reads the knobs
+  without re-pointing the view. `VIEW_CALLS` grows by `get_variables`,
+  `set_variable`, `restore_variable`, `quantity` and `expression_help`: still
+  nothing that runs a file.
+- **The view's model owns the numbers.** `variables` is assignable: what differs
+  is set as one edit, and the trait reads the scene back. Another control's
+  trait is tied to it with `traitlets.link` -- the demo's call expression,
+  linked widget to widget in a cell that names no marimo element, since one
+  naming an element re-runs on its every change -- and is an input and a
+  display, never a second owner. marimo re-runs a cell only on a change the
+  frontend made (a trait set from python is a mutation it does not track), so
+  cells read the view, not the control.
+- **Nothing over the view that cannot act.** A panel in the widget is compact:
+  the rows, the limits in the tooltips, no help block, no action without a host
+  action, a choice as its dropdown alone, its inputs underlined as the readout's
+  are. The sidebar keeps the fuller form through the module's options, not a
+  second copy. Looked at in a real browser before it is called done.
+
+### Rejected
+
+- Everything into the widget, field views and script tab included: plotly.js and
+  a code editor in every cell, for what the host does better.
+- Sliders of the widget's own with the sidebar's script kept: every control and
+  fix made twice, which [0011](#0011-one-view) refused once already.
+- The panel inside the studio panel too: the host would have to be told of each
+  commit, and nothing asks for it while the sidebar shows the same rows.
+- Adding, renaming and removing variables from the widget: in a notebook the
+  scene function is where that happens.
+- Two owners for one number: host knobs pushed into the session by a cell. The
+  cell re-ran on the view's edits too, could not tell a knob that moved from a
+  variable the view moved, and wrote the knobs' values back over the slider.
+- The history as a widget panel: the widget has undo, redo and reset; the steps
+  list, with moving, dropping and editing events and rollback, is the structural
+  surface direction.md §5.3 keeps minimal, and in a notebook the scene function
+  is the log. It stays the extension's tree.
+
+### Consequences
+
+`variable_sliders()` stays, unreleased; removing it is a line of its own once
+the panel has been used. The marimo demo shows the view editable from the start,
+its call expression linked to the view's variables, and reads the view. The
+sidebar lost no behaviour; `restore` moved from a host action to a call the
+panel makes itself. The Inspector is the next panel, once the engine answers an
+expression naming a variable the scene lacks -- today a VS Code dialog, its one
+host-side behaviour beyond transport (roadmap). Slots for a host's own layout,
+and a widget per panel for hosts that place outputs apart, wait for a host that
+asks; JupyterCAD 3.1 put its toolbar and side panel in the cell widget the same
+way, for JupyterLab alone.
+
+## 0020. A bare sensor is drawn at the studio's size, and magpylib's defaults are left alone
+
+**Status:** accepted 2026-10-09, as built.
+
+### Context
+
+The studio draws sensors and dipoles at their stated size rather than scaled to
+the scene, so that moving one object cannot rescale every other
+([architecture](architecture.md), the 3D view). The engine's own `add_object`
+wrote `SENSOR_SIZE`, 5 mm, into every sensor it made, and the comment beside it
+said why: magpylib's default size of 1 is then one metre of glyph. A sensor made
+in a scene function, or passed as a plain object, carried no size, and a 25 mm
+ring drew with a metre-long probe over it; the marimo demo had sized its sensor
+by hand. The pin was also a change to `magpy.defaults` that stayed, so once the
+studio had drawn in a kernel, a notebook's own `show()` of a bare sensor was a
+metre across too.
+
+### Decision
+
+- **The pin is a context.** `threejs.pinned_scene_units()` sets metres, absolute
+  sizing and the studio's default size for sensors and dipoles, and puts every
+  default back on the way out. `get_scene` and the chart's `get_figure` draw
+  under it; nothing else touches `magpy.defaults`.
+- **A size the style does not say is the studio's**, 5 mm, at draw time: the
+  document stays what the person wrote. A size the style does say is kept.
+  `SENSOR_SIZE` lives in `threejs.py`; the examples go on writing it into their
+  sensors, so their scripts say it.
+
+### Rejected
+
+- Writing the size into every document at create, for the recorder and the
+  import as `add_object` does: one convention instead of two, but a presentation
+  value in every saved scene, which is direction.md §11's open question.
+- Keeping the pin global and adding the size to it: a 5 mm probe is a better
+  surprise than a metre, but a notebook's own figure still changed because the
+  studio had drawn once.
+
+## 0021. A frame is one message, and a reading's pixels are instances
+
+**Status:** accepted 2026-10-10, as built.
+
+### Context
+
+Dragging a variable or a handle in a notebook was slower in marimo than in VS
+Code. Measured on the demo's Halbach, the engine cost the same everywhere, 13 ms
+a frame; what differed was the transport. Each frame was two messages, a preview
+and `get_scene`, of which the second carried 127 KB, 101 KB of it the 7 × 7
+probe's field arrows as one merged mesh; and
+[0010](#0010-the-notebook-widget-edits-with-the-package-alone) had measured
+marimo adding 60 to 85 ms to any message past 20 ms, where stdio adds nothing.
+Two such trips a frame is a drag at eight frames a second.
+
+### Decision
+
+- **A preview's answer carries the scene when the view asks.** The view's
+  message says `scene`, python puts `get_scene()` into the answer, and the view
+  redraws from it: one message a frame, in the panel's drag and the variables
+  panel's alike. Not a trait: nothing is told to the notebook per frame, as
+  before. A host's own editor, the VS Code panel's, goes on asking.
+- **A sensor whose pixels read the field is a `pixels` item**: a position, a
+  direction, a size and a colour per pixel, which the renderer draws as
+  instances of one shape, the arrow magpylib draws, a cone, or a cube. The sizes
+  and colours are computed as `make_Sensor` computes them, with magpylib's own
+  helpers; magpylib is kept from drawing the pixels itself by a pixel size of 0
+  for the length of the capture, and keeps the sensor's axes. The frame is 38
+  KB, and the payload's `ranges` reach the arrows. A run's frames keep
+  magpylib's whole drawing, so playback is untouched; the 2D `arrow` symbol
+  stays magpylib's lines.
+
+### Rejected
+
+- Binary buffers for the mesh: a third of the bytes, but the arrows would still
+  be built as a mesh every frame, and marimo's support for buffers is
+  unverified.
+- Rounding the mesh's floats: half the bytes, for the same mesh.
+- Instancing in a run's frames too: the run machinery fits traces frame to
+  frame, and pixels are not traces; nothing plays a run while dragging.
+
+### Measured
+
+The demo's Halbach, 24 magnets and a 7 × 7 probe: 127 KB and two messages a
+frame before; 38 KB and one after. `get_scene` 10.4 ms before, 9.6 ms after, the
+field being computed twice.

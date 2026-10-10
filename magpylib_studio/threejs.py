@@ -16,7 +16,8 @@ and 10):
 * The geometry must depend on the objects alone, not on the scene as a whole.
   Magpylib scales sensors and dipoles to the scene extent and picks an SI
   prefix from it, so with the defaults an unrelated object moving changes
-  everyone's vertices. `pin_scene_units` fixes both.
+  everyone's vertices. `pinned_scene_units` fixes both, for the drawing's
+  duration.
 * A trace's colour arrives one of three mutually exclusive ways, and two of
   them are traps -- see `_mesh_payload`.
 * The payload carries no transform, so a mesh has no origin to be rotated
@@ -25,6 +26,7 @@ and 10):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import warnings
@@ -94,7 +96,8 @@ _BACKEND = "_studio_scene"
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
-#: holds only under `sizemode="absolute"`, which `pin_scene_units` sets.
+#: holds only under `sizemode="absolute"`, which the studio draws under
+#: (`pinned_scene_units`); `shape_of` is read while it draws.
 SCALE_COVARIANT = {
     "Cuboid": ("dimension", "free"),
     "Sphere": ("diameter", "uniform"),
@@ -149,19 +152,51 @@ def shape_of(obj):
     }
 
 
-def pin_scene_units():
-    """Make the emitted geometry depend on the objects, not on the scene.
+#: How big a sensor, or a dipole, is drawn when its style says no size, in
+#: metres: the size of a real Hall probe package. The studio draws them at
+#: their stated size (`pinned_scene_units`), and magpylib's default size of 1
+#: would then be one metre of glyph over assemblies measured in millimetres.
+#: A size the style does say is kept, as it is.
+SENSOR_SIZE = 0.005
+
+
+@contextlib.contextmanager
+def pinned_scene_units():
+    """Draw with the geometry depending on the objects, not on the scene.
 
     Without this a scene-graph view cannot be kept between edits: moving one
     object changes the extent, which rescales every autosized object and can
     shift the SI prefix that scales *everything*. Measured in the prototype: a
     magnet's own vertices changed by 1000x because an unrelated object moved.
+
+    A context, not a setting: magpylib's defaults are put back on the way
+    out, so a notebook's own `magpy.show()` after the studio has drawn is as
+    it was -- it used to find every bare sensor a metre across.
     """
     if not available():
         raise RuntimeError(UNAVAILABLE)
-    magpy.defaults.display.units.length = "m"
-    magpy.defaults.display.style.sensor.sizemode = "absolute"
-    magpy.defaults.display.style.dipole.sizemode = "absolute"
+    display = magpy.defaults.display
+    sensor, dipole = display.style.sensor, display.style.dipole
+    was = (
+        display.units.length,
+        sensor.sizemode,
+        sensor.size,
+        dipole.sizemode,
+        dipole.size,
+    )
+    display.units.length = "m"
+    sensor.sizemode = dipole.sizemode = "absolute"
+    sensor.size = dipole.size = SENSOR_SIZE
+    try:
+        yield
+    finally:
+        (
+            display.units.length,
+            sensor.sizemode,
+            sensor.size,
+            dipole.sizemode,
+            dipole.size,
+        ) = was
 
 
 def _hex_to_rgb(color):
@@ -261,6 +296,33 @@ def _json_coordinates(values):
     return [None if value != value else value for value in flat.tolist()]
 
 
+def _one_color(value, default="#2e91e5"):
+    """A trace's colour, one for the whole trace: magpylib gives a sensor's
+    2D pixel arrows a colour per point, and the view draws a scatter in one.
+    The most common of them, then."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value or default
+    if isinstance(value, np.ndarray | list | tuple):
+        colors = [str(c) for c in np.asarray(value).ravel().tolist() if c]
+        if not colors:
+            return default
+        return max(set(colors), key=colors.count)
+    return str(value) or default
+
+
+def _one_size(value, default):
+    """A trace's width or size, one for the whole trace: the largest, where
+    magpylib gives one per point."""
+    if value is None:
+        return float(default)
+    if isinstance(value, np.ndarray | list | tuple):
+        sizes = np.asarray(value, dtype=float).ravel()
+        return float(np.nanmax(sizes)) if len(sizes) else float(default)
+    return float(value or default)
+
+
 def _scatter_payload(trace):
     """One `scatter3d` trace: currents, paths and `show(markers=...)`.
 
@@ -277,10 +339,11 @@ def _scatter_payload(trace):
         "position": _json_coordinates(position),
         "lines": "lines" in modes,
         "markers": "markers" in modes,
-        "line_color": trace.get("line_color") or "#2e91e5",
-        "line_width": float(trace.get("line_width") or 1) * SIZE_FACTORS["line_width"],
-        "marker_color": trace.get("marker_color") or "#2e91e5",
-        "marker_size": float(trace.get("marker_size") or 3)
+        "line_color": _one_color(trace.get("line_color")),
+        "line_width": _one_size(trace.get("line_width"), 1)
+        * SIZE_FACTORS["line_width"],
+        "marker_color": _one_color(trace.get("marker_color")),
+        "marker_size": _one_size(trace.get("marker_size"), 3)
         * SIZE_FACTORS["marker_size"],
         # an object's path, not the object: see `_mark_paths`
         **({"path": True} if trace.get("path") else {}),
@@ -735,6 +798,8 @@ def _by_kind(payload):
         {
             "meshes": [p for p in payload if p["kind"] == "mesh"],
             "scatters": [p for p in payload if p["kind"] == "scatter"],
+            # a sensor's pixels as instances of one shape -- `_pixels_of`
+            "pixels": [p for p in payload if p["kind"] == "pixels"],
         }
     )
 
@@ -785,6 +850,16 @@ def _keyed(traces, live=None, derived=None):
         for item in payload:
             item["object_id"] = str(item["object_id"])
         return payload
+    key_of = _key_map(live, derived)
+    for item in payload:
+        item["object_id"] = key_of(item["object_id"])
+    return payload
+
+
+def _key_map(live, derived=None):
+    """The studio id a drawn object's traces go under, as a function of
+    magpylib's own ``id(obj)``: the object's own key, else the key of the
+    collection holding it, and a pattern's copy under its source's."""
     derived = derived or {}
     studio_id = {id(obj): key for key, obj in live.items()}
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
@@ -795,11 +870,224 @@ def _keyed(traces, live=None, derived=None):
         )
         for child in getattr(obj, "children_all", ())
     }
-    for item in payload:
-        raw = item["object_id"]
+
+    def key_of(raw):
         key = studio_id.get(raw) or holding.get(raw)
-        item["object_id"] = source_of.get(key, key)
-    return payload
+        return source_of.get(key, key)
+
+    return key_of
+
+
+#: What a sensor's pixels are drawn as, by the style's `pixel.field.symbol`,
+#: when the field colours or orients them: one shape, that many times. The
+#: 2D ``arrow`` is lines, and stays magpylib's.
+_PIXEL_SHAPES = {"arrow3d": "arrow3d", "cone": "cone", "none": "cube", None: "cube"}
+
+#: Below this a reading is no direction: magpylib's own threshold.
+_NULL_VECTOR = 1e-12
+
+
+def _reading_sensors(objects):
+    """The sensors among `objects`, collections opened up, whose pixels the
+    field colours or orients -- and that have pixels, drawn to a size, in a
+    shape the view can instance."""
+    found, seen = [], set()
+    for obj in _given(objects):
+        for each in (obj, *getattr(obj, "children_all", ())):
+            if id(each) in seen or not _reads_the_field(each):
+                continue
+            seen.add(id(each))
+            if getattr(each, "pixel", None) is None:
+                continue
+            if _resolve(each, "style.pixel.field.symbol") not in _PIXEL_SHAPES:
+                continue
+            if not (_resolve(each, "style.pixel.size") or 0) > 0:
+                continue
+            found.append(each)
+    return found
+
+
+def _instanced_pixels(objects, key_of):
+    """The ``pixels`` items for the sensors `_reading_sensors` finds, and a
+    function that puts their styles back.
+
+    A sensor whose pixels read the field was one mesh of every arrow -- the
+    7 x 7 probe of the Halbach example 100 KB of a 127 KB frame, and most of
+    the engine's time drawing it. Its pixels are the same shape that many
+    times: a position, a direction, a size and a colour each, which the view
+    draws as instances of one geometry. magpylib is kept from drawing them
+    itself by a pixel size of 0 for the length of the capture, which leaves
+    the sensor its axes; the field it reads is computed as magpylib computes
+    it, and sized and coloured as magpylib does -- see `_pixels_of`.
+    """
+    sensors = [] if key_of is None else _reading_sensors(objects)
+    if not sensors:
+        return [], lambda: None
+    from magpylib._src.display.traces_generic import get_sensor_pixel_field
+
+    fields = get_sensor_pixel_field(list(_given(objects)))
+    items = []
+    for sensor in sensors:
+        key = key_of(id(sensor))
+        read = fields.get(sensor) or {}
+        if key is None or not read:
+            continue
+        items.extend(_pixels_of(sensor, next(iter(read.values())), key))
+    was = [(sensor, sensor.style.pixel.size) for sensor in sensors]
+    for sensor, _ in was:
+        sensor.style.pixel.size = 0
+
+    def restore():
+        for sensor, size in was:
+            sensor.style.pixel.size = size
+
+    return items, restore
+
+
+def _pixels_of(sensor, field, key, path_ind=-1):
+    """A sensor's pixels as ``pixels`` items: one for its readings, and one
+    of cubes for the pixels that read nothing, where the style shows those.
+
+    Mirrors `make_Sensor` and `make_Pixels` in magpylib's `traces_core`, so
+    the sizes and the colours are magpylib's own: the size from the pixel
+    spacing and the sensor's size, scaled by the reading where the style
+    says so; the colour from the colormap over the reading. What differs is
+    the shape: no mesh, a position, a direction, a size and a colour per
+    pixel. A reading is in the sensor's own frame, as magpylib hands it
+    over, and the sensor's pose takes it into the world's.
+    """
+    from magpylib._src.display.traces_core import _apply_scaling_transformation
+    from magpylib._src.display.traces_utility import get_hexcolors_from_colormap
+    from scipy.spatial.distance import pdist
+
+    style = sensor.style
+    pixel = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
+    one_pix = pixel.shape[0] == 1
+    hull = np.concatenate([[[0, 0, 0]], pixel]) if one_pix else pixel
+    dimension = getattr(sensor, "dimension", None)
+    if dimension is None:
+        dimension = _resolve(sensor, "style.size")
+    dim = np.array(
+        [dimension] * 3 if isinstance(dimension, float | int) else dimension[:3],
+        dtype=float,
+    )
+    hull_dim = hull.max(axis=0) - hull.min(axis=0)
+    dim_ext = max(float(np.mean(dim)), float(np.min(hull_dim)))
+    px_dim = 1.0
+    if _resolve(sensor, "style.pixel.sizemode") == "scaled":
+        if len(pixel) < 1000:
+            min_dist = float(np.min(pdist(pixel))) if len(pixel) > 1 else 0.0
+        else:
+            vol = float(np.prod(np.ptp(pixel, axis=0)))
+            min_dist = (vol / len(pixel)) ** (1 / 3)
+        px_dim = dim_ext / 5 if min_dist == 0 else min_dist / 2
+    sizes = np.full(len(pixel), px_dim * float(_resolve(sensor, "style.pixel.size")))
+
+    source = _resolve(sensor, "style.pixel.field.source")
+    _, *coords_str = source  # "B", or "Bxy" for two of its components
+    coords_str = coords_str or "xyz"
+    coords = list({"xyz".index(v) for v in coords_str if v in "xyz"})
+    other = [i for i in range(3) if i not in coords]
+    field = np.array(field, dtype=float)
+    field[..., other] = 0
+    norms = np.linalg.norm(field, axis=-1)
+    is_null = np.logical_or(norms == 0, np.isnan(norms))
+    norms[is_null] = np.nan
+    # Nothing read anywhere -- no source, or every pixel on a null -- is no
+    # reading to scale by: the sizes stay the style's, the colours the null
+    # colour. magpylib's own scaling would warn over the all-NaN slice.
+    any_reading = not is_null.all()
+    if any_reading:
+        nmin, nmax = np.nanmin(norms), np.nanmax(norms)
+        ptp = nmax - nmin
+        norms = (norms - nmin) / ptp if ptp != 0 else np.full_like(norms, 0.5)
+    sizescaling = _resolve(sensor, "style.pixel.field.sizescaling")
+    if any_reading and sizescaling != "uniform":
+        scaled = _apply_scaling_transformation(
+            norms,
+            sizescaling,
+            is_null,
+            path_ind,
+            min_=_resolve(sensor, "style.pixel.field.sizemin"),
+        )
+        scaled[is_null[path_ind]] = 1
+        sizes = sizes * scaled
+    pixel_color = _resolve(sensor, "style.pixel.color")
+    colors = "black" if pixel_color is None else str(pixel_color)
+    colorscaling = _resolve(sensor, "style.pixel.field.colorscaling")
+    if any_reading and colorscaling != "uniform":
+        graded = _apply_scaling_transformation(norms, colorscaling, is_null, path_ind)
+        colors = [
+            str(c)
+            for c in get_hexcolors_from_colormap(
+                values=graded,
+                colormap=_resolve(sensor, "style.pixel.field.colormap"),
+                cmin=0,
+                cmax=1,
+            )
+        ]
+
+    # into the world: the pixels sit in the sensor's frame, and so does the
+    # reading, which magpylib rotates into it
+    pose = np.atleast_2d(np.asarray(sensor._position, dtype=float))[path_ind]
+    turn = sensor._orientation[path_ind]
+    origins = turn.apply(pixel) + pose
+    vectors = turn.apply(field[path_ind])
+    null = (np.abs(field[path_ind]) < _NULL_VECTOR).all(axis=1)
+    shape = _PIXEL_SHAPES[_resolve(sensor, "style.pixel.field.symbol")]
+    label = (style.label if style.label is not None else type(sensor).__name__) or ""
+    # on the style itself: opacity has no sensor default to fall back on
+    opacity = float(style.opacity if style.opacity is not None else 1)
+
+    def item(chosen, symbol, oriented):
+        chosen = np.flatnonzero(chosen)
+        if not len(chosen):
+            return None
+        return {
+            "kind": "pixels",
+            "name": label,
+            "object_id": key,
+            "opacity": opacity,
+            "symbol": symbol,
+            "origins": np.round(origins[chosen], 9).ravel().tolist(),
+            "vectors": np.round(vectors[chosen], 6).ravel().tolist()
+            if oriented
+            else None,
+            "sizes": np.round(sizes[chosen], 9).tolist(),
+            "colors": colors
+            if isinstance(colors, str)
+            else [colors[i] for i in chosen],
+        }
+
+    items = []
+    if shape == "cube":
+        items.append(item(np.ones(len(pixel), dtype=bool), "cube", False))
+    else:
+        items.append(item(~null, shape, True))
+        if _resolve(sensor, "style.pixel.field.shownull"):
+            items.append(item(null, "cube", False))
+    return [i for i in items if i is not None]
+
+
+def _ranges_with_pixels(ranges, pixels):
+    """`ranges` reaching every pixel and what it is drawn with: an arrow or a
+    cone runs a size either way of its pixel, a cube half of one."""
+    if not pixels:
+        return ranges
+    low = (
+        np.array([r[0] for r in ranges], dtype=float) if ranges else np.full(3, np.inf)
+    )
+    high = (
+        np.array([r[1] for r in ranges], dtype=float) if ranges else np.full(3, -np.inf)
+    )
+    for item in pixels:
+        origins = np.asarray(item["origins"], dtype=float).reshape(-1, 3)
+        reach = np.asarray(item["sizes"], dtype=float) * (
+            0.5 if item["symbol"] == "cube" else 1.0
+        )
+        low = np.minimum(low, (origins - reach[:, None]).min(axis=0))
+        high = np.maximum(high, (origins + reach[:, None]).max(axis=0))
+    return np.stack([low, high], axis=1).tolist()
 
 
 def _given(objects):
@@ -1054,12 +1342,18 @@ def scene_payload(objects, live=None, derived=None):
     collection draws nothing of its own, so a view that puts handles on one
     makes it a node, and carries these on it while it is dragged.
     """
-    scene = _capture(objects, on_behalf_of="studio")
+    live = live or {}
+    derived = derived or {}
+    pixels, restore = _instanced_pixels(
+        objects, _key_map(live, derived) if live else None
+    )
+    try:
+        scene = _capture(objects, on_behalf_of="studio")
+    finally:
+        restore()
     panel = scene.panel(1, 1)
     traces = [t for frame in scene.frames for t in frame.traces]
 
-    live = live or {}
-    derived = derived or {}
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
     anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
     paths, readings = {}, []
@@ -1115,8 +1409,10 @@ def scene_payload(objects, live=None, derived=None):
 
     collections, split = _collections(live, derived, source_of)
     return {
-        **_by_kind(_keyed(traces, live, derived)),
-        "ranges": None if panel.ranges is None else panel.ranges.tolist(),
+        **_by_kind([*_keyed(traces, live, derived), *pixels]),
+        "ranges": _ranges_with_pixels(
+            None if panel.ranges is None else panel.ranges.tolist(), pixels
+        ),
         "labels": panel.labels,
         "anchors": anchors,
         "centroids": centroids,

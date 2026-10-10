@@ -282,7 +282,7 @@ def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
 
     With magpylib's defaults an unrelated object can rescale everyone's
     vertices -- autosized objects follow the scene extent, and the SI prefix
-    the whole scene is drawn in follows it too. `pin_scene_units` stops both.
+    the whole scene is drawn in follows it too. `pinned_scene_units` stops both.
     """
     before = session.get_scene()
     cube_before = next(m for m in before["meshes"] if m["object_id"] == "cube")
@@ -336,7 +336,7 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     Asserted on what is *drawn*, not on what is declared, because the two can
     part company: a Sensor's glyph is sized absolutely -- the studio pins it
     that way so moving one object cannot rescale every other, see
-    `threejs.pin_scene_units` -- so it kept magpylib's default size of 1 and
+    `threejs.pinned_scene_units` -- so it kept magpylib's default size of 1 and
     arrived a metre across beside 10 mm magnets, in every example at once.
     """
     session = MagpylibStudioSession()
@@ -1195,14 +1195,15 @@ def test_the_variables_panel_uses_every_bound_the_engine_can_write():
     import inspect
     import pathlib
 
+    # The panel the studio's sidebar and the notebook widget both mount.
     panel = (
         pathlib.Path(__file__).parent.parent
-        / "vscode-extension"
-        / "media"
-        / "variables.js"
+        / "magpylib_studio"
+        / "static"
+        / "variables.mjs"
     )
-    if not panel.exists():  # engine installed on its own, no extension beside it
-        pytest.skip("extension sources not present")
+    if not panel.exists():  # tests run against an installed wheel, no checkout
+        pytest.skip("the package's static sources are not beside the tests")
     source = panel.read_text()
 
     limits = [
@@ -5007,3 +5008,38 @@ def test_jsonrpc_roundtrip():
     assert responses[1]["result"] == {"ok": True}
     assert responses[2]["result"]["set"]["opacity"] == 0.5
     assert responses[3]["error"]["type"] == "MethodError"  # unknown method rejected
+
+
+@needs_scene_graph
+def test_a_sensors_pixels_are_drawn_as_instances():
+    """A sensor whose pixels read the field is no longer a mesh of every
+    arrow: its pixels come as one `pixels` item -- a position, a direction,
+    a size and a colour each -- for the view to draw as instances. The
+    sensor keeps its axes, the ranges reach the arrows, the style is as it
+    was, and the 2D arrow symbol stays magpylib's own drawing."""
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    sensor = s._objs["field"]
+    pixels = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
+    before = sensor.style.pixel.size
+    scene = s.get_scene()
+    assert sensor.style.pixel.size == before, "the style is put back"
+    items = [p for p in scene["pixels"] if p["object_id"] == "field"]
+    assert items and sum(len(p["sizes"]) for p in items) == len(pixels)
+    arrows = next(p for p in items if p["symbol"] == "arrow3d")
+    n = len(arrows["sizes"])
+    assert len(arrows["origins"]) == 3 * n and len(arrows["vectors"]) == 3 * n
+    assert len(arrows["colors"]) == n and all(
+        c.startswith("#") for c in arrows["colors"]
+    )
+    assert min(arrows["sizes"]) > 0
+    faces = sum(
+        len(m["index"]) // 3 for m in scene["meshes"] if m["object_id"] == "field"
+    )
+    assert faces < 400, "the sensor's own mesh is its axes, not every arrow"
+    origins = np.asarray(arrows["origins"]).reshape(-1, 3)
+    for axis in range(3):
+        low, high = scene["ranges"][axis]
+        assert low <= origins[:, axis].min() and high >= origins[:, axis].max()
+    assert s.apply_edit("field", "pixel.field.symbol", "arrow")["ok"]
+    assert not [p for p in s.get_scene()["pixels"] if p["object_id"] == "field"]

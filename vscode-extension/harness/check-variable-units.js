@@ -7,7 +7,8 @@
  * unit and reads what is typed back through the engine (`quantity`), so the
  * units live in one place (`docs/decisions.md#0008-units-are-metadata`). The extension tests cannot open
  * this panel, so this is where that is held to, on the real engine and the
- * panel's own script:
+ * panel's own module -- the package's `variables.mjs`, which the sidebar and
+ * the notebook widget both mount:
  *
  * 1. A length says what it is in, beside its name, and its box holds the
  *    number in that unit: SI unless the scene says otherwise -- `gap m`, 0.015.
@@ -21,7 +22,7 @@
  *    shows 10 and takes 12.
  */
 const { enginePython } = require("./engine-python");
-const { mount, startEngine } = require("./webview-harness");
+const { mountVariables, startEngine } = require("./webview-harness");
 
 let failures = 0;
 let engine;
@@ -37,15 +38,16 @@ async function main() {
   }
   engine = startEngine();
   await engine.request("load_example", { name: "halbach" });
-  const { provider, roots, settle, sent } = await mount("variables", engine);
+  const { panel, root, settle, sent } = await mountVariables(engine);
   await settle(8);
 
   const row = (name) => {
-    const found = roots
-      .get("list")
-      .querySelectorAll("div.row")
+    const found = root
+      .querySelectorAll("div.magpy-vars-row")
       .find(
-        (r) => r.querySelector("span.name")?.textContent.split(" ")[0] === name,
+        (r) =>
+          r.querySelector("span.magpy-vars-name")?.textContent.split(" ")[0] ===
+          name,
       );
     if (!found) {
       throw new Error(`no row for ${name} — the panel rendered none`);
@@ -68,7 +70,7 @@ async function main() {
   };
 
   // 1. shown in its unit: SI by default
-  let gapName = row("gap").querySelector("span.name").textContent;
+  let gapName = row("gap").querySelector("span.magpy-vars-name").textContent;
   check(
     gapName === "gap m",
     `a length says its unit beside its name: "${gapName}"`,
@@ -104,9 +106,9 @@ async function main() {
 
   // 3. a scene shown in mm
   await engine.request("set_model_unit", { unit: "mm" });
-  provider.refresh();
+  panel.refresh();
   await settle(12);
-  gapName = row("gap").querySelector("span.name").textContent;
+  gapName = row("gap").querySelector("span.magpy-vars-name").textContent;
   check(gapName === "gap mm", `shown in mm, it says so: "${gapName}"`);
   check(
     box("gap").value === "25",
@@ -125,7 +127,7 @@ async function main() {
     (await stored("gap")) === before,
     "a unit that is not a length stores nothing",
   );
-  const status = roots.get("status").textContent;
+  const status = root.querySelector("div.magpy-vars-status").textContent;
   check(
     /'kg' is not a unit of length/.test(status),
     `and says why: "${status}"`,

@@ -11,6 +11,9 @@
  * only load what is inside the extension. So `npm run compile` copies it in,
  * next to media/ rather than in it: ESLint reads media/, and the bundle is
  * minified three.js. `check:widget` has already said the bundle is current.
+ *
+ * The Variables panel comes with it: the sidebar mounts the package's own
+ * module, as the widget bundles it (docs/plans/variables-in-widget.md).
  */
 const fs = require("fs");
 const path = require("path");
@@ -20,7 +23,7 @@ const STATIC = path.join(EXT, "..", "magpylib_studio", "static");
 const TARGET = path.join(EXT, "widget");
 
 fs.mkdirSync(TARGET, { recursive: true });
-for (const file of ["widget.js", "widget.css"]) {
+for (const file of ["widget.js", "widget.css", "variables.mjs"]) {
   fs.copyFileSync(path.join(STATIC, file), path.join(TARGET, file));
 }
 console.log("copy-widget: the notebook widget is in widget/ for the panel.");

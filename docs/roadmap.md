@@ -209,6 +209,15 @@ nothing before R7 needs it.
 - **Instancing** (`plans/instancing.md`, F2; the GUI as its parameter binder,
   F3) — unchanged; a placed instance is one more call in a scene function when
   it exists.
+- **The Inspector into the widget**, as the Variables panel went (decision
+  0019): a module in `static/` the widget floats over its view and the VS Code
+  sidebar mounts as it is. First the engine answers an expression naming a
+  variable the scene lacks, today a VS Code dialog (`ensureVariablesDefined`,
+  the Inspector's one host-side behaviour beyond transport): a refusal naming
+  them, with the panel offering to create each at its current number, or a flag
+  on the mutating calls. The history stays the extension's. Slots for a host's
+  own layout, and a widget per panel for hosts that place outputs apart, when a
+  host asks.
 - **A scene as a page anyone can open** — `to_html` with the views for listed
   variable values computed ahead, as marimo-studio's prepared exports do; and
   the widget inside a marimo-studio view.

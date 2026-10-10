@@ -8,6 +8,7 @@ const MUTATING = new Set([
   'set_variable_bounds',
   'set_variable_unit',
   'remove_variable',
+  'restore_variable',
 ]);
 
 export interface VariableBounds {
@@ -67,6 +68,10 @@ export function sliderRange(bounds?: VariableBounds): [number, number] | undefin
  * variables has to be one that can hold a slider. The cost is that per-row
  * actions are buttons in the row instead of a context menu; the view's title
  * bar still carries New Variable… and Sweep…
+ *
+ * The rows are the package's (`magpylib_studio/static/variables.mjs`): the
+ * notebook widget floats the same panel over its view, and `media/variables.mjs`
+ * mounts it here with its calls routed through this provider.
  */
 export class VariablesViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'magpylib-studio.variablesView';
@@ -153,26 +158,24 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const nonce = webviewNonce();
     const styleUri = mediaUri(webview, this.extensionUri, 'variables.css');
-    const scriptUri = mediaUri(webview, this.extensionUri, 'variables.js');
+    const scriptUri = mediaUri(webview, this.extensionUri, 'variables.mjs');
+    // The panel itself is the package's, copied beside media/ by `npm run
+    // compile` (harness/copy-widget.js) with the notebook widget's bundle,
+    // whose stylesheet dresses its rows.
+    const widgetDir = vscode.Uri.joinPath(this.extensionUri, 'widget');
+    const panelUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'variables.mjs'));
+    const widgetStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};" />
+  <link rel="stylesheet" href="${widgetStyleUri}" />
   <link rel="stylesheet" href="${styleUri}" />
 </head>
-<body>
-  <div id="list"></div>
-  <div id="empty" hidden>
-    No variables yet. A named number any position, dimension or angle can be
-    written in terms of — change it once and the scene follows.
-  </div>
-  <details id="help">
-    <summary>what can go in a value</summary>
-    <div id="helpBody"></div>
-  </details>
-  <div id="status"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+<body data-variables="${panelUri}">
+  <div id="panel"></div>
+  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }
