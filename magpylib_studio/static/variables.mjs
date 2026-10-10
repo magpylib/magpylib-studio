@@ -21,6 +21,10 @@
  *   for an action supplied; in a notebook the scene function is where a
  *   variable is added or renamed, and the widget supplies none.
  * - `empty`: what to say when the scene has no variables.
+ * - `head`: an element for what the panel says about itself as a whole --
+ *   the widget's dock gives its title line. There goes the one button that
+ *   lets every taken-over variable decide again, and the rows carry no ↺
+ *   of their own; without it, each taken-over row has its ↺.
  * - `compact`: the rows and nothing else, for a panel floating over a 3D
  *   view -- nothing over the view that cannot act. No expression help under
  *   the rows, no note of the hard limits under a slider that spans less
@@ -109,6 +113,7 @@ export function createVariables(
     actions = {},
     empty = "No variables.",
     compact = false,
+    head = null,
   } = {},
 ) {
   const withHelp = !compact;
@@ -171,6 +176,24 @@ export function createVariables(
         if (res && res.ok === false) say(res.error);
         return load();
       })
+      .catch(say);
+  }
+
+  /** Let every taken-over variable decide again, as one step to undo. */
+  function restoreAll(names) {
+    say("");
+    const each = names.reduce(
+      (done, name) =>
+        done.then(() =>
+          rpc("restore_variable", { name }).then((res) => {
+            if (res && res.ok === false) say(res.error);
+          }),
+        ),
+      rpc("begin_interaction").catch(() => {}),
+    );
+    return each
+      .then(() => rpc("end_interaction").catch(() => {}))
+      .then(load)
       .catch(say);
   }
 
@@ -467,7 +490,7 @@ export function createVariables(
       // Everything about the variable except its value, which is the box
       // beside this: one button each, as the row is as wide as a sidebar and
       // the slider is what should have the space. Only what the host can do.
-      if (v.shadowed) {
+      if (v.shadowed && !head) {
         acts.append(
           button(
             "↺",
@@ -505,6 +528,30 @@ export function createVariables(
         } else {
           name.title += " — " + allowed;
         }
+      }
+    }
+    // In the head, one restore for every taken-over variable, where the
+    // host gave one: a mark per row has no column over the view.
+    if (head) {
+      head.replaceChildren();
+      const taken = variables.filter((v) => v.shadowed);
+      if (taken.length) {
+        const names = taken.map((v) => v.name);
+        const said =
+          names.length > 1
+            ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1]
+            : names[0];
+        const restoreAllButton = element(
+          "button",
+          "magpy-vars-restore",
+          "↺ Restore",
+        );
+        restoreAllButton.type = "button";
+        restoreAllButton.title =
+          `Let ${said} decide again, by ` +
+          how(taken.flatMap((v) => v.shadowed));
+        restoreAllButton.addEventListener("click", () => restoreAll(names));
+        head.appendChild(restoreAllButton);
       }
     }
   }

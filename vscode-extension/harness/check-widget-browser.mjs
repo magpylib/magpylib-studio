@@ -1063,6 +1063,24 @@ async function variablesPanel(port, base) {
           return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
         }
       }
+      // a variable a step took over: one restore in the dock's title line,
+      // none in the rows, and the restoring one step to undo
+      await tab.navigate(`${base}/pages/variables.html?taken`);
+      const taken = await tab.until("return window.result", 20_000);
+      if (!taken) return "?taken: never finished";
+      if (!taken.restore?.inHead || taken.restore.inRows) {
+        return `the restore was ${JSON.stringify(taken.restore)}`;
+      }
+      if (JSON.stringify(taken.restored) !== JSON.stringify(["r"])) {
+        return `restore sent ${JSON.stringify(taken.restored)}`;
+      }
+      const grouped = taken.grouped;
+      if (
+        grouped[0] !== "begin_interaction" ||
+        !grouped.includes("end_interaction")
+      ) {
+        return `restore was not one step: ${grouped.join(" ")}`;
+      }
       return thrown(tab);
     } finally {
       await tab.close();

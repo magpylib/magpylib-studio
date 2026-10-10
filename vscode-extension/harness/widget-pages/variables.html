@@ -27,6 +27,13 @@
         await fetch("/out/variables.json")
       ).json();
       const query = new URLSearchParams(location.search);
+      // `?taken`: a later step states r outright, so the panel offers to let
+      // it decide again
+      if (query.has("taken")) {
+        const r = variables.variables.find((v) => v.name === "r");
+        r.inert = true;
+        r.shadowed = [{ events: ["ring-pattern"] }];
+      }
       const values = { ...state };
       if (query.has("standalone")) values.standalone = true;
       if (query.has("readonly")) values.editable = false;
@@ -97,6 +104,28 @@
       const offered = !hidden(button("Variables"));
       if (!offered) {
         window.result = { offered, asked };
+      } else if (query.has("taken")) {
+        // the one restore in the dock's title line, none in the rows, and
+        // the restoring one step
+        button("Variables").click();
+        await until(() => el.querySelectorAll(".magpy-vars-row").length);
+        await wait(200);
+        const pill = el.querySelector(
+          ".magpy-scene-dock-head .magpy-vars-restore",
+        );
+        const inRows = Boolean(el.querySelector(".magpy-vars-acts button"));
+        const mark = asked.length;
+        pill?.click();
+        await wait(500);
+        window.result = {
+          offered,
+          restore: { inHead: Boolean(pill), inRows, label: pill?.textContent },
+          restored: asked
+            .slice(mark)
+            .filter((a) => a.method === "restore_variable")
+            .map((a) => a.params.name),
+          grouped: asked.slice(mark).map((a) => a.method),
+        };
       } else if (query.has("keep")) {
         // For a look: the panel open, and nothing done to it.
         button("Variables").click();
