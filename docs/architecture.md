@@ -242,8 +242,7 @@ one message where it was two; the release settles as one edit. A `variables`
 trait, `{name: value}` as resolved, follows the session, so a cell reads the
 knobs; assigned, it sets what differs as one edit, so another control's trait
 links to it both ways (`traitlets.link`), the view's model owning the numbers.
-`variable_sliders()` is the same as ipywidgets controls. The bundle
-`static/widget.js` is committed so installing needs no node;
+The bundle `static/widget.js` is committed so installing needs no node;
 `npm run check:widget` fails when it no longer matches its sources, and a CI job
 installs the wheel alone and runs an edit through a fake connection.
 

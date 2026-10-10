@@ -606,101 +606,6 @@ class SceneWidget(anywidget.AnyWidget):
             raise ValueError(f"{name}: {result.get('error')}")
         self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
-    def variable_sliders(self):
-        """A control for each variable of an editable view's scene, as the
-        studio's Variables panel lays them out, bound both ways: moving one
-        sets the variable, and an edit in the view -- an undo, say -- moves it
-        back. Returned as one `ipywidgets.VBox`, to show beside the view.
-
-        A number slides across its slider range, or its limits without one,
-        widened to take in where it is now: a slider clamps what it is given,
-        and clamping would be an edit nobody made. A whole number slides in
-        whole steps, a variable with options is a dropdown, and one written as
-        an expression has no control -- it follows the others. A number with
-        no range at all has nowhere to slide to, and is left out. One that
-        says what it measures slides in the unit the panel shows it in --
-        in a scene shown in mm, `gap (mm)` from 10 to 30, not from 0.01 to
-        0.03.
-        """
-        import ipywidgets as widgets
-
-        from magpylib_studio import expressions, units
-
-        session = self._editing("variable_sliders")
-
-        def values():
-            return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
-
-        controls, scales, kinds = {}, {}, {}
-        listed = session.get_variables()
-        for variable in listed["variables"]:
-            name, value = variable["name"], variable["value"]
-            limits = variable.get("bounds") or {}
-            shown = variable.get("shown") or {"symbol": "", "scale": 1.0}
-            if expressions.is_expression(variable["expression"]):
-                continue
-            if "options" in limits:
-                control = widgets.Dropdown(options=limits["options"], value=value)
-            else:
-                low = limits.get("soft_min", limits.get("min"))
-                high = limits.get("soft_max", limits.get("max"))
-                if low is None or high is None or isinstance(value, str):
-                    continue
-                low, high = min(low, value), max(high, value)
-                if limits.get("integer"):
-                    control = widgets.IntSlider(value, min=low, max=high)
-                else:
-                    scale = shown["scale"]  # a count is counted, never scaled
-                    scales[name], kinds[name] = scale, limits.get("unit")
-                    low, high = low * scale, high * scale
-                    control = widgets.FloatSlider(
-                        value * scale,
-                        min=low,
-                        max=high,
-                        step=(high - low) / 200 or 1,
-                        readout_format=".4g",
-                    )
-            symbol = shown["symbol"] if name in scales else ""
-            control.description = f"{name} ({symbol})" if symbol else name
-            controls[name] = control
-
-        def document(name, value):
-            """A control's value in the document's unit, exactly: 23.4 mm is
-            0.0234, not 23.4 * 0.001."""
-            if name not in scales:
-                return value
-            return units.to_document(
-                value, kinds[name], listed["model_unit"], listed["field_unit"]
-            )
-
-        def from_control(name):
-            def moved(change):
-                value = document(name, change["new"])
-                if values().get(name) != value:  # an echo is no edit
-                    self.set_variable(name, value)
-
-            return moved
-
-        def from_view(_change):
-            now = values()
-            for name, control in controls.items():
-                if name not in now:
-                    continue
-                shown_now = now[name] * scales.get(name, 1)
-                if name in scales and document(name, control.value) == now[name]:
-                    continue
-                if name not in scales and now[name] == control.value:
-                    continue
-                if hasattr(control, "max"):  # never clamp what the scene holds
-                    control.min = min(control.min, shown_now)
-                    control.max = max(control.max, shown_now)
-                control.value = shown_now
-
-        for name, control in controls.items():
-            control.observe(from_control(name), "value")
-        self.observe(from_view, "revision")
-        return widgets.VBox(list(controls.values()))
-
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
         Returns whether there was one. Stops where this view's editing
@@ -888,7 +793,9 @@ class SceneWidget(anywidget.AnyWidget):
                 f"a view with a scene of its own is not re-pointed: no {what}(). "
                 "Its objects are a studio session's -- a scene written in code, "
                 "a path, editable=True, or the pencil among the view's tools -- "
-                "so make another view for other objects."
+                "so make another view for other objects. A view a notebook "
+                "re-points from controls of its own is made with editable=None, "
+                "which offers no pencil."
             )
 
     def to_html(self, title="magpylib scene"):

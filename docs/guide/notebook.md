@@ -48,7 +48,9 @@ scene.widget.picked  # a third: what was clicked
 it, so a `SceneWidget(...)` in one of them is a _new widget per drag_: a new
 element, controls rebuilt from nothing, and the camera back at its opening
 framing — you lose the zoom you were working in. `update()` replaces the drawn
-objects and leaves the view alone, which is what makes a slider smooth.
+objects and leaves the view alone, which is what makes a slider smooth. Such a
+view is made with `editable=None`: no pencil, since an edit would be lost at the
+next move of a slider; `examples/jupyter_demo.ipynb` does that for its sliders.
 
 **The legend** floats over the view: the objects as they are nested, with a
 caret to fold a collection, an eye to hide it and everything in it — shown on
@@ -162,10 +164,9 @@ edit — so another control is tied to it both ways with
 numbers. `call` and `view3d` are the widgets themselves, not the
 `mo.ui.anywidget` elements around them: a marimo cell that names an element
 re-runs on its every change, and would make the link again each time;
-`examples/marimo_demo.py` does it with wigglystuff's call expression.
-`variable_sliders()` is the same as ipywidgets controls beside the view. In
-marimo a cell that names the view re-runs on its every change, a click included;
-one that should follow edits alone reads a `mo.state` fed by
+`examples/marimo_demo.py` does it with wigglystuff's call expression. In marimo
+a cell that names the view re-runs on its every change, a click included; one
+that should follow edits alone reads a `mo.state` fed by
 `view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
 whose style says no size is drawn five millimetres across; `style_size=` says
 another. How the editable view is built is

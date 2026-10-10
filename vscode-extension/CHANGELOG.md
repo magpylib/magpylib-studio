@@ -19,15 +19,14 @@ All notable changes to the Magpylib Studio extension.
   foot of the edit column: the studio's Variables panel beside it — a slider
   each, the scene following as one is dragged, a dropdown for a choice, `15 mm`
   typed and read in its unit — with a `variables` trait a cell reads, assigns,
-  or ties another control to with `traitlets.link`, and `variable_sliders()` for
-  the same as ipywidgets controls. The studio's own Variables view is that
-  panel, mounted in the sidebar. A view is read only until the pencil among its
-  tools puts the handles out: a scene written in code or a path is shown as its
-  own session from the start, and the cell's own objects are copied into one
-  when the pencil is pressed. Undo stops where the view started, and `reset()`,
-  or the arrow under the undo buttons, takes every edit since back in one
-  undoable step. `editable=None` is a view for looking only: no pencil, and
-  `editable` refuses to turn on.
+  or ties another control to with `traitlets.link`. The studio's own Variables
+  view is that panel, mounted in the sidebar. A view is read only until the
+  pencil among its tools puts the handles out: a scene written in code or a path
+  is shown as its own session from the start, and the cell's own objects are
+  copied into one when the pencil is pressed. Undo stops where the view started,
+  and `reset()`, or the arrow under the undo buttons, takes every edit since
+  back in one undoable step. `editable=None` is a view for looking only: no
+  pencil, and `editable` refuses to turn on.
 - **Writing a scene in code.** A scene is a plain magpylib function under
   `@scene`: its parameters are the variables, with their bounds and kinds in
   `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and

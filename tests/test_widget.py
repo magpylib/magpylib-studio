@@ -1128,106 +1128,6 @@ def test_a_scene_written_in_code_is_edited_as_it_is():
 
 
 @needs_scene_graph
-def test_a_views_variables_get_controls_bound_both_ways():
-    """A slider per variable with a range, a dropdown for one with options,
-    nothing for one that follows the others or has nowhere to slide; moved,
-    they set the variable, and an undo in the view moves them back."""
-    from typing import Annotated, Literal
-
-    from magpylib_studio import Bounds, Count, derived, duplicate_around, name, scene
-
-    @scene
-    def design(
-        n: Annotated[int, Count(2, 60, slider=(4, 20))] = 10,
-        r: Annotated[float, Bounds(0.005, 0.08)] = 0.02,
-        axis: Literal["x", "y", "z"] = "z",
-        free: float = 3.0,
-    ):
-        derived("half", r / 2)
-        magnet = name(
-            magpy.magnet.Cuboid(
-                dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
-            ),
-            "m",
-        )
-        name(magpy.Collection(magnet), "ring")
-        duplicate_around(magnet, count=n, axis=axis)
-
-    s = design.build()
-    studio = widget.SceneWidget(s, editable=True)
-    controls = {c.description: c for c in studio.variable_sliders().children}
-    assert {name: type(c).__name__ for name, c in controls.items()} == {
-        "n": "IntSlider",
-        "r": "FloatSlider",
-        "axis": "Dropdown",
-    }
-    assert (controls["n"].min, controls["n"].max) == (4, 20)  # the slider range
-
-    controls["r"].value = 0.03
-    assert studio.objects["m"].position == pytest.approx([0.03, 0, 0])
-    controls["axis"].value = "x"
-    assert studio.undo()
-    assert controls["axis"].value == "z"
-    assert studio.undo()
-    assert controls["r"].value == pytest.approx(0.02)
-
-
-@needs_scene_graph
-def test_a_length_slides_in_the_unit_it_is_shown_in():
-    """In a scene shown in mm, `gap (mm)` from 10 to 30, as the panel shows
-    it, not 0.01 to 0.03 -- and what it sets is the exact number of metres,
-    not 23.4 * 0.001. In metres, the default, it is `gap (m)`."""
-    from typing import Annotated
-
-    from magpylib_studio import Length, name, scene
-
-    @scene(model_unit="mm")
-    def design(gap: Annotated[float, Length(0, 0.06, slider=(0.01, 0.03))] = 0.015):
-        name(
-            magpy.magnet.Cuboid(
-                dimension=(0.01, 0.01, 0.01),
-                polarization=(0, 0, 1),
-                position=(gap, 0, 0),
-            ),
-            "m",
-        )
-
-    s = design.build()
-    studio = widget.SceneWidget(s, editable=True)
-    (control,) = studio.variable_sliders().children
-    assert control.description == "gap (mm)"
-    assert (control.min, control.value, control.max) == pytest.approx((10, 15, 30))
-
-    control.value = 23.4
-    assert studio._session.to_dict()["variables"]["gap"] == 0.0234
-    assert studio.undo()
-    assert control.value == pytest.approx(15)
-
-
-@needs_scene_graph
-def test_a_field_slides_in_the_scenes_field_unit():
-    """`j (mT)` from 800 to 1400 in a scene shown in mT, setting tesla."""
-    from typing import Annotated
-
-    from magpylib_studio import Bounds, name, scene
-
-    @scene(field_unit="mT")
-    def design(j: Annotated[float, Bounds(slider=(0.8, 1.4), unit="field")] = 1.2):
-        name(
-            magpy.magnet.Cuboid(dimension=(0.01, 0.01, 0.01), polarization=(0, 0, j)),
-            "m",
-        )
-
-    s = design.build()
-    studio = widget.SceneWidget(s, editable=True)
-    (control,) = studio.variable_sliders().children
-    assert control.description == "j (mT)"
-    assert (control.min, control.value, control.max) == pytest.approx((800, 1200, 1400))
-    control.value = 1100
-    assert studio._session.to_dict()["variables"]["j"] == 1.1
-
-
-@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()
@@ -1238,8 +1138,9 @@ def test_a_page_saved_from_a_studio_is_read_only():
 
 @needs_scene_graph
 def test_a_studio_is_not_re_pointed():
+    """And the refusal says what a view the notebook re-points is made with."""
     studio = _studio()
-    with pytest.raises(TypeError, match="edit"):
+    with pytest.raises(TypeError, match="editable=None"):
         studio.update(magpy.Sensor())
 
 
