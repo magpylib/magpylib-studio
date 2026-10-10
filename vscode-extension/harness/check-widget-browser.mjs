@@ -1073,8 +1073,10 @@ async function variablesPanel(port, base) {
 /** The object panel: toggled from the column, it shows the selection's
  *  parameters and pose and follows the selection; a typed value is read
  *  through the engine and set with `define`, a bare name is set as an
- *  expression and what the engine made is said; opening it closes the
- *  variables panel, and the handles put away take it along. */
+ *  expression and what the engine made is said; the style tree is folded
+ *  and unread until opened, then a colour set goes through the engine;
+ *  opening it closes the variables panel, and the handles put away take it
+ *  along. */
 async function objectPanel(port, base) {
   await check(
     "the object panel edits the selection through the session",
@@ -1094,6 +1096,7 @@ async function objectPanel(port, base) {
           named,
           notice,
           afterPencil,
+          style,
         } = result;
         if (!offered) return "no object toggle with the handles out";
         if (header !== "m") return `the header said ${JSON.stringify(header)}`;
@@ -1122,6 +1125,19 @@ async function objectPanel(port, base) {
         }
         if (!notice.includes("reach made"))
           return `it said ${JSON.stringify(notice)}`;
+        if (!style?.folded) return "the style tree was open unasked";
+        if (!style.lazy) return "the style tree was read before it was opened";
+        for (const name of ["color", "opacity", "label"]) {
+          if (!style.rows.includes(name))
+            return `no style row for ${name}: ${style.rows.join(", ")}`;
+        }
+        if (
+          style.edit?.method !== "apply_edit" ||
+          style.edit.params.path !== "color" ||
+          style.edit.params.value !== "#ff0000"
+        ) {
+          return `a colour set sent ${style.edit ? call(style.edit) : "nothing"}`;
+        }
         if (afterPencil.button || afterPencil.panel) {
           return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
         }

@@ -2,10 +2,11 @@
 <!--
   An editable view of a scene with variables -- the model of inspector.json
   -- against a fake kernel that answers the object panel's calls from the
-  fixture: the objects, each one's parameters and pose, a typed value read as
-  the number it is, a set answered with what it made. `?keep` opens the
-  panel on the magnet and stops, for a look. `window.result` is what the
-  panel showed and what it asked the session.
+  fixture: the objects, each one's parameters, pose, style schema and style
+  values, a typed value read as the number it is, a set answered with what it
+  made. `?keep` opens the panel on the magnet and stops, for a look; `&style`
+  unfolds the style tree too. `window.result` is what the panel showed and
+  what it asked the session.
 -->
 <html>
   <head>
@@ -23,7 +24,16 @@
         return test();
       };
       const fixture = await (await fetch("/out/inspector.json")).json();
-      const { state, scene, variables, objects, params, transforms } = fixture;
+      const {
+        state,
+        scene,
+        variables,
+        objects,
+        params,
+        transforms,
+        schemas,
+        values: styles,
+      } = fixture;
       const query = new URLSearchParams(location.search);
       if (query.has("light")) document.body.style.background = "#ffffff";
       if (query.has("dark")) document.body.style.background = "#1e1e1e";
@@ -69,6 +79,10 @@
           else if (method === "get_transform") result = transforms[p.object_id];
           else if (method === "get_variables") result = variables;
           else if (method === "get_scene") result = scene;
+          else if (method === "get_schema") result = schemas[p.object_id];
+          else if (method === "get_values") result = styles[p.object_id];
+          else if (method === "apply_edit" || method === "reset_style")
+            result = { ok: true };
           else if (method === "read_values")
             result = { ok: true, values: p.terms.map(Number) };
           else if (method === "set_param") result = made({ value: p.value });
@@ -111,6 +125,13 @@
       const poseTitle =
         el.querySelector(".magpy-ins-transform summary")?.textContent ?? null;
       if (query.has("keep")) {
+        if (query.has("style")) {
+          el.querySelector(".magpy-ins-style").open = true;
+          await until(
+            () => el.querySelectorAll(".magpy-ins-props .magpy-ins-row").length,
+          );
+          await wait(300);
+        }
         window.result = { offered, header, rows, poseTitle, kept: true };
       } else {
         // a value typed into the dimension's first box: read, then set
@@ -137,6 +158,32 @@
           asked.slice(mark).find((a) => a.method === "set_transform") ?? null;
         const notice =
           el.querySelector(".magpy-scene-notice")?.textContent ?? "";
+        // the style tree: folded, not read until opened; then a colour set
+        const styleBox = el.querySelector(".magpy-ins-style");
+        const style = {
+          folded: Boolean(styleBox) && !styleBox.open,
+          lazy: !asked.some((a) => a.method === "get_schema"),
+        };
+        mark = asked.length;
+        styleBox.open = true;
+        await until(
+          () => el.querySelectorAll(".magpy-ins-props .magpy-ins-row").length,
+        );
+        await wait(300);
+        const styleRows = () => [
+          ...el.querySelectorAll(".magpy-ins-props .magpy-ins-row"),
+        ];
+        style.rows = styleRows().map(
+          (r) => r.querySelector("label").textContent,
+        );
+        const colour = styleRows()
+          .find((r) => r.querySelector("label").textContent === "color")
+          ?.querySelector("input[type=text]");
+        colour.value = "#ff0000";
+        colour.dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(400);
+        style.edit =
+          asked.slice(mark).find((a) => a.method === "apply_edit") ?? null;
         // the handles put away take the panel with them
         button("Edit").click();
         await wait(200);
@@ -154,6 +201,7 @@
           named,
           notice,
           afterPencil,
+          style,
           asked,
         };
       }

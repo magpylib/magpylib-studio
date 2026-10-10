@@ -34,8 +34,8 @@ Writes into OUT:
   variable of each kind, the scene its session draws, and what it answers
   `get_variables` with: for the view's own variables panel;
 * ``inspector.json`` -- the same view, with what its session answers
-  `list_objects`, `get_params` and `get_transform` with, per object: for the
-  view's own object panel;
+  `list_objects`, `get_params`, `get_transform`, `get_schema` and `get_values`
+  with, per object: for the view's own object panel;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -308,6 +308,12 @@ def main(out):
                 },
                 "transforms": {
                     o["id"]: parametric._session.get_transform(o["id"]) for o in objects
+                },
+                "schemas": {
+                    o["id"]: parametric._session.get_schema(o["id"]) for o in objects
+                },
+                "values": {
+                    o["id"]: parametric._session.get_values(o["id"]) for o in objects
                 },
             }
         )

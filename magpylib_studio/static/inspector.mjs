@@ -13,8 +13,9 @@
  * - `rpc(method, params)`: the engine's answer, as a promise.
  * - `onEdited(result)`: after each write is answered, with the engine's
  *   answer -- which names a variable it made (`defined`).
- * - `compact`: the header, the parameters and the pose, and nothing else.
- *   For a panel over a 3D view: no style tree, no filter, no step editor.
+ * - `compact`: the header, the parameters, the pose, and the style tree
+ *   folded under one heading, read when it is opened and not before. For a
+ *   panel over a 3D view: no step editor, nothing shown unasked.
  * - `empty`: what to say with nothing selected.
  *
  * And gives back `{ show(objectId), showStep(eventId), refresh(), say() }`.
@@ -216,6 +217,16 @@ export function createInspector(
   filterEl.placeholder = "Filter style properties…";
   filterEl.hidden = true;
   const propsEl = element("div", "magpy-ins-props");
+  // Compact, the style tree is one folded heading: thirty-odd properties in
+  // eight groups would be the whole panel otherwise. Read when opened, and
+  // kept open across selections once it is; the filter sits inside.
+  const styleBox = element("details", "magpy-ins-style");
+  styleBox.appendChild(element("summary", "", "style"));
+  styleBox.append(filterEl, propsEl);
+  styleBox.hidden = true;
+  styleBox.addEventListener("toggle", () => {
+    if (styleBox.open && objectId && !schema) loadStyle().catch(say);
+  });
   const emptyEl = element("div", "magpy-ins-empty", empty);
   const statusEl = element("div", "magpy-ins-status");
   container.append(
@@ -223,7 +234,7 @@ export function createInspector(
     ...(compact ? [] : [stepEl]),
     paramsEl,
     transformEl,
-    ...(compact ? [] : [filterEl, propsEl]),
+    ...(compact ? [styleBox] : [filterEl, propsEl]),
     emptyEl,
     statusEl,
   );
@@ -376,7 +387,6 @@ export function createInspector(
 
   // --- style section: the engine's schema as widgets ---------------------
   function render() {
-    if (compact) return;
     const openGroups = new Set(
       Array.from(propsEl.querySelectorAll("details[open]")).map(
         (d) => d.dataset.group,
@@ -412,10 +422,15 @@ export function createInspector(
         rows.push(row);
       }
       if (!rows.length) continue;
+      if (!spec.properties) {
+        // a property of its own -- label, color, opacity -- is its row, not
+        // a group of one with its name said twice
+        propsEl.append(...rows);
+        continue;
+      }
       const details = element("details");
       details.dataset.group = group;
-      if (filter || openGroups.has(group) || !spec.properties)
-        details.open = true;
+      if (filter || openGroups.has(group)) details.open = true;
       details.append(element("summary", "", group), ...rows);
       propsEl.appendChild(details);
     }
@@ -975,8 +990,23 @@ export function createInspector(
     transformEl.appendChild(box);
   }
 
+  /** The style tree: the schema its widgets are built from and the values
+   *  they show. In full, with the object; compact, when its heading is
+   *  opened. */
+  async function loadStyle() {
+    const id = objectId;
+    const [loadedSchema, loadedValues] = await Promise.all([
+      rpc("get_schema", { object_id: id }),
+      rpc("get_values", { object_id: id }),
+    ]);
+    if (id !== objectId) return; // the selection moved on meanwhile
+    schema = loadedSchema;
+    values = loadedValues;
+    render();
+  }
+
   async function reloadValues() {
-    if (!compact) {
+    if (schema) {
       values = await rpc("get_values", { object_id: objectId });
       render();
     }
@@ -985,9 +1015,11 @@ export function createInspector(
 
   async function loadObject(id) {
     objectId = id;
+    schema = undefined; // this object's, once read
     emptyEl.style.display = id ? "none" : "";
     say("");
-    filterEl.hidden = compact || !id;
+    filterEl.hidden = !id;
+    styleBox.hidden = !id;
     if (!id) {
       headerEl.textContent = "";
       propsEl.innerHTML = "";
@@ -1026,14 +1058,8 @@ export function createInspector(
         ),
       );
     }
-    if (!compact) {
-      [schema, values] = await Promise.all([
-        rpc("get_schema", { object_id: id }),
-        rpc("get_values", { object_id: id }),
-      ]);
-      render();
-    }
-    await Promise.all([loadParams(), loadTransform()]);
+    const style = !compact || styleBox.open ? loadStyle() : Promise.resolve();
+    await Promise.all([style, loadParams(), loadTransform()]);
   }
 
   /** The step form and the object's own sections, both back from source. */

@@ -249,9 +249,11 @@ knobs; assigned, it sets what differs as one edit, so another control's trait
 links to it both ways (`traitlets.link`), the view's model owning the numbers.
 Beside the sliders, an object toggle opens **the object panel**
 (`static/inspector.mjs`, the studio's Inspector, compact): the selection's
-parameters and pose, in the scene's units, expressions as written, following the
-selection; a value typed is read through `read_values`, and set with `define`,
-so a bare name the scene lacks is made at the value it replaces. One of the two
+parameters and pose, in the scene's units, expressions as written, and its style
+tree folded under one heading, read when opened; it follows the selection. A
+value typed is read through `read_values`, and set with `define`, so a bare name
+the scene lacks is made at the value it replaces; a style property set is
+`apply_edit`, settled and told as a `set` of `style.<path>`. One of the two
 panels is open at a time. The bundle `static/widget.js` is committed so
 installing needs no node; `npm run check:widget` fails when it no longer matches
 its sources, and a CI job installs the wheel alone and runs an edit through a

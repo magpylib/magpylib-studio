@@ -608,17 +608,18 @@ function render({ model, el }) {
       variables.refresh();
     }
   }
-  // The selection's properties -- its parameters and its pose, as the
-  // studio's Inspector shows them (`inspector.mjs`), compact: no style tree,
-  // no step editor, a cell being a bounded box. Beside the column with the
-  // variables, one of the two open at a time; it follows the selection.
+  // The selection's properties -- its parameters, its pose and, folded under
+  // one heading, its style, as the studio's Inspector shows them
+  // (`inspector.mjs`), compact: no step editor, a cell being a bounded box.
+  // Beside the column with the variables, one of the two open at a time; it
+  // follows the selection.
   const inspectorEl = document.createElement("div");
   inspectorEl.className = "magpy-scene-inspector";
   inspectorEl.hidden = true;
   const inspectorButton = iconButton(
     "object",
-    "Object — the selection's parameters and pose; type 15 mm, 5° or a " +
-      "variable's name",
+    "Object — the selection's parameters, pose and style; type 15 mm, 5° " +
+      "or a variable's name",
     () => showInspector(inspectorEl.hidden),
   );
   pressed(inspectorButton, false);

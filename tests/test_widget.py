@@ -1722,3 +1722,30 @@ def test_the_object_panel_reads_and_sets_through_the_session():
     assert studio.variables["reach"] == pytest.approx(0.02)
     read = _ask(studio, "read_values", terms=["2 cm"], unit="length")["result"]
     assert read == {"ok": True, "values": [0.02]}
+
+
+@needs_scene_graph
+def test_the_object_panel_sets_style_through_the_session():
+    """The style tree's calls: the schema and the values are read, a property
+    set is one settled edit told as a `set` of its path under `style`, and a
+    reset puts the default back and says so."""
+    studio = _studio_of(_design())
+    schema = _ask(studio, "get_schema", object_id="m")["result"]
+    assert "color" in schema["properties"]
+    values = _ask(studio, "get_values", object_id="m")["result"]
+    assert set(values) >= {"set", "resolved"}
+    revision = studio.revision
+    answer = _ask(studio, "apply_edit", object_id="m", path="color", value="#ff0000")
+    assert answer["result"]["ok"]
+    assert studio.objects["m"].style.color == "#ff0000"
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {
+        "by": "set",
+        "objects": ["m"],
+        "changed": {"m": {"style.color": "#ff0000"}},
+    }
+    answer = _ask(studio, "reset_style", object_id="m", path="color")
+    assert answer["result"]["ok"]
+    assert studio.objects["m"].style.color is None
+    assert studio.last_edit["changed"] == {"m": {"style.color": None}}
+    assert studio.revision == revision + 2

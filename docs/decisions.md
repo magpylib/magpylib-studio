@@ -1221,9 +1221,11 @@ Code dialog before the engine saw it.
 - **One module, two densities.** `static/inspector.mjs` is the Inspector, handed
   an `rpc`. The sidebar mounts it in full -- header, step, parameters, pose, the
   style tree with its filter -- through a thin wrapper. The widget mounts it
-  compact: the header, the parameters and the pose of the selection, and nothing
-  else. The style tree is a long list with a long tail, the steps belong to the
-  tree that shows them, and a cell is a bounded box.
+  compact: the header, the parameters and the pose of the selection, and the
+  style tree folded under one heading, read when it is opened and not before,
+  its filter inside. The tree is thirty-odd properties in eight groups for a
+  plain magnet, the panel's whole height open and one line closed; the steps
+  belong to the tree that shows them, and a cell is a bounded box.
 - **It hangs on the column, one panel at a time.** An object toggle beside the
   sliders opens it; opening either panel closes the other; both go with the
   handles. It follows the selection, and reads the scene back once an edit
@@ -1239,8 +1241,12 @@ Code dialog before the engine saw it.
 
 ### Rejected
 
-- Style properties in the compact panel, even a few: the first ones asked for
-  would be label and colour, then the next, and the tail is the sidebar's.
+- No style in the widget, the first cut: a notebook has no sidebar to send the
+  colour of a magnet to, and the view's objects are its own copies, so a style
+  set on the kernel's object afterwards is not in the view.
+- A curated few instead of the tree, label and colour and opacity: the next
+  three would be asked for, and it is a second list to keep. The whole tree
+  folded costs one line and keeps one form.
 - The step editor in the widget: a step is picked in the tree, which the
   widget's legend is not.
 - A second implementation of the forms for the widget: every field made twice,

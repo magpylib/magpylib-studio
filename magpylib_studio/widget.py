@@ -275,12 +275,20 @@ class SceneWidget(anywidget.AnyWidget):
             "read_values",
             "set_param",
             "set_transform",
+            # and its style tree: the schema its widgets are built from, the
+            # values they show, a property set and one reset
+            "get_schema",
+            "get_values",
+            "apply_edit",
+            "reset_style",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
     _SETTLES = frozenset({"end_interaction", "undo", "redo"})
     #: The object panel's writes: settled each, as `set` from code is.
-    _OBJECT_EDITS = frozenset({"set_param", "set_transform"})
+    _OBJECT_EDITS = frozenset(
+        {"set_param", "set_transform", "apply_edit", "reset_style"}
+    )
     #: The calls that edit a variable: settled too, unless the message says
     #: the value is a preview -- the pointer still on the slider -- in which
     #: case the release settles, as a drag's does.
@@ -937,11 +945,18 @@ class SceneWidget(anywidget.AnyWidget):
                 edit["value"] = params.get("value")
         elif method in self._OBJECT_EDITS:
             target = params.get("object_id")
-            changed = {
-                k: v for k, v in params.items() if k not in ("object_id", "define")
-            }
             if method == "set_param":
                 changed = {params.get("name"): params.get("value")}
+            elif method == "apply_edit":
+                # a style property, by its path under `style`
+                changed = {f"style.{params.get('path')}": params.get("value")}
+            elif method == "reset_style":
+                # back to magpylib's default, which None is
+                changed = {f"style.{params.get('path')}": None}
+            else:
+                changed = {
+                    k: v for k, v in params.items() if k not in ("object_id", "define")
+                }
             edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
         if method == "apply_edits":

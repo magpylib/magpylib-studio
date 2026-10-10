@@ -943,6 +943,7 @@
 }
 
 .magpy-scene-inspector input[type="text"],
+.magpy-scene-inspector input[type="number"],
 .magpy-scene-inspector select {
   background: transparent;
   border: none;
@@ -954,6 +955,7 @@
 }
 
 .magpy-scene-inspector input[type="text"]:focus,
+.magpy-scene-inspector input[type="number"]:focus,
 .magpy-scene-inspector select:focus {
   outline: none;
   border-bottom-color: var(--vscode-focusBorder);
@@ -966,6 +968,24 @@
 
 .magpy-scene-inspector .magpy-ins-hint {
   padding-left: 0;
+}
+
+/* The style tree, folded under its heading: its groups a step in, a slot
+   for the reset mark, the sliders in the view's colour. */
+.magpy-scene-inspector .magpy-ins-props details {
+  margin: 1px 0 1px 8px;
+}
+
+.magpy-scene-inspector .magpy-ins-props .magpy-ins-row {
+  grid-template-columns: minmax(52px, auto) 1fr 14px;
+}
+
+.magpy-scene-inspector .magpy-ins-filter {
+  margin: 2px 0 1px;
+}
+
+.magpy-scene-inspector input[type="range"] {
+  accent-color: var(--vscode-focusBorder);
 }
 
 /* Over the view, the rows read as the readout does: a name, a slider and a

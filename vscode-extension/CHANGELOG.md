@@ -54,7 +54,10 @@ All notable changes to the Magpylib Studio extension.
   is read by the engine, `12` or `1.5 cm`, and a variable's name binds the
   number; a name the scene lacks is made at the value it replaces, which the
   engine now does for the Inspector's own calls (`set_param` and `set_transform`
-  take `define`). The studio's own Inspector is that panel, mounted in the
+  take `define`). Under them, the object's style tree folded under one heading,
+  read when opened: colour, opacity, label, the magnetization arrows, the path;
+  a value set there is one step to undo, told to the notebook as a `set` of
+  `style.<path>`. The studio's own Inspector is that panel, mounted in the
   sidebar in full.
 - **The readout takes units and variables.** The numbers a drag writes, at the
   foot of the view, show in the scene's units and take `15 mm`, `2 cm`, `5°` as

@@ -175,8 +175,11 @@ whose style says no size is drawn five millimetres across; `style_size=` says
 another. Beside the sliders, the **object** toggle opens the selection's
 parameters and pose, in the scene's units, with expressions as written: type
 `12`, `1.5 cm` or a variable's name into any of them, and a name the scene lacks
-is made at the value it replaces. One of the two panels is open at a time, and
-both go with the handles. How the editable view is built is
+is made at the value it replaces. Under them, **style** folds the object's style
+tree — colour, opacity, label, the magnetization arrows, the path — read when
+opened; a value set there is one step to undo, and the view's own objects carry
+it. One of the two panels is open at a time, and both go with the handles. How
+the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
