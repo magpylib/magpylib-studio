@@ -28,8 +28,6 @@
       ).json();
       const query = new URLSearchParams(location.search);
       const values = { ...state };
-      // the dock spike: a layout to try, and a width to drag the column to
-      if (query.has("layout")) values.layout = query.get("layout");
       if (query.has("standalone")) values.standalone = true;
       if (query.has("readonly")) values.editable = false;
       // For a look: the view wears what it sits on, and a headless browser's

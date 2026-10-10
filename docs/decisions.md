@@ -1251,3 +1251,51 @@ Code dialog before the engine saw it.
   widget's legend is not.
 - A second implementation of the forms for the widget: every field made twice,
   which [0011](#0011-one-view) refused once already.
+
+## 0024. The panels dock beside the view, and below a narrow one
+
+**Status:** accepted 2026-10-10, as built, after a spike that rendered three
+layouts at three widths (commit a4d3dfe).
+
+### Context
+
+The variables and object panels floated over the right of the view, docked
+beside the edit column
+([0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)). In a
+cell 480 pixels wide the object panel covered the scene, and a float has nowhere
+to go on a narrow view: the trouble is room, not position. The VS Code sidebar's
+answer, panels a host lays out anywhere, is the host's; a notebook has hosts
+too, and the widget is not a window manager
+([0022](#0022-what-the-widget-is-and-is-not)).
+
+### Decision
+
+- **A column, not a float.** A panel opens in a column beside the view, a third
+  of the width, and the view refits to what is left. A handle on the column's
+  inner edge drags its width. One line of title and the mark that closes it; the
+  column's toggles, pressed, say which panel is open, so the dock has no tabs of
+  its own.
+- **A sheet below a narrow view.** Under 720 pixels the column becomes a sheet
+  below the view, and the widget grows by it, up to 260 pixels, the sheet
+  scrolling past that: the view keeps its height, and the edit column beside it
+  the room it needs.
+- **Only what the moment needs.** With the object panel open the readout is put
+  away, its numbers being the panel's pose row, and comes back for the length of
+  a drag, when they move faster than a panel reads. Pose and properties are
+  headings, not folds; style folds. `V` and `O` open the panels from the
+  keyboard, for the hand that pressed `W`.
+- **Hosts that place things get a widget per panel**, later, as the roadmap has
+  it: the column is the default when nothing else is arranged.
+
+### Rejected
+
+- Dragging the panels about the view: a position to remember, lost on re-render,
+  and no room gained where room is short.
+- A left or right choice: the legend is top-left, the tools top-right, the
+  column right; beside the column is the one place.
+- Tabs in the dock's head: the column's toggles already switch, and the same
+  control twice is clutter.
+- The view giving up its lower part to the sheet, the cell keeping its height:
+  rendered, a 460-pixel view left the edit column clipped at both ends, since
+  the column and a sheet together want more than the view has; and a notebook's
+  outputs grow with what is in them anyway.

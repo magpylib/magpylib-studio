@@ -5,8 +5,10 @@
   fixture: the objects, each one's parameters, pose, style schema and style
   values, a typed value read as the number it is, a set answered with what it
   made. `?keep` opens the panel on the magnet and stops, for a look; `&style`
-  unfolds the style tree too. `window.result` is what the panel showed and
-  what it asked the session.
+  unfolds the style tree too; `&narrow` makes the view 480px wide, where the
+  dock is a sheet below it; `&dock=300` widens the column. `window.result`
+  is what the panel showed, where the dock was, and what it asked the
+  session.
 -->
 <html>
   <head>
@@ -38,8 +40,6 @@
       if (query.has("light")) document.body.style.background = "#ffffff";
       if (query.has("dark")) document.body.style.background = "#1e1e1e";
       const values = { ...state };
-      // the dock spike: a layout to try, and a width to drag the column to
-      if (query.has("layout")) values.layout = query.get("layout");
 
       const asked = [];
       const listeners = {};
@@ -98,6 +98,7 @@
       };
 
       const el = document.getElementById("root");
+      if (query.has("narrow")) el.style.width = "480px";
       widget.render({ model, el });
       await until(() => el.querySelector("canvas"));
       if (query.has("dock"))
@@ -128,6 +129,22 @@
       );
       const poseTitle =
         el.querySelector(".magpy-ins-transform summary")?.textContent ?? null;
+      // where the dock is: beside the view, or below a narrow one, the
+      // widget grown by it
+      const box = (node) => node.getBoundingClientRect();
+      const dockEl = el.querySelector(".magpy-scene-dock");
+      const stageEl = el.querySelector(".magpy-scene-stage");
+      const viewEl = el.querySelector(".magpy-scene-view");
+      const layout = {
+        narrow: el.classList.contains("magpy-narrow"),
+        beside: box(dockEl).left >= box(stageEl).right - 1,
+        below: box(dockEl).top >= box(viewEl).bottom - 1,
+        viewHeight: viewEl.clientHeight,
+        widgetHeight: el.clientHeight,
+        height: state.height,
+        title: el.querySelector(".magpy-scene-dock-title")?.textContent ?? null,
+        readout: !el.querySelector(".magpy-scene-readout").hidden,
+      };
       if (query.has("keep")) {
         if (query.has("style")) {
           el.querySelector(".magpy-ins-style").open = true;
@@ -136,7 +153,14 @@
           );
           await wait(300);
         }
-        window.result = { offered, header, rows, poseTitle, kept: true };
+        window.result = {
+          offered,
+          header,
+          rows,
+          poseTitle,
+          layout,
+          kept: true,
+        };
       } else {
         // a value typed into the dimension's first box: read, then set
         const dimension = paramRows()
@@ -206,6 +230,7 @@
           notice,
           afterPencil,
           style,
+          layout,
           asked,
         };
       }

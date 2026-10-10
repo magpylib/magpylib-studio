@@ -48,6 +48,15 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **The panels dock beside the view.** The variables and object panels open in a
+  column beside the view, which refits to what is left, rather than floating
+  over it: a float had nowhere to go on a narrow view. A handle on the column's
+  inner edge drags its width; narrower than 720 pixels the column is a sheet
+  below the view, and the widget grows by it. The dock has one line of title and
+  a close mark; the column's toggles say which panel is open. `V` and `O` open
+  them from the keyboard. While the object panel shows the pose the readout
+  stays away, and comes back for the length of a drag; pose and properties are
+  headings, not folds.
 - **The object panel.** Beside the sliders toggle, an object toggle opens the
   selection's parameters and pose over the view: the studio's Inspector, in its
   compact form, in the scene's units with expressions as written. A value typed

@@ -458,6 +458,7 @@ const KEY_LIST = {
   edit: [
     ["W · E · R · P", "move, turn, resize, aim the polarization"],
     ["Q", "put the handles away"],
+    ["V · O", "the variables panel, the object panel — again: away"],
     ["X · Y · Z", "along one axis — A: all of them"],
     ["L", "the world's axes, or the object's own"],
     ["C", "select the collection it is in — again: the one round that"],
@@ -580,9 +581,9 @@ function render({ model, el }) {
   // edge and the hover bar above is the view's. Not on a saved page, nor in
   // the studio panel, whose host has a Variables view of its own. See
   // `dressEditing`.
-  // the dock (spike): set below, once the stage is in place
+  // the dock the panels open in: made below, once the stage is in place
   let dock = null;
-  let dockTabs = {};
+  let dockTitle = null;
   const variablesEl = document.createElement("div");
   variablesEl.className = "magpy-scene-variables";
   variablesEl.hidden = true;
@@ -646,6 +647,7 @@ function render({ model, el }) {
       inspector.show((model.get("selected") || [])[0]);
     }
     syncDock();
+    showReadout(); // put away while the panel says the pose, or back
   }
   /** The scene as the session has it now, drawn: after a previewed value,
    *  which python answers without redrawing the view or telling the
@@ -839,79 +841,6 @@ function render({ model, el }) {
   );
   el.append(stage);
 
-  // --- the dock (spike): the panels in a column beside the view ----------
-  // `layout`: "overlay" (the panels float over the view, as above), "side"
-  // (a column beside it, the view narrower for it) or "split" (the column
-  // with a handle that drags its width). Narrower than 640px, the column
-  // becomes a sheet below the view, and the widget grows by it.
-  const layout = model.get("layout") || "overlay";
-  if (layout !== "overlay") {
-    el.classList.add("magpy-layout-dock");
-    if (layout === "split") el.classList.add("magpy-layout-split");
-    dock = document.createElement("div");
-    dock.className = "magpy-scene-dock";
-    dock.hidden = true;
-    const handle = document.createElement("div");
-    handle.className = "magpy-scene-dock-handle";
-    const tabs = document.createElement("div");
-    tabs.className = "magpy-scene-dock-tabs";
-    const tab = (text, onClick) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "magpy-scene-dock-tab";
-      b.textContent = text;
-      b.addEventListener("click", onClick);
-      return b;
-    };
-    dockTabs = {
-      variables: tab("Variables", () => showVariables(true)),
-      object: tab("Object", () => showInspector(true)),
-    };
-    const close = tab("×", () => {
-      showVariables(false);
-      showInspector(false);
-    });
-    close.className = "magpy-scene-dock-tab magpy-scene-dock-close";
-    close.title = "Close";
-    tabs.append(dockTabs.variables, dockTabs.object, close);
-    dock.append(handle, tabs, variablesEl, inspectorEl);
-    el.append(dock);
-    const narrow = new ResizeObserver(() =>
-      el.classList.toggle("magpy-narrow", el.clientWidth < 640),
-    );
-    narrow.observe(el);
-    if (layout === "split") {
-      handle.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        handle.setPointerCapture(e.pointerId);
-        const startX = e.clientX;
-        const startW = dock.getBoundingClientRect().width;
-        const move = (ev) => {
-          const w = Math.max(
-            160,
-            Math.min(el.clientWidth * 0.7, startW - (ev.clientX - startX)),
-          );
-          el.style.setProperty("--magpy-dock-width", `${w}px`);
-        };
-        const up = () => {
-          handle.removeEventListener("pointermove", move);
-          handle.removeEventListener("pointerup", up);
-        };
-        handle.addEventListener("pointermove", move);
-        handle.addEventListener("pointerup", up);
-      });
-    }
-  }
-  function syncDock() {
-    if (!dock) return;
-    dock.hidden = variablesEl.hidden && inspectorEl.hidden;
-    dockTabs.variables.setAttribute(
-      "aria-pressed",
-      String(!variablesEl.hidden),
-    );
-    dockTabs.object.setAttribute("aria-pressed", String(!inspectorEl.hidden));
-  }
-
   // --- full screen ------------------------------------------------------
   // The whole widget, legend and controls with it, so nothing that works in
   // the cell stops working at full size. Asked of the root the widget sits in,
@@ -933,12 +862,79 @@ function render({ model, el }) {
     pressed(fullscreenButton, on);
     setIcon(fullscreenButton, on ? "shrink" : "expand");
     name(fullscreenButton, on ? "Leave full screen (Esc)" : "Full screen");
-    // The view's height is the cell's while in the cell, and the screen's
-    // otherwise; the renderer watches its element and follows either way.
-    view.style.height = on ? "" : `${model.get("height")}px`;
+    sizeView();
     el.classList.toggle("magpy-fullscreen", on);
   }
   document.addEventListener("fullscreenchange", onFullscreenChange);
+
+  // --- the dock: the panels in a column beside the view ------------------
+  // A panel is a column beside the view, which refits to what is left, not
+  // a float over it: a float has nowhere to go on a narrow view, where the
+  // trouble is room, not position. The column takes a third of the width,
+  // and a handle on its inner edge drags it. Narrower than 720px it is a
+  // sheet below the view instead, and the widget grows by it: a view of
+  // 460px cannot hold the edit column and a sheet both, and a notebook's
+  // outputs grow with what is in them.
+  // One line of title and the mark that closes it; the column's toggles,
+  // pressed, say which panel is open, so the dock has no tabs of its own.
+  dock = document.createElement("div");
+  dock.className = "magpy-scene-dock";
+  dock.hidden = true;
+  const dockHandle = document.createElement("div");
+  dockHandle.className = "magpy-scene-dock-handle";
+  dockHandle.title = "Drag to resize";
+  const dockHead = document.createElement("div");
+  dockHead.className = "magpy-scene-dock-head";
+  dockTitle = document.createElement("span");
+  dockTitle.className = "magpy-scene-dock-title";
+  const dockClose = document.createElement("button");
+  dockClose.type = "button";
+  dockClose.className = "magpy-scene-dock-close";
+  dockClose.textContent = "×";
+  name(dockClose, "Close the panel");
+  dockClose.addEventListener("click", () => {
+    showVariables(false);
+    showInspector(false);
+  });
+  dockHead.append(dockTitle, dockClose);
+  dock.append(dockHandle, dockHead, variablesEl, inspectorEl);
+  el.append(dock);
+  const dockRoom = new ResizeObserver(() =>
+    el.classList.toggle("magpy-narrow", el.clientWidth < 720),
+  );
+  dockRoom.observe(el);
+  dockHandle.addEventListener("pointerdown", (e) => {
+    if (el.classList.contains("magpy-narrow")) return; // the sheet has no edge to drag
+    e.preventDefault();
+    dockHandle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = dock.getBoundingClientRect().width;
+    const move = (ev) => {
+      const w = Math.max(
+        160,
+        Math.min(el.clientWidth * 0.7, startW - (ev.clientX - startX)),
+      );
+      el.style.setProperty("--magpy-dock-width", `${w}px`);
+    };
+    const up = () => {
+      dockHandle.removeEventListener("pointermove", move);
+      dockHandle.removeEventListener("pointerup", up);
+    };
+    dockHandle.addEventListener("pointermove", move);
+    dockHandle.addEventListener("pointerup", up);
+  });
+  /** The dock: open with whichever panel is, and named for it. */
+  function syncDock() {
+    if (!dock) return;
+    dock.hidden = variablesEl.hidden && inspectorEl.hidden;
+    el.classList.toggle("magpy-docked", !dock.hidden);
+    dockTitle.textContent = variablesEl.hidden ? "Object" : "Variables";
+  }
+  /** The view's height: the cell's while in the cell, and the screen's
+   *  otherwise; the renderer watches its element and follows either way. */
+  function sizeView() {
+    view.style.height = isFullscreen() ? "" : `${model.get("height")}px`;
+  }
 
   // What selection and visibility *mean* is the widget's: they are traitlets.
   // The legend reports what a click would make them, as the view does.
@@ -1264,6 +1260,8 @@ function render({ model, el }) {
     else if (key === "a") constrain(null);
     else if (key === "l") toggleSpace();
     else if (key === "s") toggleSnap();
+    else if (key === "v") showVariables(variablesEl.hidden);
+    else if (key === "o") showInspector(inspectorEl.hidden);
     else return false;
     return true;
   }
@@ -1808,12 +1806,16 @@ function render({ model, el }) {
     readoutTakes.textContent = names.length
       ? `${names.join(", ")} ${decide} this — a drag takes it over`
       : "";
-    const shown = readable();
+    // With the object panel open the pose is in its rows, so the readout is
+    // put away, and comes back for a drag, when the numbers move faster
+    // than a panel reads them.
+    const spoken = inspectorEl.hidden || dragActive;
+    const shown = spoken ? readable() : null;
     if (!shown) {
       readoutKey = "";
       readoutHead.textContent = "";
       readoutFields.replaceChildren();
-      readout.hidden = !readoutTakes.textContent;
+      readout.hidden = !spoken || !readoutTakes.textContent;
       el.classList.toggle("magpy-reading", !readout.hidden);
       return;
     }
@@ -1985,6 +1987,7 @@ function render({ model, el }) {
     patterned: () => new Set(model.get("payload")?.patterned ?? []),
     begin({ objectIds, mode }) {
       dragActive = true;
+      if (!inspectorEl.hidden) showReadout(); // the numbers, for the drag
       if (playing) setPlaying(false); // the pointer is the one being asked
       editor.begin({ objectIds, mode }).catch(() => {});
     },
@@ -1996,6 +1999,7 @@ function render({ model, el }) {
     },
     commit(pose) {
       dragActive = false;
+      if (!inspectorEl.hidden) showReadout(); // and away again
       settle(editor.commit(pose.edits));
     },
   });
@@ -2210,9 +2214,7 @@ function render({ model, el }) {
     }
   }
 
-  model.on("change:height", () => {
-    if (!isFullscreen()) view.style.height = `${model.get("height")}px`;
-  });
+  model.on("change:height", sizeView);
   // Before the first await, so the controls and the legend arrive with the
   // element rather than a frame after it, and dressed for where they are.
   dressTheme();

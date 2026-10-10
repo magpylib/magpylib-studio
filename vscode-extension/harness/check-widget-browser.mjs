@@ -1076,7 +1076,9 @@ async function variablesPanel(port, base) {
  *  expression and what the engine made is said; the style tree is folded
  *  and unread until opened, then a colour set goes through the engine;
  *  opening it closes the variables panel, and the handles put away take it
- *  along. */
+ *  along. The dock it opens in is a column beside the view, named for the
+ *  panel, with the readout put away; a 480px view has it as a sheet below,
+ *  the view keeping its height and the widget growing by the sheet. */
 async function objectPanel(port, base) {
   await check(
     "the object panel edits the selection through the session",
@@ -1097,6 +1099,7 @@ async function objectPanel(port, base) {
           notice,
           afterPencil,
           style,
+          layout,
         } = result;
         if (!offered) return "no object toggle with the handles out";
         if (header !== "m") return `the header said ${JSON.stringify(header)}`;
@@ -1140,6 +1143,28 @@ async function objectPanel(port, base) {
         }
         if (afterPencil.button || afterPencil.panel) {
           return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
+        }
+        if (layout?.narrow || !layout?.beside) {
+          return `the dock was not a column beside the view: ${JSON.stringify(layout)}`;
+        }
+        if (layout.title !== "Object")
+          return `the dock said ${JSON.stringify(layout.title)}`;
+        if (layout.readout) return "the readout stayed under the object panel";
+        if (layout.viewHeight !== layout.height) {
+          return `the view did not keep its height beside the column: ${layout.viewHeight} of ${layout.height}`;
+        }
+        // a narrow view: the sheet below, within the cell's height
+        await tab.navigate(`${base}/pages/inspector.html?narrow`);
+        const sheet = (await tab.until("return window.result", 20_000))?.layout;
+        if (!sheet) return "narrow: never finished";
+        if (!sheet.narrow || !sheet.below) {
+          return `a 480px view had no sheet below it: ${JSON.stringify(sheet)}`;
+        }
+        if (
+          sheet.viewHeight !== sheet.height ||
+          sheet.widgetHeight <= sheet.height
+        ) {
+          return `the sheet did not grow the widget under a whole view: ${JSON.stringify(sheet)}`;
         }
         return thrown(tab);
       } finally {

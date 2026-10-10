@@ -639,71 +639,31 @@
 }
 
 /* --- the variables -------------------------------------------------------
-   The scene's variables as a panel: in the widget, floating bottom right,
-   left of the edit bar, shown with the handles; in the VS Code sidebar, the
+   The scene's variables as a panel: in the widget, the dock's content (see
+   the dock, below), shown with the handles; in the VS Code sidebar, the
    same rows filling a webview of their own. The rows are `variables.mjs`'s
    and dressed here once, in the three colours the widget declares and the
    editor's own where it is the editor (`--vscode-input-*`). */
 .magpy-scene-variables {
-  position: absolute;
-  right: 44px;
-  top: 44px;
-  bottom: 8px;
-  height: fit-content;
-  margin-block: auto; /* centred beside the column, as the column is */
-  z-index: 3;
-  width: min(55%, 22em);
-  max-height: calc(100% - 52px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  box-sizing: border-box;
-  padding: 5px 9px 6px;
+  padding: 2px 10px 8px;
   font-size: 11px;
   line-height: 1.5;
-  background: color-mix(
-    in srgb,
-    var(--vscode-editor-background) 94%,
-    transparent
-  );
-  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-  border-radius: 7px;
-}
-
-.magpy-animated .magpy-scene-variables {
-  bottom: 44px;
-  max-height: calc(100% - 88px);
 }
 
 /* --- the object panel ----------------------------------------------------
-   The selection's parameters and pose, docked beside the column as the
+   The selection's pose, parameters and style, the dock's content as the
    variables are. The rows are `inspector.mjs`'s, dressed here once for the
    widget and for the VS Code sidebar, which shows the fuller form. */
 .magpy-scene-inspector {
-  position: absolute;
-  right: 44px;
-  top: 44px;
-  bottom: 8px;
-  height: fit-content;
-  margin-block: auto;
-  z-index: 3;
-  width: min(60%, 24em);
-  max-height: calc(100% - 52px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  box-sizing: border-box;
-  padding: 5px 9px 6px;
+  padding: 2px 10px 8px;
   font-size: 11px;
   line-height: 1.5;
-  background: color-mix(
-    in srgb,
-    var(--vscode-editor-background) 94%,
-    transparent
-  );
-  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-  border-radius: 7px;
-}
-
-.magpy-animated .magpy-scene-inspector {
-  bottom: 44px;
-  max-height: calc(100% - 88px);
 }
 
 .magpy-scene-inspector[hidden] {
@@ -1172,12 +1132,16 @@
   display: none;
 }
 
-/* --- the dock (spike): the panels in a column beside the view ----------- */
-.magpy-scene.magpy-layout-dock {
+/* --- the dock ------------------------------------------------------------
+   The panels open in a column beside the view, which refits to what is
+   left; narrower than 720px (`.magpy-narrow`, set by the widget), in a sheet
+   below it, the widget growing by it. One line of title and the mark that
+   closes it; a handle on the column's inner edge drags its width. */
+.magpy-scene.magpy-docked {
   flex-direction: row;
 }
 
-.magpy-layout-dock .magpy-scene-stage {
+.magpy-docked .magpy-scene-stage {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -1185,81 +1149,58 @@
 .magpy-scene-dock {
   position: relative;
   flex: 0 0 auto;
-  width: var(--magpy-dock-width, 22em);
-  max-width: 60%;
+  width: var(--magpy-dock-width, clamp(15em, 34%, 26em));
+  max-width: 70%;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-left: 1px solid color-mix(in srgb, currentColor 14%, transparent);
   background: var(--vscode-editor-background);
   font-size: 11px;
   line-height: 1.5;
 }
 
-.magpy-scene-dock[hidden] {
+.magpy-scene-dock[hidden],
+.magpy-scene-dock > [hidden] {
   display: none;
 }
 
-.magpy-scene-dock-tabs {
+.magpy-scene-dock-head {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px 3px;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding: 6px 6px 3px 10px;
 }
 
-.magpy-scene-dock-tab {
+.magpy-scene-dock-title {
+  flex: 1 1 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+
+.magpy-scene-dock-close {
   font: inherit;
-  font-size: 11px;
+  font-size: 15px;
+  line-height: 1;
   color: inherit;
   background: none;
   border: 0;
   border-radius: 3px;
-  padding: 1px 7px;
-  opacity: 0.6;
+  padding: 0 5px 1px;
+  opacity: 0.5;
   cursor: pointer;
 }
 
-.magpy-scene-dock-tab:hover {
+.magpy-scene-dock-close:hover,
+.magpy-scene-dock-close:focus-visible {
   opacity: 1;
-}
-
-.magpy-scene-dock-tab[aria-pressed="true"] {
-  opacity: 1;
-  font-weight: 600;
+  outline: none;
   background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
-.magpy-scene-dock-close {
-  margin-left: auto;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 5px;
-}
-
-/* the panels as the column's content, not floats over the view */
-.magpy-scene-dock .magpy-scene-variables,
-.magpy-scene-dock .magpy-scene-inspector {
-  position: static;
-  width: auto;
-  max-width: none;
-  height: auto;
-  max-height: none;
-  margin: 0;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
 .magpy-scene-dock-handle {
-  display: none;
-}
-
-.magpy-layout-split .magpy-scene-dock-handle {
-  display: block;
   position: absolute;
   left: -3px;
   top: 0;
@@ -1269,23 +1210,42 @@
   z-index: 1;
 }
 
-.magpy-layout-split .magpy-scene-dock-handle:hover {
-  background: color-mix(in srgb, var(--vscode-focusBorder) 50%, transparent);
+.magpy-scene-dock-handle:hover {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
 }
 
-/* narrow: a sheet below the view, the widget growing by it */
-.magpy-scene.magpy-layout-dock.magpy-narrow {
+/* the sheet below a narrow view: the view keeps its height, and the edit
+   column beside it its room */
+.magpy-scene.magpy-docked.magpy-narrow {
   flex-direction: column;
 }
 
-.magpy-layout-dock.magpy-narrow .magpy-scene-dock {
+.magpy-docked.magpy-narrow .magpy-scene-dock {
   width: auto;
   max-width: none;
-  max-height: 240px;
+  max-height: 260px;
   border-left: 0;
-  border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
 }
 
-.magpy-layout-split.magpy-narrow .magpy-scene-dock-handle {
+.magpy-docked.magpy-narrow .magpy-scene-dock-handle {
+  display: none;
+}
+
+/* Pose and properties are always there: headings, not folds. Style folds. */
+.magpy-scene-inspector .magpy-ins-transform > details > summary,
+.magpy-scene-inspector .magpy-ins-params > details > summary {
+  list-style: none;
+  pointer-events: none;
+}
+
+.magpy-scene-inspector
+  .magpy-ins-transform
+  > details
+  > summary::-webkit-details-marker,
+.magpy-scene-inspector
+  .magpy-ins-params
+  > details
+  > summary::-webkit-details-marker {
   display: none;
 }
