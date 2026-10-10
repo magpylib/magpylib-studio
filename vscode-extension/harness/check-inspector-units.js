@@ -6,7 +6,8 @@
  * The document holds metres and tesla; the Inspector shows an object's
  * parameters and pose in the scene's units and reads what is typed back
  * through the engine (`read_values`), as the Variables panel does. On the
- * real engine and the Inspector's own script:
+ * real engine and the Inspector's own module -- the package's
+ * `inspector.mjs`, which the sidebar and the notebook widget both mount:
  *
  * 1. SI unless the scene says otherwise: a Cuboid's dimension is `(m)` and
  *    its boxes hold 0.01.
@@ -21,7 +22,7 @@
  * 5. magnetization, in A/m, which no unit setting covers, is as it was.
  */
 const { enginePython } = require("./engine-python");
-const { mount, startEngine } = require("./webview-harness");
+const { mountInspector, startEngine } = require("./webview-harness");
 
 let failures = 0;
 let engine;
@@ -37,17 +38,17 @@ async function main() {
   }
   engine = startEngine();
   await engine.request("load_example", { name: "halbach" });
-  const { webview, roots, settle } = await mount("inspector", engine);
+  const { panel, root, settle } = await mountInspector(engine);
   await settle(4);
   const select = async (id) => {
-    await webview.postMessage({ type: "select", objectId: id });
+    await panel.show(id);
     await settle(16);
   };
 
   const row = (name) => {
-    const found = roots
-      .get("params")
-      .querySelectorAll("div.row")
+    const found = root
+      .querySelector("div.magpy-ins-params")
+      .querySelectorAll("div.magpy-ins-row")
       .find(
         (r) => r.querySelector("label")?.textContent.split(" ")[0] === name,
       );
@@ -83,7 +84,7 @@ async function main() {
   // 2. a scene shown in mm and mT
   await engine.request("set_model_unit", { unit: "mm" });
   await engine.request("set_field_unit", { unit: "mT" });
-  await webview.postMessage({ type: "refresh" });
+  await panel.refresh();
   await settle(16);
   check(
     label("dimension") === "dimension (mm)",
@@ -98,7 +99,7 @@ async function main() {
       values("polarization")[0] === "1000",
     `a polarization in mT: "${label("polarization")}" ${values("polarization")[0]}`,
   );
-  const pose = roots.get("transform");
+  const pose = root.querySelector("div.magpy-ins-transform");
   const poseTitle = pose.querySelector("summary").textContent;
   const position = boxes(pose).slice(0, 3);
   check(
@@ -135,7 +136,7 @@ async function main() {
     (await param("dimension"))[2] === 0.01,
     "a unit that is not a length stores nothing",
   );
-  const status = roots.get("status").textContent;
+  const status = root.querySelector("div.magpy-ins-status").textContent;
   check(
     /'kg' is not a unit of length/.test(status),
     `and says why: "${status}"`,

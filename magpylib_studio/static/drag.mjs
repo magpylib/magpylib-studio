@@ -54,6 +54,8 @@ export const REDRAW_BUDGET_MS = 8;
  *   the engine has taken it; the next is not sent until then.
  * - `commit(pose)`: the pose the drag ended on. Record it and close the group.
  * - `scene()`: a promise of the scene as it is now, to redraw around the drag.
+ *   Spared when `preview` answers with a `scene` of its own: one message
+ *   where there were two, for a host whose every message costs.
  * - `render(payload, { keep })`: draw it, keeping the nodes of `keep`, the
  *   objects the handles hold, which are already where the pointer put them.
  * - `patterned()`: the sources whose copies would not follow an edit, as a
@@ -69,9 +71,9 @@ export function watchDrags(host, view) {
   let pending = null; // the newest pose not yet sent
   let inFlight = false;
 
-  async function redrawAround() {
+  async function redrawAround(carried) {
     if (!drawing() || !dragging || dragging.tooSlow) return;
-    const payload = await view.scene();
+    const payload = carried ?? (await view.scene());
     if (!dragging) return; // released while the scene was on its way
     // Timed around the render alone. The request before it is the engine's
     // time, not the view's: it delays the next pose without blocking this one.
@@ -85,14 +87,18 @@ export function watchDrags(host, view) {
     inFlight = true;
     const pose = pending;
     pending = null;
+    let carried = null; // the scene, when the preview's answer brought it
     Promise.resolve(view.preview(pose))
+      .then((answer) => {
+        carried = answer && answer.scene ? answer.scene : null;
+      })
       // On the next frame, not on the reply: a small scene answers in under
       // two milliseconds, and rebuilding it several hundred times a second to
       // show it sixty is work the screen throws away. Whichever is slower
       // decides -- and the object under the pointer is not waiting on any of
       // it, since the handles move its node locally.
       .then(() => new Promise((resolve) => requestAnimationFrame(resolve)))
-      .then(redrawAround)
+      .then(() => redrawAround(carried))
       .catch(() => {}) // a failed preview or redraw must not end the drag
       .finally(() => {
         inFlight = false;

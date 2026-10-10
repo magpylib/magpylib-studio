@@ -1845,18 +1845,30 @@ interface Edit {
 
 async function transformFromPanel(
   context: vscode.ExtensionContext,
-  message: { edits: Edit[] },
+  message: { edits: Edit[]; define?: boolean },
   previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
   try {
     const engine = await getEngine(context);
     // The engine turns the view's edits into its own calls, as it does for
     // any other view of a session: several objects dragged together are one
-    // step to undo, since the gesture was one thing the user did.
-    const result = (await engine.request('apply_edits', { edits: message.edits })) as {
+    // step to undo, since the gesture was one thing the user did. `define`:
+    // a variable's name typed in the readout that the scene lacks is made
+    // at the value it replaces, as the Inspector asks to make one.
+    const result = (await engine.request('apply_edits', {
+      edits: message.edits,
+      ...(message.define ? { define: true } : {}),
+    })) as {
       ok: boolean;
       error?: string;
+      defined?: string[];
     };
+    if (result.ok && result.defined?.length && !previewFor) {
+      vscode.window.setStatusBarMessage(
+        `Magpylib Studio: ${result.defined.join(', ')} made, at the value it replaces`,
+        4000,
+      );
+    }
     // Only the final pose reports: the same refusal sixty times over during
     // one drag is sixty notifications about one mistake.
     if (result.ok === false && !previewFor) {
@@ -2189,12 +2201,11 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!found) {
           return;
         }
+        // `restore` the panel does itself, as a call: it is one.
         if (action === 'edit') {
           await editVariableProperties(found);
         } else if (action === 'remove') {
           await mutateFromTree('remove_variable', { name });
-        } else if (action === 'restore') {
-          await mutateFromTree('restore_variable', { name });
         }
       })();
     },

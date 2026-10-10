@@ -11,7 +11,9 @@
  * extension tests, which never open this panel. They were found by reading,
  * which is not a thing that can be run again.
  *
- * What it holds to, on the real engine and the panel's own script:
+ * What it holds to, on the real engine and the panel's own module -- the
+ * package's `variables.mjs`, which the sidebar and the notebook widget both
+ * mount, so one run speaks for both:
  *
  * 1. One value per frame at most, newest wins. A mouse reports faster than a
  *    screen draws, and a scene rebuilt for a value that is overwritten before
@@ -27,7 +29,7 @@
  *    the value `change` has already sent.
  */
 const { enginePython } = require("./engine-python");
-const { mount, startEngine } = require("./webview-harness");
+const { mountVariables, startEngine } = require("./webview-harness");
 
 let failures = 0;
 let engine; // module scope so a thrown check still takes the engine with it
@@ -48,7 +50,7 @@ async function main() {
   // Frames on demand: the panel asks for one after every value it sends, and
   // nothing is due until this queue is drained.
   const frames = [];
-  const { roots, settle, sent } = await mount("variables", engine, {
+  const { root, settle, sent } = await mountVariables(engine, {
     requestAnimationFrame: (fn) => frames.push(fn),
   });
   const drawFrame = () => {
@@ -59,10 +61,11 @@ async function main() {
   await settle(8);
 
   const sliderFor = (name) => {
-    const row = roots
-      .get("list")
-      .querySelectorAll("div.row")
-      .find((r) => r.querySelector("span.name")?.textContent === name);
+    const row = root
+      .querySelectorAll("div.magpy-vars-row")
+      .find(
+        (r) => r.querySelector("span.magpy-vars-name")?.textContent === name,
+      );
     const el = row?.all().find((e) => e.type === "range");
     if (!el) {
       throw new Error(`no slider for ${name} — the panel rendered no row`);

@@ -30,6 +30,12 @@ Writes into OUT:
   ``get_scene`` and ``object_tree``;
 * ``collection.json`` -- an editable view of two magnets held as one
   collection, and the scene its session answers `get_scene` with;
+* ``variables.json`` -- an editable view of a scene written in code, with a
+  variable of each kind, the scene its session draws, and what it answers
+  `get_variables` with: for the view's own variables panel;
+* ``inspector.json`` -- the same view, with what its session answers
+  `list_objects`, `get_params`, `get_transform`, `get_schema` and `get_values`
+  with, per object: for the view's own object panel;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -122,6 +128,34 @@ def scene_with_a_collection():
     )
     pair = magpy.Collection(left, right)
     return SceneWidget(pair, editable=True)
+
+
+def scene_with_variables():
+    """A scene written in code with a variable of each kind: a count with a
+    slider range, a length with hard limits, a choice, a number with no range,
+    and one that follows the others."""
+    from typing import Annotated, Literal
+
+    from magpylib_studio import Bounds, Count, derived, duplicate_around, name, scene
+
+    @scene
+    def design(
+        n: Annotated[int, Count(2, 60, slider=(4, 20))] = 10,
+        r: Annotated[float, Bounds(0.005, 0.08)] = 0.02,
+        axis: Literal["x", "y", "z"] = "z",
+        free: float = 3.0,
+    ):
+        derived("half", r / 2)
+        magnet = name(
+            magpy.magnet.Cuboid(
+                dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
+            ),
+            "m",
+        )
+        name(magpy.Collection(magnet), "ring")
+        duplicate_around(magnet, count=n, axis=axis)
+
+    return SceneWidget(design.build(), editable=True)
 
 
 def main(out):
@@ -246,6 +280,43 @@ def main(out):
     pathed.move("mover", [[0.01 * i, 0, 0] for i in range(1, 6)], start=0)
     (out / "pathed.json").write_text(
         json.dumps({"scene": pathed.get_scene(), "tree": pathed.object_tree()})
+    )
+
+    parametric = scene_with_variables()
+    listed = parametric._session.get_variables()
+    if [v["name"] for v in listed["variables"]] != ["n", "r", "axis", "free", "half"]:
+        raise SystemExit("variables.json: a variable of each kind, in order")
+    (out / "variables.json").write_text(
+        json.dumps(
+            {
+                "state": parametric.get_state(),
+                "scene": parametric.payload,
+                "variables": listed,
+            }
+        )
+    )
+    objects = parametric._session.list_objects()
+    (out / "inspector.json").write_text(
+        json.dumps(
+            {
+                "state": parametric.get_state(),
+                "scene": parametric.payload,
+                "variables": listed,
+                "objects": objects,
+                "params": {
+                    o["id"]: parametric._session.get_params(o["id"]) for o in objects
+                },
+                "transforms": {
+                    o["id"]: parametric._session.get_transform(o["id"]) for o in objects
+                },
+                "schemas": {
+                    o["id"]: parametric._session.get_schema(o["id"]) for o in objects
+                },
+                "values": {
+                    o["id"]: parametric._session.get_values(o["id"]) for o in objects
+                },
+            }
+        )
     )
 
     held = scene_with_a_collection()

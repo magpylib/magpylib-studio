@@ -236,10 +236,24 @@ class SceneWidget(anywidget.AnyWidget):
     #: ``{"by": "set_variable", "variable": name, "value": value}``. Set
     #: before `revision`, so a callback on that reads this one's news.
     last_edit = traitlets.Dict().tag(sync=True)
+    #: The scene's variables as resolved, ``{name: value}``, in a view with a
+    #: scene of its own: what the view's own sliders set -- the variables
+    #: panel among its tools, with the handles -- and what a cell reads to
+    #: follow them. Changes once per settled edit, with `revision`. Empty for
+    #: a view of the cell's own objects, which has no variables.
+    #:
+    #: Assignable, like `selected`: ``view.variables = {"n": 12}`` sets what
+    #: differs, as one edit, and the trait reads the scene back, every
+    #: variable included. So another control's trait can be tied to it both
+    #: ways with ``traitlets.link`` -- a wigglystuff call expression, say --
+    #: and the two move together; the view's model is the one that owns the
+    #: numbers. A name the scene has no variable of is refused.
+    variables = traitlets.Dict().tag(sync=True)
 
-    #: What an editable view may ask of its session: a drag, and undoing one.
-    #: Nothing that runs a file -- a script or a scene to load -- which the
-    #: view has no need of.
+    #: What an editable view may ask of its session: a drag, and undoing one;
+    #: the variables, to list and to set, with a typed value read through
+    #: `quantity` and the expression help. Nothing that runs a file -- a
+    #: script or a scene to load -- which the view has no need of.
     VIEW_CALLS = frozenset(
         {
             "begin_interaction",
@@ -249,10 +263,36 @@ class SceneWidget(anywidget.AnyWidget):
             "redo",
             "reset",
             "get_scene",
+            "get_variables",
+            "set_variable",
+            "restore_variable",
+            "quantity",
+            "expression_help",
+            # the object panel: the selection's parameters and pose
+            "list_objects",
+            "get_params",
+            "get_transform",
+            "read_values",
+            "set_param",
+            "set_transform",
+            # and its style tree: the schema its widgets are built from, the
+            # values they show, a property set and one reset
+            "get_schema",
+            "get_values",
+            "apply_edit",
+            "reset_style",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
     _SETTLES = frozenset({"end_interaction", "undo", "redo"})
+    #: The object panel's writes: settled each, as `set` from code is.
+    _OBJECT_EDITS = frozenset(
+        {"set_param", "set_transform", "apply_edit", "reset_style"}
+    )
+    #: The calls that edit a variable: settled too, unless the message says
+    #: the value is a preview -- the pointer still on the slider -- in which
+    #: case the release settles, as a drag's does.
+    _VARIABLE_EDITS = frozenset({"set_variable", "restore_variable"})
 
     def __init__(self, *objects, animation=False, **kwargs):
         """A view of `objects` -- or of nothing yet, to `update` later.
@@ -583,101 +623,6 @@ class SceneWidget(anywidget.AnyWidget):
             raise ValueError(f"{name}: {result.get('error')}")
         self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
-    def variable_sliders(self):
-        """A control for each variable of an editable view's scene, as the
-        studio's Variables panel lays them out, bound both ways: moving one
-        sets the variable, and an edit in the view -- an undo, say -- moves it
-        back. Returned as one `ipywidgets.VBox`, to show beside the view.
-
-        A number slides across its slider range, or its limits without one,
-        widened to take in where it is now: a slider clamps what it is given,
-        and clamping would be an edit nobody made. A whole number slides in
-        whole steps, a variable with options is a dropdown, and one written as
-        an expression has no control -- it follows the others. A number with
-        no range at all has nowhere to slide to, and is left out. One that
-        says what it measures slides in the unit the panel shows it in --
-        in a scene shown in mm, `gap (mm)` from 10 to 30, not from 0.01 to
-        0.03.
-        """
-        import ipywidgets as widgets
-
-        from magpylib_studio import expressions, units
-
-        session = self._editing("variable_sliders")
-
-        def values():
-            return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
-
-        controls, scales, kinds = {}, {}, {}
-        listed = session.get_variables()
-        for variable in listed["variables"]:
-            name, value = variable["name"], variable["value"]
-            limits = variable.get("bounds") or {}
-            shown = variable.get("shown") or {"symbol": "", "scale": 1.0}
-            if expressions.is_expression(variable["expression"]):
-                continue
-            if "options" in limits:
-                control = widgets.Dropdown(options=limits["options"], value=value)
-            else:
-                low = limits.get("soft_min", limits.get("min"))
-                high = limits.get("soft_max", limits.get("max"))
-                if low is None or high is None or isinstance(value, str):
-                    continue
-                low, high = min(low, value), max(high, value)
-                if limits.get("integer"):
-                    control = widgets.IntSlider(value, min=low, max=high)
-                else:
-                    scale = shown["scale"]  # a count is counted, never scaled
-                    scales[name], kinds[name] = scale, limits.get("unit")
-                    low, high = low * scale, high * scale
-                    control = widgets.FloatSlider(
-                        value * scale,
-                        min=low,
-                        max=high,
-                        step=(high - low) / 200 or 1,
-                        readout_format=".4g",
-                    )
-            symbol = shown["symbol"] if name in scales else ""
-            control.description = f"{name} ({symbol})" if symbol else name
-            controls[name] = control
-
-        def document(name, value):
-            """A control's value in the document's unit, exactly: 23.4 mm is
-            0.0234, not 23.4 * 0.001."""
-            if name not in scales:
-                return value
-            return units.to_document(
-                value, kinds[name], listed["model_unit"], listed["field_unit"]
-            )
-
-        def from_control(name):
-            def moved(change):
-                value = document(name, change["new"])
-                if values().get(name) != value:  # an echo is no edit
-                    self.set_variable(name, value)
-
-            return moved
-
-        def from_view(_change):
-            now = values()
-            for name, control in controls.items():
-                if name not in now:
-                    continue
-                shown_now = now[name] * scales.get(name, 1)
-                if name in scales and document(name, control.value) == now[name]:
-                    continue
-                if name not in scales and now[name] == control.value:
-                    continue
-                if hasattr(control, "max"):  # never clamp what the scene holds
-                    control.min = min(control.min, shown_now)
-                    control.max = max(control.max, shown_now)
-                control.value = shown_now
-
-        for name, control in controls.items():
-            control.observe(from_control(name), "value")
-        self.observe(from_view, "revision")
-        return widgets.VBox(list(controls.values()))
-
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
         Returns whether there was one. Stops where this view's editing
@@ -717,6 +662,63 @@ class SceneWidget(anywidget.AnyWidget):
         doc = self._editing("save").to_dict()
         text = json.dumps(doc, indent=2) + "\n"
         pathlib.Path(file).write_text(text, encoding="utf-8")
+
+    @traitlets.observe("variables")
+    def _variables_assigned(self, change):
+        """`variables` assigned -- from a cell, or by a `traitlets.link` from
+        another control's trait: every variable given a value other than the
+        scene's is set, as `set_variable` sets one, as one edit for them all,
+        and the trait then reads the scene back, every variable included. The
+        view's own drawing writes the scene's values, and so sets nothing.
+        Refused -- a name the scene has no variable of, a value past its
+        limits -- it sets nothing, reads the scene back, and raises."""
+        from magpylib_studio.session import _plain
+
+        wanted = change["new"] or {}
+        if self._session is None:
+            if wanted:
+                self._editing("variables")  # raises, naming what has a scene
+            return
+        current = _values_of(self._session)
+        unknown = [name for name in wanted if name not in current]
+        if unknown:
+            self.variables = current
+            raise ValueError(
+                f"no variable {unknown[0]!r} in the scene: a variable is a "
+                "parameter of the scene function, or made with set_variable"
+            )
+        changed = {
+            name: _plain(value)
+            for name, value in wanted.items()
+            if not _equal(_plain(value), current[name])
+        }
+        if not changed:
+            if wanted != current:
+                self.variables = current  # every variable, as the scene has them
+            return
+        session = self._session
+        session.begin_interaction()  # one step to undo, however many
+        refused, applied = None, 0
+        for name, value in changed.items():
+            result = session.set_variable(name, value)
+            if not result.get("ok", True):
+                refused = f"{name}: {result.get('error')}"
+                break
+            applied += 1
+        session.end_interaction()
+        if refused:
+            # What went in before the refusal is one step, taken back whole;
+            # refused first, the group recorded nothing to take back.
+            if applied:
+                session.undo()
+            self.variables = current
+            raise ValueError(refused)
+        if len(changed) == 1:
+            ((name, value),) = changed.items()
+            edit = {"by": "set_variable", "variable": name, "value": value}
+        else:
+            edit = {"by": "set_variables", "values": changed}
+        self._show(edit)
 
     @traitlets.validate("editable")
     def _something_to_edit(self, proposal):
@@ -786,6 +788,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.tree = tree
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
+            self.variables = _values_of(self._session)
             if not first:
                 self.last_edit = edit or {}
                 self.revision += 1
@@ -807,7 +810,9 @@ class SceneWidget(anywidget.AnyWidget):
                 f"a view with a scene of its own is not re-pointed: no {what}(). "
                 "Its objects are a studio session's -- a scene written in code, "
                 "a path, editable=True, or the pencil among the view's tools -- "
-                "so make another view for other objects."
+                "so make another view for other objects. A view a notebook "
+                "re-points from controls of its own is made with editable=None, "
+                "which offers no pencil."
             )
 
     def to_html(self, title="magpylib scene"):
@@ -923,6 +928,10 @@ class SceneWidget(anywidget.AnyWidget):
             if answer.get("result", {}).get("changed"):
                 self._show({"by": "reset"})
             return
+        params = content.get("params") or {}
+        # A value the pointer is still on: applied, and the view redraws
+        # itself; the notebook is told at the release, as for a pose mid-drag.
+        preview = bool(content.get("preview"))
         edit = None
         if method in ("undo", "redo"):
             waiting = self._session.get_history()[method]
@@ -930,15 +939,52 @@ class SceneWidget(anywidget.AnyWidget):
         elif method == "end_interaction":
             edit = _drag_news(self._dragged)
             self._dragged = None
+        elif method in self._VARIABLE_EDITS and not preview:
+            edit = {"by": method, "variable": params.get("name")}
+            if method == "set_variable":
+                edit["value"] = params.get("value")
+        elif method in self._OBJECT_EDITS:
+            target = params.get("object_id")
+            if method == "set_param":
+                changed = {params.get("name"): params.get("value")}
+            elif method == "apply_edit":
+                # a style property, by its path under `style`
+                changed = {f"style.{params.get('path')}": params.get("value")}
+            elif method == "reset_style":
+                # back to magpylib's default, which None is
+                changed = {f"style.{params.get('path')}": None}
+            else:
+                changed = {
+                    k: v for k, v in params.items() if k not in ("object_id", "define")
+                }
+            edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
         if method == "apply_edits":
-            self._dragged = (content.get("params") or {}).get("edits")
+            self._dragged = params.get("edits")
+        # The scene with the answer, when the view asks for it: a preview
+        # wants to redraw, and one message where there were two is half the
+        # wait on a host whose every message costs (marimo's, measured in
+        # decision 0010). Not a trait: nothing is told per frame.
+        if content.get("scene") and isinstance(answer.get("result"), dict):
+            answer["result"]["scene"] = self._session.get_scene()
         # The answer first: telling the notebook runs its callbacks, and one
         # that takes a while -- or raises -- must not keep the view waiting
         # for an answer it would give up on.
         self.send({"kind": "rpc", **answer})
-        if method in self._SETTLES:
+        if (
+            method in self._SETTLES
+            or method in self._OBJECT_EDITS
+            or (method in self._VARIABLE_EDITS and not preview)
+        ):
             self._show(edit)
+
+
+def _equal(value, current):
+    """Whether `value` is what `current` already is, a name or a number: a
+    choice holds a name ('z'), which `_same` cannot read as a number."""
+    if isinstance(value, str) or isinstance(current, str):
+        return value == current
+    return _same(value, current)
 
 
 def _same(value, current):
@@ -955,6 +1001,11 @@ def _same(value, current):
         )
     except (TypeError, ValueError):
         return False
+
+
+def _values_of(session):
+    """The session's variables as resolved, by name: what `variables` holds."""
+    return {v["name"]: v["value"] for v in session.get_variables()["variables"]}
 
 
 def _drag_news(edits):

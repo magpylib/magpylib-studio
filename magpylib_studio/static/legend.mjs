@@ -31,7 +31,9 @@ function inTreeOrder(nodes, out = []) {
 /** The ids a payload draws something for. */
 export function drawnIn(payload) {
   return new Set(
-    [...payload.meshes, ...payload.scatters].map((item) => item.object_id),
+    [...payload.meshes, ...payload.scatters, ...(payload.pixels ?? [])].map(
+      (item) => item.object_id,
+    ),
   );
 }
 
@@ -39,7 +41,11 @@ export function drawnIn(payload) {
  *  decides it, and by the first trace the object has. */
 function swatchesOf(payload) {
   const swatches = new Map();
-  for (const item of [...payload.meshes, ...payload.scatters]) {
+  for (const item of [
+    ...payload.meshes,
+    ...payload.scatters,
+    ...(payload.pixels ?? []),
+  ]) {
     if (!swatches.has(item.object_id)) {
       swatches.set(item.object_id, swatchOf(item, payload.luts || []));
     }
@@ -53,6 +59,13 @@ function swatchesOf(payload) {
 function swatchOf(item, luts) {
   if (item.kind === "scatter") {
     return item.lines ? item.line_color : item.marker_color;
+  }
+  if (item.kind === "pixels") {
+    // a sensor's pixels coloured by the field: the middle of its colours
+    const colors = item.colors;
+    return Array.isArray(colors)
+      ? colors[Math.floor(colors.length / 2)]
+      : colors;
   }
   if (item.facecolor) return mostCommon(item.facecolor);
   // a payload shares its colour tables, and a mesh names its own by index

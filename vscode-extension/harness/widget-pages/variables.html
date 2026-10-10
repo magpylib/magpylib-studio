@@ -1,0 +1,217 @@
+<!doctype html>
+<!--
+  An editable view of a scene with variables -- the model of variables.json --
+  against a fake kernel that answers the panel's calls from the fixture: the
+  variables as listed, a set moving the one it names, the scene for a redraw.
+  `?standalone` is a saved page, `?readonly` a view with its handles away;
+  neither offers the panel. `window.result` is what the panel showed and
+  what it asked the session, in order, with a previewed value marked `*` and a
+  committed one `=`.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 80 && !test(); i++) await wait(50);
+        return test();
+      };
+      const { state, scene, variables } = await (
+        await fetch("/out/variables.json")
+      ).json();
+      const query = new URLSearchParams(location.search);
+      // `?taken`: a later step states r outright, so the panel offers to let
+      // it decide again
+      if (query.has("taken")) {
+        const r = variables.variables.find((v) => v.name === "r");
+        r.inert = true;
+        r.shadowed = [{ events: ["ring-pattern"] }];
+      }
+      const values = { ...state };
+      if (query.has("standalone")) values.standalone = true;
+      if (query.has("readonly")) values.editable = false;
+      // For a look: the view wears what it sits on, and a headless browser's
+      // own preference is whichever it is, so the page says.
+      if (query.has("dark")) document.body.style.background = "#1e1e1e";
+      if (query.has("light")) document.body.style.background = "#ffffff";
+
+      const asked = [];
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "rpc") return;
+          const { method, params } = message;
+          asked.push({
+            method,
+            params,
+            preview: message.preview === true,
+            scene: message.scene === true,
+          });
+          let result = { ok: true };
+          if (method === "get_variables") result = variables;
+          else if (method === "get_scene") result = scene;
+          else if (method === "set_variable") {
+            const found = variables.variables.find(
+              (v) => v.name === params.name,
+            );
+            if (found) found.value = found.expression = params.value;
+            // a preview asks for the scene in its own answer
+            if (message.scene) result = { ok: true, scene };
+          } else if (method === "expression_help") {
+            result = {
+              operators: ["+", "-"],
+              functions: ["sin"],
+              constants: ["pi"],
+              examples: ["2 * n"],
+              note: "",
+            };
+          }
+          setTimeout(
+            () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
+            10,
+          );
+        },
+      };
+
+      const el = document.getElementById("root");
+      widget.render({ model, el });
+      await until(() => el.querySelector("canvas"));
+      if (query.has("dock"))
+        el.style.setProperty("--magpy-dock-width", query.get("dock") + "px");
+      await wait(300);
+      const button = (start) =>
+        [...el.querySelectorAll(".magpy-icon")].find((b) =>
+          b.title.startsWith(start),
+        );
+      const hidden = (b) => !b || Boolean(b.closest("[hidden]"));
+      const offered = !hidden(button("Variables"));
+      if (!offered) {
+        window.result = { offered, asked };
+      } else if (query.has("taken")) {
+        // the one restore in the dock's title line, none in the rows, and
+        // the restoring one step
+        button("Variables").click();
+        await until(() => el.querySelectorAll(".magpy-vars-row").length);
+        await wait(200);
+        const pill = el.querySelector(
+          ".magpy-scene-dock-head .magpy-vars-restore",
+        );
+        const inRows = Boolean(el.querySelector(".magpy-vars-acts button"));
+        const mark = asked.length;
+        pill?.click();
+        await wait(500);
+        window.result = {
+          offered,
+          restore: { inHead: Boolean(pill), inRows, label: pill?.textContent },
+          restored: asked
+            .slice(mark)
+            .filter((a) => a.method === "restore_variable")
+            .map((a) => a.params.name),
+          grouped: asked.slice(mark).map((a) => a.method),
+        };
+      } else if (query.has("keep")) {
+        // For a look: the panel open, and nothing done to it.
+        button("Variables").click();
+        await until(() => el.querySelectorAll(".magpy-vars-row").length);
+        await wait(300);
+        window.result = { offered, kept: true };
+      } else {
+        button("Variables").click();
+        await until(() => el.querySelectorAll(".magpy-vars-row").length);
+        await wait(200);
+        const rowsOf = () => [...el.querySelectorAll(".magpy-vars-row")];
+        const rows = rowsOf().map((r) => ({
+          name: r.querySelector(".magpy-vars-name").textContent,
+          slider: Boolean(r.querySelector("input[type=range]")),
+          select: Boolean(r.querySelector("select")),
+          expression: Boolean(
+            r
+              .querySelector(".magpy-vars-value")
+              ?.classList.contains("magpy-vars-expr"),
+          ),
+          value: r.querySelector(".magpy-vars-value")?.value ?? null,
+        }));
+        const row = (name) =>
+          rowsOf().find(
+            (r) =>
+              r.querySelector(".magpy-vars-name").textContent.split(" ")[0] ===
+              name,
+          );
+
+        // A slider drag: three values under the pointer, released on the last.
+        const slider = row("n").querySelector("input[type=range]");
+        const mark = asked.length;
+        slider.dispatchEvent(
+          new PointerEvent("pointerdown", { bubbles: true }),
+        );
+        for (const value of [12, 14, 16]) {
+          slider.value = String(value);
+          slider.dispatchEvent(new Event("input", { bubbles: true }));
+          await wait(60);
+        }
+        slider.dispatchEvent(new Event("change", { bubbles: true }));
+        slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        await wait(500);
+        // redrawn between the values: the scene asked for, in the preview's
+        // own answer or in a message of its own
+        const redrawn = asked
+          .slice(mark)
+          .some((a) => a.method === "get_scene" || (a.preview && a.scene));
+        const drag = asked
+          .slice(mark)
+          .map(
+            (a) =>
+              a.method +
+              (a.method === "set_variable"
+                ? (a.preview ? "*" : "=") + a.params.value
+                : ""),
+          );
+
+        // A dropdown: one choice, one commit.
+        const pick = row("axis").querySelector("select");
+        const before = asked.length;
+        pick.value = [...pick.options].find((o) => o.textContent === "x").value;
+        pick.dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(300);
+        const chose = asked
+          .slice(before)
+          .filter((a) => a.method === "set_variable")
+          .map((a) => [a.params.name, a.params.value, a.preview]);
+
+        // The handles put away take the panel with them.
+        button("Edit").click();
+        await wait(200);
+        const afterPencil = {
+          button: !hidden(button("Variables")),
+          panel: !el.querySelector(".magpy-scene-variables").hidden,
+        };
+        window.result = {
+          offered,
+          rows,
+          drag,
+          redrawn,
+          chose,
+          afterPencil,
+          asked,
+        };
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<!--
+  A look at a scene the engine drew, for a screenshot: the widget over a
+  payload from the fixtures, read only, with nothing to ask python for.
+  `?out=readings.json&index=0` names the fixture and, for a file holding a
+  list, which entry; `?dark` and `?light` say what the page is; `?tools`
+  keeps the hover bar in sight, `?editable` offers the pencil. No check reads
+  this page; a person does, by screenshot.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const query = new URLSearchParams(location.search);
+      if (query.has("dark")) document.body.style.background = "#1e1e1e";
+      if (query.has("light")) document.body.style.background = "#ffffff";
+      if (query.has("tools")) {
+        const style = document.createElement("style");
+        style.textContent = ".magpy-scene-tools { opacity: 1 !important; }";
+        document.head.append(style);
+      }
+      let fixture = await (
+        await fetch(`/out/${query.get("out") ?? "readings.json"}`)
+      ).json();
+      if (Array.isArray(fixture))
+        fixture = fixture[Number(query.get("index") ?? 0)];
+      const payload = fixture.scene ?? fixture.payload ?? fixture;
+      const values = {
+        payload,
+        tree: fixture.tree ?? fixture.state?.tree ?? [],
+        selected: [],
+        hidden: [],
+        axes: true,
+        theme: "auto",
+        height: Number(query.get("height") ?? 520),
+        frames: 1,
+        duration: 5,
+        repeat: false,
+        editable: query.has("editable") ? false : null,
+        standalone: !query.has("editable"),
+        revision: 0,
+        last_edit: {},
+      };
+      const listeners = {};
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          (listeners[`change:${key}`] || []).forEach((l) => l(value));
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send() {},
+      };
+      widget.render({ model, el: document.getElementById("root") });
+    </script>
+  </body>
+</html>

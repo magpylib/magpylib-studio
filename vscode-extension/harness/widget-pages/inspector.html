@@ -1,0 +1,239 @@
+<!doctype html>
+<!--
+  An editable view of a scene with variables -- the model of inspector.json
+  -- against a fake kernel that answers the object panel's calls from the
+  fixture: the objects, each one's parameters, pose, style schema and style
+  values, a typed value read as the number it is, a set answered with what it
+  made. `?keep` opens the panel on the magnet and stops, for a look; `&style`
+  unfolds the style tree too; `&narrow` makes the view 480px wide, where the
+  dock is a sheet below it; `&dock=300` widens the column. `window.result`
+  is what the panel showed, where the dock was, and what it asked the
+  session.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 80 && !test(); i++) await wait(50);
+        return test();
+      };
+      const fixture = await (await fetch("/out/inspector.json")).json();
+      const {
+        state,
+        scene,
+        variables,
+        objects,
+        params,
+        transforms,
+        schemas,
+        values: styles,
+      } = fixture;
+      const query = new URLSearchParams(location.search);
+      if (query.has("light")) document.body.style.background = "#ffffff";
+      if (query.has("dark")) document.body.style.background = "#1e1e1e";
+      const values = { ...state };
+
+      const asked = [];
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const known = new Set(variables.variables.map((v) => v.name));
+      const made = (sent) => {
+        // a bare name the scene lacks, as the engine would make it
+        const names = [];
+        for (const value of Object.values(sent)) {
+          for (const v of [].concat(value ?? [])) {
+            if (
+              typeof v === "string" &&
+              /^=\w+$/.test(v) &&
+              !known.has(v.slice(1))
+            ) {
+              names.push(v.slice(1));
+            }
+          }
+        }
+        return names.length ? { ok: true, defined: names } : { ok: true };
+      };
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "rpc") return;
+          const { method, params: p } = message;
+          asked.push({ method, params: p });
+          let result = { ok: true };
+          if (method === "list_objects") result = objects;
+          else if (method === "get_params") result = params[p.object_id] ?? [];
+          else if (method === "get_transform") result = transforms[p.object_id];
+          else if (method === "get_variables") result = variables;
+          else if (method === "get_scene") result = scene;
+          else if (method === "get_schema") result = schemas[p.object_id];
+          else if (method === "get_values") result = styles[p.object_id];
+          else if (method === "apply_edit" || method === "reset_style")
+            result = { ok: true };
+          else if (method === "read_values")
+            result = { ok: true, values: p.terms.map(Number) };
+          else if (method === "set_param") result = made({ value: p.value });
+          else if (method === "set_transform")
+            result = made({ position: p.position, orientation: p.orientation });
+          setTimeout(
+            () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
+            10,
+          );
+        },
+      };
+
+      const el = document.getElementById("root");
+      if (query.has("narrow")) el.style.width = "480px";
+      widget.render({ model, el });
+      await until(() => el.querySelector("canvas"));
+      if (query.has("dock"))
+        el.style.setProperty("--magpy-dock-width", query.get("dock") + "px");
+      await wait(300);
+      const button = (start) =>
+        [...el.querySelectorAll(".magpy-icon")].find((b) =>
+          b.title.startsWith(start),
+        );
+      const hidden = (b) => !b || Boolean(b.closest("[hidden]"));
+      const offered = !hidden(button("Object"));
+      model.set("selected", ["m"]);
+      await wait(100);
+      // the variables first, so opening the object panel is seen to close it
+      button("Variables").click();
+      await wait(200);
+      button("Object").click();
+      await until(() => el.querySelectorAll(".magpy-ins-row").length);
+      await wait(300);
+      const panel = el.querySelector(".magpy-scene-inspector");
+      const oneAtATime = el.querySelector(".magpy-scene-variables").hidden;
+      const header = el.querySelector(".magpy-ins-name")?.textContent ?? null;
+      const paramRows = () => [
+        ...el.querySelectorAll(".magpy-ins-params .magpy-ins-row"),
+      ];
+      const rows = paramRows().map(
+        (r) => r.querySelector("label").textContent.split(" ")[0],
+      );
+      const poseTitle =
+        el.querySelector(".magpy-ins-transform summary")?.textContent ?? null;
+      // where the dock is: beside the view, or below a narrow one, the
+      // widget grown by it
+      const box = (node) => node.getBoundingClientRect();
+      const dockEl = el.querySelector(".magpy-scene-dock");
+      const stageEl = el.querySelector(".magpy-scene-stage");
+      const viewEl = el.querySelector(".magpy-scene-view");
+      const layout = {
+        narrow: el.classList.contains("magpy-narrow"),
+        beside: box(dockEl).left >= box(stageEl).right - 1,
+        below: box(dockEl).top >= box(viewEl).bottom - 1,
+        viewHeight: viewEl.clientHeight,
+        widgetHeight: el.clientHeight,
+        height: state.height,
+        title: el.querySelector(".magpy-scene-dock-title")?.textContent ?? null,
+        readout: !el.querySelector(".magpy-scene-readout").hidden,
+      };
+      if (query.has("keep")) {
+        if (query.has("style")) {
+          el.querySelector(".magpy-ins-style").open = true;
+          await until(
+            () => el.querySelectorAll(".magpy-ins-props .magpy-ins-row").length,
+          );
+          await wait(300);
+        }
+        window.result = {
+          offered,
+          header,
+          rows,
+          poseTitle,
+          layout,
+          kept: true,
+        };
+      } else {
+        // a value typed into the dimension's first box: read, then set
+        const dimension = paramRows()
+          .find((r) =>
+            r.querySelector("label").textContent.startsWith("dimension"),
+          )
+          .querySelectorAll("input[type=text]");
+        let mark = asked.length;
+        dimension[0].value = "12";
+        dimension[0].dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(400);
+        const typed =
+          asked.slice(mark).find((a) => a.method === "set_param") ?? null;
+        // a bare name in the pose's x: an expression, and the engine makes it
+        mark = asked.length;
+        const pose = [
+          ...el.querySelectorAll(".magpy-ins-transform input[type=text]"),
+        ];
+        pose[0].value = "reach";
+        pose[0].dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(400);
+        const named =
+          asked.slice(mark).find((a) => a.method === "set_transform") ?? null;
+        const notice =
+          el.querySelector(".magpy-scene-notice")?.textContent ?? "";
+        // the style tree: folded, not read until opened; then a colour set
+        const styleBox = el.querySelector(".magpy-ins-style");
+        const style = {
+          folded: Boolean(styleBox) && !styleBox.open,
+          lazy: !asked.some((a) => a.method === "get_schema"),
+        };
+        mark = asked.length;
+        styleBox.open = true;
+        await until(
+          () => el.querySelectorAll(".magpy-ins-props .magpy-ins-row").length,
+        );
+        await wait(300);
+        const styleRows = () => [
+          ...el.querySelectorAll(".magpy-ins-props .magpy-ins-row"),
+        ];
+        style.rows = styleRows().map(
+          (r) => r.querySelector("label").textContent,
+        );
+        const colour = styleRows()
+          .find((r) => r.querySelector("label").textContent === "color")
+          ?.querySelector("input[type=text]");
+        colour.value = "#ff0000";
+        colour.dispatchEvent(new Event("change", { bubbles: true }));
+        await wait(400);
+        style.edit =
+          asked.slice(mark).find((a) => a.method === "apply_edit") ?? null;
+        // the handles put away take the panel with them
+        button("Edit").click();
+        await wait(200);
+        const afterPencil = {
+          button: !hidden(button("Object")),
+          panel: !panel.hidden,
+        };
+        window.result = {
+          offered,
+          header,
+          rows,
+          poseTitle,
+          oneAtATime,
+          typed,
+          named,
+          notice,
+          afterPencil,
+          style,
+          layout,
+          asked,
+        };
+      }
+    </script>
+  </body>
+</html>

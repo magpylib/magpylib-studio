@@ -52,7 +52,8 @@ there would be nil. **Not to build:** a text-to-geometry generator; a general
 CAD tool; a second stored representation, or any parsing of code back into one;
 more one-call-per-operation agent tools; a framework for building pages, reports
 or dashboards out of a scene — marimo-studio builds those from a notebook, and
-studio's part is a view that works inside one.
+studio's part is a view that works inside one. What that view is, and is not, is
+[decision 0022](decisions.md#0022-what-the-widget-is-and-is-not).
 
 ---
 

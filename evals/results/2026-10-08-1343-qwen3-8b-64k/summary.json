@@ -14,9 +14,7 @@
       "condition": "plain",
       "ok": false,
       "ran": true,
-      "notes": [
-        "B = 0.7213 mT; 206.8 mT \u00b1 0.5 %"
-      ],
+      "notes": ["B = 0.7213 mT; 206.8 mT \u00b1 0.5 %"],
       "tools": {
         "Write": 1
       },
@@ -68,9 +66,7 @@
       "condition": "studio",
       "ok": false,
       "ran": true,
-      "notes": [
-        "B = 8890.0 mT; 206.8 mT \u00b1 0.5 %"
-      ],
+      "notes": ["B = 8890.0 mT; 206.8 mT \u00b1 0.5 %"],
       "tools": {
         "Skill": 1,
         "Write": 1

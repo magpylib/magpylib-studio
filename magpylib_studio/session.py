@@ -86,6 +86,7 @@ Protocol surface (all JSON-serializable in/out):
 from __future__ import annotations
 
 import ast
+import contextlib
 import difflib
 import json
 import os
@@ -227,11 +228,11 @@ def example_scene():
 
 
 #: How big a sensor is drawn, in metres — the size of a real Hall probe
-#: package. It has to be said: the studio pins `sensor.sizemode` to "absolute"
-#: so that moving one object cannot rescale every other (see
-#: `threejs.pin_scene_units`), and magpylib's default size of 1 is then one
-#: metre of glyph over assemblies measured in millimetres.
-SENSOR_SIZE = 0.005
+#: package, and what the studio draws a sensor at when its style says no
+#: size (`threejs.pinned_scene_units`). Written into the examples' sensors so
+#: that their scripts say it; a scene function's bare sensor gets the same
+#: without saying it.
+SENSOR_SIZE = threejs.SENSOR_SIZE
 
 
 def _bore_sensor(start, stop, steps=25, label="Sensor"):
@@ -3219,9 +3220,20 @@ class MagpylibStudioSession:
         resolved here because plotly.js has no named-template registry.
         The whole scene is always drawn: objects hidden via set_visible carry
         magpylib's own hide switches, keeping every colour assignment stable."""
-        fig = magpy.show(
-            self.scene, backend="plotly", animation=animation, return_fig=True
-        )
+        # Drawn as the 3D view draws, where magpylib can: a bare sensor the same
+
+        # size in the chart as in the view. On released magpylib the chart is all
+
+        # there is, and it draws as magpylib does.
+
+        with (
+            threejs.pinned_scene_units()
+            if threejs.available()
+            else contextlib.nullcontext()
+        ):
+            fig = magpy.show(
+                self.scene, backend="plotly", animation=animation, return_fig=True
+            )
         if template:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
@@ -3245,7 +3257,11 @@ class MagpylibStudioSession:
         methods already take. Selecting a mesh therefore names an object the
         protocol understands.
         """
-        threejs.pin_scene_units()
+        with threejs.pinned_scene_units():
+            return self._scene_as_drawn(frame)
+
+    def _scene_as_drawn(self, frame=None):
+        """`get_scene`, with the units pinned by the caller."""
         if frame is not None:
             # One step of the paths, whole: what a pose cannot express is a
             # sensor's arrows, which are read off the field and so turn as
@@ -3269,7 +3285,51 @@ class MagpylibStudioSession:
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
         scene["parametric"] = self._parametric_fields()
+        # How a view shows and reads a number, and what was written where a
+        # number is -- `gap` rather than 0.015 -- both facts about the
+        # document, as `parametric` is.
+        scene["units"] = {
+            kind: self._shown(kind) for kind in ("length", "angle", "field")
+        }
+        scene["expressions"] = self._written_fields()
         return scene
+
+    def _written_fields(self):
+        """The expression each element of a drag-editable field was written
+        as, where it was, per object: ``{"m": {"position": ["gap", None,
+        None]}}``. What a view's readout shows in place of the number, so
+        that touching a neighbouring box does not write the number over the
+        expression. A pose on a path is left out: one expression per element
+        has no meaning across its steps."""
+        out = {}
+
+        def texts(written):
+            values = np.atleast_1d(np.asarray(written, dtype=object))
+            if values.ndim != 1:
+                return None
+            texts = [
+                expressions.source_of(v) if expressions.is_expression(v) else None
+                for v in values
+            ]
+            return texts if any(t is not None for t in texts) else None
+
+        for spec, _ in self._iter_specs():
+            object_id = spec["id"]
+            fields = {}
+            for op, key in (("position", "value"), ("orientation", "rotvec")):
+                written = self._last_written(object_id, op, key)
+                found = None if written is None else texts(written)
+                if found is not None:
+                    fields[op] = found
+            params = spec.get("params") or {}
+            for attr in ("dimension", "diameter", "polarization"):
+                if attr in params and expressions.contains_expression(params[attr]):
+                    found = texts(params[attr])
+                    if found is not None:
+                        fields[attr] = found
+            if fields:
+                out[object_id] = fields
+        return out
 
     def _parametric_fields(self):
         """Which drag-editable fields a variable is deciding, per object.
@@ -3713,16 +3773,24 @@ class MagpylibStudioSession:
 
     # --- editing -----------------------------------------------------------
     def apply_edit(self, object_id, path, value):
+        """Set one style path on `object_id`, and rebuild. A pattern's copies
+        are made from their source at the step that copies it, so a style set
+        on the source reaches them only through the replay, as a drag's pose
+        does; set on the live object alone, it changed the source and left the
+        copies as they were until the next rebuild. Tried on the live object
+        first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
-        before = json.loads(json.dumps(self.doc))
         try:
             style_compat.set_style(obj, path, value)
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
             return {"ok": False, "error": str(e)}
-        self._create_event(object_id)["style"] = style_compat.set_values(obj)
-        self.doc["objects"] = self._project()  # keep the projection in step
-        self._record_state(f"edit {object_id} {path}", before)
-        return {"ok": True}
+        style = style_compat.set_values(obj)
+
+        def mutate(doc):
+            self._create_event(object_id)["style"] = style
+            doc["objects"] = self._project()  # keep the projection in step
+
+        return self._mutate_doc(mutate, f"edit {object_id} {path}")
 
     # --- scene structure ---------------------------------------------------
     def add_object(
@@ -4049,13 +4117,35 @@ class MagpylibStudioSession:
             op["start"] = start
         return self._append_ops(object_id, [op], f"rotate {object_id}")
 
-    def set_transform(self, object_id, position=None, orientation=None):
+    def set_transform(self, object_id, position=None, orientation=None, define=False):
         """Set the absolute pose in WORLD coordinates: `position` [x,y,z] and/
         or `orientation` as a rotation vector in degrees. Recorded at the end
         of the event log, so the pose is world-absolute even inside a rotated
-        Collection — nothing replays after it."""
+        Collection — nothing replays after it. With `define`, a bare name the
+        document lacks is made at the value it replaces -- see `apply_edits`."""
         if position is None and orientation is None:
             return {"ok": False, "error": "nothing to set"}
+        if define:
+            made = self._definitions_for(
+                [
+                    {
+                        "objectId": object_id,
+                        "position": position,
+                        "orientation": orientation,
+                    }
+                ]
+            )
+            if made:
+                params = {"object_id": object_id}
+                if position is not None:
+                    params["position"] = position
+                if orientation is not None:
+                    params["orientation"] = orientation
+                return self._with_definitions(
+                    made,
+                    {"method": "set_transform", "params": params},
+                    f"set transform {object_id}",
+                )
         obj = self._objs[object_id]
         if expressions.contains_expression([position, orientation]):
             # Recorded as written, not as the pose it currently comes to:
@@ -4306,7 +4396,7 @@ class MagpylibStudioSession:
         self._interaction = None
         self._interaction_redo = []
 
-    def apply_edits(self, edits):
+    def apply_edits(self, edits, define=False):
         """Record what a 3D view's handles did.
 
         `edits` are the renderer's own records, one per object dragged, as its
@@ -4323,8 +4413,90 @@ class MagpylibStudioSession:
         none of them moves.
         """
         calls = [call for edit in edits for call in _calls_for(edit)]
+        made = []
+        if define:
+            # A bare variable's name typed where a number was -- `gap` for a
+            # position's x -- that the document does not define yet is made
+            # at the value it replaces, in that kind of unit, in the same
+            # step. A name inside a longer expression is not: no value for
+            # it follows from the number it replaces, and the edit is
+            # refused by name as it always was.
+            definitions = self._definitions_for(edits)
+            made = [d["params"]["name"] for d in definitions]
+            calls = [*definitions, *calls]
         ids = sorted({edit["objectId"] for edit in edits})
-        return self.apply_calls(calls, f"edit {', '.join(ids)}")
+        result = self.apply_calls(calls, f"edit {', '.join(ids)}")
+        if made and result.get("ok"):
+            result = {**result, "defined": made}
+        return result
+
+    def _with_definitions(self, definitions, call, label):
+        """`call`, with the variables `definitions` make before it, as one
+        step; the answer names what was made."""
+        result = self.apply_calls([*definitions, call], label)
+        if result.get("ok"):
+            result = {**result, "defined": [d["params"]["name"] for d in definitions]}
+        return result
+
+    def _definitions_for(self, edits):
+        """The `set_variable` calls that make the bare names `edits` use and
+        the document lacks, each at the value it replaces -- see
+        `apply_edits(define=True)`. The value is the field's as it is now,
+        element for element, and the unit is the field's kind."""
+        defined = self.doc.get("variables") or {}
+        calls, seen = [], set()
+
+        def consider(values, current, kind):
+            for index, value in enumerate(
+                np.atleast_1d(np.asarray(values, dtype=object))
+            ):
+                if not expressions.is_expression(value):
+                    continue
+                name = expressions.source_of(value).strip()
+                if not name.isidentifier() or name in defined or name in seen:
+                    continue
+                now = np.atleast_1d(np.asarray(current, dtype=float))
+                if index >= len(now) or not np.isfinite(now[index]):
+                    continue
+                seen.add(name)
+                # a parameter of no known kind -- a magnetization, in A/m --
+                # is made as a bare number; one of several kinds, in the
+                # kind of its component
+                at = (
+                    (kind[index] if index < len(kind) else None)
+                    if isinstance(kind, tuple)
+                    else kind
+                )
+                params = {"name": name, "value": float(now[index])}
+                if at:
+                    params["unit"] = at
+                calls.append({"method": "set_variable", "params": params})
+
+        for edit in edits:
+            object_id = edit["objectId"]
+            obj = self._objs.get(object_id)
+            if obj is None:
+                continue
+            pose = self.get_transform(object_id)
+            if edit.get("position") is not None:
+                consider(edit["position"], pose["position"], "length")
+            if edit.get("orientation") is not None:
+                consider(edit["orientation"], pose["orientation"], "angle")
+            if edit.get("polarization") is not None:
+                consider(
+                    edit["polarization"], getattr(obj, "polarization", []), "field"
+                )
+            shape = edit.get("shape")
+            if shape is not None and not shape["attr"].startswith("style."):
+                attr = shape["attr"]
+                kind = _PARAM_KINDS.get(attr)
+                if attr == "dimension" and isinstance(
+                    obj, magpy.magnet.CylinderSegment
+                ):
+                    # three lengths and two angles, as `_shown_param` shows them
+                    kind = ("length", "length", "length", "angle", "angle")
+                consider(shape["value"], getattr(obj, attr, []), kind)
+        return calls
 
     def apply_calls(self, calls, label="edit"):
         """Several edits as one: all of them, one step to undo -- or, if any
@@ -4516,11 +4688,30 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"reparent {object_id}")
 
-    def set_param(self, object_id, name, value):
+    def set_param(self, object_id, name, value, define=False):
         """Set a constructor parameter (position, dimension, polarization, …).
         A value may be an expression over the document's variables, on its own
-        or inside a vector: `[0, 0, "=gap"]`."""
+        or inside a vector: `[0, 0, "=gap"]`. With `define`, a bare name the
+        document lacks is made at the value it replaces, in the same step --
+        see `apply_edits`."""
         self._spec(object_id)  # raise early on unknown id
+        if define:
+            made = self._definitions_for(
+                [{"objectId": object_id, "shape": {"attr": name, "value": value}}]
+            )
+            if made:
+                return self._with_definitions(
+                    made,
+                    {
+                        "method": "set_param",
+                        "params": {
+                            "object_id": object_id,
+                            "name": name,
+                            "value": value,
+                        },
+                    },
+                    f"set {object_id}.{name}",
+                )
 
         def mutate(doc):
             # What an object *is* lives on its create event, so this edits

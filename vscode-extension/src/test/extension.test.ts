@@ -399,15 +399,15 @@ suite('magpylib-studio', () => {
     assert.ok(present.has('r2'), 'the other ring should be untouched');
   });
 
-  test('the script tab is builder code, and saving it applies it', async function () {
+  test('the script tab is the scene as a function, and saving it applies it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
     const tab = await openScriptTab();
     const rendered = tab.getText();
-    assert.match(rendered, /^# The scene as builder code\. Save to apply it/);
-    assert.match(rendered, /regenerated from the scene after\n# a save/);
-    assert.match(rendered, /^from magpylib_studio\.build import Scene$/m);
-    assert.match(rendered, /^r1\.duplicate_around\(/m, 'the pattern should be one call');
+    assert.match(rendered, /^# The scene as a function\. Save to apply it/);
+    assert.match(rendered, /regenerated from the\n# scene after a save/);
+    assert.match(rendered, /^from magpylib_studio import .*\bscene$/m);
+    assert.match(rendered, /^ {4}duplicate_around\(r1, n,/m, 'the pattern should be one call');
 
     // Edit radius and save: the document follows, as the edit and nothing
     // else. r1 still sits at `=radius` and the ring is still a pattern -- the
@@ -415,7 +415,7 @@ suite('magpylib-studio', () => {
     await editAndSave(
       tab,
       (text) =>
-        text.replace("s.variable('radius', 0.023,", "s.variable('radius', 0.0325,") +
+        text.replace('slider=(0.016, 0.04))] = 0.023,', 'slider=(0.016, 0.04))] = 0.0325,') +
         '# a note the tab will not keep\n',
     );
     type Step = { op: string; target: string; params?: { position?: unknown[] } };
@@ -431,7 +431,7 @@ suite('magpylib-studio', () => {
     // Regenerated from the scene: the note is gone, the number is not.
     await textWhere(
       tab,
-      (text) => !text.includes('a note the tab') && text.includes("'radius', 0.0325,"),
+      (text) => !text.includes('a note the tab') && text.includes('= 0.0325,'),
       'the tab to be regenerated from the scene',
     );
 
@@ -447,7 +447,7 @@ suite('magpylib-studio', () => {
 
     const refused = answeringMessages('showErrorMessage', [NOT_APPLIED, undefined]);
     try {
-      await editAndSave(tab, (text) => text.replace('s.Collection(', 's.Group('));
+      await editAndSave(tab, (text) => text.replace('magpy.Collection(', 'magpy.Group('));
       await until(() => refused.said.length > 0, 'the save to be refused');
     } finally {
       refused.restore();
@@ -465,21 +465,21 @@ suite('magpylib-studio', () => {
     });
     await sceneWhere(without('sensor'), 'the removal to land');
     await pause(500); // a re-render would land after the scene, not before it
-    assert.ok(tab.getText().includes('s.Group('), 'the tab lost the text it was holding');
+    assert.ok(tab.getText().includes('magpy.Group('), 'the tab lost the text it was holding');
 
     // Fixed and saved, it would run -- and put the sensor back, since the tab
     // was written before the removal. So the save asks, and a no keeps both
     // the scene and the text.
     const asked = answeringMessages('showWarningMessage', [STALE, undefined]);
     try {
-      await editAndSave(tab, (text) => text.replace('s.Group(', 's.Collection('));
+      await editAndSave(tab, (text) => text.replace('magpy.Group(', 'magpy.Collection('));
       await until(() => asked.said.length > 0, 'the save to ask');
     } finally {
       asked.restore();
     }
     await pause(500); // an apply would land after the answer, not before it
     assert.ok(!ids((await scene()).objects).has('sensor'), 'a declined save applied');
-    assert.ok(tab.getText().includes('s.Collection('), 'the tab lost the fixed text');
+    assert.ok(tab.getText().includes('magpy.Collection('), 'the tab lost the fixed text');
 
     // Asked again and told yes, it runs: the scene is what the tab says.
     const told = answeringMessages('showWarningMessage', [STALE, APPLY_ANYWAY]);
@@ -498,7 +498,7 @@ suite('magpylib-studio', () => {
     const tab = await openScriptTab();
     const refused = answeringMessages('showErrorMessage', [NOT_APPLIED, undefined]);
     try {
-      await editAndSave(tab, (text) => text.replace('s.Collection(', 's.Group('));
+      await editAndSave(tab, (text) => text.replace('magpy.Collection(', 'magpy.Group('));
       await until(() => refused.said.length > 0, 'the save to be refused');
     } finally {
       refused.restore();
@@ -511,7 +511,7 @@ suite('magpylib-studio', () => {
     await sceneWhere(holding('coil'), 'the coil example to load');
     await textWhere(
       tab,
-      (text) => text.includes("id='coil'") && !text.includes('s.Group('),
+      (text) => text.includes("name(coil, 'coil')") && !text.includes('magpy.Group('),
       'the tab to follow the scene opened',
     );
   });
@@ -539,7 +539,7 @@ suite('magpylib-studio', () => {
     await closeScriptTab(tab);
   });
 
-  test('a scene exports as the builder script that builds it', async function () {
+  test('a scene exports as the scene function that builds it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
     const target = tempScene('halbach_build.py');
@@ -554,8 +554,8 @@ suite('magpylib-studio', () => {
       window.showInformationMessage = inform;
     }
     const text = Buffer.from(await vscode.workspace.fs.readFile(target)).toString('utf8');
-    assert.match(text, /^from magpylib_studio\.build import Scene$/m);
-    assert.match(text, /^r1\.duplicate_around\(/m);
+    assert.match(text, /^from magpylib_studio import .*\bscene$/m);
+    assert.match(text, /^ {4}duplicate_around\(r1, n,/m);
     // Code someone keeps: nothing regenerates it, so it does not say so.
     assert.doesNotMatch(text, /regenerated/);
   });
