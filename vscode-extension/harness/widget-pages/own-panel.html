@@ -1,0 +1,151 @@
+<!doctype html>
+<!--
+  A panel of its own (`ScenePanel`, `static/panel.js`) against a fake model
+  -- not the studio panel, which `panel.html` is --
+  of the variables kind, answered from the variables fixture: the rows come,
+  a slider's value under the pointer goes as a preview and the release as an
+  edit, and a bumped revision reads the rows again. `?object` mounts the
+  object kind on the inspector fixture, following `selected`. `?keep` stops
+  with the rows shown, for a look. `window.result` is what the panel showed
+  and what it asked.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 12px;
+        width: 320px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import panel from "/static/panel.js";
+
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const until = async (test) => {
+        for (let i = 0; i < 80 && !test(); i++) await wait(50);
+        return test();
+      };
+      const query = new URLSearchParams(location.search);
+      const object = query.has("object");
+      const fixture = await (
+        await fetch(object ? "/out/inspector.json" : "/out/variables.json")
+      ).json();
+      const {
+        variables,
+        objects,
+        params,
+        transforms,
+        schemas,
+        values: styles,
+      } = fixture;
+      if (query.has("dark")) document.body.style.background = "#1e1e1e";
+      if (query.has("light")) document.body.style.background = "#ffffff";
+
+      const asked = [];
+      const listeners = {};
+      const emit = (event, value) =>
+        (listeners[event] || []).forEach((listener) => listener(value));
+      const state = {
+        kind: object ? "object" : "variables",
+        revision: 0,
+        selected: object ? ["m"] : [],
+        theme: "auto",
+      };
+      const model = {
+        get: (key) => state[key],
+        set(key, value) {
+          state[key] = value;
+          emit(`change:${key}`, value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off(event, listener) {
+          listeners[event] = (listeners[event] || []).filter(
+            (l) => l !== listener,
+          );
+        },
+        send(message) {
+          if (message.kind !== "rpc") return;
+          const { method, params: p } = message;
+          asked.push({ method, params: p, preview: message.preview === true });
+          let result = { ok: true };
+          if (method === "get_variables") result = variables;
+          else if (method === "set_variable") {
+            const found = variables.variables.find((v) => v.name === p.name);
+            if (found) found.value = found.expression = p.value;
+          } else if (method === "list_objects") result = objects;
+          else if (method === "get_params") result = params[p.object_id] ?? [];
+          else if (method === "get_transform") result = transforms[p.object_id];
+          else if (method === "get_schema") result = schemas[p.object_id];
+          else if (method === "get_values") result = styles[p.object_id];
+          setTimeout(
+            () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
+            10,
+          );
+        },
+      };
+
+      const el = document.getElementById("root");
+      panel.render({ model, el });
+      const rowSelector = object ? ".magpy-ins-row" : ".magpy-vars-row";
+      await until(() => el.querySelectorAll(rowSelector).length);
+      await wait(200);
+      const title =
+        el.querySelector(".magpy-scene-dock-title")?.textContent ?? null;
+      const rows = [...el.querySelectorAll(rowSelector)].map(
+        (r) =>
+          (
+            r.querySelector(".magpy-vars-name") ?? r.querySelector("label")
+          )?.textContent.split(" ")[0],
+      );
+      if (query.has("keep")) {
+        window.result = { title, rows, kept: true };
+      } else if (object) {
+        // the selection moved: the panel follows it
+        model.set("selected", ["ring"]);
+        await until(
+          () => el.querySelector(".magpy-ins-name")?.textContent === "ring",
+        );
+        window.result = {
+          title,
+          rows,
+          followed: el.querySelector(".magpy-ins-name")?.textContent ?? null,
+          asked,
+        };
+      } else {
+        // a slider under the pointer: previews, then the release's edit
+        const slider = el.querySelector(".magpy-vars-row input[type=range]");
+        const mark = asked.length;
+        slider.dispatchEvent(
+          new PointerEvent("pointerdown", { bubbles: true }),
+        );
+        for (const value of [12, 14]) {
+          slider.value = String(value);
+          slider.dispatchEvent(new Event("input", { bubbles: true }));
+          await wait(60);
+        }
+        slider.dispatchEvent(new Event("change", { bubbles: true }));
+        slider.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+        await wait(500);
+        const drag = asked
+          .slice(mark)
+          .filter((a) => a.method === "set_variable")
+          .map((a) => (a.preview ? "*" : "=") + a.params.value);
+        // the view moved on: the rows are read again
+        const before = asked.length;
+        model.set("revision", 1);
+        await wait(300);
+        const reread = asked
+          .slice(before)
+          .some((a) => a.method === "get_variables");
+        window.result = { title, rows, drag, reread, asked };
+      }
+    </script>
+  </body>
+</html>

@@ -49,8 +49,9 @@ it, so a `SceneWidget(...)` in one of them is a _new widget per drag_: a new
 element, controls rebuilt from nothing, and the camera back at its opening
 framing — you lose the zoom you were working in. `update()` replaces the drawn
 objects and leaves the view alone, which is what makes a slider smooth. Such a
-view is made with `editable=None`: no pencil, since an edit would be lost at the
-next move of a slider; `examples/jupyter_demo.ipynb` does that for its sliders.
+view is made with `editable="never"`: no pencil, since an edit would be lost at
+the next move of a slider; `examples/jupyter_demo.ipynb` does that for its
+sliders.
 
 **The legend** floats over the view: the objects as they are nested, with a
 caret to fold a collection, an eye to hide it and everything in it — shown on
@@ -118,8 +119,9 @@ so a cell that `update`s the view on a slider is refused once there is a
 session, and a view of other objects is a new one. Undo stops where the view
 started — a built scene's own building is not an edit — and `studio.reset()`, or
 the arrow under the undo buttons, takes every edit since back in one step,
-itself one undo away. `editable=None` is a view for looking only, a figure
-handed to someone else: no pencil, and `editable` refuses to turn on.
+itself one undo away. `editable="never"` is a view for looking only, a figure
+handed to someone else: no pencil, and `editable` refuses to turn on; `None`
+says the same.
 
 ```python
 studio.objects["probe"]  # the objects as edited, to compute with
@@ -187,6 +189,14 @@ the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 ![The widget with its variables panel open in the column beside the view, and with the object panel open on the ring's source, its copies outlined faint](../widget-panels.png)
+
+**A panel of its own.** Where the notebook lays things out, a panel can be a
+widget apart from the view: `view.panel("variables")` and `view.panel("object")`
+are the same two panels, edited through the view, which draws and tells the
+notebook as it does for its own. Put one beside the view in an ipywidgets
+`HBox`, in a marimo `mo.hstack` or `mo.sidebar`, or in a JupyterLab sidecar; the
+view's selection, revision and theme reach it. For a view with a scene of its
+own, as the toggles are.
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
 and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`

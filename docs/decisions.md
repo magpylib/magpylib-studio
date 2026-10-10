@@ -908,7 +908,9 @@ package this environment lacks.
 
 ## 0018. A view is read only until its pencil is pressed
 
-**Status:** accepted 2026-10-09, as built; supersedes the sentence in
+**Status:** accepted 2026-10-09, as built; amended 2026-10-10: the view for
+looking only is spelt `editable="never"`, `None` kept as the same thing.
+Supersedes the sentence in
 [0010](#0010-the-notebook-widget-edits-with-the-package-alone) that a view
 cannot be made editable after the fact. The rest of 0010 stands. **Record of:**
 where `editable` is decided, raised over the view's toolbar.
@@ -1299,3 +1301,41 @@ too, and the widget is not a window manager
   rendered, a 460-pixel view left the edit column clipped at both ends, since
   the column and a sheet together want more than the view has; and a notebook's
   outputs grow with what is in them anyway.
+
+## 0025. A panel is a widget of its own where a host places it
+
+**Status:** accepted 2026-10-10, as built.
+
+### Context
+
+The widget docks its panels beside its view
+([0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)), and that
+is the whole answer where a cell is the only layout there is. Notebook hosts
+have layouts of their own -- an ipywidgets box, marimo's columns and sidebar,
+JupyterLab's sidecar -- and a person who wants the sliders in a side column has
+them in the host's hands already, if the panel is a thing the host can place.
+[0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them) left
+room for it: "a widget per panel for hosts that place outputs apart, when a host
+asks".
+
+### Decision
+
+- **`view.panel(kind)` is a widget.** `ScenePanel` mounts the same module the
+  view docks, under a model of its own, against the view's session through the
+  view: a call is answered under the panel's model, and the view draws and tells
+  the notebook as it does for its own panels. The view's revision, selection and
+  theme are mirrored to it as traits.
+- **The view stays the editor.** A panel apart adds no entry point to the
+  session: it may call what the view may call, and a previewed value redraws the
+  view by handing it the scene, where the view's own panel redraws from the
+  answer. The notebook is told at the release, as for a drag.
+- **One source, two bundles.** `panel.js` is the editor's modules without the
+  renderer, built from the same sources under the same stamp, and checked
+  against them as `widget.js` is.
+
+### Rejected
+
+- A second model inside the view's widget, one per panel: anywidget has one
+  model per widget, and a panel the host can place is a widget.
+- The panel talking to the kernel on its own: two editors of one session, each
+  drawing and telling the notebook, where the view already does both.

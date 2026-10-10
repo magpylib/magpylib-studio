@@ -48,6 +48,31 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **A panel of its own.** `view.panel("variables")` and `view.panel("object")`
+  are the view's two panels as widgets the notebook places apart, beside the
+  view in an ipywidgets box, a marimo column or a sidecar. They edit the scene
+  through the view, which draws and tells the notebook as it does for its own
+  panels, and the view's selection, revision and theme reach them.
+- **The scene function itself.** `SceneWidget(ring)` takes the function and
+  builds it, where it took `ring.build()`.
+- **The view traces a pattern.** With a pattern's source selected, a dashed line
+  in the selection's colour runs through the copies, closed round a ring, so the
+  view says how the copies follow where the faint outlines say that they do.
+- **The Inspector makes a variable without asking.** A bare name typed into a
+  parameter or a pose in the sidebar goes to the engine, which makes it at the
+  value it replaces in the same step, as the notebook's panels have it; the
+  status bar says what was made. A step's own values still ask first.
+- **Plainer words.** `unhide(obj)` is the word for undoing `hide`, where `show`
+  was also magpylib's word for drawing. A mesh says where it comes from as a
+  call: `TriangularMesh.from_file(path, scale=...)`, `.from_hull(points)`,
+  `.from_superquadric(size, roundness)`, and the script tab writes them so. A
+  view for looking only is `editable="never"`, `None` kept. `grid(half, count)`
+  is a sensor's square of pixels as a formula of the variables, where the
+  examples spelt it as a `sampled` lambda.
+- **The examples name objects by their labels.** `style_label="magnet"` is the
+  id, spaces as underscores; `name()` stays for a saved scene whose id differs
+  from its label, which the script tab writes, and `place()` for an orientation
+  stated outright. Neither is in the examples any more.
 - **A pattern's copies follow a style edit.** A colour or any style set on the
   source of a pattern reaches its copies, as a drag's pose does: the edit
   replays the scene, where before it changed the source alone until the next

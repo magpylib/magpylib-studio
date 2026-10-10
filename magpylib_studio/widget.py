@@ -904,6 +904,20 @@ class SceneWidget(anywidget.AnyWidget):
         """Answer what an editable view asks of its session -- see
         `VIEW_CALLS` -- as the studio's panel is answered, and tell the
         notebook when an edit is settled."""
+        answer, edit, settles = self._reply(content)
+        # The answer first: telling the notebook runs its callbacks, and one
+        # that takes a while -- or raises -- must not keep the view waiting
+        # for an answer it would give up on.
+        self.send({"kind": "rpc", **answer})
+        if settles:
+            self._show(edit)
+
+    def _reply(self, content):
+        """What a call of this view's session comes to -- from the view, or
+        from a panel of its own (`ScenePanel`), which sends the answer under
+        its own model: ``(answer, edit, settles)``, the answer as the view
+        takes it, and whether the notebook is to be told of `edit` once the
+        answer is sent (`_show`)."""
         from magpylib_studio import rpc
 
         method = content.get("method")
@@ -913,8 +927,7 @@ class SceneWidget(anywidget.AnyWidget):
                 "id": content.get("id"),
                 "error": {"type": "MethodError", "message": refusal},
             }
-            self.send({"kind": "rpc", **answer})
-            return
+            return answer, None, False
         if method == "reset":
             # Not a session call: the view's own start is what it goes back
             # to. Answered first, as below, and the notebook told after.
@@ -924,10 +937,12 @@ class SceneWidget(anywidget.AnyWidget):
                 answer = {"error": {"type": "ValueError", "message": str(e)}}
             else:
                 answer = {"result": {"ok": True, "changed": changed}}
-            self.send({"kind": "rpc", "id": content.get("id"), **answer})
-            if answer.get("result", {}).get("changed"):
-                self._show({"by": "reset"})
-            return
+            answer = {"id": content.get("id"), **answer}
+            return (
+                answer,
+                {"by": "reset"},
+                bool(answer.get("result", {}).get("changed")),
+            )
         params = content.get("params") or {}
         # A value the pointer is still on: applied, and the view redraws
         # itself; the notebook is told at the release, as for a pose mid-drag.
@@ -967,16 +982,72 @@ class SceneWidget(anywidget.AnyWidget):
         # decision 0010). Not a trait: nothing is told per frame.
         if content.get("scene") and isinstance(answer.get("result"), dict):
             answer["result"]["scene"] = self._session.get_scene()
-        # The answer first: telling the notebook runs its callbacks, and one
-        # that takes a while -- or raises -- must not keep the view waiting
-        # for an answer it would give up on.
-        self.send({"kind": "rpc", **answer})
-        if (
+        settles = (
             method in self._SETTLES
             or method in self._OBJECT_EDITS
             or (method in self._VARIABLE_EDITS and not preview)
-        ):
-            self._show(edit)
+        )
+        return answer, edit, settles
+
+    def panel(self, kind="variables"):
+        """A panel of this view's editor as a widget of its own, for a host
+        that places outputs apart: ``"variables"``, the slider per variable,
+        or ``"object"``, the selection's pose, parameters and style. Put it
+        beside the view -- an ipywidgets ``HBox``, a marimo column, a sidecar
+        -- and it edits the view's scene through the view, which draws and
+        tells the notebook as it does for its own panels. For an editable
+        view with a scene of its own."""
+        self._editing("A panel of its own")
+        return ScenePanel(self, kind)
+
+
+class ScenePanel(anywidget.AnyWidget):
+    """A panel of a view's editor as a widget of its own -- the variables,
+    or the selection's properties -- for a host that places outputs apart:
+    an ipywidgets box beside the view, a marimo column, a sidecar. Made by
+    `SceneWidget.panel`. It edits the view's scene through the view: a call
+    is answered under this widget's model, and the view draws and tells the
+    notebook as it does for its own panels. The view's revision, selection
+    and theme are mirrored here, so the panel follows them (decision 0025).
+    """
+
+    _esm = STATIC / "panel.js"
+    _css = STATIC / "widget.css"
+
+    #: Which panel: ``"variables"`` or ``"object"``.
+    kind = traitlets.Enum(("variables", "object")).tag(sync=True)
+    #: The view's, mirrored: the panel reads the scene again when it moves.
+    revision = traitlets.Int(0).tag(sync=True)
+    #: The view's selection, mirrored, which the object panel follows.
+    selected = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The view's theme choice, mirrored, worn as the view wears it.
+    theme = traitlets.Enum(("auto", "light", "dark"), default_value="auto").tag(
+        sync=True
+    )
+
+    def __init__(self, view, kind="variables", **kwargs):
+        super().__init__(kind=kind, **kwargs)
+        self._view = view
+        for name in ("revision", "selected", "theme"):
+            traitlets.dlink((view, name), (self, name))
+        self.on_msg(self._on_message)
+
+    def _on_message(self, _widget, content, _buffers):
+        if not isinstance(content, dict) or content.get("kind") != "rpc":
+            return
+        view = self._view
+        answer, edit, settles = view._reply(content)
+        self.send({"kind": "rpc", **answer})
+        if settles:
+            view._show(edit)
+        elif content.get("preview") and view._session is not None:
+            # A value the pointer is still on: the view's own panel redraws
+            # from the answer; a panel apart has no view to hand it to, so
+            # the view is given the scene. Not told to the notebook: that is
+            # the release's, as for a pose mid-drag.
+            result = answer.get("result")
+            if isinstance(result, dict) and result.get("ok", True):
+                view.payload = view._session.get_scene()
 
 
 def _equal(value, current):

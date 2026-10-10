@@ -8,7 +8,8 @@
    `widget.mjs` finds that background, lays it under the view, and adds
    `magpy-dark` when it is dark. The ink follows, rather than being inherited
    from a page whose text colour was chosen for another background. */
-.magpy-scene {
+.magpy-scene,
+.magpy-panel {
   --vscode-editor-background: #ffffff;
   --vscode-editorLineNumber-foreground: #6e7681;
   --vscode-focusBorder: #2e7bd6;
@@ -23,7 +24,8 @@
   overflow: hidden;
 }
 
-.magpy-scene.magpy-dark {
+.magpy-scene.magpy-dark,
+.magpy-panel.magpy-dark {
   --vscode-editor-background: #1e1e1e;
   --vscode-editorLineNumber-foreground: #8b949e;
   --vscode-focusBorder: #4b8fe2;
@@ -1280,4 +1282,34 @@
 .magpy-vars-restore:focus-visible {
   outline: none;
   background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent);
+}
+
+/* --- a panel of its own (`ScenePanel`) ------------------------------------
+   The dock's dress on a widget that is nothing but the panel, placed by the
+   notebook beside the view: the view's colours, the title line, the rows. */
+.magpy-panel {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  background: var(--vscode-editor-background);
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 4px;
+}
+
+.magpy-panel .magpy-scene-dock {
+  position: static;
+  width: auto;
+  max-width: none;
+  border-left: 0;
+}
+
+.magpy-panel-notice {
+  padding: 0 10px 8px;
+  font-size: 11px;
+  color: var(--vscode-editorWarning-foreground, #b58900);
+}
+
+.magpy-panel-notice:empty {
+  display: none;
 }
