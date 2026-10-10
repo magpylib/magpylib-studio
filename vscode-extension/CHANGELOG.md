@@ -48,6 +48,12 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **The readout takes units and variables.** The numbers a drag writes, at the
+  foot of the view, show in the scene's units and take `15 mm`, `2 cm`, `5°` as
+  the Inspector's boxes do; a variable's name typed there binds the number to it
+  and shows in its place, and a name the scene lacks is made at the value it
+  replaces, one step to undo, name and all. The engine does the making
+  (`apply_edits(define=True)`), so the Inspector can ask the same.
 - **The view's tools in groups**, a rule between: the camera, what is shown, the
   pencil, what you take away, the window. And **W**, **E**, **R** or **P** on a
   view that offers the pencil put the handles out, as the pencil does, in that

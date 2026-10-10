@@ -43,7 +43,7 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
-import { createVariables } from "./variables.mjs";
+import { QUANTITY, createVariables } from "./variables.mjs";
 
 /** How many renderers may be live on a page at once: pythreejs's number,
  *  half what a browser allows, leaving room for anything else drawing in
@@ -421,11 +421,23 @@ const DRAG_WRITES = {
  *  change the length of a number as it crosses a scale, which at pointer
  *  rate reads as a twitch. */
 const FIELD_READS = {
-  position: { unit: "m", decimals: 4, width: "7ch", from: "anchors" },
-  orientation: { unit: "°", decimals: 1, width: "6ch", from: "orientations" },
-  shape: { unit: "m", decimals: 4, width: "7ch", from: "shapes" },
-  polarization: { unit: "T", decimals: 4, width: "7ch", from: "polarizations" },
+  position: { kind: "length", width: "7ch", from: "anchors" },
+  orientation: { kind: "angle", width: "6ch", from: "orientations" },
+  shape: { kind: "length", width: "7ch", from: "shapes" },
+  polarization: { kind: "field", width: "7ch", from: "polarizations" },
 };
+
+/** The unit a kind is shown in when the scene says nothing: SI, and
+ *  degrees. The scene's own choice arrives in the payload (`units`). */
+const SI = {
+  length: { symbol: "m", scale: 1 },
+  angle: { symbol: "°", scale: 1 },
+  field: { symbol: "T", scale: 1 },
+};
+
+/** How much of a number is worth showing in each unit: a tenth of a
+ *  millimetre whether the box says metres or millimetres. */
+const DECIMALS = { m: 4, cm: 2, mm: 2, µm: 1, "°": 1, T: 4, mT: 1, µT: 1 };
 
 /** The keys, as the key list says them: the view's everywhere, and the
  *  handles' where the view edits. */
@@ -1595,6 +1607,12 @@ function render({ model, el }) {
     asked
       .then((result) => {
         if (result?.ok === false) notify(result.error);
+        else if (result?.defined?.length) {
+          const made = result.defined.join(", ");
+          notify(
+            `${made} made, at the value it replaces — the sliders have it`,
+          );
+        }
       })
       .catch((error) => {
         if (error.message !== NO_EDIT_ANSWER) notify(error.message);
@@ -1633,7 +1651,22 @@ function render({ model, el }) {
     const numbers = field === "shape" ? value.value : value;
     if (!Array.isArray(numbers) || Array.isArray(numbers[0])) return null;
     const attr = field === "shape" ? value.attr : field;
-    return { objectId: chosen[0], field, attr, numbers, ...read };
+    // in the scene's unit, as the Inspector and the variables show it
+    const unit = model.get("payload")?.units?.[read.kind] || SI[read.kind];
+    // and the expression written where a number is, where one was
+    const expressions =
+      model.get("payload")?.expressions?.[chosen[0]]?.[attr] || null;
+    return {
+      objectId: chosen[0],
+      field,
+      attr,
+      numbers,
+      expressions,
+      unit: unit.symbol,
+      scale: unit.scale,
+      decimals: DECIMALS[unit.symbol] ?? 4,
+      ...read,
+    };
   }
 
   function showReadout() {
@@ -1668,7 +1701,7 @@ function render({ model, el }) {
         unit,
       );
     }
-    fillReadout(shown.numbers, shown.decimals);
+    fillReadout(shown);
     readout.hidden = false;
     el.classList.add("magpy-reading");
   }
@@ -1679,9 +1712,10 @@ function render({ model, el }) {
     // Not `type="number"`: its spinners are noise at this size, and one on a
     // value in metres steps by a metre.
     box.type = "text";
-    box.inputMode = "decimal";
     box.dataset.index = String(index);
-    box.title = "Type a value, or drag the handles";
+    box.title =
+      "Type a value — 15 mm, 5° — or a variable's name; a new name is made " +
+      "at the value it replaces";
     // Enter needs nothing of its own: the browser fires `change` for it, and
     // a second commit of the same value is a second step to undo.
     box.addEventListener("change", commitReadout);
@@ -1690,20 +1724,30 @@ function render({ model, el }) {
       // Back to what the scene says, this box too -- before the blur, whose
       // `change` would otherwise send what was typed.
       const shown = readable();
-      if (shown) {
-        fillReadout(shown.numbers, shown.decimals, { typedOver: true });
-      }
+      if (shown) fillReadout(shown, { typedOver: true });
       box.blur();
     });
     return box;
   }
 
-  function fillReadout(numbers, decimals, { typedOver = false } = {}) {
+  /** The boxes as the scene has them: the number in the scene's unit, or
+   *  the expression written there -- `gap` -- in place of it. */
+  function fillReadout(shown, { typedOver = false, numbers = null } = {}) {
+    const values = numbers ?? shown.numbers;
     for (const box of readoutFields.querySelectorAll("input")) {
       // the box being typed in keeps what is typed, until it is given up
       if (!typedOver && box === box.getRootNode().activeElement) continue;
-      const value = numbers[Number(box.dataset.index)];
-      box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
+      const index = Number(box.dataset.index);
+      const expression = numbers ? null : shown.expressions?.[index];
+      if (expression) {
+        box.value = expression;
+      } else {
+        const value = values[index] * shown.scale;
+        box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(
+          shown.decimals,
+        );
+      }
+      box.classList.toggle("expr", Boolean(expression));
       box.dataset.shown = box.value; // to tell a typed value from a shown one
     }
   }
@@ -1723,36 +1767,61 @@ function render({ model, el }) {
       live = value && !Array.isArray(value[0]) ? [].concat(value) : null;
     }
     if (live?.length === shown.numbers.length) {
-      fillReadout(live, shown.decimals);
+      fillReadout(shown, { numbers: live });
     }
   }
 
   /** What was typed, as the same edit a drag's release sends -- through the
    *  view, which knows whether the object is on a path: a typed pose moves a
-   *  path the way a drag does, rather than replacing it with one pose. */
-  function commitReadout() {
+   *  path the way a drag does, rather than replacing it with one pose.
+   *
+   *  A number is read by the engine, in the scene's unit or the one typed
+   *  with it (`15 mm`, `5°`), so the units live in one place. Anything else
+   *  is an expression: a variable's name binds the element to it, and a name
+   *  the scene lacks is made at the value it replaces. */
+  async function commitReadout() {
     const shown = readable();
     if (!shown || !drawing()) return;
-    // A box left as it was shown sends the value itself, not the rounding
-    // it is shown at: typing x must not round y and z to four decimals. So
-    // does one emptied, or holding something that is not a number.
-    const typed = [...readoutFields.querySelectorAll("input")].map(
-      (box, index) => {
-        const value = box.value.trim() ? Number(box.value) : NaN;
-        return box.value === box.dataset.shown || !Number.isFinite(value)
-          ? shown.numbers[index]
-          : value;
-      },
+    // What each box holds now, as the scene has it: the expression where
+    // one is written, else the number itself rather than the rounding it is
+    // shown at -- typing x must not round y and z to four decimals.
+    const current = shown.numbers.map((value, index) =>
+      shown.expressions?.[index] ? `=${shown.expressions[index]}` : value,
     );
-    if (typed.every((value, index) => value === shown.numbers[index])) {
-      showReadout(); // nothing said, and anything unreadable typed goes back
+    const boxes = [...readoutFields.querySelectorAll("input")];
+    let refused = null;
+    const typed = await Promise.all(
+      boxes.map(async (box, index) => {
+        const text = box.value.trim();
+        if (!text || box.value === box.dataset.shown) return current[index];
+        if (QUANTITY.test(text)) {
+          const read = await editor.quantity(text, shown.kind);
+          if (read?.ok) return read.value;
+          refused = read?.error || `${text} is not a value`;
+          return current[index];
+        }
+        return `=${text.replace(/^=/, "")}`;
+      }),
+    );
+    if (refused) {
+      notify(refused);
+      showReadout(); // what was typed goes back to what the scene says
+      return;
+    }
+    if (typed.every((value, index) => value === current[index])) {
+      showReadout(); // nothing said
       return;
     }
     const edit = { objectId: shown.objectId };
+    const bound = typed.some((value) => typeof value === "string");
     if (shown.field === "shape") {
       edit.shape = { attr: shown.attr, value: typed };
-    } else edit[shown.field] = api.poseEdit(shown.objectId, shown.field, typed);
-    settle(editor.commit([edit]));
+    } else if (bound) {
+      edit[shown.field] = typed; // the engine reads the expression
+    } else {
+      edit[shown.field] = api.poseEdit(shown.objectId, shown.field, typed);
+    }
+    settle(editor.commit([edit], { define: true }));
   }
 
   /** What the view edits through: `begin`, `preview`, `commit`, `scene`,
@@ -1766,12 +1835,17 @@ function render({ model, el }) {
     begin: () => call("begin_interaction"),
     // the scene comes back with the pose, and the drag redraws from it
     preview: (edits) => call("apply_edits", { edits }, { scene: true }),
-    commit(edits) {
-      const done = call("apply_edits", { edits });
+    commit(edits, { define = false } = {}) {
+      const done = call("apply_edits", {
+        edits,
+        ...(define ? { define: true } : {}),
+      });
       // after the pose, which the session answers in order
       call("end_interaction").catch(() => {});
       return done;
     },
+    // typed text as a number of `kind`, in the scene's unit or the one typed
+    quantity: (text, kind) => call("quantity", { name: "", text, unit: kind }),
     scene: () => call("get_scene"),
     undo: () => call("undo"),
     redo: () => call("redo"),

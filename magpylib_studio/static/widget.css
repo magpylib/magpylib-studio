@@ -234,6 +234,12 @@
   border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
 }
 
+/* An expression where a number is: the variable deciding the element. */
+.magpy-scene-readout input.expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
 .magpy-scene-readout input:focus {
   outline: none;
   border-bottom-color: var(--vscode-focusBorder, #0078d4);

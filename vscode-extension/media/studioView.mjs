@@ -95,10 +95,13 @@ const model = {
       }),
     // recorded and the group closed by the host, which says itself if the
     // engine refused it -- and redraws everything from what the engine has
-    commit(edits) {
-      vscodeApi.postMessage({ type: "transformObjects", edits });
+    commit(edits, { define = false } = {}) {
+      vscodeApi.postMessage({ type: "transformObjects", edits, define });
       return Promise.resolve({ ok: true });
     },
+    // typed text as a number of `kind`, read by the engine as the sidebar's
+    // boxes are read
+    quantity: (text, kind) => rpc("quantity", { name: "", text, unit: kind }),
     scene: () => rpc("get_scene", {}),
     undo() {
       vscodeApi.postMessage({ type: "undo" });

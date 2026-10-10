@@ -69,9 +69,11 @@
           const result =
             message.method === "get_scene"
               ? scene
-              : message.scene
-                ? { ok: true, scene }
-                : { ok: true };
+              : message.method === "quantity"
+                ? { ok: true, value: Number(message.params.text) }
+                : message.scene
+                  ? { ok: true, scene }
+                  : { ok: true };
           setTimeout(
             () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
             20,
@@ -100,6 +102,8 @@
             return done;
           },
           scene: () => answered("get_scene"),
+          quantity: (text) =>
+            Promise.resolve({ ok: true, value: Number(text) }),
           undo: () => answered("undo"),
           redo: () => answered("redo"),
         };

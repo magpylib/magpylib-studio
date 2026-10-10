@@ -1662,3 +1662,26 @@ def test_a_preview_carries_the_scene_in_its_own_answer():
     assert posed["result"]["scene"]["anchors"]["m"] == pytest.approx([0.04, 0, 0])
     plain = _ask(studio, "get_scene")
     assert "scene" not in plain["result"], "only when asked"
+
+
+@needs_scene_graph
+def test_the_readout_makes_a_variable_from_a_bare_name():
+    """A variable's name typed in the readout where a number was, that the
+    scene lacks, is made at the value it replaces when the view asks
+    (`define`): the answer names it, the trait has it, and the field now
+    follows it -- one step to undo, name and all."""
+    studio = _studio_of(_design())
+    x = studio.objects["m"].position[0]
+    answer = _ask(
+        studio,
+        "apply_edits",
+        edits=[{"objectId": "m", "position": ["=reach", 0, 0]}],
+        define=True,
+    )
+    assert answer["result"] == {"ok": True, "defined": ["reach"]}
+    _ask(studio, "end_interaction")  # the view closes a commit, which settles
+    assert studio.variables["reach"] == pytest.approx(x)
+    assert studio.payload["expressions"]["m"]["position"] == ["reach", None, None]
+    assert studio.payload["units"]["length"]["symbol"] == "m"
+    studio.variables = {"reach": 0.05}
+    assert studio.objects["m"].position == pytest.approx([0.05, 0, 0])

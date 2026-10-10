@@ -3285,7 +3285,51 @@ class MagpylibStudioSession:
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
         scene["parametric"] = self._parametric_fields()
+        # How a view shows and reads a number, and what was written where a
+        # number is -- `gap` rather than 0.015 -- both facts about the
+        # document, as `parametric` is.
+        scene["units"] = {
+            kind: self._shown(kind) for kind in ("length", "angle", "field")
+        }
+        scene["expressions"] = self._written_fields()
         return scene
+
+    def _written_fields(self):
+        """The expression each element of a drag-editable field was written
+        as, where it was, per object: ``{"m": {"position": ["gap", None,
+        None]}}``. What a view's readout shows in place of the number, so
+        that touching a neighbouring box does not write the number over the
+        expression. A pose on a path is left out: one expression per element
+        has no meaning across its steps."""
+        out = {}
+
+        def texts(written):
+            values = np.atleast_1d(np.asarray(written, dtype=object))
+            if values.ndim != 1:
+                return None
+            texts = [
+                expressions.source_of(v) if expressions.is_expression(v) else None
+                for v in values
+            ]
+            return texts if any(t is not None for t in texts) else None
+
+        for spec, _ in self._iter_specs():
+            object_id = spec["id"]
+            fields = {}
+            for op, key in (("position", "value"), ("orientation", "rotvec")):
+                written = self._last_written(object_id, op, key)
+                found = None if written is None else texts(written)
+                if found is not None:
+                    fields[op] = found
+            params = spec.get("params") or {}
+            for attr in ("dimension", "diameter", "polarization"):
+                if attr in params and expressions.contains_expression(params[attr]):
+                    found = texts(params[attr])
+                    if found is not None:
+                        fields[attr] = found
+            if fields:
+                out[object_id] = fields
+        return out
 
     def _parametric_fields(self):
         """Which drag-editable fields a variable is deciding, per object.
@@ -4322,7 +4366,7 @@ class MagpylibStudioSession:
         self._interaction = None
         self._interaction_redo = []
 
-    def apply_edits(self, edits):
+    def apply_edits(self, edits, define=False):
         """Record what a 3D view's handles did.
 
         `edits` are the renderer's own records, one per object dragged, as its
@@ -4339,8 +4383,78 @@ class MagpylibStudioSession:
         none of them moves.
         """
         calls = [call for edit in edits for call in _calls_for(edit)]
+        made = []
+        if define:
+            # A bare variable's name typed where a number was -- `gap` for a
+            # position's x -- that the document does not define yet is made
+            # at the value it replaces, in that kind of unit, in the same
+            # step. A name inside a longer expression is not: no value for
+            # it follows from the number it replaces, and the edit is
+            # refused by name as it always was.
+            definitions = self._definitions_for(edits)
+            made = [d["params"]["name"] for d in definitions]
+            calls = [*definitions, *calls]
         ids = sorted({edit["objectId"] for edit in edits})
-        return self.apply_calls(calls, f"edit {', '.join(ids)}")
+        result = self.apply_calls(calls, f"edit {', '.join(ids)}")
+        if made and result.get("ok"):
+            result = {**result, "defined": made}
+        return result
+
+    def _definitions_for(self, edits):
+        """The `set_variable` calls that make the bare names `edits` use and
+        the document lacks, each at the value it replaces -- see
+        `apply_edits(define=True)`. The value is the field's as it is now,
+        element for element, and the unit is the field's kind."""
+        defined = self.doc.get("variables") or {}
+        calls, seen = [], set()
+
+        def consider(values, current, kind):
+            for index, value in enumerate(
+                np.atleast_1d(np.asarray(values, dtype=object))
+            ):
+                if not expressions.is_expression(value):
+                    continue
+                name = expressions.source_of(value).strip()
+                if not name.isidentifier() or name in defined or name in seen:
+                    continue
+                now = np.atleast_1d(np.asarray(current, dtype=float))
+                if index >= len(now) or not np.isfinite(now[index]):
+                    continue
+                seen.add(name)
+                calls.append(
+                    {
+                        "method": "set_variable",
+                        "params": {
+                            "name": name,
+                            "value": float(now[index]),
+                            "unit": kind,
+                        },
+                    }
+                )
+
+        for edit in edits:
+            object_id = edit["objectId"]
+            obj = self._objs.get(object_id)
+            if obj is None:
+                continue
+            pose = self.get_transform(object_id)
+            if edit.get("position") is not None:
+                consider(edit["position"], pose["position"], "length")
+            if edit.get("orientation") is not None:
+                consider(edit["orientation"], pose["orientation"], "angle")
+            if edit.get("polarization") is not None:
+                consider(
+                    edit["polarization"], getattr(obj, "polarization", []), "field"
+                )
+            shape = edit.get("shape")
+            if shape is not None and not shape["attr"].startswith("style."):
+                attr = shape["attr"]
+                consider(
+                    shape["value"],
+                    getattr(obj, attr, []),
+                    _PARAM_KINDS.get(attr, "length"),
+                )
+        return calls
 
     def apply_calls(self, calls, label="edit"):
         """Several edits as one: all of them, one step to undo -- or, if any

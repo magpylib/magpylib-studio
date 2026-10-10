@@ -5043,3 +5043,41 @@ def test_a_sensors_pixels_are_drawn_as_instances():
         assert low <= origins[:, axis].min() and high >= origins[:, axis].max()
     assert s.apply_edit("field", "pixel.field.symbol", "arrow")["ok"]
     assert not [p for p in s.get_scene()["pixels"] if p["object_id"] == "field"]
+
+
+@needs_scene_graph
+def test_a_bare_name_typed_where_a_number_was_is_made_at_that_value():
+    """`apply_edits(define=True)`: a variable's name the document lacks,
+    typed as the whole of a pose's element, is made at the value it
+    replaces, in that kind of unit, in the same step; a name inside a
+    longer expression is still refused by name; the scene then says the
+    expression behind the field, and what unit it is shown in."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    before = s.get_transform("sensor")["position"]
+    result = s.apply_edits(
+        [{"objectId": "sensor", "position": ["=lift", before[1], before[2]]}],
+        define=True,
+    )
+    assert result == {"ok": True, "defined": ["lift"]}
+    variables = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert variables["lift"]["value"] == before[0]
+    assert variables["lift"]["bounds"]["unit"] == "length"
+    assert s.get_transform("sensor")["position"] == pytest.approx(before)
+    assert s.undo()["ok"], "one step"
+    assert "lift" not in {v["name"] for v in s.get_variables()["variables"]}
+    refused = s.apply_edits(
+        [{"objectId": "sensor", "position": ["=2 * lift", 0, 0]}], define=True
+    )
+    assert refused["ok"] is False and "lift" in refused["error"]
+    # the scene says the expression behind a field, and the scene's units
+    assert s.apply_edits([{"objectId": "sensor", "position": ["=gap", 0, 0]}])["ok"]
+    scene = s.get_scene()
+    assert scene["expressions"]["sensor"]["position"] == ["gap", None, None]
+    assert scene["units"]["length"]["symbol"] == "m"
+    s.set_model_unit("mm")
+    assert s.get_scene()["units"]["length"] == {
+        "unit": "length",
+        "symbol": "mm",
+        "scale": 1000.0,
+    }

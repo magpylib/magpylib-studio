@@ -1093,7 +1093,10 @@ async function editing(port, base) {
     await check(name, async () => {
       const { result, problem } = await run(query);
       if (!result) return problem;
-      const { asked, buttons } = result;
+      const { buttons } = result;
+      // the edits, in order: a read on the way -- the readout asking what a
+      // typed value means -- is not one of them
+      const asked = result.asked.filter((a) => a.method !== "quantity");
       const said = asked.map((a) => a.method + (a.x ?? "")).join(" ");
       if (!buttons.shown) return "no editing buttons";
       if (buttons.turned !== "true" || buttons.moved !== "true") {

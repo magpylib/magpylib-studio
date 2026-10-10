@@ -62,7 +62,7 @@ function inUnit(v, value) {
 
 /** A number, then perhaps a unit and nothing else -- `15`, `15 mm`, `-90°` --
  *  which the engine reads (`quantity`), so the units live in one place. */
-const QUANTITY =
+export const QUANTITY =
   /^\s*[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*[A-Za-zµμ°]*\s*$/;
 
 /** Typed text -> document value: a number if it is one, else "=expr". */

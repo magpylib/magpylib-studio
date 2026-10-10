@@ -150,11 +150,13 @@ with `write_html` is read only. The handles and their keys are the panel's —
 them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
 swaps the world's axes for the object's own, **S** snaps — and a column down the
 view's right-hand side has the same. The corner reads out the numbers a drag is
-changing, and takes a typed value in their place; the keys button lists every
-key. A collection has handles of its own: select it — its row in the legend, or
-**C** from something in it, and **C** again for the one round that — and a drag
-moves and turns it whole, as one edit to the collection. A scene with variables
-— a scene function's parameters, or a saved scene's sliders — has a **sliders**
+changing, in the scene's units, and takes a typed value in their place —
+`15 mm`, `5°`, or a variable's name, which binds the number to it; a name the
+scene lacks is made at the value it replaces; the keys button lists every key. A
+collection has handles of its own: select it — its row in the legend, or **C**
+from something in it, and **C** again for the one round that — and a drag moves
+and turns it whole, as one edit to the collection. A scene with variables — a
+scene function's parameters, or a saved scene's sliders — has a **sliders**
 toggle at the foot of the edit column, on the right with the handles: a panel
 beside it with a slider per variable, a dropdown for a choice, and a box that
 takes `15 mm` or an expression; drag one and the scene follows, as one edit to
