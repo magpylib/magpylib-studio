@@ -105,13 +105,21 @@ A run of points as a formula: `of(t)` for `t` running across `over`
 variables, count included, which `np.linspace` over a variable cannot.
 Called plainly, it is the points.
 
+### `grid(half, count, *, plane='xy', at=0)`
+
+A square of `count` by `count` points across ±`half` in `plane` (xy,
+xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
+the variables, `pixel=grid(reach, density)`, so the grid follows a slider
+as `sampled` does. Called plainly, it is the points.
+
 ### `hide(obj)`
 
 Hide `obj` in the 3D view. It still counts in the field.
 
-### `show(obj)`
+### `unhide(obj)`
 
-Show `obj` again in the 3D view, after `hide`.
+Show `obj` again in the 3D view, after `hide`. Not `show`: that is
+magpylib's word for drawing a scene.
 
 ### `remove(obj)`
 

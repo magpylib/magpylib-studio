@@ -797,8 +797,9 @@ _WORDS = (
     "name",
     "sampled",
     "place",
+    "grid",
     "hide",
-    "show",
+    "unhide",
     "remove",
     "duplicate_around",
     "duplicate_along",
@@ -1183,7 +1184,7 @@ class _ScriptWriter:
             if hidden and (event.get("visible") is False or not by_group):
                 lines.append(f"{self.word('hide')}({self.names[target]})")
             elif not hidden and by_group:
-                lines.append(f"{self.word('show')}({self.names[target]})")
+                lines.append(f"{self.word('unhide')}({self.names[target]})")
         return lines
 
     def write_create(self, event, name):
@@ -1214,8 +1215,19 @@ class _ScriptWriter:
         params = dict(event.get("params") or {})
         parts = []
         if kind == "magnet.TriangularMesh" and "mesh_source" in params:
-            call = self.word("TriangularMesh")
-            parts.append(("mesh_source", self.value(params.pop("mesh_source"))))
+            source = params.pop("mesh_source")
+            spelt = source.get("from") if isinstance(source, dict) else None
+            if spelt in ("file", "hull", "superquadric"):
+                # by its source, in the spelling that says which
+                call = f"{self.word('TriangularMesh')}.from_{spelt}"
+                parts += [
+                    (key, self.value(value, table=key == "points"))
+                    for key, value in source.items()
+                    if key != "from"
+                ]
+            else:
+                call = self.word("TriangularMesh")
+                parts.append(("mesh_source", self.value(source)))
         else:
             call = f"{self.alias['magpy']}.{kind}"
         parts += [(key, self.value(value, table=True)) for key, value in params.items()]

@@ -323,12 +323,14 @@ class SceneWidget(anywidget.AnyWidget):
         among the view's tools puts them out. On a view of the cell's own
         objects the pencil first copies them into a session, under the names
         the cell gave them, and `editable` reads True from that moment.
-        ``view.editable = True`` is the pencil from code. ``editable=None``
+        ``view.editable = True`` is the pencil from code. ``editable="never"``
         is a view for looking only, a figure handed to someone else: no
-        pencil, and `editable` refuses to turn on.
+        pencil, and `editable` refuses to turn on; ``None`` says the same.
         """
         traits, kwargs = self._split(kwargs)
         editable = traits.pop("editable", False)
+        if editable == "never":
+            editable = None  # the word for it; the trait holds None
         super().__init__(**traits)
         #: The captured run, kept only when there is one that motion cannot
         #: play -- see `_adopt`. Every frame holds every trace of the scene
@@ -355,6 +357,9 @@ class SceneWidget(anywidget.AnyWidget):
         # while the caller is the frame above.
         named = _names_above()
         given = list(threejs._given(objects))
+        # The function itself is its document: `SceneWidget(ring)` builds
+        # it, as `ring.build()` would.
+        given = [_built(obj) for obj in given]
         # A scene written in code, or a path, is a session of its own: the
         # view shows that session, drawn by the engine, and nothing else
         # beside it -- the cell's objects would have no place in it.
@@ -727,7 +732,7 @@ class SceneWidget(anywidget.AnyWidget):
         # looking only stays that: whoever made it said so.
         if proposal["value"] and self.editable is None:
             raise traitlets.TraitError(
-                "a view made with editable=None is never edited: make another, "
+                'a view made with editable="never" is never edited: make another, '
                 "with editable=False for the pencil"
             )
         if proposal["value"] and self._session is None and not self._given:
@@ -811,7 +816,7 @@ class SceneWidget(anywidget.AnyWidget):
                 "Its objects are a studio session's -- a scene written in code, "
                 "a path, editable=True, or the pencil among the view's tools -- "
                 "so make another view for other objects. A view a notebook "
-                "re-points from controls of its own is made with editable=None, "
+                're-points from controls of its own is made with editable="never", '
                 "which offers no pencil."
             )
 
@@ -1109,6 +1114,14 @@ def _is_built(obj):
     from magpylib_studio.build import Scene
 
     return isinstance(obj, Scene)
+
+
+def _built(obj):
+    """`obj`, or the document a scene function builds: `SceneWidget(ring)`
+    is `SceneWidget(ring.build())`."""
+    from magpylib_studio.recording import SceneFunction
+
+    return obj.build() if isinstance(obj, SceneFunction) else obj
 
 
 def _session_of(objects, namespace):

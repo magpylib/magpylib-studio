@@ -32,7 +32,7 @@ from magpylib_studio.recording import (
     remove,
     sampled,
     scene,
-    show,
+    unhide,
 )
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import MagpylibStudioSession
@@ -450,7 +450,7 @@ def test_a_saved_value_is_kept_across_runs_and_a_definition_is_not(tmp_path):
 
 
 def test_studios_words_called_plainly_are_magpylib():
-    """`duplicate_along`, `mirror`, `place`, `hide`, `show`, `remove`,
+    """`duplicate_along`, `mirror`, `place`, `hide`, `unhide`, `remove`,
     `TriangularMesh`: each is one step in the document when the scene is
     built, and does the same thing to plain objects when it is called."""
 
@@ -468,16 +468,13 @@ def test_studios_words_called_plainly_are_magpylib():
         )
         twin.add(mirrored)
         mirror(mirrored, plane="xy")
-        hull = TriangularMesh(
-            {
-                "from": "hull",
-                "points": [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]],
-            },
+        hull = TriangularMesh.from_hull(
+            [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]],
             polarization=(0, 0, 1),
             position=(0.05, 0, 0),
         )
         hide(magnet)
-        show(magnet)
+        unhide(magnet)
         gone = magpy.magnet.Cuboid(**CUBE)
         row.add(gone)
         remove(gone)
@@ -1223,3 +1220,28 @@ def test_a_script_cannot_take_the_engine_with_it(tmp_path, monkeypatch, script, 
     assert first["result"]["ok"] is False
     assert first["result"]["error"].startswith(said)
     assert second["result"]["examples"]
+
+
+def test_a_grid_of_pixels_is_a_formula_of_the_variables():
+    """`grid(half, count)` is a sensor's square of pixels as `sampled` keeps
+    it: a formula of the variables, so the grid follows a slider; called
+    plainly, the points."""
+    from typing import Annotated
+
+    from magpylib_studio import Count, Length, grid, scene
+
+    @scene
+    def design(
+        reach: Annotated[float, Length(0.005, 0.05)] = 0.02,
+        density: Annotated[int, Count(2, 9)] = 3,
+    ):
+        return magpy.Sensor(pixel=grid(reach, density), style_label="probe")
+
+    s = design.build()
+    probe = s.session._objs["probe"]
+    assert probe.pixel.shape == (9, 3)
+    assert probe.pixel[0].tolist() == pytest.approx([-0.02, -0.02, 0])
+    assert probe.pixel[-1].tolist() == pytest.approx([0.02, 0.02, 0])
+    assert s.session.set_variable("density", 4)["ok"]
+    assert s.session._objs["probe"].pixel.shape == (16, 3)
+    assert design(reach=0.01, density=2).pixel.shape == (4, 3)

@@ -31,8 +31,7 @@ from magpylib_studio import (
     Length,
     derived,
     duplicate_around,
-    name,
-    sampled,
+    grid,
     scene,
 )
 
@@ -59,21 +58,16 @@ def halbach(
     density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
 ):
     stagger = derived("stagger", 180 / n, unit="angle")  # half a step, whatever n is
-    stack = name(magpy.Collection(style_label="Halbach stack"), "stack")
+    stack = magpy.Collection(style_label="Halbach stack")
     rings = {}
     for number, z in ((1, -gap / 2), (2, gap / 2)):
-        rings[number] = name(
-            magpy.Collection(style_label=f"Ring {number}"), f"ring{number}"
-        )
+        rings[number] = magpy.Collection(style_label=f"Ring {number}")
         stack.add(rings[number])
-        magnet = name(
-            magpy.magnet.Cuboid(
-                dimension=(0.008, 0.008, 0.008),
-                polarization=(1, 0, 0),
-                position=(radius, 0, z),
-                style_label=f"Magnet {number}",
-            ),
-            f"magnet{number}",
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.008, 0.008, 0.008),
+            polarization=(1, 0, 0),
+            position=(radius, 0, z),
+            style_label=f"Magnet {number}",
         )
         rings[number].add(magnet)
         duplicate_around(magnet, count=n, axis="z", spin=360 / n)
@@ -81,26 +75,15 @@ def halbach(
     rings[2].rotate_from_angax(stagger, "z", anchor=0)
 
     reach = radius / 2  # plain Python holding an expression, not a variable
-    bore = name(
-        magpy.Sensor(
-            pixel=sampled(
-                lambda t: (
-                    -reach + 2 * reach * (t % density) / (density - 1),
-                    -reach + 2 * reach * (t // density) / (density - 1),
-                    0,
-                ),
-                count=density**2,
-                over=(0, density**2 - 1),
-            ),
-            style={
-                "label": "Field in the bore",
-                "size": 0.004,
-                "pixel": {
-                    "field": {"source": "B", "symbol": "arrow3d", "colormap": "Viridis"}
-                },
+    bore = magpy.Sensor(
+        pixel=grid(reach, density),
+        style={
+            "label": "bore",
+            "size": 0.004,
+            "pixel": {
+                "field": {"source": "B", "symbol": "arrow3d", "colormap": "Viridis"}
             },
-        ),
-        "bore",
+        },
     )
     return stack, bore
 
@@ -119,8 +102,8 @@ s = halbach.build(values=here / "scene_demo.magpy.json")
 doc = s.to_dict()
 print("variables:", doc["variables"])
 for event in doc["events"]:
-    if event["op"] == "create" and event["target"] == "magnet1":
-        print("magnet1 is at", event["params"]["position"])
+    if event["op"] == "create" and event["target"] == "Magnet_1":
+        print("Magnet 1 is at", event["params"]["position"])
 
 # %% [markdown]
 # And two ways out. `to_script()` is plain magpylib, for anyone without the

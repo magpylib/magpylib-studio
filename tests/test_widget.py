@@ -1140,7 +1140,7 @@ def test_a_page_saved_from_a_studio_is_read_only():
 def test_a_studio_is_not_re_pointed():
     """And the refusal says what a view the notebook re-points is made with."""
     studio = _studio()
-    with pytest.raises(TypeError, match="editable=None"):
+    with pytest.raises(TypeError, match='editable="never"'):
         studio.update(magpy.Sensor())
 
 
@@ -1818,3 +1818,27 @@ def test_a_panel_of_its_own_needs_an_editable_view():
     looking = widget.SceneWidget(magpy.magnet.Cuboid(dimension=(1, 1, 1)))
     with pytest.raises(TypeError, match="panel of its own"):
         looking.panel("variables")
+
+
+@needs_scene_graph
+def test_the_view_takes_the_scene_function_itself():
+    """`SceneWidget(ring)` builds the function, as `SceneWidget(ring.build())`
+    did: the view shows the scene's own session, variables and all, editable
+    or for looking."""
+    design = _design()
+    studio = widget.SceneWidget(design, editable=True)
+    assert set(studio.variables) >= {"n", "r"}
+    looking = widget.SceneWidget(design)
+    assert "n" in looking.variables
+
+
+def test_never_is_the_word_for_a_view_that_is_never_edited():
+    """`editable="never"` reads where `None` made a reader stop; both make the
+    view that offers no pencil and refuses to turn on."""
+    import traitlets
+
+    magnet = magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 1))
+    view = widget.SceneWidget(magnet, editable="never")
+    assert view.editable is None
+    with pytest.raises(traitlets.TraitError, match="never edited"):
+        view.editable = True

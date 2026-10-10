@@ -41,8 +41,7 @@ def _():
         Length,
         derived,
         duplicate_around,
-        name,
-        sampled,
+        grid,
         scene,
     )
     from magpylib_studio.widget import SceneWidget
@@ -58,9 +57,8 @@ def _():
         json,
         magpy,
         mo,
-        name,
         np,
-        sampled,
+        grid,
         scene,
         traitlets,
     )
@@ -89,9 +87,8 @@ def _(
     derived,
     duplicate_around,
     magpy,
-    name,
     np,
-    sampled,
+    grid,
     scene,
 ):
     from typing import Annotated, Literal
@@ -109,21 +106,16 @@ def _(
         the upper ring half a step round from the lower, and a grid of field
         arrows across the bore."""
         stagger = derived("stagger", 180 / n, unit="angle")
-        stack = name(magpy.Collection(style_label="Halbach stack"), "stack")
+        stack = magpy.Collection(style_label="Halbach stack")
         rings = {}
         for number, z in ((1, -gap / 2), (2, gap / 2)):  # a loop over literals
-            rings[number] = name(
-                magpy.Collection(style_label=f"Ring {number}"), f"ring{number}"
-            )
+            rings[number] = magpy.Collection(style_label=f"Ring {number}")
             stack.add(rings[number])
-            magnet = name(
-                magpy.magnet.Cuboid(
-                    dimension=(0.008, 0.008, 0.008),
-                    polarization=(1, 0, 0),
-                    position=(radius, 0, z),
-                    style_label=f"Magnet {number}",
-                ),
-                f"magnet{number}",
+            magnet = magpy.magnet.Cuboid(
+                dimension=(0.008, 0.008, 0.008),
+                polarization=(1, 0, 0),
+                position=(radius, 0, z),
+                style_label=f"Magnet {number}",
             )
             rings[number].add(magnet)
             duplicate_around(magnet, count=n, axis="z", spin=360 / n)
@@ -131,30 +123,19 @@ def _(
         stack.rotate_from_angax(tilt, tilt_axis, anchor=0)
 
         reach = radius / 2
-        bore = name(
-            magpy.Sensor(
-                pixel=sampled(
-                    lambda t: (
-                        -reach + 2 * reach * (t % density) / (density - 1),
-                        -reach + 2 * reach * (t // density) / (density - 1),
-                        0,
-                    ),
-                    count=density**2,
-                    over=(0, density**2 - 1),
-                ),
-                style={
-                    "label": "Field in the bore",
-                    "size": 0.004,
-                    "pixel": {
-                        "field": {
-                            "source": "B",
-                            "symbol": "arrow3d",
-                            "colormap": "Viridis",
-                        }
-                    },
+        bore = magpy.Sensor(
+            pixel=grid(reach, density),
+            style={
+                "label": "bore",
+                "size": 0.004,
+                "pixel": {
+                    "field": {
+                        "source": "B",
+                        "symbol": "arrow3d",
+                        "colormap": "Viridis",
+                    }
                 },
-            ),
-            "bore",
+            },
         )
         return stack, bore
 

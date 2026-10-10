@@ -38,10 +38,13 @@ the scene cannot take fails at its line and says why.
   `.add`, `.move`, `.rotate_from_angax`, `.copy`. Values are SI: metres, tesla,
   amperes, degrees.
 - Studio's own words, imported from `magpylib_studio`: `duplicate_around`,
-  `duplicate_along`, `mirror` (patterns), `place` (a pose stated outright),
-  `sampled` (a run of points as a formula), `hide`, `show`, `remove`,
-  `TriangularMesh` (a mesh by its source), `name` (an id the label does not
-  give).
+  `duplicate_along`, `mirror` (patterns), `sampled` (a run of points as a
+  formula) and `grid(half, count)` (a square of them, a sensor's pixels), `hide`
+  and `unhide`, `remove`, `TriangularMesh.from_file(path, scale=...)`,
+  `.from_hull(points)` and `.from_superquadric(size, roundness)` (a mesh by its
+  source), and `place` for an orientation stated outright. An object's id is its
+  `style_label` with spaces as underscores, else its class; the script tab
+  writes `name(obj, id)` only where a saved scene's id differs from its label.
 - Called plainly, `ring(n=12)` returns magpylib objects at those values: a real
   field from `getB`, no studio involved. `ring.build()` is the document;
   `ring.build().save("ring.magpy.json")` writes it.
@@ -108,9 +111,11 @@ s.save("halbach.magpy.json")
 - **Steps:** `move`, `rotate_from_angax(angle, axis, anchor=...)`,
   `rotate_from_rotvec`, `rotate` (with a scipy `Rotation`), `obj.position =`,
   `copy()`, as in magpylib, applied in the order written. A step on a collection
-  carries what is in it. `place(obj, position=..., orientation=...)` states a
-  pose outright, as a drag in the studio does. `obj.parent = group` moves an
-  object into a group keeping its pose, as the studio's tree does;
+  carries what is in it. `obj.position = (radius, 0, 0)` states a position
+  outright, variables and all; `place(obj, position=..., orientation=...)` does
+  the same with an orientation, as a drag in the studio records it, since
+  `obj.orientation =` takes a `Rotation` and no variable. `obj.parent = group`
+  moves an object into a group keeping its pose, as the studio's tree does;
   `group.add(obj)` on a fresh object creates it inside.
 - **Patterns:** `duplicate_around(obj, count, axis="z", anchor=0, spin=0)`,
   `duplicate_along(obj, count, step)` (twice — on the object, then on its
