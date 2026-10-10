@@ -1842,3 +1842,27 @@ def test_never_is_the_word_for_a_view_that_is_never_edited():
     assert view.editable is None
     with pytest.raises(traitlets.TraitError, match="never edited"):
         view.editable = True
+
+
+@needs_scene_graph
+def test_a_plain_function_is_a_scene_to_the_view():
+    """Handed to the view, a function whose parameters are the variables is a
+    scene without the mark: built the same way, its parameters its variables.
+    `@scene` is for a file, where the mark says which function is the scene."""
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    def plain(radius: Annotated[float, Length(0.005, 0.05)] = 0.02):
+        return magpy.magnet.Cuboid(
+            dimension=(0.01, 0.01, 0.01),
+            polarization=(0, 0, 1),
+            position=(radius, 0, 0),
+            style_label="m",
+        )
+
+    studio = widget.SceneWidget(plain, editable=True)
+    assert studio.variables == {"radius": pytest.approx(0.02)}
+    assert studio.objects["m"].position[0] == pytest.approx(0.02)
+    studio.variables = {"radius": 0.03}
+    assert studio.objects["m"].position[0] == pytest.approx(0.03)

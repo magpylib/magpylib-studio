@@ -48,6 +48,9 @@ the scene cannot take fails at its line and says why.
 - Called plainly, `ring(n=12)` returns magpylib objects at those values: a real
   field from `getB`, no studio involved. `ring.build()` is the document;
   `ring.build().save("ring.magpy.json")` writes it.
+  `SceneWidget(ring, editable=True)` shows it in a notebook, built into a
+  session of its own: read that one's field off `view.objects`, and build once,
+  `s = ring.build()`, where several cells share a session.
 - Inside `.build()` a parameter is a handle, not a number. Arithmetic on it
   writes an expression; `if`, `range`, `float`, `math.*` or `print` on it raise
   `TypeError`, saying what to write instead. See
@@ -277,11 +280,11 @@ person saved survive the next run.
 - **VS Code:** right-click a scene script and choose **Open in Magpylib Studio**
   — the studio runs it and opens the scene it built, with a slider per variable.
   A `.magpy.json` opens with **Magpylib Studio: Open Scene…**.
-- **Notebook:** `SceneWidget(s, editable=True)`, from `magpylib_studio.widget`
-  (`pip install "magpylib-studio[widget]"`), is the 3D view with handles; the
-  sliders toggle at the foot of its edit column opens a slider per variable, the
-  object toggle beside it the selection's parameters, pose and style, and
-  `.variables` holds their values.
+- **Notebook:** `SceneWidget(ring, editable=True)`, from
+  `magpylib_studio.widget` (`pip install "magpylib-studio[widget]"`), is the 3D
+  view with handles; the sliders toggle at the foot of its edit column opens a
+  slider per variable, the object toggle beside it the selection's parameters,
+  pose and style, and `.variables` holds their values.
 - Give numbers with where they were read and in what unit, and say how you
   computed them. Whether a field is good enough is the person's call.
 

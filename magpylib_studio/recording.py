@@ -260,9 +260,10 @@ class SceneFunction:
 
     def build(self, values=None):
         """Call the function with its parameters as handles, recording what
-        it does, and return the `Scene` it built: the document, to `save`,
-        to show (`SceneWidget(s, editable=True)`), or to read the field of
-        through `s.session`.
+        it does, and return the `Scene` it built: the document, to `save`, to
+        read the field of through `s.session`, or to show (`SceneWidget(s)`)
+        where several cells share it. A view alone takes the function,
+        `SceneWidget(ring)`, and builds its own.
 
         `values` is where the parameters' values come from when there are
         some: a saved scene (its path) or a mapping of names to values. A

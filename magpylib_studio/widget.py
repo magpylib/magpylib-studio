@@ -315,11 +315,16 @@ class SceneWidget(anywidget.AnyWidget):
         running it again does not take the edits away. `objects` are the
         objects as edited, and `to_script` what was done. One path in place of
         the objects is a magpylib script, run to find its objects, or a
-        ``.magpy.json`` scene the studio saved. A scene written in code
-        (`magpylib_studio.build.Scene`) is edited as it is, not copied.
+        ``.magpy.json`` scene the studio saved. A scene function -- under
+        ``@scene``, or a plain function whose parameters are the variables --
+        is built into a session of its own, and the document it built
+        (`magpylib_studio.build.Scene`) is edited as it is, not copied: read
+        its field off `objects`, and build it once yourself, ``s =
+        ring.build()``, where several cells are to share one session.
 
-        A scene written in code, or a path, given without ``editable`` is
-        shown as it is -- its own session, the handles away -- and the pencil
+        A scene function or its document, or a path, given without
+        ``editable`` is shown as it is -- its own session, the handles away --
+        and the pencil
         among the view's tools puts them out. On a view of the cell's own
         objects the pencil first copies them into a session, under the names
         the cell gave them, and `editable` reads True from that moment.
@@ -1117,10 +1122,17 @@ def _is_built(obj):
 
 
 def _built(obj):
-    """`obj`, or the document a scene function builds: `SceneWidget(ring)`
-    is `SceneWidget(ring.build())`."""
-    from magpylib_studio.recording import SceneFunction
+    """`obj`, or the document a scene function builds: `SceneWidget(ring)` is
+    `SceneWidget(ring.build())`. A plain function is a scene function here
+    without the mark -- handed to the view, it is built the same way. `@scene`
+    is for a file, where the mark says which function is the scene, and for
+    `build()` without a view."""
+    import inspect
 
+    from magpylib_studio.recording import SceneFunction, scene
+
+    if inspect.isfunction(obj):
+        obj = scene(obj)
     return obj.build() if isinstance(obj, SceneFunction) else obj
 
 

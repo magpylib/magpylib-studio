@@ -54,7 +54,9 @@ All notable changes to the Magpylib Studio extension.
   through the view, which draws and tells the notebook as it does for its own
   panels, and the view's selection, revision and theme reach them.
 - **The scene function itself.** `SceneWidget(ring)` takes the function and
-  builds it, where it took `ring.build()`.
+  builds it, marked `@scene` or plain, where it took `ring.build()`; the mark is
+  for a file, where it says which function is the scene, and for `build()`
+  without a view.
 - **The view traces a pattern.** With a pattern's source selected, a dashed line
   in the selection's colour runs through the copies, closed round a ring, so the
   view says how the copies follow where the faint outlines say that they do.
@@ -86,8 +88,8 @@ All notable changes to the Magpylib Studio extension.
   over it: a float had nowhere to go on a narrow view. A handle on the column's
   inner edge drags its width; narrower than 720 pixels the column is a sheet
   below the view, and the widget grows by it. The dock has one line of title and
-  a close mark; the column's toggles say which panel is open. `V` and `O` open
-  them from the keyboard. While the object panel shows the pose the readout
+  a close mark; the column's toggles say which panel is open. `V` and `O`
+  open them from the keyboard. While the object panel shows the pose the readout
   stays away, and comes back for the length of a drag; pose and properties are
   headings, not folds.
 - **The object panel.** Beside the sliders toggle, an object toggle opens the

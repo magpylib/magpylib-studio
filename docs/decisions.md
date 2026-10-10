@@ -842,10 +842,11 @@ set of real scripts there is.
 - **One function, three callers.** Called plainly it is magpylib: numbers in,
   objects out, patterns as real copies. `fn.build()` calls it with the
   parameters as handles and records what it does into the document;
-  `fn.build(values=path)` takes a saved scene's values. A notebook renders the
-  same signature as draggable numbers. The decorator returns a wrapper that is
-  the plain function when called; one that recorded at definition time would
-  make `ring(n=12)` a document.
+  `fn.build(values=path)` takes a saved scene's values. A notebook's view takes
+  the function, marked or plain, and builds it (amended 2026-10-10); in a file
+  the mark says which function is the scene. The decorator returns a wrapper
+  that is the plain function when called; one that recorded at definition time
+  would make `ring(n=12)` a document.
 - **magpylib reports its calls through a hook**, `record(on_event, resolve)`:
   every top-level construction, property assignment and transformation, with the
   arguments as written; magpylib's own nested calls are not. `resolve` turns a
