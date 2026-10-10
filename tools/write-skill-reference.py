@@ -101,6 +101,10 @@ def reference():
         "Imported from `magpylib_studio`. Each is one step in the document when\n"
         "the scene is built, and plain magpylib when the function is called.\n",
         *(_entry(recording, name, "") for name in WORDS),
+        *(
+            _entry(recording.TriangularMesh, name, "TriangularMesh.")
+            for name in ("from_file", "from_hull", "from_superquadric")
+        ),
         "## What an expression may call\n",
         f"{functions}, and the constants {constants}: the expression\n"
         "allow-list's own names, and all a scene can hold. Over a variable,\n"

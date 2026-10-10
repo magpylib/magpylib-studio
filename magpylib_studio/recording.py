@@ -866,7 +866,8 @@ def grid(half, count, *, plane="xy", at=0):
     """A square of `count` by `count` points across ±`half` in `plane` (xy,
     xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
     the variables, `pixel=grid(reach, density)`, so the grid follows a slider
-    as `sampled` does. Called plainly, it is the points."""
+    as `sampled` does; `count` is two or more. Called plainly, it is the
+    points."""
     axes = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}[plane]
 
     def point(t):

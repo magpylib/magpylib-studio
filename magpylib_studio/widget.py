@@ -976,8 +976,10 @@ class SceneWidget(anywidget.AnyWidget):
                 # a style property, by its path under `style`
                 changed = {f"style.{params.get('path')}": params.get("value")}
             elif method == "reset_style":
-                # back to magpylib's default, which None is
-                changed = {f"style.{params.get('path')}": None}
+                # back to magpylib's default, which None is; every path, with
+                # no path named
+                path = params.get("path")
+                changed = {f"style.{path}" if path else "style": None}
             else:
                 changed = {
                     k: v for k, v in params.items() if k not in ("object_id", "define")

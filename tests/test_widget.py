@@ -1832,6 +1832,7 @@ def test_the_view_takes_the_scene_function_itself():
     assert "n" in looking.variables
 
 
+@needs_scene_graph
 def test_never_is_the_word_for_a_view_that_is_never_edited():
     """`editable="never"` reads where `None` made a reader stop; both make the
     view that offers no pencil and refuses to turn on."""
