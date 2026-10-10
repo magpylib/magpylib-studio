@@ -152,13 +152,14 @@ key. A collection has handles of its own: select it — its row in the legend, o
 **C** from something in it, and **C** again for the one round that — and a drag
 moves and turns it whole, as one edit to the collection. A scene with variables
 — a scene function's parameters, or a saved scene's sliders — has a **sliders**
-button among the tools: a panel with a slider per variable, a dropdown for a
-choice, and a box that takes `15 mm` or an expression; drag one and the scene
-follows, as one edit to undo. `view.variables` is `{name: value}` as the scene
-has them now: a trait a marimo cell reads, and one a cell assigns —
-`view.variables = {"n": 12}` is one edit — so another control is tied to it both
-ways with `traitlets.link((call, "values"), (view3d, "variables"))`, the view
-owning the numbers. `call` and `view3d` are the widgets themselves, not the
+toggle at the foot of the edit column, on the right with the handles: a panel
+beside it with a slider per variable, a dropdown for a choice, and a box that
+takes `15 mm` or an expression; drag one and the scene follows, as one edit to
+undo. `view.variables` is `{name: value}` as the scene has them now: a trait a
+marimo cell reads, and one a cell assigns — `view.variables = {"n": 12}` is one
+edit — so another control is tied to it both ways with
+`traitlets.link((call, "values"), (view3d, "variables"))`, the view owning the
+numbers. `call` and `view3d` are the widgets themselves, not the
 `mo.ui.anywidget` elements around them: a marimo cell that names an element
 re-runs on its every change, and would make the link again each time;
 `examples/marimo_demo.py` does it with wigglystuff's call expression.

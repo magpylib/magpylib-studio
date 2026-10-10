@@ -150,6 +150,17 @@
   bottom: 44px;
 }
 
+/* The toggles of the editor's panels, at the foot of the column. */
+.magpy-scene-edit-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.magpy-scene-edit-panels[hidden] {
+  display: none;
+}
+
 .magpy-scene-edit[hidden] {
   display: none;
 }
@@ -612,10 +623,13 @@
 .magpy-scene-variables {
   position: absolute;
   right: 44px;
+  top: 44px;
   bottom: 8px;
+  height: fit-content;
+  margin-block: auto; /* centred beside the column, as the column is */
   z-index: 3;
   width: min(55%, 22em);
-  max-height: calc(100% - 60px);
+  max-height: calc(100% - 52px);
   overflow: auto;
   box-sizing: border-box;
   padding: 5px 9px 6px;
@@ -632,6 +646,7 @@
 
 .magpy-animated .magpy-scene-variables {
   bottom: 44px;
+  max-height: calc(100% - 88px);
 }
 
 /* Over the view, the rows read as the readout does: a name, a slider and a

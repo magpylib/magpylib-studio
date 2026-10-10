@@ -559,8 +559,11 @@ function render({ model, el }) {
   // The scene's variables as a panel over the view: a slider each, and the
   // scene following as one is dragged (`variables.mjs`, the same rows as the
   // studio's Variables view). With the handles, since moving a variable is an
-  // edit like a drag -- so not on a saved page, nor in the studio panel,
-  // whose host has a Variables view of its own. See `dressEditing`.
+  // edit like a drag: its toggle is at the foot of the edit column and the
+  // panel docks beside it, so everything about editing hangs on the right
+  // edge and the hover bar above is the view's. Not on a saved page, nor in
+  // the studio panel, whose host has a Variables view of its own. See
+  // `dressEditing`.
   const variablesEl = document.createElement("div");
   variablesEl.className = "magpy-scene-variables";
   variablesEl.hidden = true;
@@ -709,6 +712,12 @@ function render({ model, el }) {
     line.className = "magpy-scene-rule";
     return line;
   };
+  // The editor's panels hang on this column, toggled from its foot: the
+  // variables now, the selection later. One home for everything about
+  // editing; the bar above is the view's.
+  const panelToggles = document.createElement("div");
+  panelToggles.className = "magpy-scene-edit-panels";
+  panelToggles.append(rule(), variablesButton);
   editBar.append(
     ...Object.values(modeButtons),
     spaceButton,
@@ -716,6 +725,7 @@ function render({ model, el }) {
     undoButton,
     redoButton,
     resetButton,
+    panelToggles,
   );
   tools.append(
     legendButton,
@@ -723,7 +733,6 @@ function render({ model, el }) {
     fitButton,
     projectionButton,
     editButton,
-    variablesButton,
     themeButton,
     pictureButton,
     exportButton,
@@ -1470,10 +1479,10 @@ function render({ model, el }) {
   function dressEditing() {
     editBar.hidden = !editable();
     resetButton.hidden = !editor.reset;
-    // The variables go with the handles: an edit surface, like them. Not in
-    // the studio panel, whose host shows them in its sidebar.
-    variablesButton.hidden = !editable() || model.editor !== undefined;
-    if (variablesButton.hidden && !variablesEl.hidden) showVariables(false);
+    // The panels go with the handles, on the column that goes with them.
+    // Not in the studio panel, whose host shows them in its sidebar.
+    panelToggles.hidden = model.editor !== undefined;
+    if (!editable() && !variablesEl.hidden) showVariables(false);
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);

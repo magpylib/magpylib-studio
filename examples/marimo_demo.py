@@ -9,8 +9,8 @@ magpylib function marked `@scene`: its parameters are the variables. Built
 once, it gives the studio's document, which the 3D view, the field, the sweep,
 the code tab and the saved file all read. Called, it is plain magpylib:
 objects to compute with, shown beside the document's numbers. The view edits
-that document: its handles move the magnets, and the sliders button among its
-tools opens the variables, a slider each. The signature is also rendered as a
+that document: its handles move the magnets, and the sliders toggle at the foot
+of its edit column opens the variables, a slider each. The signature is also rendered as a
 call expression whose numbers drag (wigglystuff's `TangleFunction`), tied to
 the view's variables both ways with one `traitlets.link` -- the view's model
 owns the numbers, the call is one more place to drag them, and the two never
@@ -185,8 +185,8 @@ def _(halbach, mo):
     except ImportError:
         call = knobs = None
         _shown = mo.md(
-            "_The sliders button among the view's tools (top right, pointer on "
-            "the view) is the knobs. `pip install wigglystuff` adds the call "
+            "_The sliders toggle at the foot of the view's edit column is the "
+            "knobs. `pip install wigglystuff` adds the call "
             "itself as one, its numbers dragging._"
         )
     _shown
@@ -218,7 +218,7 @@ def _(halbach):
 def _(SceneWidget, mo, s):
     # The view of the document itself -- its own session, nothing copied --
     # made once, so the camera stays where you left it. Editable from the
-    # start: the handles, and the sliders button among the tools. The widget
+    # start: the handles, and the sliders toggle under them. The widget
     # has a name of its own beside the element around it, for the cell below.
     view3d = SceneWidget(s, editable=True, height=560)
     view = mo.ui.anywidget(view3d)
@@ -254,9 +254,8 @@ def _(mo, view):
         [
             mo.md(
                 f"**Editing the document.** {view.value['revision']} settled edits "
-                "so far, each told once. The sliders button among the view's "
-                "tools (top right, with the pointer on the view) opens the "
-                "variables; **W** moves, **E** turns, **R** resizes, **P** aims; "
+                "so far, each told once. The sliders toggle at the foot of the "
+                "edit column on the right opens the variables; **W** moves, **E** turns, **R** resizes, **P** aims; "
                 "⌘Z / ctrl-Z undoes a whole gesture, and the arrow under the undo "
                 "buttons takes every edit back to where editing started. "
                 "`view.widget.objects` are the objects as edited, to compute with."

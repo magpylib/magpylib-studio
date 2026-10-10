@@ -231,8 +231,8 @@ puts them out, and for the cell's own objects first copies them into a session
 in the kernel, named from the cell's variables as read when they were given. The
 view calls `rpc.handle` over its connection, restricted to a short allow-list,
 and a `revision` trait and `last_edit` fire once per settled edit, never per
-preview frame. With the handles, a sliders button opens **the variables panel**
-(`static/variables.mjs`,
+preview frame. With the handles, the sliders toggle at the foot of the edit
+column opens **the variables panel** beside it (`static/variables.mjs`,
 [0019](decisions.md#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)):
 a slider per variable with a range, a dropdown for a choice, a box that reads
 `15 mm` through `quantity`; a value under the pointer is a `set_variable` marked

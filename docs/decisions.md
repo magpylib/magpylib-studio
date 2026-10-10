@@ -1033,8 +1033,10 @@ widget points at its kernel connection.
 - **Nothing over the view that cannot act.** A panel in the widget is compact:
   the rows, the limits in the tooltips, no help block, no action without a host
   action, a choice as its dropdown alone, its inputs underlined as the readout's
-  are. The sidebar keeps the fuller form through the module's options, not a
-  second copy. Looked at in a real browser before it is called done.
+  are, its toggle at the foot of the edit column, the editor's one home, the
+  hover bar above being the view's. The sidebar keeps the fuller form through
+  the module's options, not a second copy. Looked at in a real browser before it
+  is called done.
 
 ### Rejected
 
