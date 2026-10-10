@@ -1152,3 +1152,51 @@ Two such trips a frame is a drag at eight frames a second.
 The demo's Halbach, 24 magnets and a 7 × 7 probe: 127 KB and two messages a
 frame before; 38 KB and one after. `get_scene` 10.4 ms before, 9.6 ms after, the
 field being computed twice.
+
+## 0022. What the widget is, and is not
+
+**Status:** accepted 2026-10-10. The boundary the editor's panels move inside
+([0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)),
+written down before the next one so that it is not drawn by accident.
+
+### Decision
+
+The widget is **the view of one scene, and its editor.**
+
+- It draws the scene the same in every host that can show an anywidget or a web
+  view: a notebook cell, the VS Code panel, a saved page.
+- It edits what is in the scene and where: the handles, the variables, the
+  selection's properties, undo. Its panels hang on the edit column and show only
+  what can act; state stays in sight, commands hide until reached for.
+- It tells its host once per settled edit and reads back what the host sets,
+  through traits and nothing else. A frame of a drag is one message.
+- It asks the engine for everything it shows. It never computes a field,
+  resolves an expression or sizes an object itself.
+
+It is **not**:
+
+- an analysis surface: no field maps, sweeps, tables or plots. Those are the
+  host's cells and panels, on the engine's calls.
+- a code surface: no script editing, no agent in it. The scene function lives in
+  the notebook or the file; the script tab is the editor's.
+- a file or project manager: it exports a page and a picture; the host opens and
+  saves, and holds several scenes.
+- a framework for pages, reports or dashboards. marimo-studio, Panel and the
+  hosts do that; the widget is what they place.
+- a second implementation of anything the engine does.
+- a place to add, remove, group or pattern objects: it edits what exists. In a
+  notebook that is written in code; in VS Code it is the sidebar's dialogs.
+
+### What follows
+
+The readout, the numbers the handles write, may take units and a variable's
+name, since those are about where things are; it stays the fields the handles
+write. The Inspector, the selection's properties, is the next panel on the
+column. A figure of the field, a table of the scene or a script never is.
+
+### Rejected
+
+- Growing by what is easy to add: each panel is a tax on a reader of the view,
+  and a cell is a bounded box.
+- No boundary at all, deciding each panel on its merits: that is how the VS Code
+  sidebar came to carry eleven thousand lines.
