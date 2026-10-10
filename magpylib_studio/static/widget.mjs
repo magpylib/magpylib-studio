@@ -580,6 +580,9 @@ function render({ model, el }) {
   // edge and the hover bar above is the view's. Not on a saved page, nor in
   // the studio panel, whose host has a Variables view of its own. See
   // `dressEditing`.
+  // the dock (spike): set below, once the stage is in place
+  let dock = null;
+  let dockTabs = {};
   const variablesEl = document.createElement("div");
   variablesEl.className = "magpy-scene-variables";
   variablesEl.hidden = true;
@@ -607,6 +610,7 @@ function render({ model, el }) {
       if (!inspectorEl.hidden) showInspector(false); // one panel at a time
       variables.refresh();
     }
+    syncDock();
   }
   // The selection's properties -- its parameters, its pose and, folded under
   // one heading, its style, as the studio's Inspector shows them
@@ -641,6 +645,7 @@ function render({ model, el }) {
       if (!variablesEl.hidden) showVariables(false); // one panel at a time
       inspector.show((model.get("selected") || [])[0]);
     }
+    syncDock();
   }
   /** The scene as the session has it now, drawn: after a previewed value,
    *  which python answers without redrawing the view or telling the
@@ -833,6 +838,79 @@ function render({ model, el }) {
     notice,
   );
   el.append(stage);
+
+  // --- the dock (spike): the panels in a column beside the view ----------
+  // `layout`: "overlay" (the panels float over the view, as above), "side"
+  // (a column beside it, the view narrower for it) or "split" (the column
+  // with a handle that drags its width). Narrower than 640px, the column
+  // becomes a sheet below the view, and the widget grows by it.
+  const layout = model.get("layout") || "overlay";
+  if (layout !== "overlay") {
+    el.classList.add("magpy-layout-dock");
+    if (layout === "split") el.classList.add("magpy-layout-split");
+    dock = document.createElement("div");
+    dock.className = "magpy-scene-dock";
+    dock.hidden = true;
+    const handle = document.createElement("div");
+    handle.className = "magpy-scene-dock-handle";
+    const tabs = document.createElement("div");
+    tabs.className = "magpy-scene-dock-tabs";
+    const tab = (text, onClick) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "magpy-scene-dock-tab";
+      b.textContent = text;
+      b.addEventListener("click", onClick);
+      return b;
+    };
+    dockTabs = {
+      variables: tab("Variables", () => showVariables(true)),
+      object: tab("Object", () => showInspector(true)),
+    };
+    const close = tab("×", () => {
+      showVariables(false);
+      showInspector(false);
+    });
+    close.className = "magpy-scene-dock-tab magpy-scene-dock-close";
+    close.title = "Close";
+    tabs.append(dockTabs.variables, dockTabs.object, close);
+    dock.append(handle, tabs, variablesEl, inspectorEl);
+    el.append(dock);
+    const narrow = new ResizeObserver(() =>
+      el.classList.toggle("magpy-narrow", el.clientWidth < 640),
+    );
+    narrow.observe(el);
+    if (layout === "split") {
+      handle.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        const startX = e.clientX;
+        const startW = dock.getBoundingClientRect().width;
+        const move = (ev) => {
+          const w = Math.max(
+            160,
+            Math.min(el.clientWidth * 0.7, startW - (ev.clientX - startX)),
+          );
+          el.style.setProperty("--magpy-dock-width", `${w}px`);
+        };
+        const up = () => {
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", up);
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", up);
+      });
+    }
+  }
+  function syncDock() {
+    if (!dock) return;
+    dock.hidden = variablesEl.hidden && inspectorEl.hidden;
+    dockTabs.variables.setAttribute(
+      "aria-pressed",
+      String(!variablesEl.hidden),
+    );
+    dockTabs.object.setAttribute("aria-pressed", String(!inspectorEl.hidden));
+  }
 
   // --- full screen ------------------------------------------------------
   // The whole widget, legend and controls with it, so nothing that works in

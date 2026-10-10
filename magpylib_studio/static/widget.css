@@ -1171,3 +1171,121 @@
 .magpy-vars-status:empty {
   display: none;
 }
+
+/* --- the dock (spike): the panels in a column beside the view ----------- */
+.magpy-scene.magpy-layout-dock {
+  flex-direction: row;
+}
+
+.magpy-layout-dock .magpy-scene-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.magpy-scene-dock {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--magpy-dock-width, 22em);
+  max-width: 60%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  background: var(--vscode-editor-background);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.magpy-scene-dock[hidden] {
+  display: none;
+}
+
+.magpy-scene-dock-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 3px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.magpy-scene-dock-tab {
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  padding: 1px 7px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.magpy-scene-dock-tab:hover {
+  opacity: 1;
+}
+
+.magpy-scene-dock-tab[aria-pressed="true"] {
+  opacity: 1;
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.magpy-scene-dock-close {
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 5px;
+}
+
+/* the panels as the column's content, not floats over the view */
+.magpy-scene-dock .magpy-scene-variables,
+.magpy-scene-dock .magpy-scene-inspector {
+  position: static;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.magpy-scene-dock-handle {
+  display: none;
+}
+
+.magpy-layout-split .magpy-scene-dock-handle {
+  display: block;
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.magpy-layout-split .magpy-scene-dock-handle:hover {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 50%, transparent);
+}
+
+/* narrow: a sheet below the view, the widget growing by it */
+.magpy-scene.magpy-layout-dock.magpy-narrow {
+  flex-direction: column;
+}
+
+.magpy-layout-dock.magpy-narrow .magpy-scene-dock {
+  width: auto;
+  max-width: none;
+  max-height: 240px;
+  border-left: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-layout-split.magpy-narrow .magpy-scene-dock-handle {
+  display: none;
+}

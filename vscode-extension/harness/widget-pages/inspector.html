@@ -38,6 +38,8 @@
       if (query.has("light")) document.body.style.background = "#ffffff";
       if (query.has("dark")) document.body.style.background = "#1e1e1e";
       const values = { ...state };
+      // the dock spike: a layout to try, and a width to drag the column to
+      if (query.has("layout")) values.layout = query.get("layout");
 
       const asked = [];
       const listeners = {};
@@ -98,6 +100,8 @@
       const el = document.getElementById("root");
       widget.render({ model, el });
       await until(() => el.querySelector("canvas"));
+      if (query.has("dock"))
+        el.style.setProperty("--magpy-dock-width", query.get("dock") + "px");
       await wait(300);
       const button = (start) =>
         [...el.querySelectorAll(".magpy-icon")].find((b) =>

@@ -232,8 +232,8 @@ export function createInspector(
   container.append(
     headerEl,
     ...(compact ? [] : [stepEl]),
-    paramsEl,
     transformEl,
+    paramsEl,
     ...(compact ? [styleBox] : [filterEl, propsEl]),
     emptyEl,
     statusEl,
