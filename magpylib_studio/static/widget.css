@@ -1265,7 +1265,8 @@
   display: none;
 }
 
-.magpy-vars-restore {
+.magpy-vars-restore,
+.magpy-ins-reset-all {
   font: inherit;
   font-size: 10.5px;
   line-height: 1.5;
@@ -1279,7 +1280,9 @@
 }
 
 .magpy-vars-restore:hover,
-.magpy-vars-restore:focus-visible {
+.magpy-vars-restore:focus-visible,
+.magpy-ins-reset-all:hover,
+.magpy-ins-reset-all:focus-visible {
   outline: none;
   background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent);
 }

@@ -184,7 +184,8 @@ parameters and pose, in the scene's units, with expressions as written: type
 is made at the value it replaces. Under them, **style** folds the object's style
 tree — colour, opacity, label, the magnetization arrows, the path — read when
 opened; a value set there is one step to undo, and the view's own objects carry
-it. One of the two panels is open at a time, and both go with the handles.
+it; a ↺ Reset style in the title line puts all of it back at once, the label
+kept. One of the two panels is open at a time, and both go with the handles.
 They open in a column beside the view, which refits to what is left; drag the
 column's inner edge to widen it. Narrower than 720 pixels the column is a sheet
 below the view. `V` and `O` open and close them from the keyboard, and while the

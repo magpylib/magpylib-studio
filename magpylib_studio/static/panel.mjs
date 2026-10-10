@@ -97,6 +97,7 @@ function render({ model, el }) {
       },
       compact: true,
       empty: "Select an object in the view: its parameters and pose come here.",
+      head: actions,
     });
     const follow = () => {
       say("");

@@ -17,6 +17,11 @@
  *   folded under one heading, read when it is opened and not before. For a
  *   panel over a 3D view: no step editor, nothing shown unasked.
  * - `empty`: what to say with nothing selected.
+ * - `head`: an element for what the panel says about itself as a whole --
+ *   the widget's dock gives its title line. There goes one "↺ Reset style"
+ *   that puts the selection's set appearance back, as one step, the label
+ *   kept since it is the object's name and not its look; the rows then carry
+ *   no ↺ of their own over the view. Without it, each set row has its ↺.
  *
  * And gives back `{ show(objectId), showStep(eventId), refresh(), say() }`.
  *
@@ -203,7 +208,13 @@ function unitTag(unit) {
 
 export function createInspector(
   container,
-  { rpc, onEdited, compact = false, empty = "Select an object." } = {},
+  {
+    rpc,
+    onEdited,
+    compact = false,
+    empty = "Select an object.",
+    head = null,
+  } = {},
 ) {
   container.classList.add("magpy-ins");
   const headerEl = element("div", "magpy-ins-header");
@@ -245,6 +256,7 @@ export function createInspector(
   let generatedFrom = null;
   let schema;
   let values = { set: {}, resolved: {} };
+  let setPaths = []; // the style paths set on the object, for the head
   let stepId = null;
 
   function say(what) {
@@ -301,6 +313,44 @@ export function createInspector(
     say("");
     answered(await rpc("reset_style", { object_id: objectId, path }));
     await reloadValues();
+  }
+
+  /** The style paths set on the object, for what the head says. */
+  function noteSet(loaded) {
+    setPaths = Object.keys((loaded && loaded.set) || {});
+  }
+
+  /** In the head, one reset for the appearance set on the object, where the
+   *  host gave one: every set style path but the label, which is the
+   *  object's name rather than its look. A mark per row has no column over
+   *  the view. */
+  function sayHead() {
+    if (!head) return;
+    head.replaceChildren();
+    const paths = setPaths.filter((path) => path !== "label");
+    if (!objectId || generatedFrom || !paths.length) return;
+    const button = element("button", "magpy-ins-reset-all", "↺ Reset style");
+    button.type = "button";
+    button.title = "Put " + paths.join(", ") + " back to magpylib's defaults";
+    button.addEventListener("click", () => resetAll(paths));
+    head.appendChild(button);
+  }
+
+  /** Put every set style path but the label back, as one step to undo. */
+  function resetAll(paths) {
+    if (refuseIfGenerated()) return Promise.resolve();
+    say("");
+    const each = paths.reduce(
+      (done, path) =>
+        done.then(() =>
+          rpc("reset_style", { object_id: objectId, path }).then(answered),
+        ),
+      rpc("begin_interaction").catch(() => {}),
+    );
+    return each
+      .then(() => rpc("end_interaction").catch(() => {}))
+      .then(reloadValues)
+      .catch(refused);
   }
 
   function makeWidget(path, spec, value) {
@@ -1002,13 +1052,17 @@ export function createInspector(
     if (id !== objectId) return; // the selection moved on meanwhile
     schema = loadedSchema;
     values = loadedValues;
+    noteSet(values);
     render();
+    sayHead();
   }
 
   async function reloadValues() {
-    if (schema) {
+    if (schema || head) {
       values = await rpc("get_values", { object_id: objectId });
-      render();
+      noteSet(values);
+      if (schema) render();
+      sayHead();
     }
     await Promise.all([loadParams(), loadTransform()]);
   }
@@ -1016,6 +1070,8 @@ export function createInspector(
   async function loadObject(id) {
     objectId = id;
     schema = undefined; // this object's, once read
+    setPaths = [];
+    sayHead(); // the last object's reset goes before this one's is known
     emptyEl.style.display = id ? "none" : "";
     say("");
     filterEl.hidden = !id;
@@ -1058,7 +1114,19 @@ export function createInspector(
         ),
       );
     }
-    const style = !compact || styleBox.open ? loadStyle() : Promise.resolve();
+    // The style tree waits until opened; what the head says of the style
+    // does not, so the set paths are read on their own where a head is.
+    const style =
+      !compact || styleBox.open
+        ? loadStyle()
+        : head
+          ? rpc("get_values", { object_id: id }).then((loaded) => {
+              if (id !== objectId) return;
+              values = loaded;
+              noteSet(loaded);
+              sayHead();
+            })
+          : Promise.resolve();
     await Promise.all([style, loadParams(), loadTransform()]);
   }
 

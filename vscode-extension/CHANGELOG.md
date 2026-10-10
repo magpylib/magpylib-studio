@@ -88,7 +88,9 @@ All notable changes to the Magpylib Studio extension.
   over it: a float had nowhere to go on a narrow view. A handle on the column's
   inner edge drags its width; narrower than 720 pixels the column is a sheet
   below the view, and the widget grows by it. The dock has one line of title and
-  a close mark; the column's toggles say which panel is open. `V` and `O`
+  a close mark; the column's toggles say which panel is open. In the title line,
+  one ↺ Restore for the variables a drag or a step took over, and one ↺ Reset
+  style for the appearance set on the selection, the label kept. `V` and `O`
   open them from the keyboard. While the object panel shows the pose the readout
   stays away, and comes back for the length of a drag; pose and properties are
   headings, not folds.

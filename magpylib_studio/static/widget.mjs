@@ -472,10 +472,14 @@ function render({ model, el }) {
   pressed(variablesButton, false);
   // Compact over the view: the rows and nothing else. The limits ride in
   // the tooltips, and the expression help is the sidebar's.
-  // what the panel says about itself as a whole, in the dock's title line:
-  // the one restore for the variables a drag or a step took over
-  const dockActions = document.createElement("span");
-  dockActions.className = "magpy-scene-dock-actions";
+  // What a panel says about itself as a whole, in the dock's title line:
+  // the one restore for the variables a drag or a step took over, and the
+  // one reset for the appearance set on the selection. A slot each, shown
+  // with its panel.
+  const dockActionsVariables = document.createElement("span");
+  dockActionsVariables.className = "magpy-scene-dock-actions";
+  const dockActionsObject = document.createElement("span");
+  dockActionsObject.className = "magpy-scene-dock-actions";
   const variables = createVariables(variablesEl, {
     // a preview asks for the scene in the same message, and redraws from it
     rpc: (method, params, { preview = false } = {}) =>
@@ -483,7 +487,7 @@ function render({ model, el }) {
     onPreview: redrawFromSession,
     empty: "No variables: a scene function's parameters are its variables.",
     compact: true,
-    head: dockActions,
+    head: dockActionsVariables,
   });
   function showVariables(open) {
     variablesEl.hidden = !open;
@@ -519,6 +523,7 @@ function render({ model, el }) {
     },
     compact: true,
     empty: "Select an object: its parameters and pose come here.",
+    head: dockActionsObject,
   });
   function showInspector(open) {
     inspectorEl.hidden = !open;
@@ -777,7 +782,12 @@ function render({ model, el }) {
     showVariables(false);
     showInspector(false);
   });
-  dockHead.append(dockTitle, dockActions, dockClose);
+  dockHead.append(
+    dockTitle,
+    dockActionsVariables,
+    dockActionsObject,
+    dockClose,
+  );
   dock.append(dockHandle, dockHead, variablesEl, inspectorEl);
   el.append(dock);
   const dockRoom = new ResizeObserver(() =>
@@ -810,7 +820,8 @@ function render({ model, el }) {
     dock.hidden = variablesEl.hidden && inspectorEl.hidden;
     el.classList.toggle("magpy-docked", !dock.hidden);
     dockTitle.textContent = variablesEl.hidden ? "Object" : "Variables";
-    dockActions.hidden = variablesEl.hidden;
+    dockActionsVariables.hidden = variablesEl.hidden;
+    dockActionsObject.hidden = inspectorEl.hidden;
   }
   /** The view's height: the cell's while in the cell, and the screen's
    *  otherwise; the renderer watches its element and follows either way. */

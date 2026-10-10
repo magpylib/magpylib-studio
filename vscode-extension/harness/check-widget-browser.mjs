@@ -1162,6 +1162,19 @@ async function objectPanel(port, base) {
         ) {
           return `a colour set sent ${style.edit ? call(style.edit) : "nothing"}`;
         }
+        if (style.resetAll?.before)
+          return "a reset was offered with only the label set";
+        if (!style.resetAll?.shown)
+          return "the title line offered no reset for the colour set";
+        if (JSON.stringify(style.reset) !== JSON.stringify(["color"])) {
+          return `the reset sent ${JSON.stringify(style.reset)}`;
+        }
+        if (
+          style.resetGrouped[0] !== "begin_interaction" ||
+          !style.resetGrouped.includes("end_interaction")
+        ) {
+          return `the reset was not one step: ${style.resetGrouped.join(" ")}`;
+        }
         if (afterPencil.button || afterPencil.panel) {
           return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
         }
