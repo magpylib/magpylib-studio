@@ -274,8 +274,9 @@ person saved survive the next run.
   A `.magpy.json` opens with **Magpylib Studio: Open Scene…**.
 - **Notebook:** `SceneWidget(s, editable=True)`, from `magpylib_studio.widget`
   (`pip install "magpylib-studio[widget]"`), is the 3D view with handles; the
-  sliders toggle at the foot of its edit column opens a slider per variable, and
-  `.variables` holds their values.
+  sliders toggle at the foot of its edit column opens a slider per variable, the
+  object toggle beside it the selection's parameters and pose, and `.variables`
+  holds their values.
 - Give numbers with where they were read and in what unit, and say how you
   computed them. Whether a field is good enough is the person's call.
 

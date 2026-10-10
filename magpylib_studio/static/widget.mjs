@@ -43,6 +43,7 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createLegend, drawnIn } from "./legend.mjs";
+import { createInspector } from "./inspector.mjs";
 import { QUANTITY, createVariables } from "./variables.mjs";
 
 /** How many renderers may be live on a page at once: pythreejs's number,
@@ -347,6 +348,9 @@ const ICONS = {
   keys:
     '<rect x="1.5" y="4" width="13" height="8" rx="1.5"/>' +
     '<path d="M4 6.75h1M7.5 6.75h1M11 6.75h1M4.5 9.5h7"/>',
+  object:
+    '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/>' +
+    '<path d="M5 6h6M5 8.5h6M5 11h4"/>',
   undo: '<path d="M5.5 3 2.5 6l3 3"/><path d="M2.5 6h7a4 4 0 0 1 0 8H7"/>',
   redo: '<path d="M10.5 3l3 3-3 3"/><path d="M13.5 6h-7a4 4 0 0 0 0 8H9"/>',
   edit: '<path d="M11.5 2.5l2 2-8 8h-2v-2z"/><path d="M10 4l2 2"/>',
@@ -599,7 +603,43 @@ function render({ model, el }) {
   function showVariables(open) {
     variablesEl.hidden = !open;
     pressed(variablesButton, open);
-    if (open) variables.refresh();
+    if (open) {
+      if (!inspectorEl.hidden) showInspector(false); // one panel at a time
+      variables.refresh();
+    }
+  }
+  // The selection's properties -- its parameters and its pose, as the
+  // studio's Inspector shows them (`inspector.mjs`), compact: no style tree,
+  // no step editor, a cell being a bounded box. Beside the column with the
+  // variables, one of the two open at a time; it follows the selection.
+  const inspectorEl = document.createElement("div");
+  inspectorEl.className = "magpy-scene-inspector";
+  inspectorEl.hidden = true;
+  const inspectorButton = iconButton(
+    "object",
+    "Object — the selection's parameters and pose; type 15 mm, 5° or a " +
+      "variable's name",
+    () => showInspector(inspectorEl.hidden),
+  );
+  pressed(inspectorButton, false);
+  const inspector = createInspector(inspectorEl, {
+    rpc: (method, params) => call(method, params),
+    onEdited: (result) => {
+      if (result?.defined?.length) {
+        const made = result.defined.join(", ");
+        notify(`${made} made, at the value it replaces — the sliders have it`);
+      }
+    },
+    compact: true,
+    empty: "Select an object: its parameters and pose come here.",
+  });
+  function showInspector(open) {
+    inspectorEl.hidden = !open;
+    pressed(inspectorButton, open);
+    if (open) {
+      if (!variablesEl.hidden) showVariables(false); // one panel at a time
+      inspector.show((model.get("selected") || [])[0]);
+    }
   }
   /** The scene as the session has it now, drawn: after a previewed value,
    *  which python answers without redrawing the view or telling the
@@ -733,7 +773,7 @@ function render({ model, el }) {
   // editing; the bar above is the view's.
   const panelToggles = document.createElement("div");
   panelToggles.className = "magpy-scene-edit-panels";
-  panelToggles.append(rule(), variablesButton);
+  panelToggles.append(rule(), variablesButton, inspectorButton);
   editBar.append(
     ...Object.values(modeButtons),
     spaceButton,
@@ -782,7 +822,15 @@ function render({ model, el }) {
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(tools, editBar, variablesEl, keyList, transport, notice);
+  stage.append(
+    tools,
+    editBar,
+    variablesEl,
+    inspectorEl,
+    keyList,
+    transport,
+    notice,
+  );
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -1525,6 +1573,7 @@ function render({ model, el }) {
     // Not in the studio panel, whose host shows them in its sidebar.
     panelToggles.hidden = model.editor !== undefined;
     if (!editable() && !variablesEl.hidden) showVariables(false);
+    if (!editable() && !inspectorEl.hidden) showInspector(false);
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
@@ -1930,6 +1979,15 @@ function render({ model, el }) {
     // itself, and reads its rows back at the release.
     if ((now.has("payload") || now.has("revision")) && !variablesEl.hidden) {
       variables.refresh();
+    }
+    // The object panel follows the selection, and reads the scene back
+    // after an edit settled -- once, since a re-pointed view is both.
+    if (!inspectorEl.hidden) {
+      if (now.has("selected")) {
+        inspector.show((model.get("selected") || [])[0]);
+      } else if (now.has("payload") || now.has("revision")) {
+        inspector.refresh();
+      }
     }
     if (now.has("payload") || now.has("selected")) showReadout();
     if (now.has("revision") && model.get("revision") !== echoed) {

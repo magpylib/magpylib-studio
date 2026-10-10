@@ -1685,3 +1685,40 @@ def test_the_readout_makes_a_variable_from_a_bare_name():
     assert studio.payload["units"]["length"]["symbol"] == "m"
     studio.variables = {"reach": 0.05}
     assert studio.objects["m"].position == pytest.approx([0.05, 0, 0])
+
+
+@needs_scene_graph
+def test_the_object_panel_reads_and_sets_through_the_session():
+    """The object panel's calls: the selection's parameters and pose are
+    read, a parameter set is one settled edit told as a `set`, a pose set
+    with a bare name makes the variable, and a typed `2 cm` is read by the
+    engine."""
+    studio = _studio_of(_design())
+    listed = _ask(studio, "list_objects")["result"]
+    assert any(entry["id"] == "m" for entry in listed)
+    params = _ask(studio, "get_params", object_id="m")["result"]
+    assert next(p for p in params if p["name"] == "dimension")["value"] == [
+        0.01,
+        0.01,
+        0.01,
+    ]
+    pose = _ask(studio, "get_transform", object_id="m")["result"]
+    assert pose["position"] == pytest.approx([0.02, 0, 0])
+    revision = studio.revision
+    answer = _ask(
+        studio, "set_param", object_id="m", name="dimension", value=[0.02, 0.01, 0.01]
+    )
+    assert answer["result"]["ok"]
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {
+        "by": "set",
+        "objects": ["m"],
+        "changed": {"m": {"dimension": [0.02, 0.01, 0.01]}},
+    }
+    answer = _ask(
+        studio, "set_transform", object_id="m", position=["=reach", 0, 0], define=True
+    )
+    assert answer["result"] == {"ok": True, "defined": ["reach"]}
+    assert studio.variables["reach"] == pytest.approx(0.02)
+    read = _ask(studio, "read_values", terms=["2 cm"], unit="length")["result"]
+    assert read == {"ok": True, "values": [0.02]}

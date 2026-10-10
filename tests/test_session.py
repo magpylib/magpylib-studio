@@ -1099,7 +1099,7 @@ def test_inspector_offers_only_planes_the_engine_knows():
     from magpylib_studio.session import _MIRROR_NORMALS
 
     source = (
-        pathlib.Path(__file__).parent.parent / "vscode-extension/media/inspector.js"
+        pathlib.Path(__file__).parent.parent / "magpylib_studio/static/inspector.mjs"
     )
     if not source.exists():  # engine installed without the extension beside it
         pytest.skip("extension source not present")
@@ -5081,3 +5081,54 @@ def test_a_bare_name_typed_where_a_number_was_is_made_at_that_value():
         "symbol": "mm",
         "scale": 1000.0,
     }
+
+
+@needs_scene_graph
+def test_set_param_and_set_transform_make_a_bare_name_on_request():
+    """`define` on the two calls the Inspector makes, as on `apply_edits`:
+    a bare name the document lacks is made at the value it replaces, in the
+    field's kind of unit, and the answer names it; one step to undo. Without
+    it, refused by name as it was."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    dimension = next(p for p in s.get_params("r1") if p["name"] == "dimension")["value"]
+    result = s.set_param(
+        "r1", "dimension", ["=edge", dimension[1], dimension[2]], define=True
+    )
+    assert result == {"ok": True, "defined": ["edge"]}
+    made = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert made["edge"]["value"] == pytest.approx(dimension[0])
+    assert made["edge"]["bounds"]["unit"] == "length"
+    assert s.undo()["ok"]
+    assert "edge" not in {v["name"] for v in s.get_variables()["variables"]}
+    pose = s.get_transform("sensor")["orientation"]
+    result = s.set_transform(
+        "sensor", orientation=[pose[0], pose[1], "=twist"], define=True
+    )
+    assert result == {"ok": True, "defined": ["twist"]}
+    twist = {v["name"]: v for v in s.get_variables()["variables"]}["twist"]
+    assert twist["bounds"]["unit"] == "angle"
+    refused = s.set_param("r1", "dimension", ["=nope", 0.01, 0.01])
+    assert refused["ok"] is False and "nope" in refused["error"]
+
+
+@needs_scene_graph
+def test_a_bare_name_in_a_segments_angle_is_made_as_an_angle():
+    """A CylinderSegment's dimension is three lengths and two angles: a name
+    typed in its fourth place is made in degrees, as the field is shown, not
+    in metres as the parameter's kind would say."""
+    s = MagpylibStudioSession()
+    s.add_object(
+        "seg",
+        "magnet.CylinderSegment",
+        params={"dimension": [0.01, 0.02, 0.01, 0, 90], "polarization": [0, 0, 1]},
+    )
+    result = s.set_param(
+        "seg", "dimension", [0.01, 0.02, "=thick", "=start", 90], define=True
+    )
+    assert result == {"ok": True, "defined": ["thick", "start"]}
+    made = {v["name"]: v for v in s.get_variables()["variables"]}
+    assert made["thick"]["bounds"]["unit"] == "length"
+    assert made["thick"]["value"] == pytest.approx(0.01)
+    assert made["start"]["bounds"]["unit"] == "angle"
+    assert made["start"]["value"] == pytest.approx(0)

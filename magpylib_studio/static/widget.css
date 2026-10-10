@@ -673,6 +673,301 @@
   max-height: calc(100% - 88px);
 }
 
+/* --- the object panel ----------------------------------------------------
+   The selection's parameters and pose, docked beside the column as the
+   variables are. The rows are `inspector.mjs`'s, dressed here once for the
+   widget and for the VS Code sidebar, which shows the fuller form. */
+.magpy-scene-inspector {
+  position: absolute;
+  right: 44px;
+  top: 44px;
+  bottom: 8px;
+  height: fit-content;
+  margin-block: auto;
+  z-index: 3;
+  width: min(60%, 24em);
+  max-height: calc(100% - 52px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 5px 9px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 94%,
+    transparent
+  );
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 7px;
+}
+
+.magpy-animated .magpy-scene-inspector {
+  bottom: 44px;
+  max-height: calc(100% - 88px);
+}
+
+.magpy-scene-inspector[hidden] {
+  display: none;
+}
+
+.magpy-ins-name {
+  font-weight: 600;
+}
+
+.magpy-ins-what {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.magpy-ins-generated {
+  font-size: 11px;
+  opacity: 0.8;
+  color: var(--vscode-charts-blue, #3987e5);
+  padding-top: 2px;
+}
+
+.magpy-ins-filter {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 2px;
+}
+
+.magpy-ins details {
+  margin: 6px 0 2px;
+}
+
+.magpy-ins summary {
+  cursor: pointer;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 2px 0;
+}
+
+.magpy-ins summary:hover {
+  opacity: 1;
+}
+
+/* the units in a heading set in capitals keep their case: mm is not MM */
+.magpy-ins summary .magpy-ins-unit {
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+.magpy-ins-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 84px) 1fr 18px;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0 2px 6px;
+}
+
+.magpy-ins-row label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.magpy-ins-unit {
+  opacity: 0.5;
+}
+
+.magpy-ins-set label {
+  font-weight: 600;
+}
+
+.magpy-ins-widget {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  min-width: 0;
+}
+
+.magpy-ins input,
+.magpy-ins select,
+.magpy-ins textarea {
+  font: inherit;
+  font-size: 12px;
+  color: var(--vscode-input-foreground, inherit);
+  background: var(--vscode-input-background, transparent);
+  border: 1px solid
+    var(
+      --vscode-input-border,
+      color-mix(in srgb, currentColor 25%, transparent)
+    );
+  border-radius: 3px;
+  padding: 1px 3px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.magpy-ins input[type="color"] {
+  padding: 0;
+  width: 22px;
+  height: 18px;
+  flex: none;
+}
+
+.magpy-ins input[type="range"] {
+  padding: 0;
+}
+
+.magpy-ins-num {
+  width: 48px;
+  flex: none;
+}
+
+.magpy-ins-reset {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  opacity: 0.7;
+  padding: 0;
+  font-size: 12px;
+  visibility: hidden;
+}
+
+.magpy-ins-set .magpy-ins-reset {
+  visibility: visible;
+}
+
+.magpy-ins-status {
+  color: var(--vscode-errorForeground, #d13438);
+  white-space: pre-wrap;
+  margin-top: 6px;
+}
+
+.magpy-ins-status:empty {
+  display: none;
+}
+
+.magpy-ins-empty {
+  opacity: 0.7;
+  margin-top: 10px;
+}
+
+.magpy-ins-vec {
+  display: grid;
+  grid-template-columns: repeat(3, 11px 1fr);
+  gap: 3px;
+  align-items: center;
+}
+
+.magpy-ins-vec span {
+  opacity: 0.55;
+  text-align: right;
+  font-size: 10px;
+}
+
+.magpy-ins-readonly input {
+  opacity: 0.6;
+  background: transparent;
+  border-color: transparent;
+  cursor: default;
+}
+
+/* a field holding an expression rather than a number; hovering shows its value */
+.magpy-ins input.magpy-ins-expr {
+  font-style: italic;
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+.magpy-ins-hint {
+  opacity: 0.6;
+  padding: 0 0 3px 6px;
+  font-size: 11px;
+}
+
+/* A hint that is not an aside: a mesh whose field cannot be trusted has to
+   read differently from the line above it saying how many faces it has. */
+.magpy-ins-warning {
+  opacity: 1;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.magpy-ins textarea {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  resize: vertical;
+}
+
+.magpy-ins-matrix summary {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  opacity: 0.85;
+  padding-left: 6px;
+}
+
+/* the selected construction step, so it is obvious what just changed */
+.magpy-ins-step:not(:empty) {
+  border-left: 2px solid var(--vscode-focusBorder, #3987e5);
+  padding-left: 6px;
+  margin: 4px 0;
+}
+
+.magpy-ins-step summary {
+  color: var(--vscode-charts-blue, #3987e5);
+}
+
+/* Over the view, the rows read as the readout and the variables do: the
+   name, then the numbers underlined rather than boxed, and no reset slot; a
+   group's heading is a quiet line, not a capitalised section. (The panel's
+   element is the module's `.magpy-ins` itself, so the rules below name the
+   dock alone.) */
+.magpy-scene-inspector summary {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.magpy-scene-inspector .magpy-ins-row {
+  grid-template-columns: minmax(52px, auto) 1fr;
+  gap: 5px;
+  padding: 1px 0;
+}
+
+.magpy-scene-inspector .magpy-ins-row > :last-child:empty {
+  display: none;
+}
+
+.magpy-scene-inspector details {
+  margin: 3px 0 1px;
+}
+
+.magpy-scene-inspector input[type="text"],
+.magpy-scene-inspector select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: 0;
+  padding: 0 1px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.magpy-scene-inspector input[type="text"]:focus,
+.magpy-scene-inspector select:focus {
+  outline: none;
+  border-bottom-color: var(--vscode-focusBorder);
+}
+
+.magpy-scene-inspector .magpy-ins-empty {
+  margin-top: 2px;
+  padding: 2px 0;
+}
+
+.magpy-scene-inspector .magpy-ins-hint {
+  padding-left: 0;
+}
+
 /* Over the view, the rows read as the readout does: a name, a slider and a
    number underlined rather than boxed, tabular so a drag does not jitter. */
 .magpy-scene-variables .magpy-vars-row {

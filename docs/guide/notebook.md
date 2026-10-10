@@ -172,7 +172,11 @@ a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
 `view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
 whose style says no size is drawn five millimetres across; `style_size=` says
-another. How the editable view is built is
+another. Beside the sliders, the **object** toggle opens the selection's
+parameters and pose, in the scene's units, with expressions as written: type
+`12`, `1.5 cm` or a variable's name into any of them, and a name the scene lacks
+is made at the value it replaces. One of the two panels is open at a time, and
+both go with the handles. How the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —

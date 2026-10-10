@@ -17,6 +17,9 @@
  * - the variables panel, against a fake kernel: offered with the handles,
  *   a slider drag asking the session in the panel's order and redrawing
  *   between, a dropdown committing once (`widget-pages/variables.html`);
+ * - the object panel, against a fake kernel: the selection's parameters and
+ *   pose, a value typed read through the engine, a bare name made at the
+ *   value it replaces and said (`widget-pages/inspector.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
  *   a run that plays with no python behind it;
@@ -1067,6 +1070,69 @@ async function variablesPanel(port, base) {
   });
 }
 
+/** The object panel: toggled from the column, it shows the selection's
+ *  parameters and pose and follows the selection; a typed value is read
+ *  through the engine and set with `define`, a bare name is set as an
+ *  expression and what the engine made is said; opening it closes the
+ *  variables panel, and the handles put away take it along. */
+async function objectPanel(port, base) {
+  await check(
+    "the object panel edits the selection through the session",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/inspector.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const {
+          offered,
+          header,
+          rows,
+          poseTitle,
+          oneAtATime,
+          typed,
+          named,
+          notice,
+          afterPencil,
+        } = result;
+        if (!offered) return "no object toggle with the handles out";
+        if (header !== "m") return `the header said ${JSON.stringify(header)}`;
+        for (const name of ["dimension", "polarization"]) {
+          if (!rows.includes(name))
+            return `no row for ${name}: ${rows.join(", ")}`;
+        }
+        if (poseTitle !== "pose (m, °)")
+          return `the pose said ${JSON.stringify(poseTitle)}`;
+        if (!oneAtATime) return "the variables panel stayed open beside it";
+        const call = (c) => `${c.method}(${JSON.stringify(c.params)})`;
+        if (
+          typed?.method !== "set_param" ||
+          typed.params.name !== "dimension" ||
+          typed.params.value[0] !== 12 ||
+          typed.params.define !== true
+        ) {
+          return `a typed value sent ${typed ? call(typed) : "nothing"}`;
+        }
+        if (
+          named?.method !== "set_transform" ||
+          named.params.position?.[0] !== "=reach" ||
+          named.params.define !== true
+        ) {
+          return `a bare name sent ${named ? call(named) : "nothing"}`;
+        }
+        if (!notice.includes("reach made"))
+          return `it said ${JSON.stringify(notice)}`;
+        if (afterPencil.button || afterPencil.panel) {
+          return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** An editable view against a fake kernel: a drag goes to the session
  *  as the studio's panel sends one -- the undo group opened, each pose
  *  recorded with the scene redrawn between, the release, the group closed --
@@ -1823,6 +1889,7 @@ try {
   await editing(browser.port, base);
   await pencil(browser.port, base);
   await variablesPanel(browser.port, base);
+  await objectPanel(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);

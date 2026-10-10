@@ -33,6 +33,9 @@ Writes into OUT:
 * ``variables.json`` -- an editable view of a scene written in code, with a
   variable of each kind, the scene its session draws, and what it answers
   `get_variables` with: for the view's own variables panel;
+* ``inspector.json`` -- the same view, with what its session answers
+  `list_objects`, `get_params` and `get_transform` with, per object: for the
+  view's own object panel;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -289,6 +292,23 @@ def main(out):
                 "state": parametric.get_state(),
                 "scene": parametric.payload,
                 "variables": listed,
+            }
+        )
+    )
+    objects = parametric._session.list_objects()
+    (out / "inspector.json").write_text(
+        json.dumps(
+            {
+                "state": parametric.get_state(),
+                "scene": parametric.payload,
+                "variables": listed,
+                "objects": objects,
+                "params": {
+                    o["id"]: parametric._session.get_params(o["id"]) for o in objects
+                },
+                "transforms": {
+                    o["id"]: parametric._session.get_transform(o["id"]) for o in objects
+                },
             }
         )
     )

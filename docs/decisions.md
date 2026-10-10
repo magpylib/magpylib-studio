@@ -1200,3 +1200,48 @@ column. A figure of the field, a table of the scene or a script never is.
   and a cell is a bounded box.
 - No boundary at all, deciding each panel on its merits: that is how the VS Code
   sidebar came to carry eleven thousand lines.
+
+## 0023. The Inspector is the widget's object panel, compact
+
+**Status:** accepted 2026-10-10, as built. **Record of:**
+`plans/inspector-in-widget.md`, deleted when merged.
+
+### Context
+
+The second of the editor's panels to move into the widget
+([0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)),
+inside the boundary of [0022](#0022-what-the-widget-is-and-is-not): the
+selection's properties. The sidebar's Inspector was a thousand lines of vanilla
+JavaScript whose only host-bound line posted the message, plus one host-side
+behaviour: a value naming a variable the scene lacks was asked about in a VS
+Code dialog before the engine saw it.
+
+### Decision
+
+- **One module, two densities.** `static/inspector.mjs` is the Inspector, handed
+  an `rpc`. The sidebar mounts it in full -- header, step, parameters, pose, the
+  style tree with its filter -- through a thin wrapper. The widget mounts it
+  compact: the header, the parameters and the pose of the selection, and nothing
+  else. The style tree is a long list with a long tail, the steps belong to the
+  tree that shows them, and a cell is a bounded box.
+- **It hangs on the column, one panel at a time.** An object toggle beside the
+  sliders opens it; opening either panel closes the other; both go with the
+  handles. It follows the selection, and reads the scene back once an edit
+  settles.
+- **The engine makes a name the scene lacks.** `set_param` and `set_transform`
+  take `define`, as `apply_edits` does, and make a bare name at the value it
+  replaces, in the field's kind of unit, in the same step; the module asks for
+  it on every write and says what was made. The sidebar's dialog stays in front
+  for now and goes with its own line.
+- **The readout stays.** Its numbers move at pointer rate while a handle moves;
+  the panel's pose row is the same numbers at rest. If the two read as one thing
+  said twice, the readout folds into the panel's row later.
+
+### Rejected
+
+- Style properties in the compact panel, even a few: the first ones asked for
+  would be label and colour, then the next, and the tail is the sidebar's.
+- The step editor in the widget: a step is picked in the tree, which the
+  widget's legend is not.
+- A second implementation of the forms for the widget: every field made twice,
+  which [0011](#0011-one-view) refused once already.

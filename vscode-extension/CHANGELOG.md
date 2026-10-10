@@ -48,6 +48,14 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **The object panel.** Beside the sliders toggle, an object toggle opens the
+  selection's parameters and pose over the view: the studio's Inspector, in its
+  compact form, in the scene's units with expressions as written. A value typed
+  is read by the engine, `12` or `1.5 cm`, and a variable's name binds the
+  number; a name the scene lacks is made at the value it replaces, which the
+  engine now does for the Inspector's own calls (`set_param` and `set_transform`
+  take `define`). The studio's own Inspector is that panel, mounted in the
+  sidebar in full.
 - **The readout takes units and variables.** The numbers a drag writes, at the
   foot of the view, show in the scene's units and take `15 mm`, `2 cm`, `5°` as
   the Inspector's boxes do; a variable's name typed there binds the number to it

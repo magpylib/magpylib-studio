@@ -19,6 +19,11 @@ const MUTATING = new Set([
  * format:color -> picker, bounded number -> slider, boolean -> tri-state) and
  * filled from `get_values` (resolved values shown; explicitly set paths get a
  * reset button). All edits go through the shared engine RPC router.
+ *
+ * The panel is the package's (`magpylib_studio/static/inspector.mjs`): the
+ * notebook widget floats the same one, compact, beside its edit column, and
+ * `media/inspector.mjs` mounts it here in full with its calls routed through
+ * this provider.
  */
 export class InspectorViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'magpylib-studio.inspectorView';
@@ -97,26 +102,24 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const nonce = webviewNonce();
     const styleUri = mediaUri(webview, this.extensionUri, 'inspector.css');
-    const scriptUri = mediaUri(webview, this.extensionUri, 'inspector.js');
+    const scriptUri = mediaUri(webview, this.extensionUri, 'inspector.mjs');
+    // The panel itself is the package's, copied beside media/ by `npm run
+    // compile` (harness/copy-widget.js) with the notebook widget's bundle,
+    // whose stylesheet dresses its rows.
+    const widgetDir = vscode.Uri.joinPath(this.extensionUri, 'widget');
+    const panelUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'inspector.mjs'));
+    const widgetStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};" />
+  <link rel="stylesheet" href="${widgetStyleUri}" />
   <link rel="stylesheet" href="${styleUri}" />
 </head>
-<body>
-  <div id="header"></div>
-  <div id="step"></div>
-  <div id="params"></div>
-  <div id="transform"></div>
-  <!-- the filter sits with what it filters: the style list, which is the
-       only long one and the only one it touches -->
-  <input id="filter" type="text" placeholder="Filter style properties…" hidden />
-  <div id="props"></div>
-  <div id="empty">Select an object in the Scene view.</div>
-  <div id="status"></div>
-  <script nonce="${nonce}" src="${scriptUri}"></script>
+<body data-inspector="${panelUri}">
+  <div id="panel"></div>
+  <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }

@@ -4109,13 +4109,35 @@ class MagpylibStudioSession:
             op["start"] = start
         return self._append_ops(object_id, [op], f"rotate {object_id}")
 
-    def set_transform(self, object_id, position=None, orientation=None):
+    def set_transform(self, object_id, position=None, orientation=None, define=False):
         """Set the absolute pose in WORLD coordinates: `position` [x,y,z] and/
         or `orientation` as a rotation vector in degrees. Recorded at the end
         of the event log, so the pose is world-absolute even inside a rotated
-        Collection — nothing replays after it."""
+        Collection — nothing replays after it. With `define`, a bare name the
+        document lacks is made at the value it replaces -- see `apply_edits`."""
         if position is None and orientation is None:
             return {"ok": False, "error": "nothing to set"}
+        if define:
+            made = self._definitions_for(
+                [
+                    {
+                        "objectId": object_id,
+                        "position": position,
+                        "orientation": orientation,
+                    }
+                ]
+            )
+            if made:
+                params = {"object_id": object_id}
+                if position is not None:
+                    params["position"] = position
+                if orientation is not None:
+                    params["orientation"] = orientation
+                return self._with_definitions(
+                    made,
+                    {"method": "set_transform", "params": params},
+                    f"set transform {object_id}",
+                )
         obj = self._objs[object_id]
         if expressions.contains_expression([position, orientation]):
             # Recorded as written, not as the pose it currently comes to:
@@ -4400,6 +4422,14 @@ class MagpylibStudioSession:
             result = {**result, "defined": made}
         return result
 
+    def _with_definitions(self, definitions, call, label):
+        """`call`, with the variables `definitions` make before it, as one
+        step; the answer names what was made."""
+        result = self.apply_calls([*definitions, call], label)
+        if result.get("ok"):
+            result = {**result, "defined": [d["params"]["name"] for d in definitions]}
+        return result
+
     def _definitions_for(self, edits):
         """The `set_variable` calls that make the bare names `edits` use and
         the document lacks, each at the value it replaces -- see
@@ -4421,16 +4451,18 @@ class MagpylibStudioSession:
                 if index >= len(now) or not np.isfinite(now[index]):
                     continue
                 seen.add(name)
-                calls.append(
-                    {
-                        "method": "set_variable",
-                        "params": {
-                            "name": name,
-                            "value": float(now[index]),
-                            "unit": kind,
-                        },
-                    }
+                # a parameter of no known kind -- a magnetization, in A/m --
+                # is made as a bare number; one of several kinds, in the
+                # kind of its component
+                at = (
+                    (kind[index] if index < len(kind) else None)
+                    if isinstance(kind, tuple)
+                    else kind
                 )
+                params = {"name": name, "value": float(now[index])}
+                if at:
+                    params["unit"] = at
+                calls.append({"method": "set_variable", "params": params})
 
         for edit in edits:
             object_id = edit["objectId"]
@@ -4449,11 +4481,13 @@ class MagpylibStudioSession:
             shape = edit.get("shape")
             if shape is not None and not shape["attr"].startswith("style."):
                 attr = shape["attr"]
-                consider(
-                    shape["value"],
-                    getattr(obj, attr, []),
-                    _PARAM_KINDS.get(attr, "length"),
-                )
+                kind = _PARAM_KINDS.get(attr)
+                if attr == "dimension" and isinstance(
+                    obj, magpy.magnet.CylinderSegment
+                ):
+                    # three lengths and two angles, as `_shown_param` shows them
+                    kind = ("length", "length", "length", "angle", "angle")
+                consider(shape["value"], getattr(obj, attr, []), kind)
         return calls
 
     def apply_calls(self, calls, label="edit"):
@@ -4646,11 +4680,30 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"reparent {object_id}")
 
-    def set_param(self, object_id, name, value):
+    def set_param(self, object_id, name, value, define=False):
         """Set a constructor parameter (position, dimension, polarization, …).
         A value may be an expression over the document's variables, on its own
-        or inside a vector: `[0, 0, "=gap"]`."""
+        or inside a vector: `[0, 0, "=gap"]`. With `define`, a bare name the
+        document lacks is made at the value it replaces, in the same step --
+        see `apply_edits`."""
         self._spec(object_id)  # raise early on unknown id
+        if define:
+            made = self._definitions_for(
+                [{"objectId": object_id, "shape": {"attr": name, "value": value}}]
+            )
+            if made:
+                return self._with_definitions(
+                    made,
+                    {
+                        "method": "set_param",
+                        "params": {
+                            "object_id": object_id,
+                            "name": name,
+                            "value": value,
+                        },
+                    },
+                    f"set {object_id}.{name}",
+                )
 
         def mutate(doc):
             # What an object *is* lives on its create event, so this edits

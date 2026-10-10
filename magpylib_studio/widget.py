@@ -268,10 +268,19 @@ class SceneWidget(anywidget.AnyWidget):
             "restore_variable",
             "quantity",
             "expression_help",
+            # the object panel: the selection's parameters and pose
+            "list_objects",
+            "get_params",
+            "get_transform",
+            "read_values",
+            "set_param",
+            "set_transform",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
     _SETTLES = frozenset({"end_interaction", "undo", "redo"})
+    #: The object panel's writes: settled each, as `set` from code is.
+    _OBJECT_EDITS = frozenset({"set_param", "set_transform"})
     #: The calls that edit a variable: settled too, unless the message says
     #: the value is a preview -- the pointer still on the slider -- in which
     #: case the release settles, as a drag's does.
@@ -926,6 +935,14 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": method, "variable": params.get("name")}
             if method == "set_variable":
                 edit["value"] = params.get("value")
+        elif method in self._OBJECT_EDITS:
+            target = params.get("object_id")
+            changed = {
+                k: v for k, v in params.items() if k not in ("object_id", "define")
+            }
+            if method == "set_param":
+                changed = {params.get("name"): params.get("value")}
+            edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
         if method == "apply_edits":
             self._dragged = params.get("edits")
@@ -939,7 +956,11 @@ class SceneWidget(anywidget.AnyWidget):
         # that takes a while -- or raises -- must not keep the view waiting
         # for an answer it would give up on.
         self.send({"kind": "rpc", **answer})
-        if method in self._SETTLES or (method in self._VARIABLE_EDITS and not preview):
+        if (
+            method in self._SETTLES
+            or method in self._OBJECT_EDITS
+            or (method in self._VARIABLE_EDITS and not preview)
+        ):
             self._show(edit)
 
 
