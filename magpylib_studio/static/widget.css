@@ -129,6 +129,24 @@
   transition: opacity 0.15s;
 }
 
+/* The tools in groups, a rule between: the camera, what is shown, editing,
+   what you take away, the window. A group with nothing to show -- every
+   button hidden -- takes its rule with it. */
+.magpy-scene-tool-group {
+  display: flex;
+  gap: 1px;
+}
+
+.magpy-scene-tool-group + .magpy-scene-tool-group {
+  margin-left: 3px;
+  padding-left: 3px;
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-scene-tool-group:not(:has(.magpy-icon:not([hidden]))) {
+  display: none;
+}
+
 /* The editing tools, for a view whose objects are a session's: a column on
    the right-hand edge, always in sight -- which handles are out is the state
    of the view, not a tool to reach for. Centred in the height the other tools

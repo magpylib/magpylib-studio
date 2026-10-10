@@ -4,7 +4,9 @@
   `editable` false -- and the pencil among its tools, against a fake kernel
   that answers the press as python does: the session's scene and tree set on
   the model. `?standalone` is a saved page, with no python to ask; `?empty`
-  a view with nothing named to edit. `window.result` is what the pencil did.
+  a view with nothing named to edit. `window.result` is what the pencil did,
+  and what W did after it: on a view that offers the pencil, the handle keys
+  are the pencil, and come up in their mode.
 -->
 <html>
   <head>
@@ -77,7 +79,18 @@
       const notice = el.querySelector(".magpy-scene-notice")?.textContent ?? "";
       if (!hidden(pencil)) pencil.click(); // again: the handles go away
       await wait(200);
-      window.result = { before, after, again: seen(), saved, notice };
+      const again = seen();
+      // W on a read-only view does what the pencil does, and comes up moving
+      const stage = el.querySelector(".magpy-scene-stage");
+      stage.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "w", bubbles: true }),
+      );
+      await wait(300);
+      const byKey = {
+        ...seen(),
+        moving: button("Move")?.getAttribute("aria-pressed") ?? null,
+      };
+      window.result = { before, after, again, byKey, saved, notice };
     </script>
   </body>
 </html>

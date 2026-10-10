@@ -655,6 +655,10 @@ function render({ model, el }) {
       ...(model.tabWalks
         ? [["Tab", "select the next object — ⇧Tab: the one before"]]
         : []),
+      // where the pencil is, the handle keys are the pencil
+      ...(!editable() && !editButton.hidden
+        ? [["W · E · R · P", "edit — the handles come out, in that mode"]]
+        : []),
       ...(editable() ? KEY_LIST.edit : []),
     ];
     keyList.replaceChildren(
@@ -727,17 +731,21 @@ function render({ model, el }) {
     resetButton,
     panelToggles,
   );
+  // In groups, left to right: the camera; what is shown; editing; what
+  // you take away; the window. A group whose every button is hidden -- the
+  // pencil on a saved page -- goes with them, rule and all (see the CSS).
+  const group = (...buttons) => {
+    const span = document.createElement("span");
+    span.className = "magpy-scene-tool-group";
+    span.append(...buttons);
+    return span;
+  };
   tools.append(
-    legendButton,
-    axesButton,
-    fitButton,
-    projectionButton,
-    editButton,
-    themeButton,
-    pictureButton,
-    exportButton,
-    keysButton,
-    fullscreenButton,
+    group(fitButton, projectionButton),
+    group(legendButton, axesButton, themeButton),
+    group(editButton),
+    group(pictureButton, exportButton),
+    group(keysButton, fullscreenButton),
   );
 
   const transport = document.createElement("div");
@@ -1079,8 +1087,30 @@ function render({ model, el }) {
    *  and A frees it; L swaps the world's axes for the object's own; S snaps
    *  to round steps. Cmd/Ctrl+Z undoes -- with Shift, redoes. */
   function editKey(event) {
-    if (!editable() || event.altKey) return false;
+    if (event.altKey) return false;
     const key = event.key.toLowerCase();
+    if (!editable()) {
+      // A handle key on a view that offers the pencil does what the pencil
+      // does, and comes up in that mode: pressing W means "move it", and a
+      // keyboard hand need not reach for the mouse once.
+      const mode = HANDLE_KEYS[key];
+      if (
+        !mode ||
+        mode === "none" ||
+        editButton.hidden ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey
+      ) {
+        return false;
+      }
+      handles = mode;
+      notify(
+        "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away",
+      );
+      commit("editable", true);
+      return true;
+    }
     if ((event.metaKey || event.ctrlKey) && key === "z") {
       // A host that has its own undo key -- VS Code runs its keybinding on
       // Cmd+Z in the studio panel -- says so, and the view leaves the key to

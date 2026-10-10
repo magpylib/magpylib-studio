@@ -48,6 +48,10 @@ All notable changes to the Magpylib Studio extension.
 - **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
   run by Claude Code headless with plain magpylib and with the skill, results
   kept in the repository.
+- **The view's tools in groups**, a rule between: the camera, what is shown, the
+  pencil, what you take away, the window. And **W**, **E**, **R** or **P** on a
+  view that offers the pencil put the handles out, as the pencil does, in that
+  mode.
 - An import of plain magpylib (`load_script`) now names the variables it turned
   into numbers, where it used to say nothing.
 - **A drag's frame is one message.** A slider's or a handle's preview asks for

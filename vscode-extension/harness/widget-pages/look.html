@@ -3,8 +3,9 @@
   A look at a scene the engine drew, for a screenshot: the widget over a
   payload from the fixtures, read only, with nothing to ask python for.
   `?out=readings.json&index=0` names the fixture and, for a file holding a
-  list, which entry; `?dark` and `?light` say what the page is. No check
-  reads this page; `scratchpad/shot.sh` and a person do.
+  list, which entry; `?dark` and `?light` say what the page is; `?tools`
+  keeps the hover bar in sight, `?editable` offers the pencil. No check reads
+  this page; a person does, by screenshot.
 -->
 <html>
   <head>
@@ -19,6 +20,11 @@
       const query = new URLSearchParams(location.search);
       if (query.has("dark")) document.body.style.background = "#1e1e1e";
       if (query.has("light")) document.body.style.background = "#ffffff";
+      if (query.has("tools")) {
+        const style = document.createElement("style");
+        style.textContent = ".magpy-scene-tools { opacity: 1 !important; }";
+        document.head.append(style);
+      }
       let fixture = await (
         await fetch(`/out/${query.get("out") ?? "readings.json"}`)
       ).json();
@@ -36,8 +42,8 @@
         frames: 1,
         duration: 5,
         repeat: false,
-        editable: null,
-        standalone: true,
+        editable: query.has("editable") ? false : null,
+        standalone: !query.has("editable"),
         revision: 0,
         last_edit: {},
       };

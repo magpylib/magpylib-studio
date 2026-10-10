@@ -69,9 +69,10 @@ tree — "the lower ring" is still the one below after a slider has remade both.
 **Keys**, once the view has focus, are the panel's: **F** frames the selection
 and **Home** everything, **1**/**3**/**7** look from the front, right and top,
 **5** switches the projection, **H** hides the selection and **shift-H** shows
-only it, **Esc** lets go, **space** plays. They come from one table in
-`scene3d.mjs` that both hosts use. Tab is the one the widget does not take: in a
-notebook it moves between cells.
+only it, **Esc** lets go, **space** plays. On a view that offers the pencil,
+**W**, **E**, **R** or **P** put the handles out, as the pencil does, in that
+mode. They come from one table in `scene3d.mjs` that both hosts use. Tab is the
+one the widget does not take: in a notebook it moves between cells.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.

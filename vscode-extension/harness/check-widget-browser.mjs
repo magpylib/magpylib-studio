@@ -953,7 +953,8 @@ async function studioDrag(port, base) {
 
 /** The pencil: a read-only view of named objects offers one, and pressing
  *  it saves `editable` for python and brings the edit bar out; a saved page
- *  and a view of nothing offer none. */
+ *  and a view of nothing offer none. W on a view that offers the pencil is
+ *  the pencil, and comes up moving; elsewhere it does nothing. */
 async function pencil(port, base) {
   await check("the pencil puts a read-only view into editing", async () => {
     const tab = await openTab(port);
@@ -968,12 +969,15 @@ async function pencil(port, base) {
         await tab.navigate(`${base}/pages/pencil.html${query}`);
         const result = await tab.until("return window.result", 20_000);
         if (!result) return `${page}: never finished`;
-        const { before, after, again, saved, notice } = result;
+        const { before, after, again, byKey, saved, notice } = result;
         if (before.pencil !== offered) {
           return `${page} ${offered ? "offered no pencil" : "offered a pencil"}`;
         }
         if (before.bar) return `${page}: the edit bar was out before a press`;
-        if (!offered) continue;
+        if (!offered) {
+          if (saved.length || byKey.bar) return `${page}: W did something`;
+          continue;
+        }
         if (!after.bar || !after.pencil || after.pressed !== "true") {
           return `after the press: ${JSON.stringify(after)}`;
         }
@@ -982,7 +986,10 @@ async function pencil(port, base) {
         if (again.bar || again.pressed !== "false") {
           return `pressed again: ${JSON.stringify(again)}`;
         }
-        if (saved.join() !== "true,false") {
+        if (!byKey.bar || byKey.pressed !== "true" || byKey.moving !== "true") {
+          return `W on the read-only view: ${JSON.stringify(byKey)}`;
+        }
+        if (saved.join() !== "true,false,true") {
           return `the presses saved ${saved.join()}`;
         }
       }
