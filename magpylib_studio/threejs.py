@@ -852,7 +852,13 @@ def _keyed(traces, live=None, derived=None):
         return payload
     key_of = _key_map(live, derived)
     for item in payload:
-        item["object_id"] = key_of(item["object_id"])
+        raw = item["object_id"]
+        item["object_id"] = key_of(raw)
+        own = key_of(raw, own=True)
+        # a pattern's copy, drawn under its source: said which, so the view
+        # can mark the source and its copies apart
+        if own != item["object_id"]:
+            item["copy"] = own
     return payload
 
 
@@ -871,9 +877,11 @@ def _key_map(live, derived=None):
         for child in getattr(obj, "children_all", ())
     }
 
-    def key_of(raw):
+    def key_of(raw, own=False):
+        """The id to draw under -- or, with `own`, the object's own: a copy's
+        names it among the traces its source's node holds."""
         key = studio_id.get(raw) or holding.get(raw)
-        return source_of.get(key, key)
+        return key if own else source_of.get(key, key)
 
     return key_of
 

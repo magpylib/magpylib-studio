@@ -5155,3 +5155,18 @@ def test_a_style_set_on_a_patterns_source_reaches_its_copies(session):
     assert session.reset_style("r2", "color")["ok"]
     assert session._objs["r2#2"].style.color is None
     assert session.apply_edit("r2", "color", "no such colour")["ok"] is False
+
+
+@needs_scene_graph
+def test_a_copys_traces_say_which_copy_they_are(session):
+    """Drawn under its source's id, a copy's trace still names the copy, so
+    the view can outline the source full and the copies faint."""
+    session.add_object("ring", "Collection")
+    session.add_object(
+        "r2", "magnet.Cuboid", params={"dimension": [1, 1, 1]}, parent="ring"
+    )
+    session.move("r2", [3, 0, 0])
+    assert session.duplicate_around("r2", count=4, spin=90)["ok"]
+    assert "r2#1" in session._objs
+    meshes = [m for m in session.get_scene()["meshes"] if m["object_id"] == "r2"]
+    assert sorted(m.get("copy", "") for m in meshes) == ["", "r2#1", "r2#2", "r2#3"]

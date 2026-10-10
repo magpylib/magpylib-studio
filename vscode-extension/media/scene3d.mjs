@@ -785,6 +785,11 @@ const EDGE_ANGLE = 25;
  *  yellower than the green magpylib paints a magnet's south pole. */
 const SELECTION_COLOUR = "#39ff14";
 
+/** How faint a pattern's copies are outlined beside their source, drawn in
+ *  full: the family reads as one leader and its followers, and a click on
+ *  any of them selects the source. */
+const COPY_OUTLINE = 0.35;
+
 /** How wide, in pixels, the selection's lines are: an edge in view, a path or
  *  a wire, and an edge the shape hides, drawn faintly through it. A plain GL
  *  line is one pixel whatever it is asked for, which is easy to miss. */
@@ -811,7 +816,7 @@ const wideMaterials = new Set();
  *
  * Each part hangs on the trace it marks, so it moves with it.
  */
-function outline(objectIds, opacity) {
+function outline(objectIds, opacity, copyOpacity = opacity) {
   const added = [];
   const hang = (on, part) => {
     part.raycast = () => {}; // an indicator, not a target
@@ -825,8 +830,9 @@ function outline(objectIds, opacity) {
     if (!node?.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue; // a handle, or another node
+      const own = trace.userData.copy ? copyOpacity : opacity;
       if (trace.isMesh) {
-        outlineShape(trace, opacity, hang);
+        outlineShape(trace, own, hang);
         continue;
       }
       // A scatter: its lines take the selection's colour, and its markers
@@ -838,10 +844,10 @@ function outline(objectIds, opacity) {
             part.geometry.getAttribute("position").array,
           );
           if (pairs.length) {
-            hang(part, wideSegments(pairs, OUTLINE_WIDTH, opacity, true));
+            hang(part, wideSegments(pairs, OUTLINE_WIDTH, own, true));
           }
         } else if (trace.userData.path && part.isPoints) {
-          hang(part, pathMarkers(part, opacity));
+          hang(part, pathMarkers(part, own));
         }
       }
     }
@@ -1055,11 +1061,18 @@ export function withPenLifts(position) {
   return Float32Array.from(position, (value) => (value === null ? NaN : value));
 }
 
-/** One trace as the thing drawn: a mesh, a sensor's pixels, or a scatter. */
+/** One trace as the thing drawn: a mesh, a sensor's pixels, or a scatter.
+ *  A pattern's copy, drawn under its source, is marked as the copy it is,
+ *  for the outline to draw it fainter than the source. */
 function buildItem(item) {
-  if (item.kind === "mesh") return buildMesh(item);
-  if (item.kind === "pixels") return buildPixels(item);
-  return buildScatter(item);
+  const built =
+    item.kind === "mesh"
+      ? buildMesh(item)
+      : item.kind === "pixels"
+        ? buildPixels(item)
+        : buildScatter(item);
+  if (item.copy) built.userData.copy = item.copy;
+  return built;
 }
 
 /** A sensor's pixels, instanced: one shape -- the arrow magpylib draws, a
@@ -1233,7 +1246,7 @@ function highlight(objectIds) {
 /** Outline the selection afresh, round whatever is drawn for it now. */
 function drawOutlines() {
   takeOff(outlines);
-  outlines = outline(selectedIds, 1);
+  outlines = outline(selectedIds, 1, COPY_OUTLINE);
 }
 
 /** Where a drag of several objects turns about: the middle of what is

@@ -52,6 +52,10 @@ All notable changes to the Magpylib Studio extension.
   source of a pattern reaches its copies, as a drag's pose does: the edit
   replays the scene, where before it changed the source alone until the next
   rebuild.
+- **The source is drawn full, its copies faint.** With a pattern's source
+  selected, the view outlines the source in full and its copies at a third, so
+  the family reads as one leader and its followers; a click on any of them
+  selects the source, as before.
 - **The panels dock beside the view.** The variables and object panels open in a
   column beside the view, which refits to what is left, rather than floating
   over it: a float had nowhere to go on a narrow view. A handle on the column's
