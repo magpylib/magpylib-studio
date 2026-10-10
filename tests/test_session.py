@@ -5170,3 +5170,4 @@ def test_a_copys_traces_say_which_copy_they_are(session):
     assert "r2#1" in session._objs
     meshes = [m for m in session.get_scene()["meshes"] if m["object_id"] == "r2"]
     assert sorted(m.get("copy", "") for m in meshes) == ["", "r2#1", "r2#2", "r2#3"]
+    assert session.get_scene()["copies"] == {"r2": ["r2#1", "r2#2", "r2#3"]}

@@ -2224,14 +2224,27 @@ export function activate(context: vscode.ExtensionContext): void {
   inspector = new InspectorViewProvider(
     context.extensionUri,
     async (method, params) => {
-      // The inspector's fields take expressions too, and a webview cannot
-      // raise an input box — so the ask happens here, on the way through.
-      if (params && MUTATING_WITH_VALUES.has(method)) {
+      // A bare name in a parameter or a pose is the engine's to make: the
+      // panel sends `define`, and the engine makes the name at the value it
+      // replaces, in the same step (decision 0023). A step's own values still
+      // go through the ask here, since `edit_event` takes no `define`, and a
+      // webview cannot raise an input box of its own.
+      if (params && MUTATING_WITH_VALUES.has(method) && !params.define) {
         if (!(await ensureVariablesDefined(Object.values(params), { method, params }))) {
           return { ok: false, error: 'cancelled' };
         }
       }
-      return (await getEngine(context)).request(method, params);
+      const result = (await (await getEngine(context)).request(method, params)) as {
+        ok?: boolean;
+        defined?: string[];
+      };
+      if (result?.ok && result.defined?.length) {
+        vscode.window.setStatusBarMessage(
+          `Magpylib Studio: ${result.defined.join(', ')} made, at the value it replaces`,
+          4000,
+        );
+      }
+      return result;
     },
     () => {
       // Every field here writes to the scene, so this is an edit like any

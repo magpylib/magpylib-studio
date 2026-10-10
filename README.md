@@ -73,6 +73,7 @@ from typing import Annotated
 
 import magpylib as magpy
 from magpylib_studio import Count, Length, duplicate_around, scene
+from magpylib_studio.widget import SceneWidget
 
 
 @scene
@@ -93,6 +94,7 @@ ring(n=12).getB((0, 0, 0))  # plain magpylib: real objects, a real field
 ring.build().save(
     "ring.magpy.json"
 )  # the document: n and radius are sliders in the studio
+SceneWidget(ring, editable=True)  # the scene in a notebook, a slider per parameter
 ```
 
 Called, it is magpylib. Built, it is the studio's document, every parameter a

@@ -181,9 +181,13 @@ assignment a parameter edit or a pose pin, `copy()` the document's copy, and the
 style each object was given is read between calls and written as edits.
 Arithmetic on a handle writes an expression; what needs the value now raises at
 its line; a property read is today's number, with a warning. Studio's own words
-(`derived`, the patterns, `place`, `sampled`, `hide`, `show`, `remove`,
-`TriangularMesh`, `name`) are one step each when recording and plain magpylib
-when called. `fn.build(values=path)` takes a saved scene's slider values.
+(`derived`, the patterns, `sampled` and `grid`, `hide` and `unhide`, `remove`,
+`TriangularMesh.from_file`, `.from_hull` and `.from_superquadric`, `place`,
+`name`) are one step each when recording and plain magpylib when called.
+`fn.build(values=path)` takes a saved scene's slider values. A plain function
+handed to the notebook's view is a scene function without the mark, built the
+same way; the mark is for a file, where it says which function is the scene, and
+for `build()` without a view.
 
 Three ways between code and the document, none of which parses code
 ([0004](decisions.md#0004-script-generation-is-one-way)):

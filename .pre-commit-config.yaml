@@ -23,7 +23,8 @@ ci:
   autofix_commit_msg: "style: pre-commit fixes"
   autoupdate_schedule: "monthly"
 
-# Nothing here reads or rewrites `magpylib_studio/static/widget.js`. It is the
+# Nothing here reads or rewrites `magpylib_studio/static/widget.js` or
+# `panel.js`. Each is the
 # notebook widget's bundle — the panel's renderer with three.js in it, built by
 # `tools/build-widget.sh` and committed so that installing the package needs no
 # node — and every hook that touched it would make it differ from what the
@@ -31,7 +32,7 @@ ci:
 # the shader strings three.js carries, and codespell reads minified names as
 # misspelled words. `npm run check:widget` is the check it does have, and it
 # compares the bundle against the sources rather than its own contents.
-exclude: ^vscode-extension/(node_modules|out|\.vscode-test)/|^magpylib_studio/static/widget\.js$
+exclude: ^vscode-extension/(node_modules|out|\.vscode-test)/|^magpylib_studio/static/(widget|panel)\.js$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

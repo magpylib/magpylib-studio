@@ -24,7 +24,10 @@ const EXT = path.join(__dirname, "..");
 const REPO = path.join(EXT, "..");
 
 const STATIC = path.join(REPO, "magpylib_studio", "static");
-const BUNDLE = path.join(STATIC, "widget.js");
+// Two bundles from the one set of sources: the view, and a panel of its own.
+const BUNDLES = ["widget.js", "panel.js"].map((name) =>
+  path.join(STATIC, name),
+);
 // The set the build hashes, the way it takes them: every module of the
 // widget's own and the renderer, by path from the repo root, sorted.
 const SOURCES = [
@@ -36,20 +39,6 @@ const SOURCES = [
 ].sort();
 const REBUILD =
   "Run tools/build-widget.sh (needs npm install in vscode-extension/).";
-
-if (!fs.existsSync(BUNDLE)) {
-  console.error(
-    `check-widget: ${path.relative(REPO, BUNDLE)} is missing. ${REBUILD}`,
-  );
-  process.exit(1);
-}
-
-const banner = fs.readFileSync(BUNDLE, "utf8").slice(0, 500);
-const stamped = /^\/\/ sources-sha256: ([0-9a-f]{64})$/m.exec(banner);
-if (!stamped) {
-  console.error(`check-widget: the bundle carries no source hash. ${REBUILD}`);
-  process.exit(1);
-}
 
 // What it was built with: the three.js the panel loads, and the esbuild the
 // build pins.
@@ -70,17 +59,33 @@ for (const file of SOURCES) hash.update(fs.readFileSync(path.join(REPO, file)));
 hash.update(`three@${three} ${esbuild}`);
 const actual = hash.digest("hex");
 
-if (actual !== stamped[1]) {
-  console.error(
-    "check-widget: the notebook widget was built from different sources than " +
-      `the ones in the tree (${SOURCES.join(", ")}), or with another three.js ` +
-      `or esbuild than three@${three} and ${esbuild}. ` +
-      REBUILD,
-  );
-  process.exit(1);
+for (const BUNDLE of BUNDLES) {
+  if (!fs.existsSync(BUNDLE)) {
+    console.error(
+      `check-widget: ${path.relative(REPO, BUNDLE)} is missing. ${REBUILD}`,
+    );
+    process.exit(1);
+  }
+  const banner = fs.readFileSync(BUNDLE, "utf8").slice(0, 500);
+  const stamped = /^\/\/ sources-sha256: ([0-9a-f]{64})$/m.exec(banner);
+  if (!stamped) {
+    console.error(
+      `check-widget: ${path.relative(REPO, BUNDLE)} carries no source hash. ${REBUILD}`,
+    );
+    process.exit(1);
+  }
+  if (actual !== stamped[1]) {
+    console.error(
+      `check-widget: ${path.relative(REPO, BUNDLE)} was built from different sources than ` +
+        `the ones in the tree (${SOURCES.join(", ")}), or with another three.js ` +
+        `or esbuild than three@${three} and ${esbuild}. ` +
+        REBUILD,
+    );
+    process.exit(1);
+  }
 }
 
-console.log("check-widget: the widget bundle matches its sources.");
+console.log("check-widget: the widget bundles match their sources.");
 
 // The legend's type icons are the tree's (`media/icons`), carried in the
 // widget's own stylesheet as masks, since the package cannot read the

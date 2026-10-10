@@ -40,6 +40,9 @@
       if (query.has("light")) document.body.style.background = "#ffffff";
       if (query.has("dark")) document.body.style.background = "#1e1e1e";
       const values = { ...state };
+      // `?coloured`: a colour set on the magnet already, for a look at the
+      // title line's reset
+      if (query.has("coloured")) styles.m.set.color = "#ff0000";
 
       const asked = [];
       const listeners = {};
@@ -83,9 +86,12 @@
           else if (method === "get_scene") result = scene;
           else if (method === "get_schema") result = schemas[p.object_id];
           else if (method === "get_values") result = styles[p.object_id];
-          else if (method === "apply_edit" || method === "reset_style")
-            result = { ok: true };
-          else if (method === "read_values")
+          else if (method === "apply_edit") {
+            // kept, so the values read back say what was set
+            styles[p.object_id].set[p.path] = p.value;
+          } else if (method === "reset_style") {
+            delete styles[p.object_id].set[p.path];
+          } else if (method === "read_values")
             result = { ok: true, values: p.terms.map(Number) };
           else if (method === "set_param") result = made({ value: p.value });
           else if (method === "set_transform")
@@ -191,6 +197,9 @@
         const style = {
           folded: Boolean(styleBox) && !styleBox.open,
           lazy: !asked.some((a) => a.method === "get_schema"),
+          resetBefore: Boolean(
+            el.querySelector(".magpy-scene-dock-head .magpy-ins-reset-all"),
+          ),
         };
         mark = asked.length;
         styleBox.open = true;
@@ -212,6 +221,25 @@
         await wait(400);
         style.edit =
           asked.slice(mark).find((a) => a.method === "apply_edit") ?? null;
+        // the colour set, the title line offers to put it back, as one step;
+        // before it, with only the label set, it offered nothing
+        await wait(300);
+        const resetAll = el.querySelector(
+          ".magpy-scene-dock-head .magpy-ins-reset-all",
+        );
+        style.resetAll = {
+          before: style.resetBefore,
+          shown: Boolean(resetAll),
+          title: resetAll?.title ?? null,
+        };
+        const mark2 = asked.length;
+        resetAll?.click();
+        await wait(500);
+        style.reset = asked
+          .slice(mark2)
+          .filter((a) => a.method === "reset_style")
+          .map((a) => a.params.path);
+        style.resetGrouped = asked.slice(mark2).map((a) => a.method);
         // the handles put away take the panel with them
         button("Edit").click();
         await wait(200);

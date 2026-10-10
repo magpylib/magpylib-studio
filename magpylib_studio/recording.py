@@ -82,6 +82,7 @@ __all__ = [
     "derived",
     "duplicate_along",
     "duplicate_around",
+    "grid",
     "hide",
     "mirror",
     "name",
@@ -89,7 +90,7 @@ __all__ = [
     "remove",
     "sampled",
     "scene",
-    "show",
+    "unhide",
 ]
 
 #: The recorder of the `build()` in progress, if any.
@@ -259,9 +260,10 @@ class SceneFunction:
 
     def build(self, values=None):
         """Call the function with its parameters as handles, recording what
-        it does, and return the `Scene` it built: the document, to `save`,
-        to show (`SceneWidget(s, editable=True)`), or to read the field of
-        through `s.session`.
+        it does, and return the `Scene` it built: the document, to `save`, to
+        read the field of through `s.session`, or to show (`SceneWidget(s)`)
+        where several cells share it. A view alone takes the function,
+        `SceneWidget(ring)`, and builds its own.
 
         `values` is where the parameters' values come from when there are
         some: a saved scene (its path) or a mapping of names to values. A
@@ -860,6 +862,26 @@ def _resolve_all(recorder, *values):
     return tuple(recorder.resolved(value) if recorder else value for value in values)
 
 
+def grid(half, count, *, plane="xy", at=0):
+    """A square of `count` by `count` points across ±`half` in `plane` (xy,
+    xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
+    the variables, `pixel=grid(reach, density)`, so the grid follows a slider
+    as `sampled` does; `count` is two or more. Called plainly, it is the
+    points."""
+    axes = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}[plane]
+
+    def point(t):
+        across = -half + 2 * half * (t % count) / (count - 1)
+        up = -half + 2 * half * (t // count) / (count - 1)
+        coordinates = [None, None, None]
+        coordinates[axes[0]] = across
+        coordinates[axes[1]] = up
+        coordinates[axes[2]] = at
+        return tuple(coordinates)
+
+    return sampled(point, count=count**2, over=(0, count**2 - 1))
+
+
 def duplicate_around(obj, count, axis="z", anchor=0, spin=0):
     """`count` of `obj` about `axis` through `anchor`, each copy turned by
     `spin` degrees more than the last: one step, which stays a pattern.
@@ -958,8 +980,9 @@ def hide(obj):
     return obj
 
 
-def show(obj):
-    """Show `obj` again in the 3D view, after `hide`."""
+def unhide(obj):
+    """Show `obj` again in the 3D view, after `hide`. Not `show`: that is
+    magpylib's word for drawing a scene."""
     recorder = _recording_step(obj, "show")
     _switch(obj, True, recorder)
     return obj
@@ -1029,6 +1052,48 @@ def TriangularMesh(mesh_source, **kwargs):
         if orientation is not None:
             recorded.set_transform(orientation=_rotvec(orientation))
     return obj
+
+
+def _mesh_from_file(path, *, scale=None, sha256=None, **kwargs):
+    """`TriangularMesh.from_file("rotor.stl", scale=0.001, polarization=...)`:
+    the mesh a file holds, `scale` in metres per file unit -- 0.001 for a file
+    drawn in millimetres, which is most of them. `sha256` is what the file
+    held when a scene was saved, which the script tab carries so a changed
+    file is still noticed; nobody writes it by hand."""
+    source = {"from": "file", "path": str(path)}
+    if scale is not None:
+        source["scale"] = scale
+    if sha256 is not None:
+        source["sha256"] = sha256
+    return TriangularMesh(source, **kwargs)
+
+
+def _mesh_from_hull(points, **kwargs):
+    """`TriangularMesh.from_hull(points, polarization=...)`: the convex hull
+    of `points`, as magpylib's `from_ConvexHull` makes it, kept as the points
+    so a variable among them still decides it."""
+    return TriangularMesh({"from": "hull", "points": points}, **kwargs)
+
+
+def _mesh_from_superquadric(
+    size, roundness=(1, 1), *, around=None, across=None, **kwargs
+):
+    """`TriangularMesh.from_superquadric((w, d, h), (profile, plan))`: a
+    rounded solid, `roundness` 0.05/0.05 a block, 0.05/1 a cylinder, 1/1 a
+    sphere, 2/2 a diamond; `around` and `across` how many samples."""
+    source = {"from": "superquadric", "size": size, "roundness": roundness}
+    if around is not None:
+        source["around"] = around
+    if across is not None:
+        source["across"] = across
+    return TriangularMesh(source, **kwargs)
+
+
+# The spellings that say where a mesh comes from; the dict is the document's
+# own form, and still taken.
+TriangularMesh.from_file = _mesh_from_file
+TriangularMesh.from_hull = _mesh_from_hull
+TriangularMesh.from_superquadric = _mesh_from_superquadric
 
 
 # --- what an expression may say -----------------------------------------------

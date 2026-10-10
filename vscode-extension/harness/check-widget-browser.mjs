@@ -20,6 +20,9 @@
  * - the object panel, against a fake kernel: the selection's parameters and
  *   pose, a value typed read through the engine, a bare name made at the
  *   value it replaces and said (`widget-pages/inspector.html`);
+ * - a panel of its own, the variables and the object kinds against a fake
+ *   model: the rows, a drag's previews and release, the rows read again when
+ *   the view moves on, the selection followed (`widget-pages/own-panel.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
  *   a run that plays with no python behind it;
@@ -1159,6 +1162,19 @@ async function objectPanel(port, base) {
         ) {
           return `a colour set sent ${style.edit ? call(style.edit) : "nothing"}`;
         }
+        if (style.resetAll?.before)
+          return "a reset was offered with only the label set";
+        if (!style.resetAll?.shown)
+          return "the title line offered no reset for the colour set";
+        if (JSON.stringify(style.reset) !== JSON.stringify(["color"])) {
+          return `the reset sent ${JSON.stringify(style.reset)}`;
+        }
+        if (
+          style.resetGrouped[0] !== "begin_interaction" ||
+          !style.resetGrouped.includes("end_interaction")
+        ) {
+          return `the reset was not one step: ${style.resetGrouped.join(" ")}`;
+        }
         if (afterPencil.button || afterPencil.panel) {
           return `the panel stayed when the handles went away: ${JSON.stringify(afterPencil)}`;
         }
@@ -1190,6 +1206,45 @@ async function objectPanel(port, base) {
       }
     },
   );
+}
+
+/** A panel of its own (`ScenePanel`): the variables kind lists the rows,
+ *  sends a slider's values under the pointer as previews and the release as
+ *  the edit, and reads the rows again when the view's revision moves; the
+ *  object kind shows the selection and follows it. */
+async function panelWidget(port, base) {
+  await check("a panel of its own edits through the view", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/own-panel.html`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "variables: never finished";
+      if (result.title !== "Variables")
+        return `the title said ${JSON.stringify(result.title)}`;
+      if (result.rows.join() !== "n,r,axis,free,half")
+        return `the rows were ${result.rows.join()}`;
+      const said = result.drag.join(" ");
+      if (result.drag.at(-1) !== "=14")
+        return `the release committed ${result.drag.at(-1)}: ${said}`;
+      if (!result.drag.slice(0, -1).every((d) => d.startsWith("*"))) {
+        return `a value under the pointer was no preview: ${said}`;
+      }
+      if (!result.reread)
+        return "the rows were not read again when the view moved on";
+      await tab.navigate(`${base}/pages/own-panel.html?object`);
+      const object = await tab.until("return window.result", 20_000);
+      if (!object) return "object: never finished";
+      if (object.title !== "Object")
+        return `the object title said ${JSON.stringify(object.title)}`;
+      if (!object.rows.includes("dimension"))
+        return `no dimension row: ${object.rows.join(", ")}`;
+      if (object.followed !== "ring")
+        return `the panel showed ${JSON.stringify(object.followed)} after the selection moved`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 /** An editable view against a fake kernel: a drag goes to the session
@@ -1949,6 +2004,7 @@ try {
   await pencil(browser.port, base);
   await variablesPanel(browser.port, base);
   await objectPanel(browser.port, base);
+  await panelWidget(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);

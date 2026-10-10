@@ -1140,7 +1140,7 @@ def test_a_page_saved_from_a_studio_is_read_only():
 def test_a_studio_is_not_re_pointed():
     """And the refusal says what a view the notebook re-points is made with."""
     studio = _studio()
-    with pytest.raises(TypeError, match="editable=None"):
+    with pytest.raises(TypeError, match='editable="never"'):
         studio.update(magpy.Sensor())
 
 
@@ -1749,3 +1749,121 @@ def test_the_object_panel_sets_style_through_the_session():
     assert studio.objects["m"].style.color is None
     assert studio.last_edit["changed"] == {"m": {"style.color": None}}
     assert studio.revision == revision + 2
+
+
+def _panel_of(studio, kind):
+    """A panel of its own on `studio`, its messages kept."""
+    panel = studio.panel(kind)
+    panel.sent = []
+    panel.send = lambda message, buffers=None: panel.sent.append(message)
+    return panel
+
+
+def _ask_panel(panel, method, preview=False, **params):
+    """What a panel of its own sends when it calls the session, and the
+    answer, which comes back under the panel's own model."""
+    message = {"kind": "rpc", "id": len(panel.sent), "method": method, "params": params}
+    if preview:
+        message["preview"] = True
+    panel._on_message(panel, message, [])
+    return panel.sent[-1]
+
+
+@needs_scene_graph
+def test_a_panel_of_its_own_edits_through_the_view():
+    """`view.panel("variables")` is a widget the notebook places apart: it
+    reads the scene's variables through the view; a value it sets is one
+    settled edit the view draws and tells the notebook; a previewed value
+    redraws the view and tells nothing; and the view's revision, selection and
+    theme reach it. The object panel sets a parameter the same way."""
+    studio = _studio_of(_design())
+    panel = _panel_of(studio, "variables")
+    assert panel.kind == "variables"
+    listed = _ask_panel(panel, "get_variables")["result"]
+    assert [v["name"] for v in listed["variables"]][:2] == ["n", "r"]
+    revision = studio.revision
+    drawn = studio.payload
+    answer = _ask_panel(panel, "set_variable", name="n", value=12, preview=True)
+    assert answer["result"]["ok"]
+    assert studio.revision == revision, "a preview told the notebook"
+    assert studio.payload is not drawn, "a preview left the view undrawn"
+    answer = _ask_panel(panel, "set_variable", name="n", value=14)
+    assert answer["result"]["ok"]
+    assert studio.revision == revision + 1
+    assert studio.variables["n"] == 14
+    assert panel.revision == studio.revision
+    studio.selected = ["m"]
+    studio.theme = "dark"
+    assert panel.selected == ["m"] and panel.theme == "dark"
+    objects = _panel_of(studio, "object")
+    answer = _ask_panel(
+        objects, "set_param", object_id="m", name="dimension", value=[0.02, 0.01, 0.01]
+    )
+    assert answer["result"]["ok"]
+    assert studio.revision == revision + 2
+    assert studio.objects["m"].dimension[0] == pytest.approx(0.02)
+    refused = _ask_panel(objects, "load_example", name="halbach")
+    assert "may not call" in refused["error"]["message"]
+
+
+@needs_scene_graph
+def test_a_panel_of_its_own_needs_an_editable_view():
+    """A view of the cell's own objects, with no scene of its own, has no
+    panel to give; a kind the view does not know is refused by name."""
+    import traitlets
+
+    studio = _studio_of(_design())
+    with pytest.raises(traitlets.TraitError):
+        studio.panel("history")
+    looking = widget.SceneWidget(magpy.magnet.Cuboid(dimension=(1, 1, 1)))
+    with pytest.raises(TypeError, match="panel of its own"):
+        looking.panel("variables")
+
+
+@needs_scene_graph
+def test_the_view_takes_the_scene_function_itself():
+    """`SceneWidget(ring)` builds the function, as `SceneWidget(ring.build())`
+    did: the view shows the scene's own session, variables and all, editable
+    or for looking."""
+    design = _design()
+    studio = widget.SceneWidget(design, editable=True)
+    assert set(studio.variables) >= {"n", "r"}
+    looking = widget.SceneWidget(design)
+    assert "n" in looking.variables
+
+
+@needs_scene_graph
+def test_never_is_the_word_for_a_view_that_is_never_edited():
+    """`editable="never"` reads where `None` made a reader stop; both make the
+    view that offers no pencil and refuses to turn on."""
+    import traitlets
+
+    magnet = magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 1))
+    view = widget.SceneWidget(magnet, editable="never")
+    assert view.editable is None
+    with pytest.raises(traitlets.TraitError, match="never edited"):
+        view.editable = True
+
+
+@needs_scene_graph
+def test_a_plain_function_is_a_scene_to_the_view():
+    """Handed to the view, a function whose parameters are the variables is a
+    scene without the mark: built the same way, its parameters its variables.
+    `@scene` is for a file, where the mark says which function is the scene."""
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    def plain(radius: Annotated[float, Length(0.005, 0.05)] = 0.02):
+        return magpy.magnet.Cuboid(
+            dimension=(0.01, 0.01, 0.01),
+            polarization=(0, 0, 1),
+            position=(radius, 0, 0),
+            style_label="m",
+        )
+
+    studio = widget.SceneWidget(plain, editable=True)
+    assert studio.variables == {"radius": pytest.approx(0.02)}
+    assert studio.objects["m"].position[0] == pytest.approx(0.02)
+    studio.variables = {"radius": 0.03}
+    assert studio.objects["m"].position[0] == pytest.approx(0.03)

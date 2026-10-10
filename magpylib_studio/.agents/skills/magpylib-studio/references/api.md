@@ -18,9 +18,10 @@ What `@scene` makes:
 ### `fn.build(values=None)`
 
 Call the function with its parameters as handles, recording what
-it does, and return the `Scene` it built: the document, to `save`,
-to show (`SceneWidget(s, editable=True)`), or to read the field of
-through `s.session`.
+it does, and return the `Scene` it built: the document, to `save`, to
+read the field of through `s.session`, or to show (`SceneWidget(s)`)
+where several cells share it. A view alone takes the function,
+`SceneWidget(ring)`, and builds its own.
 
 `values` is where the parameters' values come from when there are
 some: a saved scene (its path) or a mapping of names to values. A
@@ -105,13 +106,22 @@ A run of points as a formula: `of(t)` for `t` running across `over`
 variables, count included, which `np.linspace` over a variable cannot.
 Called plainly, it is the points.
 
+### `grid(half, count, *, plane='xy', at=0)`
+
+A square of `count` by `count` points across ±`half` in `plane` (xy,
+xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
+the variables, `pixel=grid(reach, density)`, so the grid follows a slider
+as `sampled` does; `count` is two or more. Called plainly, it is the
+points.
+
 ### `hide(obj)`
 
 Hide `obj` in the 3D view. It still counts in the field.
 
-### `show(obj)`
+### `unhide(obj)`
 
-Show `obj` again in the 3D view, after `hide`.
+Show `obj` again in the 3D view, after `hide`. Not `show`: that is
+magpylib's word for drawing a scene.
 
 ### `remove(obj)`
 
@@ -131,6 +141,26 @@ keywords are magpylib's (`polarization`, `position`, `style_label`).
 Give an object the id `object_id` in the document, where its label (or
 its class) would give another. Rarely needed by hand: the script tab
 writes it where a scene's ids are not what its labels give.
+
+### `TriangularMesh.from_file(path, *, scale=None, sha256=None, **kwargs)`
+
+`TriangularMesh.from_file("rotor.stl", scale=0.001, polarization=...)`:
+the mesh a file holds, `scale` in metres per file unit -- 0.001 for a file
+drawn in millimetres, which is most of them. `sha256` is what the file
+held when a scene was saved, which the script tab carries so a changed
+file is still noticed; nobody writes it by hand.
+
+### `TriangularMesh.from_hull(points, **kwargs)`
+
+`TriangularMesh.from_hull(points, polarization=...)`: the convex hull
+of `points`, as magpylib's `from_ConvexHull` makes it, kept as the points
+so a variable among them still decides it.
+
+### `TriangularMesh.from_superquadric(size, roundness=(1, 1), *, around=None, across=None, **kwargs)`
+
+`TriangularMesh.from_superquadric((w, d, h), (profile, plan))`: a
+rounded solid, `roundness` 0.05/0.05 a block, 0.05/1 a cylinder, 1/1 a
+sphere, 2/2 a diamond; `around` and `across` how many samples.
 
 ## What an expression may call
 

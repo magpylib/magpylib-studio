@@ -14,6 +14,8 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 
 const scene = new THREE.Scene();
 let host = null; // the element the view is hung in; whose theme it wears
@@ -88,6 +90,9 @@ let polarizations = {}; // studio id -> its polarization, in its own frame
 //: is what a drag now moves, the engine recording it before the step that
 //: copies it rather than after.
 let patterned = new Set();
+// Source id -> its pattern's copies, in the order the pattern laid them: the
+// path a trace follows while the source is selected.
+let copies = {};
 // Studio id -> what a collection holds, nested collections too. A collection
 // draws nothing of its own: it has a node only for handles to go on, and what
 // it holds is hung on that node while it is dragged.
@@ -790,6 +795,9 @@ const SELECTION_COLOUR = "#39ff14";
  *  any of them selects the source. */
 const COPY_OUTLINE = 0.35;
 
+/** How faint the dashed line through a pattern's copies is drawn. */
+const TRACE_OPACITY = 0.55;
+
 /** How wide, in pixels, the selection's lines are: an edge in view, a path or
  *  a wire, and an edge the shape hides, drawn faintly through it. A plain GL
  *  line is one pixel whatever it is asked for, which is easy to miss. */
@@ -1246,7 +1254,60 @@ function highlight(objectIds) {
 /** Outline the selection afresh, round whatever is drawn for it now. */
 function drawOutlines() {
   takeOff(outlines);
-  outlines = outline(selectedIds, 1, COPY_OUTLINE);
+  outlines = [
+    ...outline(selectedIds, 1, COPY_OUTLINE),
+    ...patternTraces(selectedIds),
+  ];
+}
+
+/** The path a pattern laid its copies on, through their centres, while the
+ *  source is selected: a dashed line in the selection's colour, closed when
+ *  the ring comes back round to the source. It says how the copies follow,
+ *  where the faint outlines say that they do. Drawn through what hides it,
+ *  since it is a guide and not a thing. */
+function patternTraces(objectIds) {
+  const added = [];
+  for (const objectId of objectIds) {
+    const made = copies[objectId];
+    if (!patterned.has(objectId) || !made?.length) continue;
+    const points = [objectId, ...made]
+      .map((id) => centroids[id])
+      .filter(Boolean);
+    if (points.length < 2) continue;
+    const at = (point) => new THREE.Vector3().fromArray(point);
+    const step = at(points[0]).distanceTo(at(points[1]));
+    const back = at(points[points.length - 1]).distanceTo(at(points[0]));
+    // a ring closes when the last copy sits one step short of the source
+    const closed = points.length > 2 && Math.abs(back - step) < 0.15 * step;
+    const run = closed ? [...points, points[0]] : points;
+    let length = 0;
+    for (let i = 1; i < run.length; i++) {
+      length += at(run[i - 1]).distanceTo(at(run[i]));
+    }
+    if (!length) continue;
+    const material = new LineMaterial({
+      linewidth: 1,
+      dashed: true,
+      dashSize: length / 90,
+      gapSize: length / 90,
+      transparent: true,
+      opacity: TRACE_OPACITY,
+      depthTest: false,
+    });
+    material.color = new THREE.Color(SELECTION_COLOUR);
+    if (renderer) renderer.getSize(material.resolution);
+    wideMaterials.add(material);
+    const line = new Line2(
+      new LineGeometry().setPositions(run.flat()),
+      material,
+    );
+    line.computeLineDistances();
+    line.raycast = () => {}; // a guide, not a target
+    line.renderOrder = 1;
+    scene.add(line);
+    added.push({ on: scene, part: line });
+  }
+  return added;
 }
 
 /** Where a drag of several objects turns about: the middle of what is
@@ -1871,6 +1932,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   patterned = new Set(payload.patterned || []);
   collections = payload.collections || {};
   centroids = payload.centroids || {};
+  copies = payload.copies || {};
 
   discard(held);
   const readings = new Set(payload.readings ?? []);
