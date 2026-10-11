@@ -258,16 +258,15 @@ folder its mesh paths are relative to. It loads alone through `load_scene`, the
 JSON Schema validates it, and on the system clipboard it pastes across windows.
 `export_object(object_id)` writes one; `import_fragment(fragment, parent)`
 merges one under a parent as one step to undo. A copy within a scene goes
-through the same exporter, which mends today's copy.
+through the same exporter.
 
-- **The copy is the object it was.** Its world pose comes with it: what its
-  groups did to it is one rigid step on the copy's root. Today's `copy_object`
-  drops that: halbach's `r2`, turned 18° by its ring, copies to (23, 0, 15) mm
-  at 0° where it sits at (21.9, 7.1, 15) mm.
+- **The copy is the object it was.** Its world pose comes with it, as a copy
+  within a scene keeps it since the review: what its groups did to it is one
+  rigid step on the copy's root. (Before, halbach's `r2`, turned 18° by its
+  ring, copied to (23, 0, 15) mm at 0° where it sits at (21.9, 7.1, 15) mm.)
 - **Ids** are new in the target, none its log has used, live or removed, and
-  `target`, `parent` and `children` are renamed together. An id freed by a
-  removal is no longer handed out again; today a copy, or `set_param`, can reach
-  the removed object.
+  `target`, `parent` and `children` are renamed together, as within a scene: one
+  id names one object in a log, a removed object's id retired when reused.
 - **Variables are never shared** (decided): the copy brings its own, renamed on
   any clash -- `radius` → `radius_2` -- in one pass, in dependency order, every
   formula rewritten. A later paste of the same reuses the twin it made
@@ -324,9 +323,9 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    extension-host restart with a scene open.
 1. **The engine's sessions** (about ½ day): `serve`'s table, `open_session` that
    loads, `close_session`, `version`, random names, refusal without a session
-   after an open, one mesh cache per process. Three fixes first, bugs today: a
-   copy's pose, ids reused after a removal, Save As then undo breaking mesh
-   paths.
+   after an open, one mesh cache per process. Three engine fixes it rests on are
+   made already, with this plan's revision: a copy's pose, an id reused after a
+   removal, Save As then undo breaking mesh paths.
 2. **Every view and request carries its scene** (1–2 days): a handle
    `{engine, session}` through the extension's forty-odd call sites and the side
    bar's views, each drawn for one session. Still one scene, the suite green,

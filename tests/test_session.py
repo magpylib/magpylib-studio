@@ -5496,3 +5496,131 @@ def test_keeping_renaming_or_dropping_a_variant_rebuilds_nothing():
     assert len(s.get_history()["entries"]) == steps + 3
     assert s.undo()["ok"]
     assert s.to_dict()["variants"] == {"big": {"radius": 0.035}}
+
+
+# --- copies stand where their sources stand; one id names one object ---------
+
+
+def test_a_copy_beside_its_source_follows_what_its_source_follows():
+    """Halbach's `r2` is turned by its ring's stagger after it joined the
+    ring. Its copy beside it goes into the log beside it, step for step, so
+    it is turned too -- where it stood before, appended at the end, it missed
+    the turn and sat 18 degrees off -- and it turns again with the slider."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    copied = s.copy_object("r2")["id"]
+
+    def pose(object_id):
+        obj = s._objs[object_id]
+        return np.array(obj.position), obj.orientation.as_rotvec(degrees=True)
+
+    for n in (10, 14):
+        assert s.set_variable("n", n)["ok"]
+        (here, turned), (there, also) = pose("r2"), pose(copied)
+        assert np.allclose(here, there) and np.allclose(turned, also)
+    assert not np.allclose(pose("r2")[1], 0), "the ring's turn is in both"
+
+
+def test_a_copy_keeps_its_own_history_in_its_own_order_and_names():
+    """A group turned before a child joined it does not turn the child's
+    copy, and a step inside the copy names the copy's own group."""
+    s = MagpylibStudioSession()
+    s.load_scene({"objects": [{"id": "G", "type": "Collection"}]})
+    assert s.rotate("G", 90, "z", anchor=[0, 0, 0])["ok"]
+    s.add_object(
+        "c",
+        "magnet.Cuboid",
+        params={
+            "dimension": [0.01, 0.01, 0.01],
+            "polarization": [0, 0, 1],
+            "position": [0.02, 0, 0],
+        },
+        parent="G",
+    )
+    s.add_object("K", "Collection", parent="G")
+    assert s.move_object("c", "K")["ok"]
+    copied = s.copy_object("G", parent=None)["id"]
+    child = next(oid for oid in s._parents if oid.startswith("c_"))
+    assert np.allclose(s._objs[child].position, [0.02, 0, 0])
+    assert s._parents[child] == "K_1" and s._parents["K_1"] == copied
+    assert [c for c, p in s._parents.items() if p == "K"] == ["c"]
+
+
+def test_a_copy_put_elsewhere_stands_where_its_source_stands():
+    """Pasted at the root, a magnet its group turned after it joined is put
+    where it stands, as a move keeps an object where it was -- and taken back
+    whole by one undo."""
+    s = MagpylibStudioSession()
+    s.load_scene({"objects": [{"id": "G", "type": "Collection"}]})
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        params={
+            "dimension": [0.01, 0.01, 0.01],
+            "polarization": [0, 0, 1],
+            "position": [0.02, 0, 0],
+        },
+        parent="G",
+    )
+    assert s.rotate("G", 90, "z", anchor=[0, 0, 0])["ok"]
+    steps = len(s.get_history()["entries"])
+    copied = s.copy_object("m", parent=None)["id"]
+    assert s._parents[copied] is None
+    assert np.allclose(s._objs[copied].position, s._objs["m"].position)
+    assert np.allclose(s._objs[copied].orientation.as_rotvec(degrees=True), [0, 0, 90])
+    assert len(s.get_history()["entries"]) == steps + 1
+    assert s.undo()["ok"]
+    assert copied not in s._objs
+
+
+def test_an_id_a_removed_object_had_names_the_new_object_alone():
+    """Remove `m`, then add another `m`: the removed one's steps keep an id
+    of their own (`m~1`), so a copy of the new `m` copies it and not the
+    removed one, and an edit reaches the live object. A file written before
+    reads the same way once opened, and its script builds it back."""
+    s = MagpylibStudioSession()
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        params={"dimension": [0.01] * 3, "polarization": [0, 0, 1]},
+    )
+    s.move("m", [0.03, 0, 0])
+    s.remove_object("m")
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        params={"dimension": [0.01] * 3, "polarization": [1, 0, 0]},
+    )
+    assert [e["target"] for e in s.get_events()["events"]] == ["m~1", "m~1", "m~1", "m"]
+    copied = s.copy_object("m")["id"]
+    assert np.allclose(s._objs[copied].polarization, [1, 0, 0])
+    assert np.allclose(s._objs[copied].position, [0, 0, 0])
+    assert s.set_param("m", "polarization", [0, 1, 0])["ok"]
+    assert np.allclose(s._objs["m"].polarization, [0, 1, 0])
+
+    written_before = {
+        "events": [
+            {
+                "id": "e1",
+                "op": "create",
+                "target": "m",
+                "type": "magnet.Sphere",
+                "params": {"diameter": 0.01, "polarization": [0, 0, 1]},
+            },
+            {"id": "e2", "op": "remove", "target": "m"},
+            {
+                "id": "e3",
+                "op": "create",
+                "target": "m",
+                "type": "magnet.Sphere",
+                "params": {"diameter": 0.02, "polarization": [0, 0, 1]},
+            },
+        ]
+    }
+    opened = MagpylibStudioSession()
+    assert opened.load_scene(written_before)["ok"]
+    assert [e["target"] for e in opened.get_events()["events"]] == ["m~1", "m~1", "m"]
+    assert opened._objs["m"].diameter == pytest.approx(0.02)
+    from magpylib_studio import build
+
+    assert build.rebuilt(opened).to_dict()["events"] == opened.to_dict()["events"]
