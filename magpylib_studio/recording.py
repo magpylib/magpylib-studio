@@ -58,6 +58,7 @@ import dataclasses
 import functools
 import inspect
 import math
+import numbers
 import typing
 import warnings
 from contextvars import ContextVar
@@ -230,6 +231,57 @@ def _parameter(parameter, annotation):
     return spec
 
 
+def _value_problem(spec, value):
+    """Why the parameter `spec` describes cannot take `value`, as its
+    annotation says, or None."""
+    if "options" in spec:
+        if value not in spec["options"]:
+            choices = ", ".join(repr(option) for option in spec["options"])
+            return f"= {value!r} is not one of {choices}"
+        return None
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        return f"= {value!r} is not a number"
+    if not math.isfinite(value):
+        return f"= {value} is no number a scene can hold"
+    if spec.get("integer") and float(value) != int(value):
+        return f"= {value:g} counts things, so it has to be a whole number"
+    low, high = spec.get("bounds") or (None, None)
+    if low is not None and value < low:
+        return f"= {value:g} is below its minimum {low:g}"
+    if high is not None and value > high:
+        return f"= {value:g} is above its maximum {high:g}"
+    return None
+
+
+def _variants(variants, parameters, owner):
+    """A scene function's variants, checked against its parameters when it
+    is marked rather than when it is built: each a name, and the values it
+    gives some of the parameters, each one its parameter's annotation
+    allows."""
+    specs = {spec["name"]: spec for spec in parameters}
+    out = {}
+    for name, values in dict(variants or {}).items():
+        if not isinstance(name, str) or not name.strip():
+            raise TypeError(f"a variant of {owner} needs a name, not {name!r}")
+        if not isinstance(values, dict) or not values:
+            raise TypeError(
+                f"variant {name!r} of {owner}: give its values by parameter, "
+                f"as {{'n': 12}}"
+            )
+        for key, value in values.items():
+            if key not in specs:
+                raise TypeError(
+                    f"variant {name!r} sets {key!r}, which is not a parameter of "
+                    f"{owner}: a variant gives parameters values, and a derived "
+                    f"variable follows them"
+                )
+            problem = _value_problem(specs[key], value)
+            if problem:
+                raise ValueError(f"variant {name!r}: {key} {problem}")
+        out[name] = dict(values)
+    return out
+
+
 # --- the decorator ------------------------------------------------------------
 
 
@@ -237,7 +289,7 @@ class SceneFunction:
     """A function that is a scene: see the module. Call it for plain magpylib
     objects at the values you pass; `build()` for the document."""
 
-    def __init__(self, fn, *, model_unit=None, field_unit=None):
+    def __init__(self, fn, *, model_unit=None, field_unit=None, variants=None):
         functools.update_wrapper(self, fn)
         self._fn = fn
         self.model_unit = model_unit
@@ -250,6 +302,11 @@ class SceneFunction:
             _parameter(parameter, hints.get(parameter.name))
             for parameter in inspect.signature(fn).parameters.values()
         ]
+        #: The variants named in the mark, by name: plain values, so
+        #: `ring(**ring.variants["wide"])` is the scene at them in plain
+        #: magpylib, and `ring.build(values=ring.variants["wide"])` the
+        #: document at them.
+        self.variants = _variants(variants, self.parameters, fn.__name__)
 
     def __repr__(self):
         names = ", ".join(spec["name"] for spec in self.parameters)
@@ -269,7 +326,14 @@ class SceneFunction:
         some: a saved scene (its path) or a mapping of names to values. A
         default in the signature is the value when nothing says otherwise;
         a slider dragged in the panel and saved wins, so the next run keeps
-        it. A `derived` variable is a definition, and the function's wins."""
+        it. A `derived` variable is a definition, and the function's wins.
+
+        The variants named in the mark are the scene's; a saved scene's come
+        with its values, as its sliders do, and win over one of the same
+        name -- so a variant saved in the panel survives the next run. One
+        the scene can no longer take whole -- a parameter it names gone or a
+        formula now, a value past new limits -- is left out with a warning,
+        and the mark's of that name, if any, stays."""
         hook.install()
         document = build.Scene(
             values=values, model_unit=self.model_unit, field_unit=self.field_unit
@@ -297,11 +361,26 @@ class SceneFunction:
             recorder.finish()
         finally:
             _BUILDING.reset(token)
+        self._keep_variants(document)
         # The build is where the scene starts, not a run of edits: undone a
         # step at a time it would come apart, which nobody asked for.
         document.session.forget_history()
         document._built_from = self
         return document
+
+    def _keep_variants(self, document):
+        """The mark's variants, each as the built scene can take it whole.
+        One it cannot -- a parameter the saved values made a formula, a
+        combination a formula's limits refuse -- is left out with a warning,
+        never failing the build; the saved scene's are laid over these when
+        the document is first read (`Scene`)."""
+        for variant, values in self.variants.items():
+            result = document._session.save_variant(variant, values)
+            if not result.get("ok", True):
+                warnings.warn(
+                    f"the variant {variant!r} was left out: {result['error']}",
+                    stacklevel=3,
+                )
 
     def save(self, path, values=None):
         """`build(values).save(path)`: the document, as the studio saves one."""
@@ -335,16 +414,26 @@ class SceneFunction:
         return out
 
 
-def scene(fn=None, *, model_unit=None, field_unit=None):
+def scene(fn=None, *, model_unit=None, field_unit=None, variants=None):
     """Mark a function as a scene: its parameters are the variables, its body
     is plain magpylib, and `build()` records it. `@scene`, or
     `@scene(model_unit="mm", field_unit="mT")` for the units the studio
-    shows the scene in (the numbers stay SI)."""
+    shows the scene in (the numbers stay SI).
+
+    `variants` names sets of parameter values, a variant each:
+    `@scene(variants={"compact": {"n": 8}, "wide": {"n": 16, "radius": 0.035}})`.
+    The studio's variables panel lists them and sets the parameters to one
+    in a step; in code, `ring.variants["wide"]` is that mapping, so
+    `ring(**ring.variants["wide"])` is the scene at those values in plain
+    magpylib. A variant may leave parameters out, and those keep the values
+    they have when it is used. It holds values only: a `derived` variable is
+    a formula of the parameters, and follows them."""
+    marks = {"model_unit": model_unit, "field_unit": field_unit, "variants": variants}
     if fn is None:
-        return functools.partial(scene, model_unit=model_unit, field_unit=field_unit)
+        return functools.partial(scene, **marks)
     if isinstance(fn, SceneFunction):
-        return SceneFunction(fn._fn, model_unit=model_unit, field_unit=field_unit)
-    return SceneFunction(fn, model_unit=model_unit, field_unit=field_unit)
+        return SceneFunction(fn._fn, **marks)
+    return SceneFunction(fn, **marks)
 
 
 # --- the recorder -------------------------------------------------------------

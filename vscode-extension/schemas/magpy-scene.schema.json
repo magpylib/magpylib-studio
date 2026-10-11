@@ -49,6 +49,25 @@
         "additionalProperties": true
       }
     },
+    "variants": {
+      "type": "object",
+      "description": "Named sets of values for the variables, a variant each: picking one sets the variables it names, as one step to undo. A variant holds values only, a number or a choice's name, never an expression (\"=360/n\") and never a string that is neither (\"360/n\"); the variables it leaves out keep theirs.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            { "type": "number" },
+            { "type": "string", "pattern": "^[A-Za-z_]\\w*$" }
+          ]
+        }
+      },
+      "examples": [
+        {
+          "compact": { "n": 8, "radius": 0.018 },
+          "wide": { "n": 16, "radius": 0.035 }
+        }
+      ]
+    },
     "events": {
       "type": "array",
       "description": "What built the scene, in order. Folding it from the start reproduces the scene exactly, ids included.",

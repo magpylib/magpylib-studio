@@ -71,6 +71,7 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
     },
     "radius": { "min": 0.005, "max": 0.08, "unit": "length" }
   },
+  "variants": { "compact": { "n": 8, "radius": 0.018 }, "wide": { "n": 16 } },
   "model_unit": "mm",
   "field_unit": "mT",
   "events": [
@@ -132,6 +133,20 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   and `unit`, the kind a variable measures
   ([0008](decisions.md#0008-units-are-metadata)). `model_unit` and `field_unit`
   say what the scene is _shown_ in; the numbers stay SI.
+- **`variants`** names sets of values for the variables, a variant each:
+  `{name: {variable: value}}`, a finite number or a choice's name, never an
+  expression, stored as numbers in the variables' order. A variant may leave
+  variables out. `use_variant` sets the ones it names as one step; which one the
+  scene is in is read off the variables, never stored: of those whose values
+  hold, the one naming the most. Saving, renaming or removing one rebuilds
+  nothing. A variant is checked as the combination it makes: values the limits
+  refuse, its own or a formula's following them, are refused when it is saved; a
+  change of limits that would strand one is refused, naming it; one a later
+  formula makes unusable is listed in `get_variables` as `unusable`, with why,
+  and not used. Renames and removals of variables reach every variant; a
+  variable made a formula leaves them. An older studio carries the key untouched
+  ([0013](decisions.md#0013-the-saved-file-is-the-document)), so the version
+  stays 3.
 - **Hidden objects** stay in the scene and in the field: hiding sets magpylib's
   own `model3d.showdefault` and `path.show` on the leaf specs, keeping the prior
   values in `hidden_style` for an exact restore, so nothing else is recoloured.
@@ -184,7 +199,14 @@ its line; a property read is today's number, with a warning. Studio's own words
 (`derived`, the patterns, `sampled` and `grid`, `hide` and `unhide`, `remove`,
 `TriangularMesh.from_file`, `.from_hull` and `.from_superquadric`, `place`,
 `name`) are one step each when recording and plain magpylib when called.
-`fn.build(values=path)` takes a saved scene's slider values. A plain function
+`fn.build(values=path)` takes a saved scene's slider values. The mark names
+variants, `@scene(variants={...})`, each value checked against its parameter's
+annotation where the mark is written; `ring.variants` is that mapping, so
+`ring(**ring.variants["wide"])` is plain magpylib at those values. The build
+keeps them, and a saved scene's over them by name when the document is first
+read (`Scene`, so a builder script keeps them too): one the built scene cannot
+take whole -- a parameter gone or a formula now, values past new limits -- is
+left out with a warning, and the mark's of that name stays. A plain function
 handed to the notebook's view is a scene function without the mark, built the
 same way; the mark is for a file, where it says which function is the scene, and
 for `build()` without a view.
@@ -197,7 +219,10 @@ Three ways between code and the document, none of which parses code
 - `to_builder_script()` writes the scene as such a function, one call per step,
   which run builds the same document. The script tab shows it, and a deliberate
   save applies it as one undo step
-  ([0007](decisions.md#0007-the-script-tab-is-builder-code)).
+  ([0007](decisions.md#0007-the-script-tab-is-builder-code)). Variants are
+  written in the mark, each value in the signature's order; an entry naming no
+  parameter, and a variant the scene cannot use, are named at the top instead,
+  since written they would fail the script at its mark.
 - `load_script(path)` runs any script with `show()` intercepted. A script that
   defined a scene function opens as the scene it builds, whole; plain magpylib
   opens as its objects, and the import names the variables it turned into
@@ -250,21 +275,27 @@ a slider per variable with a range, a dropdown for a choice, a box that reads
 `15 mm` through `quantity`; a value under the pointer is a `set_variable` marked
 `preview`, applied without a word to the notebook, and answered with the scene
 when the message asks (`scene`), so a frame of a slider's or a handle's drag is
-one message where it was two; the release settles as one edit. A `variables`
-trait, `{name: value}` as resolved, follows the session, so a cell reads the
-knobs; assigned, it sets what differs as one edit, so another control's trait
-links to it both ways (`traitlets.link`), the view's model owning the numbers.
-Beside the sliders, an object toggle opens **the object panel**
-(`static/inspector.mjs`, the studio's Inspector, compact): the selection's
-parameters and pose, in the scene's units, expressions as written, and its style
-tree folded under one heading, read when opened; it follows the selection. A
-value typed is read through `read_values`, and set with `define`, so a bare name
-the scene lacks is made at the value it replaces; a style property set is
-`apply_edit`, settled and told as a `set` of `style.<path>`. One of the two
-panels is open at a time. The bundle `static/widget.js` is committed so
-installing needs no node; `npm run check:widget` fails when it no longer matches
-its sources, and a CI job installs the wheel alone and runs an edit through a
-fake connection.
+one message where it was two; the release settles as one edit. With variants,
+one row above the sliders: a toggle per variant, the one the values are in
+pressed, one press a `use_variant` settled as one edit, an unusable one shown
+and not offered -- or a dropdown, past four or names too long for a row.
+`view.save_variant(name)` keeps the values as they are and hands back, for the
+mark, those of the scene function's parameters. A `variables` trait,
+`{name: value}` as resolved, follows the session, so a cell reads the knobs;
+assigned, it sets what differs as one change (`set_variables`: one rebuild,
+checked as the combination it makes, no step for values the scene already has),
+so another control's trait links to it both ways (`traitlets.link`), the view's
+model owning the numbers. Beside the sliders, an object toggle opens **the
+object panel** (`static/inspector.mjs`, the studio's Inspector, compact): the
+selection's parameters and pose, in the scene's units, expressions as written,
+and its style tree folded under one heading, read when opened; it follows the
+selection. A value typed is read through `read_values`, and set with `define`,
+so a bare name the scene lacks is made at the value it replaces; a style
+property set is `apply_edit`, settled and told as a `set` of `style.<path>`. One
+of the two panels is open at a time. The bundle `static/widget.js` is committed
+so installing needs no node; `npm run check:widget` fails when it no longer
+matches its sources, and a CI job installs the wheel alone and runs an edit
+through a fake connection.
 
 **The studio panel draws the widget** ([0011](decisions.md#0011-one-view)):
 `media/studioView.mjs` holds a model (`payload`, the engine's `object_tree`,
@@ -335,20 +366,20 @@ line — no ports, no framework.
 <- {"id": 2, "error": {"type": "KeyError", "message": "..."}}
 ```
 
-| group     | methods                                                                                                                                                                                                                                                                                               |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| inspect   | `list_objects` · `object_tree` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                                                                                                                      |
-| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                                                                                                                             |
-| edit      | `apply_edit` (style) · `set_param` · `reset_style` · `apply_edits` / `apply_calls` (what a view's drag sends) · `begin_interaction` · `end_interaction`                                                                                                                                               |
-| transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                                                                                                                                 |
-| patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                                                                                                                                 |
-| variables | `get_variables` · `set_variable` · `set_variable_bounds` · `set_variable_unit` · `set_model_unit` · `set_field_unit` · `get_units` · `quantity` · `read_values` · `field_units` · `unit_kinds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression` |
-| history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                                                                                                                                                          |
-| view      | `get_scene` (3D payload) · `get_figure` (plotly) · `get_field_figure` · `get_field_map` · `get_sweep_figure`                                                                                                                                                                                          |
-| field     | `get_field` · `sweep`                                                                                                                                                                                                                                                                                 |
-| undo      | `undo` · `redo` · `goto_history`                                                                                                                                                                                                                                                                      |
-| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `apply_builder_script` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script`                                                                                                           |
-| bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                                                                                                                                                                |
+| group     | methods                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| inspect   | `list_objects` · `object_tree` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                                                                                                                                                                                                               |
+| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                                                                                                                                                                                                                      |
+| edit      | `apply_edit` (style) · `set_param` · `reset_style` · `apply_edits` / `apply_calls` (what a view's drag sends) · `begin_interaction` · `end_interaction`                                                                                                                                                                                                                                        |
+| transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                                                                                                                                                                                                                          |
+| patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                                                                                                                                                                                                                          |
+| variables | `get_variables` · `set_variable` · `set_variable_bounds` · `set_variable_unit` · `set_model_unit` · `set_field_unit` · `get_units` · `quantity` · `read_values` · `field_units` · `unit_kinds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression` · `set_variables` · `use_variant` · `save_variant` · `rename_variant` · `remove_variant` |
+| history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                                                                                                                                                                                                                                                   |
+| view      | `get_scene` (3D payload) · `get_figure` (plotly) · `get_field_figure` · `get_field_map` · `get_sweep_figure`                                                                                                                                                                                                                                                                                   |
+| field     | `get_field` · `sweep`                                                                                                                                                                                                                                                                                                                                                                          |
+| undo      | `undo` · `redo` · `goto_history`                                                                                                                                                                                                                                                                                                                                                               |
+| I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `apply_builder_script` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script`                                                                                                                                                                                                    |
+| bulk      | `batch` — many mutating ops in one call, one undo step                                                                                                                                                                                                                                                                                                                                         |
 
 Mutating methods return `{"ok": bool, "error"?: str}`
 ([0012](decisions.md#0012-validation-is-shared-and-reported)). Everything is

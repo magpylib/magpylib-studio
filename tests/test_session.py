@@ -5171,3 +5171,328 @@ def test_a_copys_traces_say_which_copy_they_are(session):
     meshes = [m for m in session.get_scene()["meshes"] if m["object_id"] == "r2"]
     assert sorted(m.get("copy", "") for m in meshes) == ["", "r2#1", "r2#2", "r2#3"]
     assert session.get_scene()["copies"] == {"r2": ["r2#1", "r2#2", "r2#3"]}
+
+
+# --- variants ----------------------------------------------------------------
+
+
+def _variant_scene():
+    """A count, a length, a choice and a formula, and a magnet following them."""
+    s = MagpylibStudioSession()
+    s.set_variable("n", 10)
+    s.set_variable("radius", 0.02)
+    s.set_variable("axis", "z")
+    s.set_variable_bounds("n", min=2, max=60, integer=True)
+    s.set_variable_bounds("axis", options=["x", "y", "z"])
+    s.set_variable("half", "=radius / 2")
+    s.add_object(
+        "m",
+        "magnet.Sphere",
+        {"polarization": [0, 0, 1], "diameter": "=half", "position": ["=radius", 0, 0]},
+    )
+    return s
+
+
+def test_a_variant_sets_the_values_it_holds_as_one_step():
+    """Saved, a variant keeps every variable that holds a value, never a
+    formula; used, it sets them back as one step to undo; and which one the
+    scene is in is read off the values, so a slider moved off them leaves
+    it, and moved back puts it back in."""
+    s = _variant_scene()
+    saved = s.save_variant("nominal")
+    assert saved == {"ok": True, "values": {"n": 10, "radius": 0.02, "axis": "z"}}
+    assert s.save_variant("wide", {"radius": 0.035, "n": 16})["ok"]
+    listed = s.get_variables()
+    assert listed["variants"] == {
+        "nominal": {"n": 10, "radius": 0.02, "axis": "z"},
+        "wide": {"n": 16, "radius": 0.035},  # in the scene's order, as given or not
+    }
+    assert listed["variant"] == "nominal"
+
+    assert s.use_variant("wide") == {"ok": True, "untouched": ["axis"]}
+    assert s._objs["m"].position[0] == pytest.approx(0.035)
+    assert s._objs["m"].diameter == pytest.approx(0.0175), "the formula follows"
+    assert s.get_variables()["variant"] == "wide"
+
+    s.set_variable("radius", 0.036)
+    assert s.get_variables()["variant"] is None
+    s.set_variable("radius", 0.035)
+    assert s.get_variables()["variant"] == "wide"
+
+    again = s.use_variant("wide")
+    assert again == {"ok": True, "unchanged": True, "untouched": ["axis"]}
+    steps = len(s.get_history()["entries"])
+    assert s.use_variant("nominal")["ok"]
+    assert len(s.get_history()["entries"]) == steps + 1, "one step, however many"
+    assert s.undo()["ok"]
+    assert s.get_variables()["variant"] == "wide"
+
+
+def test_a_variant_holds_values_its_variables_can_take():
+    """A formula is what a variable is, so no variant holds one; a value past
+    a variable's limits is refused when the variant is saved, not later when
+    it is used; and a variant needs a name and something to set."""
+    s = _variant_scene()
+    assert "formula" in s.save_variant("x", {"half": 0.01})["error"]
+    assert "formula" in s.save_variant("x", {"radius": "=2 * n"})["error"]
+    assert s.save_variant("x", {"n": 100})["error"] == "n = 100 is above its maximum 60"
+    assert "whole number" in s.save_variant("x", {"n": 2.5})["error"]
+    assert "options" in s.save_variant("x", {"axis": "w"})["error"]
+    assert (
+        s.save_variant("x", {"nope": 1})["error"] == "no variable 'nope' in the scene"
+    )
+    assert s.save_variant(" ")["error"] == "a variant needs a name"
+    assert s.save_variant("x", {})["error"] == "a variant sets at least one variable"
+    assert "variants" not in s.to_dict()
+    assert s.use_variant("nope") == {"ok": False, "error": "no variant 'nope'"}
+
+
+def test_variants_follow_their_variables():
+    """A rename reaches every variant; a removal takes the variable out of
+    them, and a variant left with nothing to set goes with it; a variable
+    made a formula leaves them too, since a formula is no value. Each is part
+    of the one step of the edit that caused it."""
+    s = _variant_scene()
+    s.save_variant("nominal")
+    s.save_variant("big", {"radius": 0.03})
+    s.set_variable("spare", 1.0)
+    s.save_variant("spare only", {"spare": 2.0})
+
+    assert s.rename_variable("radius", "r")["ok"]
+    assert s.to_dict()["variants"] == {
+        "nominal": {"n": 10, "r": 0.02, "axis": "z"},
+        "big": {"r": 0.03},
+        "spare only": {"spare": 2.0},
+    }
+    assert s.remove_variable("spare")["ok"]
+    assert list(s.to_dict()["variants"]) == ["nominal", "big"]
+    assert s.set_variable("r", "=n / 500")["ok"]
+    assert s.to_dict()["variants"] == {"nominal": {"n": 10, "axis": "z"}}
+    assert s.undo()["ok"]
+    assert s.to_dict()["variants"]["big"] == {"r": 0.03}
+
+
+def test_a_variant_naming_what_the_scene_has_no_value_for_leaves_it_out():
+    """An entry no variable of the scene takes a value for -- renamed by a
+    studio that did not know variants, or a formula now -- is left out when
+    the variant is used, and the answer says so; what it does set is set."""
+    s = _variant_scene()
+    doc = s.to_dict()
+    doc["variants"] = {"old": {"n": 12, "gap": 0.004, "half": 0.3}}
+    assert s.load_scene(doc)["ok"]
+    assert s.use_variant("old") == {
+        "ok": True,
+        "untouched": ["radius", "axis"],
+        "ignored": ["half", "gap"],  # the scene's order, then what it lacks
+    }
+    assert s.to_dict()["variables"]["n"] == 12
+
+
+def test_a_variant_can_be_renamed_in_its_place_and_removed():
+    s = _variant_scene()
+    for name, radius in (("a", 0.03), ("b", 0.04), ("c", 0.05)):
+        s.save_variant(name, {"radius": radius})
+    assert s.rename_variant("b", "middle") == {"ok": True}
+    assert list(s.get_variables()["variants"]) == ["a", "middle", "c"]
+    assert s.rename_variant("a", "c")["error"] == "there is already a variant 'c'"
+    assert s.rename_variant("zz", "y")["error"] == "no variant 'zz'"
+    assert s.remove_variant("middle") == {"ok": True}
+    assert s.remove_variant("a")["ok"] and s.remove_variant("c")["ok"]
+    assert "variants" not in s.to_dict()
+    assert "variants" not in s.get_variables()
+    assert s.to_dict()["variables"]["radius"] == 0.02, "the values stay"
+
+
+def test_variants_are_saved_with_the_scene_and_a_malformed_one_refused(tmp_path):
+    """The document carries them, an older studio carries them untouched as
+    a key it does not know, so the format's version does not move; a file
+    whose variants this one cannot read is refused whole, as a newer format
+    is, rather than opened without them."""
+    s = _variant_scene()
+    s.save_variant("wide", {"radius": 0.035})
+    path = tmp_path / "scene.magpy.json"
+    path.write_text(json.dumps(s.to_dict()), encoding="utf-8")
+    opened = MagpylibStudioSession()
+    assert opened.load_scene(str(path))["ok"]
+    assert opened.get_variables()["variants"] == {"wide": {"radius": 0.035}}
+    assert opened.to_dict()["version"] == DOC_VERSION == 3
+    for variants, said in (
+        ([1], "each variant by its name"),
+        ({"a": 3}, "its values by variable"),
+        ({"a": {"n": True}}, "not a number or a name"),
+        ({"a": {"n": "=2"}}, "formula"),
+    ):
+        refused = MagpylibStudioSession().load_scene(
+            {"events": [], "variants": variants}
+        )
+        assert refused["ok"] is False and said in refused["error"]
+
+
+def test_variants_validate_against_the_published_schema():
+    validator = _scene_schema()
+    s = _variant_scene()
+    s.save_variant("nominal")
+    s.save_variant("wide", {"radius": 0.035})
+    doc = s.to_dict()
+    assert not [e.message for e in validator.iter_errors(doc)]
+    doc["variants"]["wide"]["radius"] = "=2 * n"
+    assert list(validator.iter_errors(doc))
+    doc["variants"]["wide"] = 0.035
+    assert list(validator.iter_errors(doc))
+
+
+def test_variants_are_reachable_over_the_wire():
+    requests = [
+        {"id": 1, "method": "load_example", "params": {"name": "halbach"}},
+        {
+            "id": 2,
+            "method": "save_variant",
+            "params": {"name": "wide", "values": {"radius": 0.035}},
+        },
+        {"id": 3, "method": "use_variant", "params": {"name": "wide"}},
+        {"id": 4, "method": "rename_variant", "params": {"old": "wide", "new": "big"}},
+        {"id": 5, "method": "remove_variant", "params": {"name": "big"}},
+    ]
+    out = io.StringIO()
+    serve(inp=io.StringIO("\n".join(json.dumps(r) for r in requests) + "\n"), out=out)
+    answers = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [a["id"] for a in answers] == [1, 2, 3, 4, 5]
+    assert all(a["result"]["ok"] for a in answers), answers
+
+
+def test_several_variables_are_set_together_in_one_build():
+    """Set together, variables are one rebuild and one step to undo, and are
+    checked as the combination they make: a wall that is the difference of
+    two lengths stays thick enough with both moved, though not with one moved
+    first. One bad value refuses them all."""
+    s = MagpylibStudioSession()
+    s.set_variable("outer", 2.0)
+    s.set_variable("inner", 1.0)
+    s.set_variable("wall", "=outer - inner")
+    s.set_variable_bounds("wall", min=0.5)
+    assert s.set_variable("outer", 1.2)["ok"] is False, "alone, the wall is 0.2"
+    builds = []
+    build = s._build
+    s._build = lambda: (builds.append(1), build())[1]
+    steps = len(s.get_history()["entries"])
+
+    assert s.set_variables({"outer": 1.2, "inner": 0.5}) == {"ok": True}
+    assert len(builds) == 1
+    assert s._vars["wall"] == pytest.approx(0.7)
+    assert len(s.get_history()["entries"]) == steps + 1
+
+    refused = s.set_variables({"outer": 3.0, "inner": 2.9})
+    assert refused["ok"] is False and "wall" in refused["error"]
+    assert (s._vars["outer"], s._vars["inner"]) == (1.2, 0.5)
+    assert s.set_variables({"pi": 3})["error"] == "'pi' is a built-in expression name"
+
+
+def test_a_variant_its_scene_cannot_use_is_refused_made_and_said():
+    """Checked as the combination it is: values the limits refuse -- those it
+    sets, or a formula following them -- are refused when the variant is
+    saved; limits that would leave one unusable are refused, naming it; and
+    one a later formula makes unusable is listed so, and not used."""
+    s = MagpylibStudioSession()
+    s.set_variable("outer", 2.0)
+    s.set_variable("inner", 1.0)
+    s.set_variable("wall", "=outer - inner")
+    s.set_variable_bounds("wall", min=0.5)
+    thin = s.save_variant("thin", {"outer": 1.2, "inner": 1.0})
+    assert thin == {"ok": False, "error": "wall = 0.2 is below its minimum 0.5"}
+
+    assert s.save_variant("wide", {"outer": 4.0})["ok"]
+    narrowed = s.set_variable_bounds("outer", max=3)
+    assert narrowed["ok"] is False
+    assert "the variant 'wide' could not be used" in narrowed["error"]
+    assert "outer = 4 is above its maximum 3" in narrowed["error"]
+
+    # a formula that holds now and not for the variant: allowed, and said
+    assert s.set_variable("wall", "=outer - inner - 2 * (outer - 2)")["ok"]
+    assert s.get_variables()["unusable"] == {
+        "wide": "wall = -1 is below its minimum 0.5"
+    }
+    assert s.use_variant("wide") == {
+        "ok": False,
+        "error": "wide: wall = -1 is below its minimum 0.5",
+    }
+
+
+def test_the_variant_in_force_is_the_one_naming_the_most_values_that_hold():
+    """After using a variant that holds another's values and more, it is the
+    one in force; the other, its values holding already, changes nothing."""
+    s = _variant_scene()
+    s.save_variant("twelve", {"n": 12})
+    s.save_variant("twelve wide", {"n": 12, "radius": 0.035})
+    assert s.use_variant("twelve wide")["ok"]
+    assert s.get_variables()["variant"] == "twelve wide"
+    assert s.use_variant("twelve") == {
+        "ok": True,
+        "unchanged": True,
+        "untouched": ["radius", "axis"],
+    }
+
+
+def test_a_rename_onto_a_name_a_variant_holds_for_no_variable_drops_that_entry():
+    """An entry under the new name was for no variable of the scene, since
+    none had that name; the renamed entry takes its place, never the stale
+    value."""
+    s = _variant_scene()
+    doc = s.to_dict()
+    doc["variants"] = {"old": {"radius": 0.03, "gap": 0.004, "n": 12}}
+    assert s.load_scene(doc)["ok"]
+    assert s.rename_variable("radius", "gap")["ok"]
+    assert s.to_dict()["variants"]["old"] == {"n": 12, "gap": 0.03}
+
+
+def test_a_variants_numerals_are_numbers_and_its_names_are_names():
+    """A numeral given as text is the number it spells, as for any value on
+    its way in -- so the variant reads as in force once used; text that is
+    neither a number nor a name is refused, as is a name for a number."""
+    s = _variant_scene()
+    saved = s.save_variant("b", {"radius": "0.03"})
+    assert saved == {"ok": True, "values": {"radius": 0.03}}
+    assert s.use_variant("b")["ok"]
+    assert s.get_variables()["variant"] == "b"
+    assert (
+        "neither a number nor a name"
+        in s.save_variant("c", {"radius": "360/n"})["error"]
+    )
+    assert s.save_variant("c", {"radius": "wide"})["error"] == (
+        "radius holds a number, not 'wide'"
+    )
+    doc = s.to_dict()
+    doc["variants"]["d"] = {"n": "16"}
+    assert s.load_scene(doc)["ok"]
+    assert s.to_dict()["variants"]["d"] == {"n": 16}
+
+
+def test_a_variant_that_is_no_number_is_refused_never_raised():
+    s = _variant_scene()
+    for bad in (float("nan"), float("inf")):
+        refused = s.save_variant("x", {"n": bad})
+        assert refused["ok"] is False
+        assert "which no variable can be" in refused["error"]
+    doc = s.to_dict()
+    doc["variants"] = {"x": {"radius": float("nan")}}
+    loaded = MagpylibStudioSession().load_scene(doc)
+    assert loaded["ok"] is False and "which no variable can be" in loaded["error"]
+
+
+def test_keeping_renaming_or_dropping_a_variant_rebuilds_nothing():
+    """Nothing in the scene follows a variant until it is used, so these
+    rebuild nothing -- and keep a run captured for the view's frames, which
+    a rebuild throws away. Each is still one step to undo."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    builds = []
+    build = s._build
+    s._build = lambda: (builds.append(1), build())[1]
+    s._animated = captured = object()
+    steps = len(s.get_history()["entries"])
+    assert s.save_variant("wide", {"radius": 0.035})["ok"]
+    assert s.rename_variant("wide", "big")["ok"]
+    assert s.remove_variant("big")["ok"]
+    assert builds == [] and s._animated is captured
+    assert len(s.get_history()["entries"]) == steps + 3
+    assert s.undo()["ok"]
+    assert s.to_dict()["variants"] == {"big": {"radius": 0.035}}

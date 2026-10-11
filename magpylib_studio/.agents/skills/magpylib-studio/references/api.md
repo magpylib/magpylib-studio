@@ -6,12 +6,21 @@ magpylib-studio has.
 
 ## The mark
 
-### `scene(fn=None, *, model_unit=None, field_unit=None)`
+### `scene(fn=None, *, model_unit=None, field_unit=None, variants=None)`
 
 Mark a function as a scene: its parameters are the variables, its body
 is plain magpylib, and `build()` records it. `@scene`, or
 `@scene(model_unit="mm", field_unit="mT")` for the units the studio
 shows the scene in (the numbers stay SI).
+
+`variants` names sets of parameter values, a variant each:
+`@scene(variants={"compact": {"n": 8}, "wide": {"n": 16, "radius": 0.035}})`.
+The studio's variables panel lists them and sets the parameters to one
+in a step; in code, `ring.variants["wide"]` is that mapping, so
+`ring(**ring.variants["wide"])` is the scene at those values in plain
+magpylib. A variant may leave parameters out, and those keep the values
+they have when it is used. It holds values only: a `derived` variable is
+a formula of the parameters, and follows them.
 
 What `@scene` makes:
 
@@ -28,6 +37,13 @@ some: a saved scene (its path) or a mapping of names to values. A
 default in the signature is the value when nothing says otherwise;
 a slider dragged in the panel and saved wins, so the next run keeps
 it. A `derived` variable is a definition, and the function's wins.
+
+The variants named in the mark are the scene's; a saved scene's come
+with its values, as its sliders do, and win over one of the same
+name -- so a variant saved in the panel survives the next run. One
+the scene can no longer take whole -- a parameter it names gone or a
+formula now, a value past new limits -- is left out with a warning,
+and the mark's of that name, if any, stays.
 
 ### `fn.save(path, values=None)`
 
@@ -205,6 +221,14 @@ cycle, a value some object rejects) is reported and rolled back.
 `set_variable_unit`), so a variable is created a length rather than
 created and then made one; None leaves what it says as it was.
 
+### `session.set_variables(values)`
+
+Set several variables at once, each as `set_variable` sets one:
+one rebuild and one step to undo, however many there are, and refused
+whole when any value is. So a combination that holds only together --
+two lengths a wall is the difference of -- is taken as the
+combination it is, never checked half-set.
+
 ### `session.get_variables()`
 
 The document's variables, as written, as resolved, and as heeded.
@@ -213,6 +237,40 @@ The document's variables, as written, as resolved, and as heeded.
 `shadowed` says where it is being overruled, by which steps or by
 which value written over it — enough for a view to explain a slider
 that moves nothing, and to offer the way back. See `restore_variable`.
+
+A scene with variants lists them too, `variants`, each a variable's
+value by its name, and says which one the variables are in now,
+`variant`: the first whose values all hold, or None once a slider
+has moved off them -- and `unusable`, each variant that cannot be
+used as the scene stands, with why. See `use_variant`.
+
+### `session.use_variant(name)`
+
+Set the variables a variant names to its values, as one step to
+undo -- as a slider sets one, so values the variables' limits refuse
+are refused, and the scene is left as it was.
+
+A variant may name fewer variables than the scene has: one written in
+code may leave some out on purpose, and one saved before a variable
+was added does not know it. Those it does not name keep their values,
+and the answer lists them as `untouched`. An entry naming no variable
+that holds a value -- renamed by an older studio, or a formula now --
+is left out, and listed as `ignored`.
+
+### `session.save_variant(name, values=None)`
+
+Keep values for the scene's variables under a name: a variant, set
+back in one step by `use_variant`.
+
+With no `values`, every variable that holds a number or a choice, as
+it is now -- what saving a variant from a panel means, so that using
+it puts the scene back exactly. With `values`, those named, which may
+be fewer; a numeral given as text is the number it spells. A formula
+is what a variable is, so no variant holds one. Values the variables'
+limits refuse -- the ones it sets, or a formula following them -- are
+refused now, not when the variant is used. Saved over a variant of
+the same name, it replaces it, in its place. The answer carries the
+`values` kept.
 
 ### `session.load_scene(scene, base_dir=None)`
 

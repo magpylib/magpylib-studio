@@ -1867,3 +1867,84 @@ def test_a_plain_function_is_a_scene_to_the_view():
     assert studio.objects["m"].position[0] == pytest.approx(0.02)
     studio.variables = {"radius": 0.03}
     assert studio.objects["m"].position[0] == pytest.approx(0.03)
+
+
+@needs_scene_graph
+def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
+    """`view.save_variant(name)` keeps the values as they are, formulas left
+    out, and hands them back to paste into the mark; the panel lists it at
+    once, and its dropdown sets the values back as one settled edit, told to
+    the notebook once and undone in one step. Making, renaming and removing
+    one is code's, not the view's."""
+    studio = _studio_of(_design())
+    revision = studio.revision
+    kept = studio.save_variant("start")
+    assert kept == {"n": 10, "r": 0.02, "axis": "z", "free": 3.0}
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {"by": "save_variant", "variant": "start"}
+    listed = _ask(studio, "get_variables")["result"]
+    assert listed["variants"] == {"start": kept}
+    assert listed["variant"] == "start"
+
+    studio.set_variable("r", 0.03)
+    assert _ask(studio, "get_variables")["result"]["variant"] is None
+    assert _ask(studio, "use_variant", name="start")["result"]["ok"]
+    assert studio.revision == revision + 3
+    assert studio.last_edit == {"by": "use_variant", "variant": "start"}
+    assert studio.variables["r"] == 0.02
+    assert studio.variables["half"] == 0.01, "the formula follows"
+    assert studio.undo()
+    assert studio.variables["r"] == 0.03
+
+    with pytest.raises(ValueError, match="needs a name"):
+        studio.save_variant("")
+    for method in ("save_variant", "rename_variant", "remove_variant"):
+        assert _ask(studio, method, name="start")["error"]["type"] == "MethodError"
+
+
+@needs_scene_graph
+def test_variables_assigned_together_rebuild_the_scene_once():
+    """Several values assigned at once are one rebuild, not one each: using a
+    variant from a cell costs what moving one slider does."""
+    studio = _studio_of(_design())
+    builds = []
+    build = studio._session._build
+    studio._session._build = lambda: (builds.append(1), build())[1]
+    studio.variables = {"n": 12, "r": 0.03, "free": 4.0}
+    assert len(builds) == 1
+    assert studio.last_edit == {
+        "by": "set_variables",
+        "values": {"n": 12, "r": 0.03, "free": 4.0},
+    }
+
+
+@needs_scene_graph
+def test_variables_assigned_that_change_nothing_leave_no_step():
+    """Values that come to the scene it already is -- a formula a variable
+    already has, a number as text -- leave no step to undo, keep the redo an
+    undo just made, and leave the trait saying every variable."""
+    studio = _studio_of(_design())
+    studio.variables = {"r": 0.03}
+    studio.variables = {"r": 0.02}
+    assert studio.undo()
+    history = studio._session.get_history()
+    before = (len(history["undo"]), len(history["redo"]))
+    studio.variables = {"half": "=r / 2"}
+    studio.variables = {"r": "0.03"}
+    history = studio._session.get_history()
+    assert (len(history["undo"]), len(history["redo"])) == before
+    assert studio.variables["n"] == 10, "the trait holds them all"
+    assert studio.redo()
+
+
+@needs_scene_graph
+def test_a_variant_saved_from_a_cell_hands_back_what_the_mark_can_hold():
+    """The view's variant keeps every variable that holds a value; what comes
+    back to paste into the mark is the scene function's parameters alone,
+    and a warning names what the mark could not hold."""
+    studio = _studio_of(_design())
+    assert studio._session.set_variable("side", 0.01)["ok"]  # one the view made
+    with pytest.warns(UserWarning, match="side: in the view's variant 'start'"):
+        kept = studio.save_variant("start")
+    assert kept == {"n": 10, "r": 0.02, "axis": "z", "free": 3.0}
+    assert studio._session.get_variables()["variants"]["start"]["side"] == 0.01

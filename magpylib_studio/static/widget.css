@@ -952,7 +952,8 @@
 
 /* Over the view, the rows read as the readout does: a name, a slider and a
    number underlined rather than boxed, tabular so a drag does not jitter. */
-.magpy-scene-variables .magpy-vars-row {
+.magpy-scene-variables .magpy-vars-row,
+.magpy-scene-variables .magpy-vars-variant {
   grid-template-columns: minmax(36px, auto) 1fr 44px;
   gap: 7px;
   padding: 1px 0;
@@ -969,7 +970,8 @@
 }
 
 .magpy-scene-variables .magpy-vars-row input[type="text"],
-.magpy-scene-variables .magpy-vars-row select {
+.magpy-scene-variables .magpy-vars-row select,
+.magpy-scene-variables .magpy-vars-variant select {
   background: transparent;
   border: none;
   border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
@@ -979,7 +981,8 @@
 }
 
 .magpy-scene-variables .magpy-vars-row input[type="text"]:focus,
-.magpy-scene-variables .magpy-vars-row select:focus {
+.magpy-scene-variables .magpy-vars-row select:focus,
+.magpy-scene-variables .magpy-vars-variant select:focus {
   outline: none;
   border-bottom-color: var(--vscode-focusBorder);
 }
@@ -996,12 +999,69 @@
   display: none;
 }
 
-.magpy-vars-row {
+.magpy-vars-row,
+.magpy-vars-variant {
   display: grid;
   grid-template-columns: minmax(52px, auto) 1fr 54px auto;
   gap: 5px;
   align-items: center;
   padding: 2px 0;
+}
+
+/* The variants, above the variables they set: a toggle each, across the slot
+   and the value as a choice's dropdown is, or that dropdown when they are
+   many. The one the values are in is pressed, as the view's tools are. */
+.magpy-vars-variant[hidden] {
+  display: none;
+}
+
+.magpy-vars-variant {
+  margin-bottom: 4px;
+}
+
+.magpy-vars-variant select,
+.magpy-vars-chips {
+  grid-column: 2 / 4;
+}
+
+.magpy-vars-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.magpy-vars-chip {
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: inherit;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 10px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.magpy-vars-chip:not(:disabled):hover,
+.magpy-vars-chip:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--vscode-focusBorder) 60%, transparent);
+}
+
+.magpy-vars-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.magpy-vars-chip.on {
+  color: var(--vscode-focusBorder);
+  background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+  cursor: default;
+}
+
+.magpy-vars-variant .magpy-vars-name {
+  opacity: 0.7;
 }
 
 .magpy-vars-name {
@@ -1033,7 +1093,8 @@
 }
 
 .magpy-vars-row input[type="text"],
-.magpy-vars-row select {
+.magpy-vars-row select,
+.magpy-vars-variant select {
   width: 100%;
   box-sizing: border-box;
   font: inherit;

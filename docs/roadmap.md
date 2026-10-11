@@ -1,8 +1,8 @@
 # Roadmap — what studio becomes, and in what order
 
 **Status:** written 2026-10-05, amended 2026-10-06 and 2026-10-07, restructured
-2026-10-08. This is the one list of what is next: each step says what it is,
-why, and when it is done. What is built is in the
+2026-10-08, R9 taken up 2026-10-11. This is the one list of what is next: each
+step says what it is, why, and when it is done. What is built is in the
 [changelog](../vscode-extension/CHANGELOG.md) and
 [architecture.md](architecture.md); why the project is shaped this way is in
 [direction.md](direction.md); each decision taken on the way is a record in
@@ -172,6 +172,11 @@ back is lossy and wrong without saying so.
 
 ### R9 — Several scenes: a project is a folder, a scene is a file
 
+**Taken up 2026-10-11, ahead of R7, with variants:**
+[plans/several-scenes.md](plans/several-scenes.md). Decided with Alex that day:
+a project is a folder of scene files, with no container format; variants come in
+this step, as named value sets inside a scene; undo stays the studio's own.
+
 **What.** No container format. A scene is one `.magpy.json` (and the scene
 script it came from, where there is one); a project is the folder that holds
 them. Several projects open is several windows or a multi-root workspace, and
@@ -191,15 +196,14 @@ notebooks do and what VS Code is built around; `plans/instancing.md` already
 decided that a definition lives in its own file; and one scene per file is one
 diff per scene.
 
-**Not separate scenes:** variants (mostly a set of variable values; a named
-value set inside the scene, as OpenSCAD's Customizer keeps presets, may be the
-right size of thing — open) and parameters shared across scenes (wait for
-instancing).
+**Not separate scenes:** variants, which are named value sets inside the scene,
+as OpenSCAD's Customizer keeps presets (the plan's §6), and parameters shared
+across scenes (wait for instancing).
 
-**When.** The contract now (R3's code takes a scene); the editor after R7. Today
-the extension holds one engine, one panel and one scene file as module-level
-state, and the engine serves one session; the refactor touches all of it, and
-nothing before R7 needs it.
+**When.** Now, ahead of R7: nothing before R7 needs it, and nothing in R7 waits
+on it either. Today the extension holds one engine, one panel and one scene file
+as module-level state, and the engine serves one session; the refactor touches
+all of it. The plan orders the work in five steps that each land on their own.
 
 ### R10 and later
 
@@ -265,5 +269,3 @@ unanswered for two days because nobody asked them.
 
 - **The order in R7:** tier 0 on the Maxwell seat before the open solver.
 - **R5's order:** pointing at the scene before the view in the chat.
-- **A project is a folder of scene files** (R9), rather than a container format;
-  and whether variants are named value sets inside a scene.

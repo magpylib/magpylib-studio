@@ -266,6 +266,8 @@ class SceneWidget(anywidget.AnyWidget):
             "get_variables",
             "set_variable",
             "restore_variable",
+            # a variant from the panel's dropdown: its values, as one edit
+            "use_variant",
             "quantity",
             "expression_help",
             # the object panel: the selection's parameters and pose
@@ -293,6 +295,8 @@ class SceneWidget(anywidget.AnyWidget):
     #: the value is a preview -- the pointer still on the slider -- in which
     #: case the release settles, as a drag's does.
     _VARIABLE_EDITS = frozenset({"set_variable", "restore_variable"})
+    #: A variant used from the panel: its values set as one edit, settled.
+    _VARIANT_EDITS = frozenset({"use_variant"})
 
     def __init__(self, *objects, animation=False, **kwargs):
         """A view of `objects` -- or of nothing yet, to `update` later.
@@ -344,6 +348,9 @@ class SceneWidget(anywidget.AnyWidget):
         #: time, as the panel serves them.
         self._scene = None
         self._objects = {}
+        #: The parameters of the scene function the view's scene was built
+        #: from, by name, or None: what `save_variant` hands back to paste.
+        self._parameters = None
         #: The studio session an editable view's objects belong to; None for a
         #: view of the cell's own.
         self._session = None
@@ -395,6 +402,9 @@ class SceneWidget(anywidget.AnyWidget):
                 # Its own session, not a copy: the scene the code wrote is the
                 # one the view edits, so a drag shows in `to_dict()` after.
                 self._edit(given[0].session, handles=editable)
+                built_from = given[0]._built_from
+                if built_from is not None:
+                    self._parameters = [s["name"] for s in built_from.parameters]
             else:
                 self._edit(_session_of(given, named))
         elif objects:
@@ -633,6 +643,38 @@ class SceneWidget(anywidget.AnyWidget):
             raise ValueError(f"{name}: {result.get('error')}")
         self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
+    def save_variant(self, name):
+        """Keep the variables as they are now under `name`: a variant of this
+        view's scene, which the sliders panel lists at once and sets them back
+        to in one step. Saved over one of the same name, it replaces it.
+
+        Returns its values -- the variables that hold a number or a choice,
+        never a formula -- ready to paste into the scene function's
+        `@scene(variants=...)`, where it outlives the cell: of a scene a
+        function built, its parameters' alone, since the mark holds nothing
+        else, and a warning names a variable the view's variant also holds.
+        Until it is in the mark it lives in this view's scene as a dragged
+        slider does: kept by `save` and a build from that file, gone when
+        the cell runs again. Refused, it changes nothing and raises, saying
+        why."""
+        session = self._editing("save_variant")
+        result = session.save_variant(name)
+        if not result.get("ok", True):
+            raise ValueError(f"{name}: {result.get('error')}")
+        self._show({"by": "save_variant", "variant": name})
+        values = dict(result["values"])
+        if self._parameters is not None:
+            left = [key for key in values if key not in self._parameters]
+            if left:
+                warnings.warn(
+                    f"{', '.join(left)}: in the view's variant {name!r}, and "
+                    "no parameter of the scene function, so not in what this "
+                    "returns for its mark",
+                    stacklevel=2,
+                )
+            values = {k: v for k, v in values.items() if k in self._parameters}
+        return values
+
     def undo(self):
         """Take back an editable view's last edit -- a whole drag at a time.
         Returns whether there was one. Stops where this view's editing
@@ -677,11 +719,12 @@ class SceneWidget(anywidget.AnyWidget):
     def _variables_assigned(self, change):
         """`variables` assigned -- from a cell, or by a `traitlets.link` from
         another control's trait: every variable given a value other than the
-        scene's is set, as `set_variable` sets one, as one edit for them all,
-        and the trait then reads the scene back, every variable included. The
-        view's own drawing writes the scene's values, and so sets nothing.
-        Refused -- a name the scene has no variable of, a value past its
-        limits -- it sets nothing, reads the scene back, and raises."""
+        scene's is set, together (`set_variables`): one rebuild and one edit
+        for them all, checked as the combination they make. The trait then
+        reads the scene back, every variable included. The view's own drawing
+        writes the scene's values, and so sets nothing. Refused -- a name the
+        scene has no variable of, a value past its limits -- it sets nothing,
+        reads the scene back, and raises."""
         from magpylib_studio.session import _plain
 
         wanted = change["new"] or {}
@@ -707,28 +750,29 @@ class SceneWidget(anywidget.AnyWidget):
                 self.variables = current  # every variable, as the scene has them
             return
         session = self._session
-        session.begin_interaction()  # one step to undo, however many
-        refused, applied = None, 0
-        for name, value in changed.items():
-            result = session.set_variable(name, value)
-            if not result.get("ok", True):
-                refused = f"{name}: {result.get('error')}"
-                break
-            applied += 1
+        # One step to undo -- and none, for values that come to the scene it
+        # already was: the group's close takes back a step that changed
+        # nothing, and gives back the redo it would have cost.
+        session.begin_interaction()
+        result = session.set_variables(changed)
         session.end_interaction()
-        if refused:
-            # What went in before the refusal is one step, taken back whole;
-            # refused first, the group recorded nothing to take back.
-            if applied:
-                session.undo()
+        if not result.get("ok", True):
             self.variables = current
-            raise ValueError(refused)
+            error = result.get("error")
+            # Which one was refused, where the engine's words do not say.
+            if len(changed) == 1 or not any(name in error for name in changed):
+                error = f"{', '.join(changed)}: {error}"
+            raise ValueError(error)
         if len(changed) == 1:
             ((name, value),) = changed.items()
             edit = {"by": "set_variable", "variable": name, "value": value}
         else:
             edit = {"by": "set_variables", "values": changed}
-        self._show(edit)
+        if not self._show(edit):
+            # Nothing came of it -- a formula a variable already had, a
+            # number as text: the trait says the scene as it is, not what
+            # was assigned.
+            self.variables = _values_of(self._session)
 
     @traitlets.validate("editable")
     def _something_to_edit(self, proposal):
@@ -968,6 +1012,8 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": method, "variable": params.get("name")}
             if method == "set_variable":
                 edit["value"] = params.get("value")
+        elif method in self._VARIANT_EDITS:
+            edit = {"by": method, "variant": params.get("name")}
         elif method in self._OBJECT_EDITS:
             target = params.get("object_id")
             if method == "set_param":
@@ -997,6 +1043,7 @@ class SceneWidget(anywidget.AnyWidget):
         settles = (
             method in self._SETTLES
             or method in self._OBJECT_EDITS
+            or method in self._VARIANT_EDITS
             or (method in self._VARIABLE_EDITS and not preview)
         )
         return answer, edit, settles
