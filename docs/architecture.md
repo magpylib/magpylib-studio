@@ -147,6 +147,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   variable made a formula leaves them. An older studio carries the key untouched
   ([0013](decisions.md#0013-the-saved-file-is-the-document)), so the version
   stays 3.
+- **One id names one object** in the whole log. An id a removed object had,
+  given to a new one, retires the removed object's steps to an id of their own
+  (`magnet~1`), and a file written before is read the same way when opened;
+  copies take ids no step has named.
 - **Hidden objects** stay in the scene and in the field: hiding sets magpylib's
   own `model3d.showdefault` and `path.show` on the leaf specs, keeping the prior
   values in `hidden_style` for an exact restore, so nothing else is recoloured.
@@ -172,7 +176,14 @@ which is what makes sliders live and `sweep` affordable.
   made meanwhile inserted at that step.
 - Undo is a stack of document snapshots, capped at 100
   ([0005](decisions.md#0005-undo-is-snapshots)); a drag or a `batch` is one
-  step.
+  step. A Save As that rebases mesh paths rebases every snapshot too, so a step
+  taken back still finds its meshes.
+- A copy stands where its source stands. Beside its source (`copy_object`
+  without a parent), its steps go into the log beside the source's, each after
+  the one it copies, so it is in the same groups when they turn and follows the
+  same variables; put elsewhere, its steps go at the end in their own order, and
+  it is pinned to its source's world pose where the source's groups had moved
+  it, in the same undo step.
 - Variables: hard bounds and `integer` are enforced in the fold, so they hold
   however a value arrived; renaming rewrites expressions through the AST;
   `sweep` re-folds once per value and records nothing.

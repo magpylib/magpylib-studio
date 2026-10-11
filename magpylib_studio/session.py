@@ -2151,6 +2151,95 @@ def _drift(written, back, width=100):
     return None
 
 
+def _ids_in_log(events):
+    """Every object id the log names, live or removed: a target, a parent, a
+    child."""
+    ids = set()
+    for event in events:
+        ids.add(event.get("target"))
+        ids.add(event.get("parent"))
+        ids.update(event.get("children") or [])
+    ids.discard(None)
+    return ids
+
+
+def _retire_id(events, object_id, taken):
+    """Rename every event naming `object_id` -- a removed object's whole life
+    -- to an id nothing else names (`magnet~1`), and add it to `taken`: so the
+    id can name a new object, and one id names one object in the whole log.
+    Every lookup by id -- an object's create, its steps, its family -- reads
+    one life, where two lives under one id had a copy replay the removed
+    object, and an edit land on its create instead of the live one's."""
+    n = 1
+    while f"{object_id}~{n}" in taken:
+        n += 1
+    retired = f"{object_id}~{n}"
+    for event in events:
+        if event.get("target") == object_id:
+            event["target"] = retired
+        if event.get("parent") == object_id:
+            event["parent"] = retired
+        if object_id in (event.get("children") or []):
+            event["children"] = [
+                retired if child == object_id else child for child in event["children"]
+            ]
+    taken.add(retired)
+    return retired
+
+
+def _retire_reused_ids(doc):
+    """A document whose log gives an id to a second object after the first
+    was removed -- written before ids were kept apart -- gets each earlier
+    life renamed (`_retire_id`), so it reads as one written since."""
+    events = doc.get("events") or []
+    taken = _ids_in_log(events)
+    created = set()
+    for i, event in enumerate(events):
+        if event.get("op") != "create":
+            continue
+        object_id = event.get("target")
+        if object_id in created:
+            _retire_id(events[:i], object_id, taken)
+        created.add(object_id)
+
+
+def _rebase_doc(doc, previous, current):
+    """Rewrite `doc`'s relative mesh paths, written from `previous`, to name
+    the same files from `current`; the count rewritten."""
+    moved = 0
+    for event in doc.get("events") or []:
+        source = (event.get("params") or {}).get("mesh_source")
+        if not isinstance(source, dict) or source.get("from") != "file":
+            continue
+        written = source.get("path")
+        if not written or os.path.isabs(written):
+            continue
+        was = os.path.join(previous or os.getcwd(), written)
+        try:
+            source["path"] = os.path.relpath(was, current or os.getcwd())
+        except ValueError:
+            # No relative path exists between them — a different drive on
+            # Windows. Absolute is then the only spelling that is true.
+            source["path"] = os.path.abspath(was)
+        moved += 1
+    return moved
+
+
+def _same_pose(obj, position, orientation):
+    """Whether magpylib object `obj` stands at `position` turned by
+    `orientation`, path and all."""
+    here = np.array(obj.position, dtype=float)
+    if here.shape != np.shape(position):
+        return False
+    if not np.allclose(here, position, rtol=0, atol=1e-12):
+        return False
+    try:
+        turned = obj.orientation.inv() * orientation
+    except ValueError:  # paths of different lengths
+        return False
+    return bool(np.all(turned.magnitude() < 1e-9))
+
+
 def _out_of_limits(name, value, limits):
     """Why `name` may not hold `value` under its `limits`, or None: one of its
     options, inside its hard bounds, a whole number for a count."""
@@ -3248,24 +3337,17 @@ class MagpylibStudioSession:
         `_mutate_doc`: the paths describe the same meshes as before, so this
         is not a change to the scene and has no business on the undo stack.
         What it changes is how the same scene is spelled from where it now
-        lives.
+        lives -- and so it changes every snapshot the undo and redo history
+        keeps, too: a step taken back after a Save As is the scene as it was,
+        and left as written its relative paths would name files from the old
+        folder, from the new one.
         """
-        moved = 0
-        for event in self.doc.get("events") or []:
-            source = (event.get("params") or {}).get("mesh_source")
-            if not isinstance(source, dict) or source.get("from") != "file":
-                continue
-            written = source.get("path")
-            if not written or os.path.isabs(written):
-                continue
-            was = os.path.join(previous or os.getcwd(), written)
-            try:
-                source["path"] = os.path.relpath(was, current or os.getcwd())
-            except ValueError:
-                # No relative path exists between them — a different drive on
-                # Windows. Absolute is then the only spelling that is true.
-                source["path"] = os.path.abspath(was)
-            moved += 1
+        moved = _rebase_doc(self.doc, previous, current)
+        seen = {id(self.doc)}
+        for entry in [*self._undo, *self._redo, *self._interaction_redo]:
+            if id(entry["doc"]) not in seen:  # the redo a gesture keeps is shared
+                seen.add(id(entry["doc"]))
+                _rebase_doc(entry["doc"], previous, current)
         return moved
 
     def object_tree(self):
@@ -3946,6 +4028,12 @@ class MagpylibStudioSession:
         params = self._stamped_mesh_source(params)
 
         def mutate(doc):
+            events = doc.setdefault("events", [])
+            taken = _ids_in_log(events)
+            if object_id in taken:
+                # A removed object had this id: its life keeps another, and
+                # the id names this object alone.
+                _retire_id(events, object_id, taken)
             self._append(
                 {
                     "op": "create",
@@ -4424,7 +4512,11 @@ class MagpylibStudioSession:
         scene holds, and past `taken`, the ids a copy in progress has already
         given its other objects -- a copied collection's children used to be
         numbered against the scene alone, and collided."""
-        used = {s["id"] for s, _ in self._iter_specs()} | set(taken)
+        used = (
+            {s["id"] for s, _ in self._iter_specs()}
+            | _ids_in_log(self.doc.get("events") or [])
+            | set(taken)
+        )
         stem = re.sub(r"_\d+$", "", base) or "obj"
         n = 1
         while f"{stem}_{n}" in used:
@@ -4446,14 +4538,26 @@ class MagpylibStudioSession:
 
     def copy_object(self, object_id, parent=_BESIDE):
         """Duplicate an object (a Collection copies its whole subtree). The
-        copy's label gets magpylib's iteration suffix.
+        copy's label gets magpylib's iteration suffix, and the copy stands
+        where its source stands, in the world as well as in its group.
 
         With no `parent` the copy lands beside its source, which is where a
-        copy belongs and — for an object inside a group — the only place its
+        copy belongs and -- for an object inside a group -- the only place its
         own pattern step can put *its* copies: a pattern needs a group to add
         to, so copying a patterned magnet to the scene root used to fail
-        outright. Passing `parent` explicitly still says where it goes, and
-        `None` still means the root, so a paste can put it anywhere.
+        outright. Its history goes in beside the source's, each step right
+        after the one it copies, so it is in the same groups when they turn
+        and follows whatever the source follows: a ring's magnet turned by
+        the ring's stagger is turned by it too, and turns again with the
+        slider. Appended at the end instead, it missed every turn its groups
+        made after it joined them, and stood elsewhere.
+
+        Passing `parent` still says where it goes, and `None` still means the
+        root, so a paste can put it anywhere. Its history then goes at the
+        end of the log, in its own order -- a group turned before a child
+        joined it does not turn the child's copy -- and where its source's
+        groups had moved the source, the copy is put where the source is, as
+        a move keeps an object where it was. One step to undo either way.
         """
         src = self._spec(object_id)
         if (
@@ -4466,35 +4570,75 @@ class MagpylibStudioSession:
         label = self._next_label(self._objs[object_id].style.label or src["type"])
 
         # source id -> copy's id, decided up front so the copied events can be
-        # redirected onto the new objects as they are replayed
+        # redirected onto the new objects: what they act on, the group they
+        # put it in, the children they name
         renamed = {object_id: new_id}
         for spec in _walk_specs(src.get("children") or []):
             renamed[spec["id"]] = self._unique_id(spec["id"], renamed.values())
 
-        def mutate(doc):
-            source_events = list(doc.get("events") or [])
-            for spec, spec_parent in self._iter_specs([src]):
-                create = json.loads(json.dumps(self._create_event(spec["id"])))
-                create["target"] = renamed[spec["id"]]
-                if spec is src:
-                    create.setdefault("style", {})["label"] = label
-                    if parent is _BESIDE:
-                        pass  # keep the source's own parent
-                    elif parent is not None:
-                        create["parent"] = parent
-                    else:
-                        create.pop("parent", None)
-                else:
-                    create["parent"] = renamed[spec_parent["id"]]
-                self._append(create)
-            # A copy is not a copy without its history: the source's other
-            # events replay onto the new ids, in the order they first ran.
-            for event in source_events:
-                if event.get("op") != "create" and event["target"] in renamed:
-                    self._append({**event, "target": renamed[event["target"]]})
+        def copied(event):
+            out = json.loads(json.dumps({k: v for k, v in event.items() if k != "id"}))
+            out["target"] = renamed[out["target"]]
+            if out.get("parent") in renamed:
+                out["parent"] = renamed[out["parent"]]
+            if out.get("children"):
+                out["children"] = [renamed.get(c, c) for c in out["children"]]
+            if event.get("op") == "create" and event["target"] == object_id:
+                out.setdefault("style", {})["label"] = label
+                if parent is None:
+                    out.pop("parent", None)
+                elif parent is not _BESIDE:
+                    out["parent"] = parent
+            return out
 
-        result = self._mutate_doc(mutate, f"copy {object_id}")
+        def beside(doc):
+            events = doc.get("events") or []
+            used = {event.get("id") for event in events}
+            n = len(events)
+            out = []
+            for event in events:
+                out.append(event)
+                if event.get("target") in renamed:
+                    n += 1
+                    while f"e{n}" in used:
+                        n += 1
+                    used.add(f"e{n}")
+                    out.append({"id": f"e{n}", **copied(event)})
+            doc["events"] = out
+
+        def elsewhere(doc):
+            for event in list(doc.get("events") or []):
+                if event.get("target") not in renamed:
+                    continue
+                if event.get("op") == "reparent" and event.get("parent") not in renamed:
+                    continue  # the paste says where the copy goes
+                self._append(copied(event))
+
+        if parent is _BESIDE:
+            result = self._mutate_doc(beside, f"copy {object_id}")
+            if result["ok"]:
+                result["id"] = new_id
+            return result
+
+        source = self._objs[object_id]
+        where = (np.array(source.position, dtype=float), source.orientation)
+        before = json.loads(json.dumps(self.doc))
+        paused, self._history_paused = self._history_paused, True
+        try:
+            result = self._mutate_doc(elsewhere, f"copy {object_id}")
+            if result["ok"] and not _same_pose(self._objs[new_id], *where):
+                pinned = self._mutate_doc(
+                    lambda doc: self._set_world_pose(new_id, *where, insert=False),
+                    f"copy {object_id}",
+                )
+                if not pinned["ok"]:
+                    self.doc = before
+                    self._build()
+                    result = pinned
+        finally:
+            self._history_paused = paused
         if result["ok"]:
+            self._record_state(f"copy {object_id}", before)
             result["id"] = new_id
         return result
 
@@ -4783,6 +4927,9 @@ class MagpylibStudioSession:
             }
 
         def mutate(doc):
+            taken = _ids_in_log(doc["events"])
+            if new_id in taken:
+                _retire_id(doc["events"], new_id, taken)
             for event in doc["events"]:
                 if event.get("target") == object_id:
                     event["target"] = new_id
@@ -4948,6 +5095,7 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             self.doc = _canonical(_migrate_events(json.loads(json.dumps(scene))))
+            _retire_reused_ids(self.doc)
             # A mesh source that arrived without a hash gets one now, while
             # the file it names is in front of us: a hand-written document,
             # or one parsed back from a script, which has no way to say what
@@ -5436,8 +5584,8 @@ class MagpylibStudioSession:
 
         A scene with variants lists them too, `variants`, each a variable's
         value by its name, and says which one the variables are in now,
-        `variant`: the first whose values all hold, or None once a slider
-        has moved off them -- and `unusable`, each variant that cannot be
+        `variant`: of those whose values all hold, the one naming the most,
+        or None once a slider has moved off them -- and `unusable`, each variant that cannot be
         used as the scene stands, with why. See `use_variant`.
         """
         variables = self.doc.get("variables") or {}

@@ -60,8 +60,11 @@ against the open scene — `magpylib-studio run script.py`, the counterpart of
 marimo pair's `execute-code`. The engine then has to tell the panel that its
 scene changed, which the panel today learns only from its own calls; FEM's jobs
 need the same server-initiated messages (V3), and so does the notebook view.
-**Every run takes a scene** — its file — defaulting to the open one, so several
-open scenes (R9) changes nothing about it.
+**Every run names its scene**: a file or a session; with neither, the scene in
+front, which the extension tells the engine; with no scene in front, refused
+(plans/several-scenes.md §3). Every message the engine sends names its session.
+In VS Code an agent's save of a scene file already reaches its open tab, as one
+undo step (the plan's §4), so this step is for hosts with no file.
 
 **In a marimo notebook the way in exists already.** Through marimo pair an agent
 runs code in the kernel that holds an editable `SceneWidget`'s session, reads
@@ -149,7 +152,8 @@ scene when step 2 exists, FEM when FEM exists.
 3. the pyAEDT emitter (M6), **checked at tier 0 on the Maxwell seat against
    magpylib**, with the signature conformance (§8.4) and golden text (§8.3) in
    CI — written one scene to one design, so a folder of scenes can later become
-   one AEDT project of several designs (R9);
+   one AEDT project of several designs (R9), a scene's variants a parametric
+   table so one Maxwell run solves each;
 4. the open solver (M2–M4) after, for validation CI can run and for tiers 1+.
 
 **Why the change.** `plans/fem.md` §7 puts the open solver first so the
@@ -162,9 +166,11 @@ on a licensed seat (§8.6), not CI. Why an emitter and not an LLM translating:
 ### R8 — Values and results back from Ansys
 
 **What.** Two flows back, no geometry: **design variable values** after an
-Optimetrics run, into the studio's variables of the same names (with R2's unit
-conversion), the `Scene(values=…)` split again; and **Maxwell's field at the
-sensor points**, into the comparison view (`plans/fem.md` §12).
+Optimetrics run, arriving as a variant named after the run
+([0026](decisions.md#0026-variants-are-named-value-sets-inside-a-scene)) over
+the studio's variables of the same names (with R2's unit conversion), to compare
+and use; and **Maxwell's field at the sensor points**, into the comparison view
+(`plans/fem.md` §12).
 
 **Why not geometry.** An AEDT project holds far more than magpylib can:
 booleans, iron, nonlinear B-H, windings, boundaries, mesh settings. Mapping that
@@ -172,10 +178,15 @@ back is lossy and wrong without saying so.
 
 ### R9 — Several scenes: a project is a folder, a scene is a file
 
-**Taken up 2026-10-11, ahead of R7, with variants:**
-[plans/several-scenes.md](plans/several-scenes.md). Decided with Alex that day:
-a project is a folder of scene files, with no container format; variants come in
-this step, as named value sets inside a scene; undo stays the studio's own.
+**Taken up 2026-10-11, ahead of R7:**
+[plans/several-scenes.md](plans/several-scenes.md), revised that day after an
+adversarial review. Decided with Alex that day: a project is a folder of scene
+files, no container format; undo stays the studio's own; the side bar's tree
+holds every open scene; objects copy and drag across scenes, a copy keeping its
+own variables, never sharing one; VS Code 1.109 is the floor; a file changed on
+disk comes into its tab as one undo step; a prototype first, then the tabs and
+the tree as one release. Variants came in this step and are built
+([0026](decisions.md#0026-variants-are-named-value-sets-inside-a-scene), #32).
 
 **What.** No container format. A scene is one `.magpy.json` (and the scene
 script it came from, where there is one); a project is the folder that holds
@@ -185,25 +196,30 @@ needs nothing built. Several scenes open is the work:
 - **one tab per scene** — the studio as a VS Code custom editor for
   `.magpy.json`, so opening a scene file opens it in the studio, side by side
   with others;
-- **the sidebar follows the active tab** — tree, Variables, History and
-  Inspector show whichever scene is in front;
-- **one engine, a session per open scene** — requests routed by scene. The
-  sessions are independent already (each notebook view has its own), so this is
-  cheaper than a process per scene.
+- **the side bar holds every open scene** — the tree lists them, each with its
+  objects; Variables, Inspector and Undo show the scene in front;
+- **one engine, a session per open scene** — every request naming its session.
+  The sessions are independent already (each notebook view has its own), so this
+  is cheaper than a process per scene; scripts run outside it, in a short-lived
+  process, so one cannot take every scene down;
+- **objects copy across scenes**, their variables with them.
 
 **Why a folder and not a file of scenes.** It is what Godot and Unity do, what
 notebooks do and what VS Code is built around; `plans/instancing.md` already
 decided that a definition lives in its own file; and one scene per file is one
 diff per scene.
 
-**Not separate scenes:** variants, which are named value sets inside the scene,
-as OpenSCAD's Customizer keeps presets (the plan's §6), and parameters shared
-across scenes (wait for instancing).
+**Not separate scenes:** variants, named value sets inside the scene, as
+OpenSCAD's Customizer keeps presets (built, 0026), and parameters shared across
+scenes (wait for instancing).
 
 **When.** Now, ahead of R7: nothing before R7 needs it, and nothing in R7 waits
 on it either. Today the extension holds one engine, one panel and one scene file
 as module-level state, and the engine serves one session; the refactor touches
-all of it. The plan orders the work in five steps that each land on their own.
+all of it. The plan's order: a throwaway prototype of the custom editor, the
+engine's sessions, every view and request carrying its scene, then tabs, tree
+and crash safety as one release, then copying across scenes, then scripts out of
+the engine.
 
 ### R10 and later
 
@@ -221,7 +237,13 @@ all of it. The plan orders the work in five steps that each land on their own.
   outputs apart, when a host asks.
 - **A scene as a page anyone can open** — `to_html` with the views for listed
   variable values computed ahead, as marimo-studio's prepared exports do; and
-  the widget inside a marimo-studio view.
+  the widget inside a marimo-studio view. A scene's variants are the obvious
+  list.
+- **More from variants**: the field per variant (`sweep` over variants,
+  recording nothing), and two variants side by side, a view of one scene at
+  another variant's values.
+- **A Merge of two variables** — a rename onto an existing one, its uses
+  repointed — when someone asks; a pasted copy's `radius_2` is the case.
 
 ## 2. Also tracked
 
@@ -242,7 +264,8 @@ so that older notes still read:
   notifications, a job id space, cancellation. `serve()` is a strictly serial
   blocking loop, so a solve through it freezes the whole UI; mesh reorientation
   already blocks it for 16 s. Shared with R3 step 2's "the scene changed"
-  message.
+  message, and its worker is first built for scripts (R9: scripts outside the
+  engine).
 - **V4 — Refusal-first job API.** Errors, not warnings, on a residual without
   convergence metadata, a solve past budget, a comparison mixing `ideal` and
   `physical` (`plans/fem.md` §13.5). Decide the shape early even if the work

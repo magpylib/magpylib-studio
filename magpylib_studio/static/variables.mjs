@@ -7,7 +7,7 @@
  * as one step to undo -- or a dropdown, when there are too many to fit.
  *
  * The VS Code studio's Variables view and the notebook widget's panel are
- * this one module (docs/plans/variables-in-widget.md): the sidebar mounts it
+ * this one module (docs/decisions.md#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them): the sidebar mounts it
  * in a webview with its calls going through the extension host, the widget
  * floats it over the view with its calls going to the session in the kernel.
  * The module knows neither. It is handed:

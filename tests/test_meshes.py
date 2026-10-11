@@ -649,6 +649,29 @@ def test_a_document_that_moves_takes_its_meshes_with_it(cube_stl, tmp_path):
     assert session.list_objects()[0]["mesh"]["faces"] == 12  # and it still reads
 
 
+def test_a_step_taken_back_after_the_document_moved_still_finds_its_mesh(
+    cube_stl, tmp_path
+):
+    """Save As rewrites the history too: a step undone after the move is the
+    scene as it was, spelled from where it now lives. Left as written, its
+    relative path meant the old folder from the new one, and the mesh broke
+    on the first undo -- and the next save wrote the broken path."""
+    session = MagpylibStudioSession()
+    session.set_base_dir(str(cube_stl.parent))
+    add_mesh(session, "rotor", {"from": "file", "path": "cube.stl", "scale": 0.001})
+    assert session.set_param("rotor", "polarization", [0, 0, 0.5])["ok"]
+    moved_to = tmp_path / "scenes"
+    moved_to.mkdir()
+    session.set_base_dir(str(moved_to), rebase=True)
+
+    assert session.undo()["ok"]
+    assert session._broken == []
+    source = session.to_dict()["events"][0]["params"]["mesh_source"]
+    assert source["path"] == os.path.join("..", "cube.stl")
+    assert session.redo()["ok"]
+    assert session._broken == []
+
+
 def test_opening_from_a_directory_does_not_rewrite_what_it_finds(cube_stl, tmp_path):
     """The other half of the same distinction: a document *opened* from a
     folder already says what it means, and rebasing it there would break the

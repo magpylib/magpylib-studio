@@ -1,9 +1,21 @@
-# Several scenes, and variants — design
+# Several scenes — design
 
-**Status: proposed, 2026-10-11.** Roadmap R9, taken up ahead of R7. Decided with
-Alex that day: a project is a folder of scene files, with no container format;
-variants are named value sets inside a scene, and come in this step; undo stays
-the studio's own. Nothing is built.
+**Status: proposed, revised 2026-10-11 after an adversarial review.** Roadmap
+R9, taken up ahead of R7. Decided with Alex that day:
+
+- a project is a folder of scene files, with no container format;
+- undo stays the studio's own;
+- the side bar's tree holds every open scene;
+- objects copy and drag across scenes in this step: a drag copies, Cut and Paste
+  moves, and a pasted copy keeps its own variables, never sharing one;
+- VS Code 1.109 is the floor;
+- a file changed on disk comes into a tab as one undo step, unsaved edits or
+  not;
+- the order of §7: a prototype first, the tabs and the tree as one release;
+- variants come in this step: built (#32), recorded in
+  [0026](../decisions.md#0026-variants-are-named-value-sets-inside-a-scene).
+
+The rest is not built.
 
 ---
 
@@ -33,328 +45,340 @@ Import Script, Open in Studio on a script's drawing, and a script's other
 
 ## 2. The shape
 
-As R9 has it:
-
 - **A scene is a file**, `.magpy.json`, and **a project is the folder** that
-  holds them. Several projects are several windows or a multi-root workspace,
-  and need nothing built.
+  holds them. Several projects are several windows or a multi-root workspace.
 - **A tab per scene**: the studio as a custom editor for `*.magpy.json`.
-- **The sidebar follows the scene in front**: the tree, the Inspector, the
-  Variables, the Undo view.
-- **One engine, a session per open scene**, each request naming its session.
-
-And a scene can hold **variants** (§6), so that a second setting of the same
-design is a name in the scene rather than a copy of it in another file.
+- **The side bar holds every open scene**: the tree lists them, each with its
+  objects; the Variables, the Inspector and the Undo view show the scene in
+  front.
+- **One engine, a session per open scene**, every request naming its session;
+  scripts run outside it.
+- **Objects copy across scenes**, their variables with them.
+- **Variants** name sets of values inside a scene (built, 0026).
 
 ## 3. The engine: a session per scene
 
-**A request names its session**, beside the method rather than among its
-parameters:
+**Every request names its session**, beside the method:
 
 ```
--> {"id": 7, "session": "s2", "method": "set_variable", "params": {"name": "gap", "value": 0.002}}
+-> {"id": 7, "session": "4f2a9c", "method": "set_variable", "params": {"name": "gap", "value": 0.002}}
 ```
 
-`serve()` holds a table of sessions. `open_session` and `close_session` are the
-server's, not a session's, and the extension names the session, so the open and
-the `load_scene` after it go down the pipe together, with no answer to wait for
-in between. A request with no `session` goes to the default one, which exists
-from the start, so the "Try it" example in architecture.md and any host that
-drives one scene work unchanged. `rpc.handle(session, request)`, which the
-widget calls, does not change: routing is `serve`'s.
+- `open_session(session, scene?, path?)` opens a session and loads it in the
+  same call, from a document or a path, and refuses a name already open;
+  `close_session(session)` drops it. Names are random and never reused, across
+  engine restarts too, so a stale reference can only miss.
+- **No default once a session is open.** A request without `session` goes to a
+  default session only on a connection that never opened one -- the "Try it"
+  example in architecture.md, a host that drives one scene. After an
+  `open_session` it is refused, so a call the refactor misses fails loudly
+  instead of reading or writing an empty scene.
+- **The engine says its protocol.** `version` answers the package version, a
+  protocol number and `DOC_VERSION`; the extension checks a range and refuses an
+  engine outside it, offering Install the Engine. An engine from before this
+  ignores `session`, and would serve every tab from one session without a word.
+- **Every message the engine sends names its session**: R3 step 2's "the scene
+  changed", V3's jobs.
 
-**The engine says its protocol.** The extension checks nothing about the engine
-it starts, and the engine is whatever `magpylib-studio` the chosen interpreter
-has. An engine from before this ignores `session` and serves every tab from one
-session, without a word. So a `version` method answers the package version and a
-protocol number, and the extension refuses an engine without it, offering
-Install the Engine.
+**Sessions are cheap; what they hold is not.** Measured: an engine process is 95
+MB resident (72 MB footprint) and 0.25 s to start, nearly all of it
+`import magpylib`; another session adds well under 1 MB and a few milliseconds.
+What grows is per session: up to 100 undo snapshots of its document, and its
+meshes. The mesh cache becomes one per process -- its keys are content hashes
+already -- so a part used in two scenes, or copied across, resolves once.
 
-**Sessions are cheap; processes are not.** Measured: an engine process with the
-halbach example drawn is 95 MB and 0.3 s to start; five more sessions in it,
-each with the array example drawn, added under 1 MB and 40 ms each. Calls are
-serial, so no two sessions' calls interleave, and the magpylib defaults that
-`threejs.pinned_scene_units()` sets are put back after each. One thing is shared
-and stays so: a script run by `load_script` or the script tab runs in the
-engine's process, and one that sets `magpy.defaults` sets it for every open
-scene, as today it does for the next scene loaded.
+**Code runs outside it.** A script -- `load_script`, the script tab's save, R3's
+runs -- runs in a short-lived child process (0.25 s to start), in the scene's
+folder, with that root's interpreter, and hands back a document. One that calls
+`os._exit`, loops for ever or sets `magpy.defaults` then takes nothing down with
+it; today it takes every open scene. This is V3's worker, built for scripts
+first. A watchdog and a Restart Engine command bring every scene back (§4) when
+a call hangs.
 
-**One queue for every tab.** A long call in one scene (a mesh reorientation is
-16 s) holds every tab until it returns. V3's worker fixes that for all of them
-at once.
+**One queue still.** A long call in one scene (a 16 s mesh reorientation) holds
+every tab until it returns. Moving such calls off the queue is V3's.
 
-**The table knows each session's file**: `open_session` takes the path, and Save
-As tells it. That is the lookup R3 step 2's `magpylib-studio run script.py`
-needs, since every run takes a scene, by its file.
+**Across sessions**, `export_object` and `import_fragment` (§5.1) are session
+calls, and the extension carries what one returns to the other.
+
+**R3 step 2 names its scene.** A run names a file or a session; with neither it
+goes to the scene in front, which the extension tells the engine (`set_front`);
+with no scene in front it is refused.
 
 ## 4. The custom editor
 
-**A `CustomEditorProvider`, the engine owning the document.** The saved file is
-`to_dict()` verbatim
-([0013](../decisions.md#0013-the-saved-file-is-the-document)) and undo is the
-session's snapshots ([0005](../decisions.md#0005-undo-is-snapshots)). A
-`CustomTextEditorProvider` would make VS Code's text model a second owner: every
-settled drag a whole-file text edit, and two undo stacks to keep in step.
+**A `CustomEditorProvider`, the engine owning the document**, registered for
+`*.magpy.json` as the default editor, with `retainContextWhenHidden` given at
+registration (a custom editor takes it nowhere else). The document is the saved
+file, `to_dict()` verbatim
+([0013](../decisions.md#0013-the-saved-file-is-the-document)), and undo is the
+session's ([0005](../decisions.md#0005-undo-is-snapshots)); a
+`CustomTextEditorProvider` would make VS Code's text model a second owner, each
+settled drag a whole-file text edit and two undo stacks to keep in step.
 
-**Registered for `*.magpy.json`, as the default.** A scene file opened anywhere
-(the Explorer, Quick Open, `code ring.magpy.json`, a link in an agent's answer)
-opens in the studio. The JSON is one Reopen Editor With… → Text Editor away,
-where the schema still validates it.
+**VS Code 1.109 is the floor** (decided). Before it, Save As and an untitled
+scene's first save leave the old tab dirty, and closing it asks to save what was
+just saved (microsoft/vscode#286325). The typings are pinned to the floor, and
+`npm test` runs on it as well as on stable.
 
-| VS Code calls                                                 | the provider                                                                                                                                                                                                     |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `openCustomDocument(uri, { backupId, untitledDocumentData })` | `open_session`, then `load_scene` from the backup if there is one, else from the file, else from the untitled data or nothing; the base directory is the file's folder, or the workspace's for an untitled scene |
-| `resolveCustomEditor(document, panel)`                        | what `adoptStudioPanel` does now, for that document                                                                                                                                                              |
-| `saveCustomDocument`                                          | writes `to_dict` to the file                                                                                                                                                                                     |
-| `saveCustomDocumentAs(destination)`                           | `set_base_dir(rebase=True)`, then writes                                                                                                                                                                         |
-| `revertCustomDocument`                                        | `load_scene` from the file                                                                                                                                                                                       |
-| `backupCustomDocument(destination)`                           | writes `to_dict` there, for hot exit                                                                                                                                                                             |
+**Each scene is live, restoring or lost.**
 
-**An edit marks the tab.** Each mutation fires a
-`CustomDocumentContentChangeEvent` where `broadcastMutation` sets `sceneDirty`
-now: the dot is on the tab, closing asks, and VS Code keeps the backup. **Undo
-stays the studio's** (decided): Ctrl+Z is `magpylib-studio.undo` on the scene in
-front, and the dot clears on a save or a revert, not on undoing back to the
-saved state, as the tree's • behaves today.
+- **Live**: the engine holds its session, and the extension holds its last
+  settled document, fetched where `broadcastMutation` runs now (0.7 ms for a
+  400-object scene).
+- **Restoring**: after an engine restart, until its session is back.
+- **Lost**: its restore failed. Save, Save As and backup throw, so VS Code keeps
+  the tab dirty and its last backup; the tab offers Try Again and Open as JSON.
+  Nothing writes an empty scene over a file.
 
-**New Scene is an untitled tab**, opened with `vscode.openWith` on an
-`untitled:` URI; its first save asks where. Load Example opens one too.
+**Edits and replacements.** An edit fires `CustomDocumentContentChangeEvent` and
+moves the scene's revision. A replacement -- opening, a revert, a file changed
+on disk, a crash restore -- fires nothing. A save notes the revision before it
+writes; if an edit moved it meanwhile, the event fires again once the save has
+returned, since VS Code clears the dot when the save resolves. A scene loaded
+into an untitled tab -- an example, an import, a script's drawing -- starts
+dirty, so it is backed up and asked about; an empty New Scene starts clean.
 
-**A file changed on disk** is loaded again by a tab with no unsaved changes, as
-one undo step, as a text editor does; a tab with changes says so and offers
-Revert. Nothing watches the scene file today. With a tab per file, this is how
-an agent's `ring.build().save("ring.magpy.json")` reaches the tab the person has
-open. `load_scene` starts the history afresh, so this needs the replace that the
-script tab's save does (`_replace`), as a call of its own.
+| VS Code calls                                                 | the provider                                                                                                                                                                                                                      |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `openCustomDocument(uri, { backupId, untitledDocumentData })` | never throws: a document that cannot load holds why, and its tab says so with Retry, Install the Engine and Reopen as Text. A `git:` or other non-file URI is read with `workspace.fs`, shown read-only, and kept out of the tree |
+| `resolveCustomEditor(document, panel)`                        | what `adoptStudioPanel` does now. A document holds a set of panels: a Source Control diff opens a second one on the open document                                                                                                 |
+| `saveCustomDocument`                                          | checks the file first. Unchanged since this tab read or wrote it, it writes the last settled document; changed, it asks: Overwrite, Load the File's Version, Compare                                                              |
+| `saveCustomDocumentAs(destination)`                           | writes a rebased copy to the destination, the live session untouched, and records destination → session                                                                                                                           |
+| `revertCustomDocument`                                        | replaces the scene with the file's, as one undo step                                                                                                                                                                              |
+| `backupCustomDocument(destination)`                           | writes the last settled document                                                                                                                                                                                                  |
 
-**One tab per scene** (`supportsMultipleEditorsPerDocument: false`): splitting
-reveals the one there is. Two views of one session, with two cameras say, when
-someone asks.
+**Save As hands the session over.** VS Code replaces the editor with one for the
+new file, a new document. `openCustomDocument(destination)` adopts the session
+recorded for it instead of loading -- its undo, its selection, its camera -- and
+rebases its mesh paths, in the undo snapshots too; the old document's dispose
+does not close a session it handed on. A rename or a move in the Explorer is the
+same, through `onWillRenameFiles`. An untitled scene's first save is a Save As.
+Save As onto a scene open in another tab is refused.
 
-**When the engine cannot start**, the tab says so in place, with Install the
-Engine and Reopen as Text.
+**A file changed on disk** comes in as one undo step labelled "changed on disk",
+whether the tab has unsaved edits or not (decided): what it had is one undo
+away, and a notice says so. The watcher ignores a write whose bytes are the ones
+this tab last wrote or read, lets a burst of events settle (git deletes then
+creates), and marks a deleted file without loading anything. A file that does
+not load -- conflict markers, a newer format -- marks the tab "changed on disk,
+not loaded", and refuses its saves until Load or Overwrite. A document identical
+to the scene records nothing.
 
-**What goes**: `sceneFile`, `sceneDirty` and `showSceneFile`; `SCENE_STATE_KEY`
-and `restoreScene`; the reload half of the backup; the `magpylibStudio` panel
-serializer. Save, Save As, Revert and Close become VS Code's, on the tab, Ctrl+S
-included; the Scene view's buttons call them for the scene in front.
+**Revert** is VS Code's, which asks nothing and does not wait for the provider:
+it replaces the scene as one undo step, so it can be undone. The studio's own
+Revert buttons keep their question.
+
+**Auto-save** (`files.autoSave`) saves through `saveCustomDocument` and never
+backs up; with `onFocusChange`, a click into the side bar writes the file. The
+guide says so, and the check before a save keeps another writer's file safe.
+
+**Upgrading from one scene**: for one release a stub `magpylibStudio` serializer
+disposes the old panel and opens the remembered scene as a tab, and the old
+`SCENE_STATE_KEY` and `backup.magpy.json` open once as a dirty tab on the
+remembered file.
+
+**What goes**: `sceneFile` and `showSceneFile`; `SCENE_STATE_KEY` and
+`restoreScene`, after the upgrade release; the reload half of the backup; the
+panel's serializer. The module-level `sceneDirty` becomes each scene's.
 
 **What stays the extension's: the engine's crash.** VS Code's backups are for
-the window. The engine is our subprocess, and it holds every open scene, so the
-crash copy stays, one per scene, and a restarted engine is given each one back;
-a scene whose copy will not load says so on its tab.
+the window; the engine is our subprocess, and holds every open scene. A
+restarted engine is given each scene's last settled document back, one at a
+time, with a marker on disk naming the one restoring, so a scene whose restore
+kills the engine is skipped next time and marked lost. A crash loses every tab's
+undo history; the notice says so.
 
-## 5. The extension: the scene in front
+## 5. The extension: every open scene in the tree
 
 **One object per open scene**, the custom document, holds what is module-level
-now: the uri, the session, the panel, the selection, the script tab, the
-imported candidates, the crash copy and its timer. The engine, the sidebar's
-providers and the clipboard stay the window's.
+now: the uri, the session, its panels, the selection, the script tab, the
+imported candidates, its state and revision, its last settled document. The
+engine and the side bar's providers stay the window's.
 
-**The scene in front** is the one whose tab was focused last. It stays in front
-while the focus is on a Python file or the terminal, so the sidebar does not
-empty while someone writes a script beside the scene; when its tab closes, the
-scene tab focused before it takes its place.
+**The tree holds every open scene** (decided), each a top-level node with its
+objects under it, as Unity's Hierarchy shows the scenes it has loaded. Its
+scenes come from the tabs (`window.tabGroups`, inputs of this view type), not
+from the documents: after a reload VS Code loads a tab's document only when it
+is shown, so a scene behind another tab is listed as unloaded and loads in its
+own group when it is expanded or dropped on. A scene opened from a file is
+pinned, so a single click on a second scene in the Explorer does not close the
+first; Load Example opens as a preview, replaced by the next until something is
+done in it. Rows are keyed by scene -- objects, steps and removed objects; a
+step row is `op-e1` today, which two scenes would share. Scenes are listed in
+the order they opened; two of the same name show their folder. An edit refreshes
+its scene's node and nothing else.
 
-- **The sidebar reads it.** Each provider is handed a `request` bound to the
-  scene in front, and a change of scene refreshes all four. The tree's
-  description is the scene's name; the dot is on the tab.
-- **The field panel follows it**, as the sidebar does. Comparing two scenes'
-  fields is another feature.
-- **Commands and keys act on it.** In the keybindings,
-  `activeWebviewPanelId == 'magpylibStudio'` becomes
-  `activeCustomEditorId == 'magpylib-studio.scene'`.
+**The scene in front is the extension's own state**, set by any act on a scene:
+focusing its tab, selecting its node, a menu command on its row, a drop or a
+paste into it, focusing its script tab. It is not VS Code's active editor, which
+may be a Python file, or the other scene when the two sit side by side --
+revealing a tab without focus does not activate its group. It is published as a
+context key, and its node is marked. The tree's selection is its selection: when
+a scene comes in front, or its view picks something, the tree reveals and
+selects it.
+
+- **The Variables, the Inspector and the Undo view show it**, their titles
+  naming it. Each is drawn for one session, and every call it makes carries that
+  session, so a value committed by the click that switches scenes lands in the
+  scene it was typed for.
+- **Keys act on it.** Undo and Redo bind on the scene in front, with
+  `!inputFocus` so a search box keeps its own. Save and Save As keep studio
+  bindings while the focus is in the side bar, acting on the scene in front
+  through `workspace.save(uri)` and `workspace.saveAs(uri)`; in an editor, VS
+  Code's act on that editor, which the click put in front.
+- **A scene's node carries its commands**: Add Object, New Collection, Save,
+  Close, View Script and Field View, on hover and in its menu. The title bar
+  keeps New Scene, Open Scene, Load Example, Collapse All, Undo and Redo. Revert
+  on a node brings its tab forward first.
+- **The field panel belongs to one scene**, its title naming it; Field View on
+  another scene's node moves it there and drops a sweep made for the first.
 - **Each scene has its script tab**: a file in extension storage named after the
-  scene (`ring.py`), in a folder keyed by the scene's URI, so that two
-  `ring.magpy.json` from different folders do not share one and a reload finds
-  which scene a restored tab belongs to. It is regenerated as now, and its save
-  applies to its own scene wherever the focus is. The live JSON
+  scene, in a folder keyed by a random id the document keeps through its backup
+  and its Save As, so two `ring.magpy.json` from different folders never share
+  one. Its save applies to its own scene. The live JSON
   (`magpylib-studio:/scene.json`) becomes one per scene the same way.
 - **What arrives opens a tab.** Import Script, and Open in Studio on a script or
-  on a script's drawing, open a new untitled scene instead of replacing the one
-  in front. A script with several `show()` calls opens its first; Switch
-  Imported Scene switches that tab's, as now.
-- **Paste stays within a scene.** Copying in one tab and pasting in another is
-  new engine work (an object's create, its steps and the variables they name,
-  moved between sessions); for now it refuses and says why.
+  on a script's drawing, open a new untitled scene, dirty, instead of replacing
+  the one in front. A script with several `show()` calls opens its first; Switch
+  Imported Scene switches that tab's, as one undo step.
+- **With no scene open**, the tree's welcome offers New Scene, Open Scene, Load
+  Example and Import Script; an empty scene's node holds one row, "Add an
+  object…"; the walkthrough's first step opens or makes a scene.
+
+### 5.1 Copying across scenes
+
+Decided 2026-10-11, in this step.
+
+**A copy is an ordinary scene document**, the part of `to_dict` that is the
+object's: the live life of its subtree -- each object's last create and the
+steps after it, in the log's order, with the parents they had then -- the
+variables it uses through every formula, with their limits and units, and the
+folder its mesh paths are relative to. It loads alone through `load_scene`, the
+JSON Schema validates it, and on the system clipboard it pastes across windows.
+`export_object(object_id)` writes one; `import_fragment(fragment, parent)`
+merges one under a parent as one step to undo. A copy within a scene goes
+through the same exporter.
+
+- **The copy is the object it was.** Its world pose comes with it, as a copy
+  within a scene keeps it since the review: what its groups did to it is one
+  rigid step on the copy's root. (Before, halbach's `r2`, turned 18° by its
+  ring, copied to (23, 0, 15) mm at 0° where it sits at (21.9, 7.1, 15) mm.)
+- **Ids** are new in the target, none its log has used, live or removed, and
+  `target`, `parent` and `children` are renamed together, as within a scene: one
+  id names one object in a log, a removed object's id retired when reused.
+- **Variables are never shared** (decided): the copy brings its own, renamed on
+  any clash -- `radius` → `radius_2` -- in one pass, in dependency order, every
+  formula rewritten. A later paste of the same reuses the twin it made
+  (`radius_2` with the same definition and limits) rather than making
+  `radius_3`. Only the variables the copy uses come; an expression set aside
+  under a pinned value is dropped. The paste says what it did: "n → n_2, radius
+  → radius_2". Unifying two on purpose is a Merge, later.
+- **Steps that would point outside the copy** -- a reparent onto a group not
+  copied -- are left out; a broken step is left out and named; a name the source
+  does not define never binds to the target's.
+- **A pattern's source** pasted at a scene's root is wrapped in a new Collection
+  named after it, in the same step: a pattern needs a group, and every example's
+  magnet is a pattern's source. A pattern's copy cannot be copied, as within a
+  scene.
+- **Mesh paths** are rebased from the source's folder to the target's.
+- **Variants stay with their scene**: the copy's variables come in at their
+  current values.
+- **The clipboard holds a reference** -- the session, the object, its revision
+  -- while the source is open, and the copy is exported at paste time, as within
+  a scene today; when the source closes, the clipboard takes the copy then. A
+  copy carries its `DOC_VERSION`.
+- **A drag across scenes copies** (decided). The target comes in front, its tab
+  forward and the copy selected, and the status bar says "Copied magnet to
+  stator.magpy.json". A drop on empty space does nothing.
+- **Cut and Paste moves**: the copy goes in, then the source's object is
+  removed. Undoing the paste also undoes the removal while that is still the
+  source's latest step; otherwise the status bar says to undo there. A cut whose
+  scene has closed pastes as a copy, and says so.
+- **In a notebook** copying across scenes is a function call
+  (`import_fragment`), not a gesture: the widget is the view of one scene
+  ([0022](../decisions.md#0022-what-the-widget-is-and-is-not)).
 
 ## 6. Variants
 
-### 6.1 What a variant is
-
-A named set of values for the scene's **knobs**: its variables that hold a
-number or a choice, not a formula.
-
-```json
-"variables": { "n": 10, "radius": 0.023, "stagger": "=360/(2*n)" },
-"variants": {
-  "compact": { "n": 8, "radius": 0.018 },
-  "wide": { "n": 12, "radius": 0.035 }
-}
-```
-
-- **Using a variant sets the knobs it names**, as one undo step, the way a
-  slider sets one: the fold holds the hard bounds and `integer` as it does for
-  any value. `variables` stays the one answer to what the scene is now; a
-  variant is not a mode.
-- **Which variant the scene is in is worked out, never stored**: of those whose
-  values all hold, the one naming the most of them, so a variant that holds
-  another's values and more is the one in force once used. Move a slider and the
-  scene is in none; move it back and it is in the variant again. Nothing to keep
-  in step, and nothing for undo to get wrong. The panel remembers which one it
-  used last, so that "save over" knows what to save over; the document does not.
-- **Saving a variant from the panel writes every knob**, so using it puts the
-  scene back exactly. One written in code or by a tool may name fewer (R8's
-  values from an Optimetrics run name what the optimiser moved), and using it
-  leaves the rest where they are.
-- **Variants follow the variables.** Renaming a variable renames it in every
-  variant, and removing one removes it. A knob made a formula leaves every
-  variant, since a formula is a definition and a variant holds values. A knob
-  added later is in no variant until one is saved again; using an older one
-  leaves it as it is, and the answer names it. An entry naming no variable (an
-  older studio renamed it) is left out when the variant is used, and reported; a
-  rename onto its name drops it rather than collide with it.
-- **A variant is checked as the combination it makes** (2026-10-11, after a
-  review): values the limits refuse -- those it sets, or a formula following
-  them -- are refused when it is saved; a change of limits that would strand one
-  is refused, naming it; one a later formula makes unusable is listed as
-  `unusable`, with why, shown and not offered, and not used. Its values are
-  numbers (a numeral as text is read as one) or a choice's name, finite, never a
-  formula; a variant with none is no variant.
-
-**In the document**, `variants` is a new top-level key. An older studio carries
-it untouched ([0013](../decisions.md#0013-the-saved-file-is-the-document)) and
-offers nothing for it, so `DOC_VERSION` stays 3; the JSON Schema gains it.
-
-### 6.2 In the session
-
-`get_variables()` adds `variants`, `variant`, the one the scene is in, or none,
-and `unusable`. `use_variant(name)`, `save_variant(name, values=None)` (none
-means every knob as it is now), `rename_variant(old, new)` and
-`remove_variant(name)` are each one undo step, reported like any edit.
-`save_variant` refuses a name that is not a knob. Saving, renaming and removing
-rebuild nothing: no object follows a variant until it is used, and a rebuild
-would also throw away a captured run. `set_variables(values)` sets several
-variables in one rebuild and one step, as the `variables` trait does.
-
-### 6.3 In code
-
-The scene function names its variants in its mark, beside its units:
-
-```python
-@scene(
-    variants={"compact": {"n": 8, "radius": 0.018}, "wide": {"n": 12, "radius": 0.035}}
-)
-def ring(n: ... = 10, radius: ... = 0.023): ...
-```
-
-- `ring(**ring.variants["wide"])` is plain magpylib at those values, and
-  `ring.build(values=ring.variants["wide"])` the document at them: `values`
-  takes a mapping already, so using a variant in code is nothing new to learn.
-  In a notebook, `view.variables = ring.variants["wide"]` uses one, through the
-  trait that is already there, as one change: `set_variables` sets them all in
-  one rebuild and one undo step, checked as the combination they make (the trait
-  set them one at a time before, a rebuild each).
-- `to_builder_script()` writes them in the mark, so the script tab says the
-  whole scene and its save keeps them. A key no builder call writes does not
-  survive a save that changes something (`apply_builder_script`), which is why
-  they have to be code. Each is written in the signature's order, however the
-  document stored it, so the tab builds its scene back; an entry naming no
-  parameter, and a variant the scene cannot use, are named at the top instead,
-  since written they would fail the script at its mark.
-- The mark's values are checked against each parameter's annotation where the
-  mark is written: a count's whole number, a choice's options, the bounds.
-- `build(values=path)` takes a saved scene's variants along with its values. A
-  variant saved in the panel survives the next run, as a slider's position does,
-  and wins over one of the same name in the mark. One deleted in the panel but
-  still in the mark comes back with the next run, as a variable removed in the
-  panel comes back from the signature: the mark is the code's. A variant, the
-  mark's or the file's, that the built scene cannot take whole -- a parameter
-  gone or a formula now, values past new limits -- is left out with a warning,
-  never trimmed and never failing the build; the mark's of that name stays.
-- `Scene.variant(name, values)` underneath, for the builder;
-  `Scene(values=path)` lays the saved variants over the script's when the scene
-  is first read, so a builder script keeps them as a scene function does.
-
-### 6.4 In the panel
-
-The variables panel is one module in both hosts (`static/variables.mjs`). With
-variants in the scene, it gets one row above the sliders: a toggle per variant,
-the one the values are in pressed, and none once a slider moves off them; one
-press uses one, as one change (decided 2026-10-11: a dropdown was two clicks,
-and plain). Past four variants, or names too long to sit in a row, a dropdown
-holds them instead. An unusable variant is shown and not offered, its tooltip
-saying why.
-
-- **In the sidebar**, beside it, the host's actions, as `edit` and `remove` are
-  for a variable now: save as a new variant, save over this one, rename, delete.
-- **In the widget, the toggles alone.** Using a variant edits values, which the
-  widget does; making one changes what the scene says, which in a notebook is
-  the scene function's job, as adding a variable is. The widget's allow-list
-  gains `use_variant` and nothing else.
-- **From a cell, `view.save_variant(name)`** (decided 2026-10-11): a method, not
-  a button. It keeps the knobs as they are under that name in the view's scene,
-  so the panel has it at once, and returns them, ready to paste into the mark.
-  Two things it saves a person from: `view.variables` holds every variable,
-  formulas included, which a variant must not; and a variant saved on the
-  session directly leaves the view stale, since the view follows only the edits
-  made through its own calls. Until it is in the mark it lives as a dragged
-  slider does: gone when the cell runs again, kept by `view.save` and a build
-  from that file.
-- With no variants there is no row, and the panel stays as it is.
-
-### 6.5 Next, not here
-
-- **R8**: values back from Optimetrics arrive as a variant named after the run,
-  instead of over the knobs; the person compares, and uses it.
-- **R7**: the emitter can write the variants as a parametric table, so one
-  Maxwell run solves each.
-- **The field per variant**: `sweep` over variants, recording nothing, when a
-  cell or the evals ask for it.
-- **Two variants side by side**: a view of one scene at another variant's
-  values. Until then, a second tab is a Save As.
+Built (#32): architecture.md says how they work,
+[0026](../decisions.md#0026-variants-are-named-value-sets-inside-a-scene) why.
+Left for this plan: in the VS Code side bar, save as a new variant, save over
+the one in force, rename and delete, as the host's actions in the variables
+panel, built in §7 step 3. Where variants go next -- R7's parametric table, R8's
+values back as a variant, the field per variant, two variants side by side -- is
+the roadmap's.
 
 ## 7. The order
 
-Each step lands on its own, writing the changelog and architecture.md as it
-does.
+Decided 2026-10-11. Each step lands with its changelog and architecture.md.
 
-1. **The engine's sessions**: `serve`'s table, `open_session`, `close_session`,
-   the default session, `version`. Tested: two sessions, each with its own undo;
-   an unknown session refused; a request without one served as today.
-2. **Variants**, engine and panel: the document key, the session's calls, the
-   rules of §6.1, the mark, the writer, `build(values=path)`, the panel's row
-   and the sidebar's actions, the widget's allow-list, the skill and its
-   generated reference. Independent of the tabs, and in notebooks the day it
-   lands.
-3. **The extension, unchanged to look at**: what is one scene's moves into one
-   object. Still one scene, and the extension suite green.
-4. **The custom editor**: scenes open in tabs; New, Open, Save, Save As, Revert
-   and reload are VS Code's, and the hand-built ones go; a crash copy per scene;
-   the file watcher.
-5. **Several tabs**: the sidebar, the Undo view, the field panel and the keys
-   follow the scene in front; a script tab per scene; what arrives opens a tab.
+0. **A prototype, thrown away** (1–2 days): a minimal custom editor on VS Code
+   1.109 and on stable, checking before anything builds on it: Save As and an
+   untitled first save handing a session over; a dirty scene renamed in the
+   Explorer; two dirty untitled scenes through a reload; auto-save against an
+   outside write; a Source Control diff and a merge; keys with the focus in the
+   view, the side bar and an input box; a split; eight tabs' memory and WebGL
+   contexts, with a hidden tab's renderer released as the widget's pool does; an
+   extension-host restart with a scene open.
+1. **The engine's sessions** (about ½ day): `serve`'s table, `open_session` that
+   loads, `close_session`, `version`, random names, refusal without a session
+   after an open, one mesh cache per process. Three engine fixes it rests on are
+   made already, with this plan's revision: a copy's pose, an id reused after a
+   removal, Save As then undo breaking mesh paths.
+2. **Every view and request carries its scene** (1–2 days): a handle
+   `{engine, session}` through the extension's forty-odd call sites and the side
+   bar's views, each drawn for one session. Still one scene, the suite green,
+   and nothing moved that step 3 deletes.
+3. **Tabs, the tree of every open scene, and crash safety, as one release** (4–6
+   days): the custom editor, its document as the per-scene object, the scene in
+   front, the watcher, Save As's hand-over, the upgrade, the variants' side bar
+   actions. The first slice anyone sees, and the riskiest, which step 0
+   de-risks.
+4. **Copying across scenes** (about 2 days), engine and interface together: the
+   exporter, the import, paste and drag, the clipboard; a copy within a scene
+   through the same exporter.
+5. **Scripts outside the engine** (about 1 day), before any R3 step 2 work: the
+   child process, the watchdog, Restart Engine.
 
-**Done when** two scenes are open side by side, each with its own undo, tree,
-variables and script tab; a reload brings both back, unsaved changes included;
-an engine crash brings both back; and a variant saved in the sidebar is used
-from a notebook's dropdown and survives a save and a run of its script. Then
-this plan goes: its decisions become records, and its as-built facts are in
+**Done when**, each clause a check:
+
+- the engine's tests (`tests/test_session.py`, and a new `tests/test_rpc.py`
+  driving `serve`): two sessions, each with its own undo; a request without a
+  session refused once one is open; a copy across sessions keeping its pose and
+  bringing its variables renamed; Save As then undo keeping its mesh paths;
+- `npm test`: two scene tabs in the tree; a drag from one node onto the other;
+  the engine killed with two dirty scenes, both back; a script tab each; Save As
+  keeping the undo history;
+- by hand, in CONTRIBUTING's list: a reload with two unsaved scenes; eight tabs'
+  memory.
+
+Then this plan goes: its decisions become records, and what it built is in
 architecture.md.
 
-## 8. To check before building
+## 8. What VS Code does, as the review found it
 
-- **Untitled custom documents**: New Scene's `untitled:` tab, and its first save
-  through `saveCustomDocumentAs`, on VS Code 1.95, the floor.
-- **A diff in Source Control**: with the studio the default for `.magpy.json`,
-  does a diff open two studio views (two sessions, one of them on a `git:` URI)
-  or the text diff? The text diff is the one wanted.
-- **WebGL contexts**: each tab keeps its context while hidden
-  (`retainContextWhenHidden`, for the camera). The browser drops the oldest
-  somewhere past sixteen, and the widget's pool of eight is per page, so it does
-  not span tabs. How many tabs before a hidden one comes back blank?
-- **Hot exit**: two scenes with unsaved changes, a reload; both come back
-  unsaved, from VS Code's backups.
+Read from VS Code's source (1.95 and main) and its typings, not assumed:
+
+- Save As, an untitled scene's first save and a rename in the Explorer replace
+  the editor with one for the new file: a new document (typings, "the current
+  editor is be replaced by an non-dirty editor for the newly saved file").
+- A content-change event marks a custom document dirty until a save or a revert
+  resolves; the dot clears when the save resolves, whatever arrived meanwhile;
+  revert clears it at once.
+- Auto-save saves custom documents and never backs them up; VS Code neither
+  reloads a custom document whose file changed nor checks the file before a
+  save.
+- After a reload, a custom tab's document is opened only when the tab is shown,
+  or when it is dirty with a backup.
+- Before 1.133 a default custom editor also opens diffs and merges
+  (microsoft/vscode#292379); the diff's modified side reuses the open document.
+- With `supportsMultipleEditorsPerDocument: false`, opening the scene again
+  moves its tab rather than revealing it in place; revealing a tab without focus
+  does not activate its group.
+- `retainContextWhenHidden` reaches a custom editor only at registration; a
+  rejected `openCustomDocument` shows VS Code's own failure page; Revert asks
+  nothing and does not wait for the provider.
 
 ## 9. Rejected
 
@@ -362,20 +386,36 @@ architecture.md.
   what Godot, notebooks and VS Code use, `plans/instancing.md` puts a definition
   in its own file, and one scene per file is one diff per scene.
 - **A `CustomTextEditorProvider`**: §4.
-- **A process per scene**: 95 MB and 0.3 s each, for an isolation the serial
-  loop already gives between calls. A long job's isolation is V3's worker.
+- **A process per scene**: 95 MB and 0.25 s each, for an isolation that scripts
+  need and documents do not; scripts run in a child process instead (§3).
 - **VS Code's undo stack** (decided 2026-10-11): the Undo view's jumps, the
   rollback bar and the cap of 100 snapshots would each have to be mirrored into
   a stack VS Code keeps.
-- **Variants as files**: a value set saved as a file copies the whole scene with
-  it, and the two drift apart with the first edit.
-- **A stored active variant that slider edits are written into**, as CAD
-  configurations do: sliders with a mode, and where an edit lands a matter of
-  state. `variables` stays the one answer to what the scene is now.
-- **Formulas in a variant**: a variant that put a number in `stagger`'s place
-  would undo a definition every time it was used.
+- **The side bar showing the tab in front only**, or a list of scenes above one
+  tree (decided 2026-10-11): one scene at a time, where the person wants several
+  side by side.
+- **Every scene file in the workspace in the tree**: the Explorer lists files;
+  the tree is for what is open, each node a live session.
+- **A pasted copy following the target's variables**, or sharing one whose
+  definition matches (decided 2026-10-11): it would move with the target's
+  slider because the values happened to agree.
+- **A drag across scenes moving**: an accidental drag would take an object out
+  of its scene, undone only by two undos in two scenes.
+- **Asking before taking a file changed on disk** (decided 2026-10-11): an
+  agent's session would be a dialog per write, where one undo keeps the person's
+  edits.
+- **A floor of 1.95, or of 1.133** (decided 2026-10-11): below 1.109 Save As
+  leaves the old tab dirty; 1.133, which keeps diffs as text, is too recent for
+  the editors built on VS Code.
+- **Moving the closure's state into a per-scene object first**, the old step 3:
+  it moved code the custom editor then deletes.
+- **`copy_across` in the engine**: the extension carries the copy for the
+  clipboard anyway, and it would tie sessions to one process.
+- **The field panel following the scene in front**: it carried one scene's sweep
+  into another, and recomputed on every switch.
 
 ## 10. Open
 
-Nothing yet. The widget's question (a save button, or the dropdown alone) is
-answered in §6.4: the toggles alone, and `view.save_variant` from a cell.
+- A Merge of two variables -- a rename onto an existing one, its uses repointed
+  -- when someone asks for it.
+- Whether a preview tab joins the tree (proposed: yes, marked as a preview).

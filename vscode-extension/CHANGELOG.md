@@ -260,6 +260,17 @@ All notable changes to the Magpylib Studio extension.
 
 ### Fixed
 
+- A copy of an object inside a turned group -- any magnet of the Halbach
+  example's second ring -- stood where the object would be had the group never
+  turned. It now stands where the object stands, and beside it keeps following
+  the same group and variables; pasted elsewhere, it is put where the object is.
+- Removing an object and adding another of the same id left both under that id:
+  a copy of the new one copied the removed one, and an edit of a parameter could
+  land on the removed one. The removed one's steps now keep an id of their own,
+  in files written before as well.
+- After Save As into another folder, an undo brought back mesh paths that meant
+  the old folder, and the mesh broke. The undo history is rebased with the
+  document.
 - Turning or resizing an object on a path with the handles turned or stretched
   its path along with it, which jumped back when the handle was let go. The path
   stays where it is, and moves only as the object's position does.
