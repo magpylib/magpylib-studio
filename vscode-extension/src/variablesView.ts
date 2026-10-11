@@ -9,6 +9,7 @@ const MUTATING = new Set([
   'set_variable_unit',
   'remove_variable',
   'restore_variable',
+  'use_variant',
 ]);
 
 export interface VariableBounds {
@@ -123,7 +124,11 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
         // value until this one is back, so a scene that is slow to rebuild
         // gets asked for fewer of them rather than falling further behind.
         webviewView.webview.postMessage({ type: 'rpcResult', reqId, method, result });
-        if (MUTATING.has(method)) {
+        // A call that found the scene already as asked -- a variant whose
+        // values hold -- edited nothing, and marking the file unsaved for it
+        // would be a lie.
+        const unchanged = (result as { unchanged?: boolean } | null)?.unchanged === true;
+        if (MUTATING.has(method) && !unchanged) {
           // Either way it moves everything written in terms of the variable —
           // which is the whole point, and none of it is on this panel. What
           // differs is how much of the studio is worth bringing with it.

@@ -16,7 +16,8 @@
  *   (`widget-pages/pool.html`);
  * - the variables panel, against a fake kernel: offered with the handles,
  *   a slider drag asking the session in the panel's order and redrawing
- *   between, a dropdown committing once (`widget-pages/variables.html`);
+ *   between, a dropdown committing once, a scene's variants a toggle each
+ *   above the rows (`widget-pages/variables.html`);
  * - the object panel, against a fake kernel: the selection's parameters and
  *   pose, a value typed read through the engine, a bare name made at the
  *   value it replaces and said (`widget-pages/inspector.html`);
@@ -1012,7 +1013,10 @@ async function pencil(port, base) {
  *  a slider drag asks the session as the studio's Variables view does --
  *  the undo group opened, previews with the scene redrawn between, the
  *  release committed once, the group closed, the rows read back -- and a
- *  dropdown commits its choice once. The handles put away take it along. */
+ *  dropdown commits its choice once. The handles put away take it along. A
+ *  scene's variants are a toggle each above the rows, or a dropdown when
+ *  they are many, saying which one the values are in; one press asks the
+ *  session once, and the rows are read back. */
 async function variablesPanel(port, base) {
   await check("the variables panel edits through the session", async () => {
     const tab = await openTab(port);
@@ -1030,7 +1034,9 @@ async function variablesPanel(port, base) {
           return `${page} ${offered ? "offered no variables" : "offered variables"}`;
         }
         if (!offered) continue;
-        const { rows, drag, redrawn, chose, afterPencil } = result;
+        const { rows, drag, redrawn, chose, afterPencil, variantRow } = result;
+        if (variantRow)
+          return "a scene with no variants offered a dropdown of them";
         const names = rows.map((r) => r.name.split(" ")[0]).join();
         if (names !== "n,r,axis,free,half") return `the rows were ${names}`;
         const by = (name) => rows.find((r) => r.name.split(" ")[0] === name);
@@ -1083,6 +1089,53 @@ async function variablesPanel(port, base) {
         !grouped.includes("end_interaction")
       ) {
         return `restore was not one step: ${grouped.join(" ")}`;
+      }
+      // variants: a toggle each above the rows while they are few, none
+      // pressed to start; one press asks the session once, settled, and the
+      // rows are read back; a press on the pressed one asks nothing
+      await tab.navigate(`${base}/pages/variables.html?variants`);
+      const few = (await tab.until("return window.result", 20_000))?.variants;
+      if (!few) return "?variants: never finished";
+      if (!few.shown) return "the variants were not offered";
+      if (few.toggles.join() !== "compact,wide" || few.dropdown.length) {
+        return `two variants were ${JSON.stringify(few)}`;
+      }
+      if (few.before.length) return `${few.before} was pressed to start`;
+      if (JSON.stringify(few.used) !== JSON.stringify([["wide", false]])) {
+        return `the toggle sent ${JSON.stringify(few.used)}`;
+      }
+      if (!few.readBack) return "the rows were not read back after a press";
+      if (few.after.join() !== "wide" || few.n !== "16") {
+        return `after wide, ${few.after} was pressed and n was ${few.n}`;
+      }
+      if (few.pressedAgain) return "a press on the pressed variant asked again";
+      if (few.disabled.length) return `${few.disabled} was offered as unusable`;
+      // one the scene cannot use as it stands: shown, not offered, and a
+      // press on it asks nothing
+      await tab.navigate(`${base}/pages/variables.html?variants&broken`);
+      const broken = (await tab.until("return window.result", 20_000))
+        ?.variants;
+      if (!broken) return "?broken: never finished";
+      if (broken.disabled.join() !== "wide") {
+        return `the unusable variants were ${broken.disabled.join() || "none"}`;
+      }
+      if (broken.used.length || broken.n !== "10") {
+        return `a press on an unusable variant sent ${JSON.stringify(broken.used)}`;
+      }
+      // many: a dropdown instead, saying the values are in none
+      await tab.navigate(`${base}/pages/variables.html?many`);
+      const many = (await tab.until("return window.result", 20_000))?.variants;
+      if (!many) return "?many: never finished";
+      if (many.toggles.length || many.dropdown.length !== 7) {
+        return `six variants were ${JSON.stringify(many)}`;
+      }
+      if (many.before !== "—")
+        return `the values were said to be in ${many.before}`;
+      if (JSON.stringify(many.used) !== JSON.stringify([["n16", false]])) {
+        return `the dropdown sent ${JSON.stringify(many.used)}`;
+      }
+      if (many.after !== "n16" || many.n !== "16") {
+        return `after n16, the dropdown said ${many.after} and n ${many.n}`;
       }
       return thrown(tab);
     } finally {

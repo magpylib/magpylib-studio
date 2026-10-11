@@ -27,6 +27,7 @@ import contextlib
 import json
 import pathlib
 import sys
+import warnings
 
 import numpy as np
 
@@ -36,6 +37,7 @@ from magpylib_studio.session import (
     MagpylibStudioSession,
     _arange_lit,
     _linspace_lit,
+    _variant_problem,
 )
 
 
@@ -498,13 +500,19 @@ class Scene:
             self._call("set_model_unit", model_unit)
         if field_unit is not None:
             self._call("set_field_unit", field_unit)
+        variants = {}
         if isinstance(values, str | pathlib.PurePath):
             path = pathlib.Path(values)
             saved = (
                 json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
             )
             values = saved.get("variables") or {}
+            variants = saved.get("variants") or {}
         self._values = dict(values or {})
+        #: The variants of the saved scene `values` named: laid over the
+        #: script's when the scene is first read (`_keep_saved_variants`).
+        self._saved_variants = variants if isinstance(variants, dict) else {}
+        self._variants_kept = False
         #: Constructed, in order, for the ones never added or touched: they
         #: enter at the root when the scene is read.
         self._objects = []
@@ -564,6 +572,13 @@ class Scene:
             self._call("set_variable_unit", name, unit)
         return Variable(name)
 
+    def variant(self, name, values):
+        """Keep `values` -- a number, or a name for a choice, by variable --
+        under `name`: a variant of the scene, which the studio's variables
+        panel lists and sets the variables back to in one step. A formula is
+        what a variable is, so no variant holds one."""
+        self._call("save_variant", name, dict(values))
+
     def sampled(self, of, *, count=None, over=None):
         """A run of points as a formula: `of(t)`, for `t` running across
         `over` in `count` steps (the document's defaults, given neither: two,
@@ -597,7 +612,32 @@ class Scene:
         constructed so far in it."""
         for obj in list(self._objects):
             obj._enter()
+        self._keep_saved_variants()
         return self._session
+
+    def _keep_saved_variants(self):
+        """The saved scene's variants over the script's, once, when the scene
+        is first read -- the moment the constructed objects enter it too.
+
+        One saved in the panel survives the next run, as a slider's value
+        does, and wins over the script's of the same name. One the scene can
+        no longer take whole -- a variable it names gone or a formula now, a
+        value past new limits -- is left out with a warning, and the
+        script's of that name, if any, stays."""
+        if self._variants_kept:
+            return
+        self._variants_kept = True
+        for name, values in self._saved_variants.items():
+            result = (
+                self._session.save_variant(name, values)
+                if isinstance(values, dict)
+                else {"ok": False, "error": "it holds no values by variable"}
+            )
+            if not result.get("ok", True):
+                warnings.warn(
+                    f"the saved variant {name!r} was left out: {result['error']}",
+                    stacklevel=4,
+                )
 
     def to_dict(self):
         return self.session.to_dict()
@@ -983,7 +1023,21 @@ class _ScriptWriter:
         if not body:
             body = ["pass"]
         mark = self.word("scene")
-        head = f"@{mark}({', '.join(decorator)})" if decorator else f"@{mark}"
+        variants = self.write_variants()
+        if variants:
+            # One per line: a variant is read, compared and pasted whole.
+            head = [
+                f"@{mark}(",
+                *(f"    {part}," for part in decorator),
+                "    variants={",
+                *variants,
+                "    },",
+                ")",
+            ]
+        elif decorator:
+            head = [f"@{mark}({', '.join(decorator)})"]
+        else:
+            head = [f"@{mark}"]
         if parameters:
             signature = [
                 f"def {self.function}(",
@@ -992,7 +1046,11 @@ class _ScriptWriter:
             ]
         else:
             signature = [f"def {self.function}():"]
-        function = [head, *signature, *(f"    {line}" if line else "" for line in body)]
+        function = [
+            *head,
+            *signature,
+            *(f"    {line}" if line else "" for line in body),
+        ]
         notes = [f"# not written: {what}" for what in self.unwritten]
         return (
             "\n".join(
@@ -1000,6 +1058,34 @@ class _ScriptWriter:
             )
             + "\n"
         )
+
+    def write_variants(self):
+        """The variants as the mark says them, one a line, each value in the
+        signature's order -- so a variant reads the same however the document
+        stored it, and the script of the scene it builds is this one again.
+
+        Only what the mark can hold, and its scene can use: an entry naming
+        no parameter is left out of its variant, and a variant the scene
+        could not use is left out whole -- written, either would fail the
+        script at its mark. Both are named at the top instead."""
+        lines = []
+        for variant, values in (self.doc.get("variants") or {}).items():
+            problem = _variant_problem(values, self.doc)
+            if problem:
+                self.unwritten.append(f"the variant {variant!r} ({problem})")
+                continue
+            stale = [name for name in values if name not in self.parameter_names]
+            if stale:
+                self.unwritten.append(
+                    f"{', '.join(stale)} in the variant {variant!r} (no such parameter)"
+                )
+            entries = ", ".join(
+                f"{name!r}: {self.value(values[name])}"
+                for name in self.parameter_names
+                if name in values
+            )
+            lines.append(f"        {variant!r}: {{{entries}}},")
+        return lines
 
     def header(self):
         lines = []
@@ -1028,6 +1114,9 @@ class _ScriptWriter:
         """The parameters, and the `derived` lines for variables defined by
         a formula, each after the variables it names."""
         parameters, derived, done, order = [], [], set(), []
+        #: The parameters' names, in the signature's order: what a variant
+        #: written in the mark may name, in the order it names them.
+        self.parameter_names = []
 
         def visit(name, seen=()):
             if name in done or name not in self.variables or name in seen:
@@ -1057,6 +1146,7 @@ class _ScriptWriter:
             else:
                 annotation = self.annotation(limits, unit)
                 parameters.append(f"{name}: {annotation} = {self.value(value)}")
+                self.parameter_names.append(name)
         return parameters, derived
 
     def annotation(self, limits, unit):

@@ -198,7 +198,14 @@ print(
   scene once per value and reads the field each time, in milliseconds, and
   leaves the scene on the value it started with. `values` must be a list:
   `.tolist()` a numpy array.
-- `set_variable(name, value)` changes a value for good.
+- `set_variable(name, value)` changes a value for good;
+  `set_variables({name: value, ...})` changes several as one step, checked as
+  the combination they make.
+- Named sets of values are variants, written in the mark:
+  `@scene(variants={"compact": {"n": 8}, "wide": {"n": 16, "radius": 0.035}})`.
+  `ring(**ring.variants["wide"])` is plain magpylib at those values, and
+  `s.session.use_variant("wide")` sets them on the built scene as one step. A
+  variant holds values, never a formula, and names parameters only.
 - Session calls report a refusal rather than raise it: check `["ok"]` and read
   `["error"]`.
 

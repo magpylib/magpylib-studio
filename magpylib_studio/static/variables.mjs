@@ -2,6 +2,9 @@
  * The scene's variables, as a panel any host can mount: a slider for a range,
  * a dropdown for options, a box that takes a typed value -- `15 mm`, `2 cm`,
  * or an expression -- and, moved, the whole scene following in milliseconds.
+ * A scene with variants gets one more row above the others: a toggle per
+ * variant, the one the values are in pressed, and pressing another sets them
+ * as one step to undo -- or a dropdown, when there are too many to fit.
  *
  * The VS Code studio's Variables view and the notebook widget's panel are
  * this one module (docs/plans/variables-in-widget.md): the sidebar mounts it
@@ -64,6 +67,25 @@ function inUnit(v, value) {
   );
 }
 
+/** Variants few and short enough for a toggle each, one press to use; past
+ *  that they would crowd the row, and a dropdown holds them instead. */
+function asToggles(names) {
+  return names.length <= 4 && names.join("").length <= 32;
+}
+
+/** What a variant sets, as the rows show each value: "n 8, gap 9 mm". */
+function valuesOf(values, variables) {
+  return Object.entries(values || {})
+    .map(([name, value]) => {
+      const v = variables.find((each) => each.name === name);
+      if (!v) return null;
+      const symbol = v.shown && v.shown.symbol ? " " + v.shown.symbol : "";
+      return `${name} ${inUnit(v, value)}${symbol}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 /** A number, then perhaps a unit and nothing else -- `15`, `15 mm`, `-90°` --
  *  which the engine reads (`quantity`), so the units live in one place. */
 export const QUANTITY =
@@ -118,6 +140,10 @@ export function createVariables(
 ) {
   const withHelp = !compact;
   const ranges = !compact;
+  // The scene's variants, when it has some: a dropdown above the variables
+  // they set, saying which one the values are in now.
+  const variantEl = element("div", "magpy-vars-variant");
+  variantEl.hidden = true;
   const listEl = element("div", "magpy-vars-list");
   const emptyEl = element("div", "magpy-vars-empty", empty);
   emptyEl.hidden = true;
@@ -130,7 +156,13 @@ export function createVariables(
     if (helpEl.open) help().catch(say);
   });
   const statusEl = element("div", "magpy-vars-status");
-  container.append(listEl, emptyEl, ...(withHelp ? [helpEl] : []), statusEl);
+  container.append(
+    variantEl,
+    listEl,
+    emptyEl,
+    ...(withHelp ? [helpEl] : []),
+    statusEl,
+  );
 
   function say(what) {
     statusEl.textContent = what instanceof Error ? what.message : String(what);
@@ -166,6 +198,80 @@ export function createVariables(
         return load();
       })
       .catch(say);
+  }
+
+  /** Set the variables to a variant's values, as one step to undo. */
+  function useVariant(name) {
+    say("");
+    return rpc("use_variant", { name })
+      .then((res) => {
+        if (res && res.ok === false) say(res.error);
+        else if (res && res.ignored) {
+          say(`${name} left out ${res.ignored.join(", ")}: no longer a value`);
+        }
+        return load();
+      })
+      .catch(say);
+  }
+
+  /** Which variant the values are in, and the way to another: a toggle each
+   *  while they are few, one press to use, and a dropdown once they would
+   *  crowd the row. Named, not stored: move a slider and the values are in
+   *  none, so no toggle is pressed and the dropdown says so -- there is
+   *  nothing to go back to by choosing that. */
+  function showVariants(variants, current, variables, unusable = {}) {
+    const names = Object.keys(variants || {});
+    variantEl.hidden = names.length === 0;
+    variantEl.innerHTML = "";
+    if (!names.length) return;
+    const label = element("span", "magpy-vars-name", "variant");
+    label.title =
+      "A variant is a set of values for the variables: choosing one sets " +
+      "them all, as one step to undo";
+    // A variant the scene cannot use as it stands -- a value its limits
+    // refuse now -- is shown and not offered, and says why.
+    const says = (name) =>
+      unusable[name]
+        ? `${name} cannot be used as the scene stands: ${unusable[name]}`
+        : `${name}: ${valuesOf(variants[name], variables)}`;
+    if (asToggles(names)) {
+      const toggles = element("div", "magpy-vars-chips");
+      for (const name of names) {
+        const on = name === current;
+        const chip = element("button", "magpy-vars-chip", name);
+        chip.type = "button";
+        chip.classList.toggle("on", on);
+        chip.setAttribute("aria-pressed", String(on));
+        chip.disabled = Boolean(unusable[name]);
+        chip.title = says(name);
+        chip.addEventListener("click", () => {
+          if (!on) useVariant(name);
+        });
+        toggles.appendChild(chip);
+      }
+      variantEl.append(label, toggles);
+      return;
+    }
+    const pick = element("select");
+    const none = element("option", "", "—");
+    none.value = "";
+    none.disabled = true;
+    none.selected = current == null;
+    pick.appendChild(none);
+    for (const name of names) {
+      const item = element("option", "", name);
+      item.value = name;
+      item.selected = name === current;
+      item.disabled = Boolean(unusable[name]);
+      item.title = says(name);
+      pick.appendChild(item);
+    }
+    pick.title =
+      current == null
+        ? "The values are in no variant: choose one to set them"
+        : `The values are ${current}'s: choose another to set them`;
+    pick.addEventListener("change", () => useVariant(pick.value));
+    variantEl.append(label, pick);
   }
 
   /** Let the variable decide again what a later step states outright. */
@@ -342,7 +448,11 @@ export function createVariables(
   }
 
   async function build() {
-    const { variables } = await rpc("get_variables", {});
+    const { variables, variants, variant, unusable } = await rpc(
+      "get_variables",
+      {},
+    );
+    showVariants(variants, variant, variables, unusable);
     listEl.innerHTML = "";
     emptyEl.hidden = variables.length > 0;
     for (const v of variables) {

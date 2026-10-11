@@ -581,7 +581,7 @@ def same_document(a, b):
     steps = lambda doc: [  # noqa: E731
         {k: v for k, v in e.items() if k != "id"} for e in doc.get("events", [])
     ]
-    keys = ("variables", "variable_bounds", "objects")
+    keys = ("variables", "variable_bounds", "variants", "objects")
     return steps(a) == steps(b) and all(a.get(k) == b.get(k) for k in keys)
 
 
@@ -1245,3 +1245,246 @@ def test_a_grid_of_pixels_is_a_formula_of_the_variables():
     assert s.session.set_variable("density", 4)["ok"]
     assert s.session._objs["probe"].pixel.shape == (16, 3)
     assert design(reach=0.01, density=2).pixel.shape == (4, 3)
+
+
+# --- variants -----------------------------------------------------------------
+
+
+def test_a_scenes_variants_are_named_in_its_mark():
+    """`@scene(variants=...)` names sets of parameter values: plain mappings,
+    so the function called with one is plain magpylib at those values, and
+    the build at one is the document at them. The document lists them, and
+    says which one its values are in."""
+
+    @scene(variants={"compact": {"n": 4, "r": 0.015}, "wide": {"n": 12}})
+    def ring(
+        n: Annotated[int, Count(2, 60)] = 6,
+        r: Annotated[float, Length(0.005, 0.08)] = 0.02,
+    ):
+        group = magpy.Collection(style_label="ring")
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.004, 0.004, 0.004), polarization=(1, 0, 0), position=(r, 0, 0)
+        )
+        group.add(magnet)
+        duplicate_around(magnet, count=n, axis="z", spin=360 / n)
+        return group
+
+    assert ring.variants == {"compact": {"n": 4, "r": 0.015}, "wide": {"n": 12}}
+    assert len(ring(**ring.variants["wide"]).sources_all) == 12
+    built = ring.build(values=ring.variants["compact"])
+    doc = built.to_dict()
+    assert doc["variables"] == {"n": 4, "r": 0.015}
+    assert doc["variants"] == ring.variants
+    assert built.session.get_variables()["variant"] == "compact"
+    assert built.session.get_history()["undo"] == [], "the build is where it starts"
+
+
+def test_a_variant_naming_no_parameter_is_refused_where_it_is_written():
+    """At the mark, not at a build later on: a variant gives parameters
+    values, and a derived variable is a formula of them. A value its
+    parameter's annotation refuses is refused there too."""
+    with pytest.raises(TypeError, match="'half', which is not a parameter of design"):
+
+        @scene(variants={"a": {"half": 0.01}})
+        def design(n: int = 4):
+            derived("half", n / 2)
+
+    with pytest.raises(TypeError, match="give its values by parameter"):
+
+        @scene(variants={"a": 4})
+        def design_two(n: int = 4):
+            pass
+
+    with pytest.raises(ValueError, match=re.escape("'a': n = 2.5 counts things")):
+
+        @scene(variants={"a": {"n": 2.5}})
+        def design_three(n: int = 4):
+            pass
+
+    with pytest.raises(ValueError, match="'a': axis = 'w' is not one of 'x', 'y'"):
+
+        @scene(variants={"a": {"axis": "w"}})
+        def design_four(axis: Literal["x", "y"] = "x"):
+            pass
+
+    with pytest.raises(
+        ValueError, match=re.escape("'a': r = 0.5 is above its maximum 0.1")
+    ):
+
+        @scene(variants={"a": {"r": 0.5}})
+        def design_five(r: Annotated[float, Length(0.01, 0.1)] = 0.05):
+            pass
+
+
+def test_the_script_of_a_scene_writes_its_variants_in_the_mark(tmp_path):
+    """One a line, so a variant reads, compares and pastes whole; run, the
+    script builds them back, and the script tab's save keeps them."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    assert session.save_variant("wide", {"radius": 0.035, "n": 12})["ok"]
+    assert session.save_variant("tilted", {"tilt": 30.0, "tilt_axis": "x"})["ok"]
+    script = session.to_builder_script()
+    assert (
+        "    variants={\n"
+        "        'wide': {'n': 12, 'radius': 0.035},\n"
+        "        'tilted': {'tilt': 30.0, 'tilt_axis': 'x'},\n"
+        "    },\n"
+    ) in script
+    assert same_document(rebuilt(session).to_dict(), session.to_dict())
+
+    edited = with_default(script, "radius", 0.0325)
+    assert session.apply_builder_script(tab(tmp_path, edited)) == {"ok": True}
+    assert session.to_dict()["variants"]["wide"] == {"n": 12, "radius": 0.035}
+    assert session.to_dict()["variables"]["radius"] == 0.0325
+
+
+def test_a_variant_saved_in_the_panel_survives_the_next_run(tmp_path):
+    """A saved scene's variants come with its values, as its sliders do: one
+    saved in the panel is kept, and wins over one of the same name in the
+    mark; one the function can no longer take whole -- a value past its
+    limits, a parameter it names gone -- is left out, each with a warning."""
+    path = tmp_path / "scene.magpy.json"
+
+    @scene(variants={"wide": {"n": 12}, "small": {"n": 3}})
+    def design(n: Annotated[int, Count(2, 20)] = 6):
+        pass
+
+    s = design.build(values=path)  # not there yet: the mark's alone
+    assert s.session.save_variant("wide", {"n": 14})["ok"]
+    assert s.session.save_variant("mine", {"n": 9})["ok"]
+    s.save(path)
+    assert design.build(values=path).to_dict()["variants"] == {
+        "wide": {"n": 14},
+        "small": {"n": 3},
+        "mine": {"n": 9},
+    }
+
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["variants"]["mine"] = {"n": 99}
+    doc["variants"]["gone"] = {"m": 1}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.warns(UserWarning) as said:
+        variants = design.build(values=path).to_dict()["variants"]
+    assert variants == {"wide": {"n": 14}, "small": {"n": 3}}
+    assert [str(w.message) for w in said] == [
+        "the saved variant 'mine' was left out: n = 99 is above its maximum 20",
+        "the saved variant 'gone' was left out: no variable 'm' in the scene",
+    ]
+
+
+def test_what_a_variant_holds_that_the_mark_cannot_is_named_not_written(tmp_path):
+    """An entry naming no parameter -- a formula now, or left by a studio that
+    renamed a variable before variants -- is left out of its variant in the
+    script, and a variant the scene could not use is left out whole: written,
+    either would fail the script at its mark. Both are named at the top; the
+    tab builds its scene back, a save that changes nothing changes nothing,
+    and an edit saves."""
+    session = MagpylibStudioSession()
+    session.load_example("halbach")
+    doc = session.to_dict()
+    doc["variants"] = {
+        "old": {"n": 12, "width": 0.004, "stagger": 3, "sampled": 1},
+        "huge": {"n": 100},
+    }
+    assert session.load_scene(doc)["ok"]
+    script = session.to_builder_script()
+    mark = script[script.index("@") : script.index("def ")]
+    assert "        'old': {'n': 12},\n" in mark and "'huge'" not in mark
+    notes = [line for line in script.splitlines() if line.startswith("# not written")]
+    stale = next(note for note in notes if "in the variant 'old'" in note)
+    assert all(name in stale for name in ("width", "stagger", "sampled"))
+    assert any("the variant 'huge' (n = 100 is above its maximum" in n for n in notes)
+
+    assert session.apply_builder_script(tab(tmp_path, script)) == {
+        "ok": True,
+        "unchanged": True,
+    }
+    edited = with_default(script, "radius", 0.0325)
+    assert session.apply_builder_script(tab(tmp_path, edited))["ok"]
+    assert session.to_dict()["variants"] == {"old": {"n": 12}}
+
+
+def test_a_variant_stored_in_another_order_than_the_signature_saves_from_the_tab(
+    tmp_path,
+):
+    """The script writes each variant in the signature's order, whatever order
+    the document keeps it in, so the tab builds its scene back and an edit
+    saves -- here the signature puts z before a, the document a before z."""
+    session = MagpylibStudioSession()
+    session.set_variable("y", 0.01)
+    session.set_variable("a", 0.02)
+    session.set_variable("z", 0.005)
+    session.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"dimension": ["=y", "=a", 0.01], "polarization": [0, 0, 1]},
+    )
+    assert session.set_variable("y", "=2 * z")["ok"]
+    assert session.save_variant("v")["values"] == {"a": 0.02, "z": 0.005}
+    script = session.to_builder_script()
+    assert "        'v': {'z': 0.005, 'a': 0.02},\n" in script
+    assert session.apply_builder_script(
+        tab(tmp_path, with_default(script, "a", 0.025))
+    )["ok"]
+    assert session.to_dict()["variables"]["a"] == 0.025
+
+
+def test_a_mark_variant_the_saved_scene_cannot_take_is_left_out_with_a_warning(
+    tmp_path,
+):
+    """A parameter the panel made a formula takes no variant's value: the
+    mark's variant setting it is left out, with a warning, and the build goes
+    on."""
+    path = tmp_path / "scene.magpy.json"
+
+    @scene(variants={"big": {"radius": 0.03}})
+    def ring(n: int = 6, radius: float = 0.02):
+        pass
+
+    s = ring.build(values=path)
+    assert s.session.set_variable("radius", "=n / 500")["ok"]
+    s.save(path)
+    with pytest.warns(UserWarning, match="the variant 'big' was left out: radius is"):
+        built = ring.build(values=path)
+    assert "variants" not in built.to_dict()
+
+
+def test_a_saved_variant_the_code_has_moved_on_from_gives_way_to_the_marks(tmp_path):
+    """A saved variant naming a parameter the code renamed is left out whole,
+    with a warning, and the mark's of that name stays -- never trimmed to
+    what still matches and kept over the code's."""
+    path = tmp_path / "scene.magpy.json"
+
+    @scene(variants={"wide": {"n": 12, "radius": 0.03}})
+    def before(n: int = 6, radius: float = 0.02):
+        pass
+
+    before.build(values=path).save(path)
+
+    @scene(variants={"wide": {"n": 12, "r": 0.03}})
+    def after(n: int = 6, r: float = 0.02):
+        pass
+
+    with pytest.warns(UserWarning, match="'wide' was left out: no variable 'radius'"):
+        variants = after.build(values=path).to_dict()["variants"]
+    assert variants == {"wide": {"n": 12, "r": 0.03}}
+
+
+def test_a_builder_script_keeps_the_saved_variants_as_it_keeps_the_values(tmp_path):
+    """`Scene(values=path)` lays the saved variants over the script's when
+    the scene is read, as a scene function's build does: one saved in the
+    panel survives the next run, and wins over the script's of its name."""
+    path = tmp_path / "scene.magpy.json"
+
+    def run():
+        s = Scene(values=path)
+        s.variable("n", 6, bounds=(2, 60), integer=True)
+        s.variant("wide", {"n": 12})
+        s.save(path)
+        return s.to_dict()["variants"]
+
+    assert run() == {"wide": {"n": 12}}
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["variants"] = {"wide": {"n": 14}, "mine": {"n": 9}}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert run() == {"wide": {"n": 14}, "mine": {"n": 9}}

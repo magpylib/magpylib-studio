@@ -57,6 +57,21 @@ All notable changes to the Magpylib Studio extension.
   builds it, marked `@scene` or plain, where it took `ring.build()`; the mark is
   for a file, where it says which function is the scene, and for `build()`
   without a view.
+- **Variants.** A scene keeps named sets of values for its variables:
+  `@scene(variants={"compact": {...}, "wide": {...}})` in code, checked against
+  each parameter's annotation where it is written; `view.save_variant(name)`
+  from a notebook cell; saved in the `.magpy.json` as `variants`, the format's
+  version unchanged. The variables panel shows a toggle per variant above the
+  sliders, the one the values are in pressed, and one press sets them all as one
+  step to undo; past four, a dropdown. `ring(**ring.variants["wide"])` is the
+  scene at those values in plain magpylib, and the script tab writes them in the
+  mark. A variant holds values, never a formula; values the limits refuse, alone
+  or through a formula, are refused when it is saved, and one the scene cannot
+  use as it stands is shown, not offered.
+- **Several values in one step.** `view.variables = {...}` sets everything it
+  changes together (`set_variables`): one rebuild where it was one per value,
+  checked as the combination it makes, and no step to undo for values the scene
+  already has.
 - **The view traces a pattern.** With a pattern's source selected, a dashed line
   in the selection's colour runs through the copies, closed round a ring, so the
   view says how the copies follow where the faint outlines say that they do.

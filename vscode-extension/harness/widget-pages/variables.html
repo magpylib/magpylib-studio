@@ -4,7 +4,9 @@
   against a fake kernel that answers the panel's calls from the fixture: the
   variables as listed, a set moving the one it names, the scene for a redraw.
   `?standalone` is a saved page, `?readonly` a view with its handles away;
-  neither offers the panel. `window.result` is what the panel showed and
+  neither offers the panel. `?variants` gives the scene two variants, the
+  values in neither, and `?many` six, too many for a toggle each; `?broken`
+  says one of them cannot be used as the scene stands. `window.result` is what the panel showed and
   what it asked the session, in order, with a previewed value marked `*` and a
   committed one `=`.
 -->
@@ -33,6 +35,24 @@
         const r = variables.variables.find((v) => v.name === "r");
         r.inert = true;
         r.shadowed = [{ events: ["ring-pattern"] }];
+      }
+      // `?variants`: two variants, in neither of which the values are;
+      // `?many`: six, which would crowd the row as toggles
+      if (query.has("variants")) {
+        variables.variants = {
+          compact: { n: 4, r: 0.015 },
+          wide: { n: 16, r: 0.03 },
+        };
+        variables.variant = null;
+      }
+      if (query.has("broken")) {
+        variables.unusable = { wide: "r = 0.03 is above its maximum 0.025" };
+      }
+      if (query.has("many")) {
+        variables.variants = Object.fromEntries(
+          [4, 6, 8, 12, 16, 20].map((n) => [`n${n}`, { n }]),
+        );
+        variables.variant = null;
       }
       const values = { ...state };
       if (query.has("standalone")) values.standalone = true;
@@ -74,6 +94,13 @@
             if (found) found.value = found.expression = params.value;
             // a preview asks for the scene in its own answer
             if (message.scene) result = { ok: true, scene };
+          } else if (method === "use_variant") {
+            const set = variables.variants[params.name];
+            for (const [name, value] of Object.entries(set)) {
+              const found = variables.variables.find((v) => v.name === name);
+              if (found) found.value = found.expression = value;
+            }
+            variables.variant = params.name;
           } else if (method === "expression_help") {
             result = {
               operators: ["+", "-"],
@@ -126,6 +153,82 @@
             .map((a) => a.params.name),
           grouped: asked.slice(mark).map((a) => a.method),
         };
+      } else if (
+        (query.has("variants") || query.has("many")) &&
+        !query.has("keep")
+      ) {
+        // above the rows, a toggle per variant -- or a dropdown, past a few
+        // -- with none pressed; one press asks the session once, settled,
+        // the rows are read back, and a press on the pressed one asks
+        // nothing
+        button("Variables").click();
+        await until(() => el.querySelectorAll(".magpy-vars-row").length);
+        await wait(200);
+        const variantRow = el.querySelector(".magpy-vars-variant");
+        const chips = () => [...el.querySelectorAll(".magpy-vars-chip")];
+        const pick = () => el.querySelector(".magpy-vars-variant select");
+        const pressed = () =>
+          chips()
+            .filter((c) => c.classList.contains("on"))
+            .map((c) => c.textContent);
+        const chosen = () => pick()?.selectedOptions[0]?.textContent ?? null;
+        const shown = !hidden(variantRow);
+        const toggles = chips().map((c) => c.textContent);
+        const disabled = chips()
+          .filter((c) => c.disabled)
+          .map((c) => c.textContent);
+        const dropdown = pick()
+          ? [...pick().options].map((o) => o.textContent)
+          : [];
+        const before = toggles.length ? pressed() : chosen();
+        const target = toggles.length ? "wide" : "n16";
+        const mark = asked.length;
+        if (toggles.length) {
+          chips()
+            .find((c) => c.textContent === target)
+            ?.click();
+        } else if (pick()) {
+          pick().value = target;
+          pick().dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        await wait(400);
+        const used = asked
+          .slice(mark)
+          .filter((a) => a.method === "use_variant")
+          .map((a) => [a.params.name, a.preview]);
+        const readBack = asked
+          .slice(mark)
+          .some((a) => a.method === "get_variables");
+        const after = toggles.length ? pressed() : chosen();
+        const n = [...el.querySelectorAll(".magpy-vars-row")]
+          .find(
+            (r) =>
+              r.querySelector(".magpy-vars-name").textContent.split(" ")[0] ===
+              "n",
+          )
+          ?.querySelector(".magpy-vars-value")?.value;
+        const again = asked.length;
+        chips()
+          .find((c) => c.classList.contains("on"))
+          ?.click();
+        await wait(300);
+        window.result = {
+          offered,
+          variants: {
+            shown,
+            toggles,
+            disabled,
+            dropdown,
+            before,
+            used,
+            readBack,
+            after,
+            n,
+            pressedAgain: asked
+              .slice(again)
+              .filter((a) => a.method === "use_variant").length,
+          },
+        };
       } else if (query.has("keep")) {
         // For a look: the panel open, and nothing done to it.
         button("Variables").click();
@@ -148,6 +251,9 @@
           ),
           value: r.querySelector(".magpy-vars-value")?.value ?? null,
         }));
+        // Read while the panel is open: the pencil below hides it, and with
+        // it any row, offered or not.
+        const variantRow = !hidden(el.querySelector(".magpy-vars-variant"));
         const row = (name) =>
           rowsOf().find(
             (r) =>
@@ -204,6 +310,7 @@
         };
         window.result = {
           offered,
+          variantRow,
           rows,
           drag,
           redrawn,

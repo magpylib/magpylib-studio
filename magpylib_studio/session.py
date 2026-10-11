@@ -53,11 +53,14 @@ Protocol surface (all JSON-serializable in/out):
   undo(steps?) / redo(steps?)          -> {"ok": bool, "error"?: str}
   get_history()                        -> {"entries": [...], "current": int, ...}
   goto_history(index)                  -> {"ok": bool, "error"?: str}
-  get_variables()                      -> {"variables": [{name, expression, value}]}
+  get_variables()                      -> {"variables": [{name, expression, value}],
+                                          "variants"?, "variant"?, "unusable"?}
   unknown_variables(values)            -> {"unknown": [names not defined yet]}
   expression_help()                    -> {operators, functions, constants, ...}
   check_expression(text)               -> {"ok": bool, "error"?: str}
   set_variable(name, value, unit?)     -> {"ok": bool, "error"?: str}
+  set_variables(values)                -> {"ok": bool, ...} several at once: one
+                                          rebuild, one step, refused whole
   set_variable_bounds(name, min?, max?, soft_min?, soft_max?) -> {"ok": bool, ...}
                                           (keeps the variable's unit)
   set_variable_unit(name, unit?)       -> {"ok": bool, ...} length, angle, field,
@@ -72,6 +75,12 @@ Protocol surface (all JSON-serializable in/out):
   unit_kinds()                         -> the kinds and the units each is typed in
   rename_variable(old, new)            -> {"ok": bool, "error"?: str}
   remove_variable(name)                -> {"ok": bool, "error"?: str}
+  use_variant(name)                    -> {"ok", "untouched"?, "ignored"?} a
+                                          variant's values, as one step
+  save_variant(name, values?)          -> {"ok", "values"?} every variable
+                                          holding a value, or those given
+  rename_variant(old, new)             -> {"ok": bool, "error"?: str}
+  remove_variant(name)                 -> {"ok": bool, "error"?: str}
   sweep(variable, values, sensor_id?, points?, field?) -> {"ok", "steps": [...]}
   get_sweep_figure(variable, values, …) -> plotly line-plot JSON
   get_events()                         -> {"events": [{index, id, target, source}]}
@@ -89,6 +98,7 @@ import ast
 import contextlib
 import difflib
 import json
+import math
 import os
 import re
 import traceback
@@ -1411,6 +1421,7 @@ _DOC_KEYS = (
     "field_unit",
     "variables",
     "variable_bounds",
+    "variants",
     "objects",
     "events",
 )
@@ -1493,6 +1504,22 @@ def _canonical(doc):
         }
         if not doc["variable_bounds"]:
             del doc["variable_bounds"]
+    if "variants" in doc:
+        order = list(doc.get("variables") or {})
+        variants = {}
+        for name, values in doc["variants"].items():
+            values = _variant_values(values)
+            if not values:
+                continue  # sets nothing: no variant
+            # The scene's order, whoever wrote it; an entry naming no
+            # variable keeps its place after them.
+            ordered = {k: values[k] for k in order if k in values}
+            ordered.update({k: v for k, v in values.items() if k not in ordered})
+            variants[name] = ordered
+        if variants:
+            doc["variants"] = variants
+        else:
+            del doc["variants"]
     if doc.get("events"):
         doc["events"] = expressions.normalized(doc["events"])
         for event in doc["events"]:
@@ -2097,6 +2124,7 @@ def _said(doc):
         steps,
         doc.get("variables"),
         doc.get("variable_bounds"),
+        doc.get("variants"),
         doc.get("model_unit"),
         doc.get("field_unit"),
     )
@@ -2121,6 +2149,140 @@ def _drift(written, back, width=100):
             line = ours[i1] if i1 < i2 else theirs[j1]
             return line if len(line) <= width else line[: width - 1] + "…"
     return None
+
+
+def _out_of_limits(name, value, limits):
+    """Why `name` may not hold `value` under its `limits`, or None: one of its
+    options, inside its hard bounds, a whole number for a count."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return f"{name} = {value} is no number a scene can hold"
+    choices = limits.get("options")
+    if choices is not None and value not in choices:
+        return (
+            f"{name} = {value!r} is not one of its options "
+            f"({', '.join(str(c) for c in choices)})"
+        )
+    if isinstance(value, str):
+        # A named value — an axis, a plane. The limits below are all
+        # numeric, and comparing a name against one used to surface as
+        # a raw TypeError from deep inside the build.
+        if choices is None:
+            return (
+                f"{name} = {value!r} is a name, but {name} is limited "
+                f"as a number; give it options rather than a range"
+            )
+        return None
+    if limits.get("min") is not None and value < limits["min"]:
+        return f"{name} = {value:g} is below its minimum {limits['min']:g}"
+    if limits.get("max") is not None and value > limits["max"]:
+        return f"{name} = {value:g} is above its maximum {limits['max']:g}"
+    if limits.get("integer") and float(value) != int(value):
+        return f"{name} = {value:g} counts things, so it has to be a whole number"
+    return None
+
+
+def _variable_problem(name, value):
+    """Why `name` cannot be a variable holding `value`, or None."""
+    if not isinstance(name, str) or not name.isidentifier():
+        return f"{name!r} is not a valid variable name"
+    if name in expressions._CONSTANTS or name in expressions._FUNCTIONS:
+        return f"{name!r} is a built-in expression name"
+    if not isinstance(value, int | float | str) or isinstance(value, bool):
+        return f"{name} is a number or an expression, not {value!r}"
+    return None
+
+
+def _variant_values(values):
+    """A variant's values as the document holds them: a numeral given as text
+    is the number it spells, as for every value on its way in."""
+    return {name: expressions.as_number(value) for name, value in values.items()}
+
+
+def _variant_value_problem(value):
+    """Why `value` is no value a variant can hold, or None: a finite number,
+    or a name for a choice -- never a formula, which is what a variable is
+    rather than a value it was left at."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return "is not a number or a name"
+    if isinstance(value, float) and not math.isfinite(value):
+        return f"is {value}, which no variable can be"
+    if expressions.is_expression(value):
+        return "is a formula, and a variant holds values"
+    if isinstance(value, str) and not value.isidentifier():
+        return f"is {value!r}, neither a number nor a name"
+    return None
+
+
+def _variants_problem(variants):
+    """What is wrong with a document's `variants`, or None: each variant by
+    a name, and in each a variable's value by the variable's name, as
+    `_variant_value_problem` has a value."""
+    if not isinstance(variants, dict):
+        return "variants: expected each variant by its name"
+    for name, values in variants.items():
+        if not isinstance(name, str) or not name.strip():
+            return f"a variant needs a name, not {name!r}"
+        if not isinstance(values, dict):
+            return f"variant {name!r}: expected its values by variable"
+        for variable, value in _variant_values(values).items():
+            problem = _variant_value_problem(value)
+            if problem:
+                return f"variant {name!r}: {variable} {problem}"
+    return None
+
+
+def _variant_problem(values, doc):
+    """Why a variant cannot be used in `doc` as it stands, or None.
+
+    It sets none of the variables that hold a value; or gives one a number
+    where it holds a name, or the other way round; or puts a variable outside
+    its limits -- one it sets, or a formula following them, so a combination
+    is checked as the combination it is. An entry naming no variable that
+    holds a value is no problem: using the variant leaves it out."""
+    variables = doc.get("variables") or {}
+    setting = {}
+    for name, value in values.items():
+        held = variables.get(name)
+        if held is None or expressions.is_expression(held):
+            continue
+        if isinstance(held, str) != isinstance(value, str):
+            kind = "a name" if isinstance(held, str) else "a number"
+            return f"{name} holds {kind}, not {value!r}"
+        setting[name] = value
+    if not setting:
+        return "it sets none of the scene's variables"
+    try:
+        resolved = expressions.resolve_variables({**variables, **setting})
+    except Exception as e:  # noqa: BLE001 - a formula these values break
+        return str(e)
+    for name, limits in (doc.get("variable_bounds") or {}).items():
+        if name in resolved:
+            problem = _out_of_limits(name, resolved[name], limits)
+            if problem:
+                return problem
+    return None
+
+
+def _unusable_variants(doc):
+    """Each variant `doc` cannot use as it stands, with why."""
+    found = {}
+    for name, values in (doc.get("variants") or {}).items():
+        problem = _variant_problem(values, doc)
+        if problem:
+            found[name] = problem
+    return found
+
+
+def _drop_from_variants(doc, name):
+    """Take the variable `name` out of every variant, and a variant it leaves
+    with nothing to set along with it."""
+    variants = doc.get("variants")
+    if not variants:
+        return
+    for variant in list(variants):
+        variants[variant].pop(name, None)
+        if not variants[variant]:
+            del variants[variant]
 
 
 class MagpylibStudioSession:
@@ -2221,34 +2383,9 @@ class MagpylibStudioSession:
             value = self._vars.get(name)
             if value is None:
                 continue
-            choices = limits.get("options")
-            if choices is not None and value not in choices:
-                raise ValueError(
-                    f"{name} = {value!r} is not one of its options "
-                    f"({', '.join(str(c) for c in choices)})"
-                )
-            if isinstance(value, str):
-                # A named value — an axis, a plane. The limits below are all
-                # numeric, and comparing a name against one used to surface as
-                # a raw TypeError from deep inside the build.
-                if choices is None:
-                    raise ValueError(
-                        f"{name} = {value!r} is a name, but {name} is limited "
-                        f"as a number; give it options rather than a range"
-                    )
-                continue
-            if limits.get("min") is not None and value < limits["min"]:
-                raise ValueError(
-                    f"{name} = {value:g} is below its minimum {limits['min']:g}"
-                )
-            if limits.get("max") is not None and value > limits["max"]:
-                raise ValueError(
-                    f"{name} = {value:g} is above its maximum {limits['max']:g}"
-                )
-            if limits.get("integer") and float(value) != int(value):
-                raise ValueError(
-                    f"{name} = {value:g} counts things, so it has to be a whole number"
-                )
+            problem = _out_of_limits(name, value, limits)
+            if problem:
+                raise ValueError(problem)
         self._objs = {}
         self._derived = {}
         self._inherited = {}
@@ -4801,6 +4938,13 @@ class MagpylibStudioSession:
                 "A scene is made in the studio, or in Python with "
                 "magpylib_studio.build.Scene and saved with s.save(path)",
             }
+        if "variants" in scene:
+            problem = _variants_problem(scene["variants"])
+            if problem:
+                return {
+                    "ok": False,
+                    "error": f"not a scene this one can read: {problem}",
+                }
 
         def mutate(doc):
             self.doc = _canonical(_migrate_events(json.loads(json.dumps(scene))))
@@ -5289,6 +5433,12 @@ class MagpylibStudioSession:
         `shadowed` says where it is being overruled, by which steps or by
         which value written over it — enough for a view to explain a slider
         that moves nothing, and to offer the way back. See `restore_variable`.
+
+        A scene with variants lists them too, `variants`, each a variable's
+        value by its name, and says which one the variables are in now,
+        `variant`: the first whose values all hold, or None once a slider
+        has moved off them -- and `unusable`, each variant that cannot be
+        used as the scene stands, with why. See `use_variant`.
         """
         variables = self.doc.get("variables") or {}
         bounds = self.doc.get("variable_bounds") or {}
@@ -5301,7 +5451,7 @@ class MagpylibStudioSession:
             view = units.shown((bounds.get(name) or {}).get("unit"), model, field)
             return {"shown": view} if view else {}
 
-        return {
+        listing = {
             "model_unit": model,
             "field_unit": field,
             "variables": [
@@ -5317,6 +5467,13 @@ class MagpylibStudioSession:
                 for name, value in variables.items()
             ],
         }
+        if self.doc.get("variants"):
+            listing["variants"] = json.loads(json.dumps(self.doc["variants"]))
+            listing["variant"] = self._variant_in_force()
+            unusable = _unusable_variants(self.doc)
+            if unusable:
+                listing["unusable"] = unusable
+        return listing
 
     def restore_variable(self, name):
         """Drop the steps standing in front of a variable, so it decides again.
@@ -5463,6 +5620,8 @@ class MagpylibStudioSession:
         ):
             return {"ok": False, "error": "soft_max is outside max"}
 
+        unusable = _unusable_variants(self.doc)
+
         def mutate(doc):
             bounds = doc.setdefault("variable_bounds", {})
             unit = (bounds.get(name) or {}).get("unit")
@@ -5474,6 +5633,15 @@ class MagpylibStudioSession:
                 bounds[name] = kept
             else:
                 bounds.pop(name, None)
+            # As a value the scene holds now is refused when the limits leave
+            # it outside, so is one a variant holds: refused then, it is not
+            # a variant found broken later, when it is used.
+            for variant, problem in _unusable_variants(doc).items():
+                if variant not in unusable:
+                    raise ValueError(
+                        f"the variant {variant!r} could not be used within "
+                        f"these limits ({problem}): change or remove it first"
+                    )
 
         return self._mutate_doc(mutate, f"bound {name}")
 
@@ -5713,12 +5881,9 @@ class MagpylibStudioSession:
         `unit` says what it measures in the same step (see
         `set_variable_unit`), so a variable is created a length rather than
         created and then made one; None leaves what it says as it was."""
-        if not isinstance(name, str) or not name.isidentifier():
-            return {"ok": False, "error": f"{name!r} is not a valid variable name"}
-        if name in expressions._CONSTANTS or name in expressions._FUNCTIONS:
-            return {"ok": False, "error": f"{name!r} is a built-in expression name"}
-        if not isinstance(value, int | float | str) or isinstance(value, bool):
-            return {"ok": False, "error": "a variable is a number or an expression"}
+        problem = _variable_problem(name, value)
+        if problem:
+            return {"ok": False, "error": problem}
         if unit is not None and unit not in units.KINDS:
             return {
                 "ok": False,
@@ -5732,11 +5897,36 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             doc.setdefault("variables", {})[name] = expressions.normalized(value)
+            if expressions.is_expression(doc["variables"][name]):
+                # what the variable is now, which no variant sets it back from
+                _drop_from_variants(doc, name)
             if unit is not None:
                 bounds = doc.setdefault("variable_bounds", {})
                 bounds[name] = {**(bounds.get(name) or {}), "unit": unit}
 
         return self._mutate_doc(mutate, f"set {name}")
+
+    def set_variables(self, values):
+        """Set several variables at once, each as `set_variable` sets one:
+        one rebuild and one step to undo, however many there are, and refused
+        whole when any value is. So a combination that holds only together --
+        two lengths a wall is the difference of -- is taken as the
+        combination it is, never checked half-set."""
+        if not isinstance(values, dict) or not values:
+            return {"ok": False, "error": "give the variables' values by name"}
+        for name, value in values.items():
+            problem = _variable_problem(name, value)
+            if problem:
+                return {"ok": False, "error": problem}
+
+        def mutate(doc):
+            variables = doc.setdefault("variables", {})
+            for name, value in values.items():
+                variables[name] = expressions.normalized(value)
+                if expressions.is_expression(variables[name]):
+                    _drop_from_variants(doc, name)
+
+        return self._mutate_doc(mutate, "set " + ", ".join(values))
 
     def rename_variable(self, old, new):
         """Rename a variable, rewriting every expression that names it.
@@ -5776,6 +5966,18 @@ class MagpylibStudioSession:
                 }
             if doc.get("events"):
                 doc["events"] = expressions.renamed(doc["events"], old, new)
+            if doc.get("variants"):
+                # The renamed entry takes the new name in its place. One under
+                # that name already was for no variable of this scene -- the
+                # new name is none -- and goes, rather than collide with it.
+                doc["variants"] = {
+                    variant: {
+                        (new if name == old else name): value
+                        for name, value in values.items()
+                        if name != new
+                    }
+                    for variant, values in doc["variants"].items()
+                }
 
         return self._mutate_doc(mutate, f"rename {old} to {new}")
 
@@ -5786,6 +5988,7 @@ class MagpylibStudioSession:
 
         def mutate(doc):
             del doc["variables"][name]
+            _drop_from_variants(doc, name)
             # An expression set aside over it names a variable that no longer
             # exists, so there is nothing left to give back.
             for event in doc.get("events") or []:
@@ -5806,6 +6009,166 @@ class MagpylibStudioSession:
                 f"{name!r} is still used by the scene; change what refers to it first"
             )
         return result
+
+    # --- variants -------------------------------------------------------------
+
+    def _knobs(self):
+        """The variables a variant may set, by name, with their values: those
+        holding a number or a choice. A formula is what a variable is, not a
+        value it was left at, so no variant holds one."""
+        return {
+            name: value
+            for name, value in (self.doc.get("variables") or {}).items()
+            if not expressions.is_expression(value)
+        }
+
+    def _variant_in_force(self):
+        """The variant whose values all hold, or None: of several, the one
+        naming the most of them, so that after using a variant that holds
+        another's values and more, it is the one in force.
+
+        Read off the variables, never stored: a variant is a set of values,
+        not a mode, so there is nothing to keep in step with the sliders and
+        nothing for undo to get wrong. Move one and the scene is in no
+        variant; move it back and it is in that one again. Exactly the same
+        values, as everywhere here: a real edit can be a nanometre."""
+        knobs = self._knobs()
+        found, most = None, 0
+        for name, values in (self.doc.get("variants") or {}).items():
+            named = {k: v for k, v in values.items() if k in knobs}
+            if len(named) > most and all(knobs[k] == v for k, v in named.items()):
+                found, most = name, len(named)
+        return found
+
+    def _edit_variants(self, mutate, label):
+        """Apply `mutate(doc)` to the variants alone, as one step to undo.
+
+        No rebuild: nothing in the scene follows a variant until it is used,
+        and a rebuild would throw away a run captured for the view's frames
+        for nothing."""
+        snapshot = json.loads(json.dumps(self.doc))
+        mutate(self.doc)
+        _canonical(self.doc)
+        self._record_state(label, snapshot)
+        return {"ok": True}
+
+    def use_variant(self, name):
+        """Set the variables a variant names to its values, as one step to
+        undo -- as a slider sets one, so values the variables' limits refuse
+        are refused, and the scene is left as it was.
+
+        A variant may name fewer variables than the scene has: one written in
+        code may leave some out on purpose, and one saved before a variable
+        was added does not know it. Those it does not name keep their values,
+        and the answer lists them as `untouched`. An entry naming no variable
+        that holds a value -- renamed by an older studio, or a formula now --
+        is left out, and listed as `ignored`."""
+        variants = self.doc.get("variants") or {}
+        if name not in variants:
+            return {"ok": False, "error": f"no variant {name!r}"}
+        values = variants[name]
+        problem = _variant_problem(values, self.doc)
+        if problem:
+            return {"ok": False, "error": f"{name}: {problem}"}
+        knobs = self._knobs()
+        setting = {k: v for k, v in values.items() if k in knobs}
+        report = {}
+        untouched = [k for k in knobs if k not in values]
+        ignored = [k for k in values if k not in knobs]
+        if untouched:
+            report["untouched"] = untouched
+        if ignored:
+            report["ignored"] = ignored
+        if all(knobs[k] == v for k, v in setting.items()):
+            return {"ok": True, "unchanged": True, **report}
+
+        def mutate(doc):
+            doc["variables"].update(setting)
+
+        result = self._mutate_doc(mutate, f"use {name}")
+        if not result["ok"]:
+            return {"ok": False, "error": f"{name}: {result['error']}"}
+        return {**result, **report}
+
+    def save_variant(self, name, values=None):
+        """Keep values for the scene's variables under a name: a variant, set
+        back in one step by `use_variant`.
+
+        With no `values`, every variable that holds a number or a choice, as
+        it is now -- what saving a variant from a panel means, so that using
+        it puts the scene back exactly. With `values`, those named, which may
+        be fewer; a numeral given as text is the number it spells. A formula
+        is what a variable is, so no variant holds one. Values the variables'
+        limits refuse -- the ones it sets, or a formula following them -- are
+        refused now, not when the variant is used. Saved over a variant of
+        the same name, it replaces it, in its place. The answer carries the
+        `values` kept."""
+        if not isinstance(name, str) or not name.strip():
+            return {"ok": False, "error": "a variant needs a name"}
+        knobs = self._knobs()
+        values = _plain(knobs if values is None else values)
+        if not isinstance(values, dict) or not values:
+            return {"ok": False, "error": "a variant sets at least one variable"}
+        values = _variant_values(values)
+        for variable, value in values.items():
+            problem = _variant_value_problem(value)
+            if problem:
+                return {"ok": False, "error": f"{variable} {problem}"}
+        defined = self.doc.get("variables") or {}
+        for variable in values:
+            if variable not in defined:
+                return {"ok": False, "error": f"no variable {variable!r} in the scene"}
+            if variable not in knobs:
+                return {
+                    "ok": False,
+                    "error": f"{variable} is a formula ({defined[variable]}), "
+                    "which no variant sets: a variant holds values",
+                }
+        problem = _variant_problem(values, self.doc)
+        if problem:
+            return {"ok": False, "error": problem}
+        # In the scene's order however it was given, as the document keeps
+        # every variant's.
+        kept = {k: values[k] for k in knobs if k in values}
+        if (self.doc.get("variants") or {}).get(name) == kept:
+            return {"ok": True, "unchanged": True, "values": kept}
+
+        def mutate(doc):
+            doc.setdefault("variants", {})[name] = kept
+
+        result = self._edit_variants(mutate, f"save variant {name}")
+        result["values"] = dict(kept)
+        return result
+
+    def rename_variant(self, old, new):
+        """Rename a variant, in its place among the others."""
+        variants = self.doc.get("variants") or {}
+        if old not in variants:
+            return {"ok": False, "error": f"no variant {old!r}"}
+        if new == old:
+            return {"ok": True}  # nothing to do, and nothing to record
+        if not isinstance(new, str) or not new.strip():
+            return {"ok": False, "error": "a variant needs a name"}
+        if new in variants:
+            return {"ok": False, "error": f"there is already a variant {new!r}"}
+
+        def mutate(doc):
+            doc["variants"] = {
+                (new if variant == old else variant): values
+                for variant, values in doc["variants"].items()
+            }
+
+        return self._edit_variants(mutate, f"rename variant {old} to {new}")
+
+    def remove_variant(self, name):
+        """Drop a variant. The variables keep the values they have."""
+        if name not in (self.doc.get("variants") or {}):
+            return {"ok": False, "error": f"no variant {name!r}"}
+
+        def mutate(doc):
+            del doc["variants"][name]
+
+        return self._edit_variants(mutate, f"remove variant {name}")
 
     def sweep(self, variable, values, sensor_id=None, points=None, field="B"):
         """Rebuild the scene once per value of a variable and read the field.
