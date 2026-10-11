@@ -187,6 +187,9 @@ own variables, never sharing one; VS Code 1.109 is the floor; a file changed on
 disk comes into its tab as one undo step; a prototype first, then the tabs and
 the tree as one release. Variants came in this step and are built
 ([0026](decisions.md#0026-variants-are-named-value-sets-inside-a-scene), #32).
+The prototype ran the same day on VS Code 1.109, 1.131 and 1.141 (the plan's
+§8); from it, the studio keeps a recovery copy of each open scene, since VS
+Code's own restore after a crash misses recent edits.
 
 **What.** No container format. A scene is one `.magpy.json` (and the scene
 script it came from, where there is one); a project is the folder that holds
@@ -216,10 +219,10 @@ scenes (wait for instancing).
 **When.** Now, ahead of R7: nothing before R7 needs it, and nothing in R7 waits
 on it either. Today the extension holds one engine, one panel and one scene file
 as module-level state, and the engine serves one session; the refactor touches
-all of it. The plan's order: a throwaway prototype of the custom editor, the
-engine's sessions, every view and request carrying its scene, then tabs, tree
-and crash safety as one release, then copying across scenes, then scripts out of
-the engine.
+all of it. The plan's order: a throwaway prototype of the custom editor (done),
+the engine's sessions, every view and request carrying its scene, then tabs,
+tree and crash safety as one release, then copying across scenes, then scripts
+out of the engine.
 
 ### R10 and later
 
