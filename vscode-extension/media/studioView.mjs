@@ -7,7 +7,12 @@
 // field view, the history and the script tab, marks the scene unsaved and
 // writes the backup. So the view says what it did in the messages the host
 // has always answered, and the host is left to do the rest.
+import { watchTextFocus } from "./textFocus.mjs";
+
 const vscodeApi = acquireVsCodeApi();
+watchTextFocus((focused) =>
+  vscodeApi.postMessage({ type: "textFocus", focused }),
+);
 const viewEl = document.getElementById("view");
 const chartEl = document.getElementById("chart");
 const modeEditEl = document.getElementById("modeEdit");

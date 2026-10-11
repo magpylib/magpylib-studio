@@ -260,6 +260,11 @@ All notable changes to the Magpylib Studio extension.
 
 ### Fixed
 
+- Cmd/Ctrl+Z in a box -- a variable's value, an object's parameter, the field
+  panel's offset -- undid the scene instead of the typing, and Shift+Cmd/Ctrl+Z
+  redid it. The studio's undo keys now stand aside while a box has the focus, in
+  its panels and in VS Code's own (the search box, a rename), and the box undoes
+  its own typing.
 - A copy of an object inside a turned group -- any magnet of the Halbach
   example's second ring -- stood where the object would be had the group never
   turned. It now stands where the object stands, and beside it keeps following

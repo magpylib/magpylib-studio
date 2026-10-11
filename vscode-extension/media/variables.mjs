@@ -9,7 +9,12 @@
 // serves lightly: the views that show it live, and the bookkeeping at the
 // release. What the host has dialogs for -- editing a variable's properties,
 // removing it -- the panel asks for as actions, and the host does.
+import { watchTextFocus } from "./textFocus.mjs";
+
 const vscodeApi = acquireVsCodeApi();
+watchTextFocus((focused) =>
+  vscodeApi.postMessage({ type: "textFocus", focused }),
+);
 let nextReqId = 1;
 const pending = new Map();
 

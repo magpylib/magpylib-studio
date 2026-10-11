@@ -9,7 +9,12 @@
 // script tab, and marks the scene unsaved -- and so that a value naming a
 // variable the scene lacks is asked about first, as the host does for every
 // panel (`ensureVariablesDefined`).
+import { watchTextFocus } from "./textFocus.mjs";
+
 const vscodeApi = acquireVsCodeApi();
+watchTextFocus((focused) =>
+  vscodeApi.postMessage({ type: "textFocus", focused }),
+);
 let nextReqId = 1;
 const pending = new Map();
 

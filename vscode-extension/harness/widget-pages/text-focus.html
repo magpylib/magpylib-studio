@@ -1,0 +1,64 @@
+<!doctype html>
+<!--
+  A studio webview says when a box that takes typing has the focus
+  (media/textFocus.mjs): VS Code cannot see into the webview, and the studio's
+  Cmd/Ctrl+Z binding stands aside on what this says, so the box undoes its own
+  typing. `window.result` is each step and what had been told after it.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <input id="text" value="abc" />
+    <input id="number" type="number" value="1" />
+    <input id="range" type="range" />
+    <input id="readonly" readonly value="fixed" />
+    <button id="button" type="button">a button</button>
+    <div id="rows"><input id="row" value="a row" /></div>
+    <script type="module">
+      import { watchTextFocus } from "/media/textFocus.mjs";
+
+      const told = [];
+      watchTextFocus((focused) => told.push(focused));
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const byId = (id) => document.getElementById(id);
+      const steps = [
+        ["a box", () => byId("text").focus()],
+        ["a number box", () => byId("number").focus()],
+        ["a slider", () => byId("range").focus()],
+        ["a read-only box", () => byId("readonly").focus()],
+        ["a button", () => byId("button").focus()],
+        ["a row's box", () => byId("row").focus()],
+        // the rows drawn again, the focused box with them, and no focusout
+        // for it, as some Chromium versions have it (this one fires one)
+        [
+          "the row redrawn",
+          () => {
+            const mute = (event) => event.stopImmediatePropagation();
+            window.addEventListener("focusout", mute, true);
+            byId("rows").innerHTML = "";
+            setTimeout(
+              () => window.removeEventListener("focusout", mute, true),
+              30,
+            );
+          },
+        ],
+        ["a box again", () => byId("text").focus()],
+        // the focus gone to the rest of VS Code: the box stays active
+        ["the window left", () => window.dispatchEvent(new Event("blur"))],
+        ["the window back", () => window.dispatchEvent(new Event("focus"))],
+        ["the box left", () => byId("text").blur()],
+      ];
+      // as a page that has the focus starts
+      window.dispatchEvent(new Event("focus"));
+      const result = [];
+      for (const [name, act] of steps) {
+        act();
+        await wait(60);
+        result.push([name, told.join(",")]);
+      }
+      window.result = result;
+    </script>
+  </body>
+</html>

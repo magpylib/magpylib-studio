@@ -92,11 +92,42 @@ for (const [group, items] of Object.entries(pkg.contributes.menus)) {
   }
 }
 
+// A context key a `when` reads that the code never names is never set: the
+// clause reads it as false for good. For the undo keys' `textFocus` that is
+// the bug it exists to stop -- Cmd/Ctrl+Z in a box undoing the scene -- back
+// without a word, after a rename on either side. View ids are not set; they
+// are what `view ==` and `focusedView ==` compare against.
+const views = new Set(
+  Object.values(pkg.contributes.views ?? {})
+    .flat()
+    .map((view) => view.id),
+);
+const clauses = [];
+(function walk(node) {
+  if (Array.isArray(node)) node.forEach(walk);
+  else if (node && typeof node === "object") {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "when" || key === "enablement") clauses.push(String(value));
+      else walk(value);
+    }
+  }
+})(pkg.contributes);
+const keys = new Set(
+  clauses.flatMap((clause) => clause.match(/magpylib-studio\.[\w-]+/g) ?? []),
+);
+for (const key of keys) {
+  const named = new RegExp(`['"]${key.replace(/[.-]/g, "\\$&")}['"]`);
+  if (!views.has(key) && !named.test(src)) {
+    problems.push(`${key}: read in a when clause, never set in src/`);
+  }
+}
+
 if (problems.length) {
   for (const problem of problems) console.log(`FAIL  ${problem}`);
   process.exit(1);
 }
 console.log(
   `ok    contributions (${declared.size} commands, ` +
-    `${Object.keys(palette).length} palette rules, ${composed.size} context values)`,
+    `${Object.keys(palette).length} palette rules, ${composed.size} context values, ` +
+    `${keys.size} context keys)`,
 );

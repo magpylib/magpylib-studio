@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 
+import { setTextFocus, tookTextFocus } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /** Calls from this panel that change the scene, not just what it displays. */
@@ -104,6 +105,9 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.html(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (tookTextFocus(message)) {
+        return;
+      }
       if (message.type === 'ready') {
         this.ready = true;
         this.refresh();
@@ -151,6 +155,7 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidDispose(() => {
       this.view = undefined;
       this.ready = false;
+      setTextFocus(false);
     });
   }
 

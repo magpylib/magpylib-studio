@@ -24,6 +24,8 @@
  * - a panel of its own, the variables and the object kinds against a fake
  *   model: the rows, a drag's previews and release, the rows read again when
  *   the view moves on, the selection followed (`widget-pages/own-panel.html`);
+ * - a studio webview telling its host when a box that takes typing has the
+ *   focus, for the undo keys to stand aside (`widget-pages/text-focus.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
  *   selecting and hiding from the legend, the picture tool, full screen, and
  *   a run that plays with no python behind it;
@@ -723,6 +725,48 @@ async function silent(port, base) {
       await tab.close();
     }
   });
+}
+
+/** A studio webview says when a box that takes typing has the focus, and
+ *  when it stops having it -- to another element, to its row being redrawn
+ *  under it, to the rest of VS Code -- so the studio's Cmd/Ctrl+Z binding
+ *  stands aside for the box's own undo (media/textFocus.mjs). */
+async function textFocus(port, base) {
+  await check(
+    "a webview says when a box that takes typing has the focus",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        // a tab in the background gets no focus events: act as the one in front
+        await tab.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+        await tab.navigate(`${base}/pages/text-focus.html`);
+        const result = await tab.until("return window.result", 10_000);
+        if (!result) return "never finished";
+        const told = [
+          "true", // a box
+          "true", // a number box: still a box
+          "true,false", // a slider
+          "true,false", // a read-only box
+          "true,false", // a button
+          "true,false,true", // a row's box
+          "true,false,true,false", // the row redrawn
+          "true,false,true,false,true", // a box again
+          "true,false,true,false,true,false", // the window left
+          "true,false,true,false,true,false,true", // the window back
+          "true,false,true,false,true,false,true,false", // the box left
+        ];
+        const wrong = result.filter(([, said], i) => said !== told[i]);
+        if (wrong.length) {
+          return wrong
+            .map(([step, said]) => `after ${step}: told [${said}]`)
+            .join("; ");
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** The panel a script draws into, with its own script: the widget drawn
@@ -2050,6 +2094,7 @@ try {
   await themeMidRun(browser.port, base);
   await staleFrame(browser.port, base);
   await silent(browser.port, base);
+  await textFocus(browser.port, base);
   await panel(browser.port, base, expected);
   await heldReadings(browser.port, base);
   await studioDrag(browser.port, base);

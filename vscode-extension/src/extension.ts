@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { PythonExtension } from '@vscode/python-extension';
 import { EngineClient } from './engineClient';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
+import { setTextFocus, tookTextFocus } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
@@ -1713,6 +1714,9 @@ function adoptStudioPanel(
   panel.webview.html = createWebviewHtml(context, panel.webview);
   wireRpcRouter(context, panel.webview);
   panel.webview.onDidReceiveMessage((message) => {
+    if (tookTextFocus(message)) {
+      return;
+    }
     if (message.type === 'selectObject') {
       // a pick in the 3D view is the same act as clicking the Scene tree
       selectObjectInStudio(context, message.objectId);
@@ -1738,6 +1742,7 @@ function adoptStudioPanel(
   });
   panel.onDidDispose(() => {
     currentPanel = undefined;
+    setTextFocus(false);
   });
 }
 
@@ -1784,7 +1789,7 @@ function adoptFieldPanel(
   panel.webview.html = createFieldViewHtml(context, panel.webview);
   wireRpcRouter(context, panel.webview);
   panel.webview.onDidReceiveMessage((message) => {
-    if (message.type !== 'ready') {
+    if (tookTextFocus(message) || message.type !== 'ready') {
       return;
     }
     fieldReady = true;
@@ -1797,6 +1802,7 @@ function adoptFieldPanel(
   panel.onDidDispose(() => {
     fieldPanel = undefined;
     fieldReady = false;
+    setTextFocus(false);
     // Whatever was waiting was for this panel. Keeping it would deliver a
     // sweep to whichever panel is opened next, whenever that is.
     pendingFieldMessage = undefined;
@@ -5285,6 +5291,7 @@ export function createFieldViewHtml(
   const nonce = webviewNonce();
   const fieldStyleUri = mediaUri(webview, context.extensionUri, 'field.css');
   const fieldScriptUri = mediaUri(webview, context.extensionUri, 'field.js');
+  const textFocusUri = mediaUri(webview, context.extensionUri, 'textFocus.mjs');
   const plotlyUri = webview.asWebviewUri(
     vscode.Uri.joinPath(
       context.extensionUri,
@@ -5303,7 +5310,7 @@ export function createFieldViewHtml(
   <link rel="stylesheet" href="${fieldStyleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
 </head>
-<body>
+<body data-text-focus="${textFocusUri}">
   <div id="canvas"></div>
   <div id="statusbar">
     <label>

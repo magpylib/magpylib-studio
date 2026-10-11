@@ -1,6 +1,11 @@
 // Magpylib-rendered 2D field plot (show(output=...)): field at the
 // scene's sensors along their paths. Opened on demand from the Studio.
 const vscodeApi = acquireVsCodeApi();
+import(document.body.dataset.textFocus).then(({ watchTextFocus }) =>
+  watchTextFocus((focused) =>
+    vscodeApi.postMessage({ type: "textFocus", focused }),
+  ),
+);
 const statusEl = document.getElementById("status");
 const canvasEl = document.getElementById("canvas");
 const outputEl = document.getElementById("output");

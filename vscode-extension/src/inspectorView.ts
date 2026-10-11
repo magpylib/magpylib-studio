@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 
+import { setTextFocus, tookTextFocus } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 const MUTATING = new Set([
@@ -48,6 +49,9 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.html(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (tookTextFocus(message)) {
+        return;
+      }
       if (message.type === 'ready') {
         this.ready = true;
         this.select(this.getSelection());
@@ -76,6 +80,7 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidDispose(() => {
       this.view = undefined;
       this.ready = false;
+      setTextFocus(false);
     });
   }
 

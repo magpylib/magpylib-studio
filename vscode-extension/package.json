@@ -343,13 +343,13 @@
         "command": "magpylib-studio.undo",
         "key": "ctrl+z",
         "mac": "cmd+z",
-        "when": "activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField'"
+        "when": "(activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
       },
       {
         "command": "magpylib-studio.redo",
         "key": "ctrl+shift+z",
         "mac": "cmd+shift+z",
-        "when": "activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField'"
+        "when": "(activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
       }
     ],
     "viewsContainers": {
