@@ -160,3 +160,37 @@ def test_one_mesh_cache_for_every_session():
     fresh = Engine()
     fresh.handle({"id": 1, "method": "list_objects"})
     assert fresh._default._mesh_cache is fresh._meshes
+
+
+def test_an_empty_scene_opens_in_its_folder(tmp_path):
+    """An untitled scene has a folder too: a mesh added later finds its file
+    there."""
+    engine = Engine()
+    engine.open_session("u", base_dir=str(tmp_path))
+    assert engine._sessions["u"]._base_dir == str(tmp_path)
+
+
+def test_a_replaced_scene_is_one_undo_away():
+    """A Revert replaces the scene as a step: undo brings back what it had."""
+    first = MagpylibStudioSession()
+    first.add_object(**cube("a"))
+    other = MagpylibStudioSession()
+    other.add_object(**cube("b"))
+    answers = ask(
+        {
+            "method": "open_session",
+            "params": {"session": "s", "scene": first.to_dict()},
+        },
+        {
+            "session": "s",
+            "method": "replace_scene",
+            "params": {"scene": other.to_dict()},
+        },
+        {"session": "s", "method": "list_objects"},
+        {"session": "s", "method": "undo"},
+        {"session": "s", "method": "list_objects"},
+    )
+    assert answers[1]["result"]["ok"]
+    assert [o["id"] for o in answers[2]["result"]] == ["b"]
+    assert answers[3]["result"]["ok"]
+    assert [o["id"] for o in answers[4]["result"]] == ["a"]

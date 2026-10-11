@@ -30,6 +30,8 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'magpylib-studio.inspectorView';
 
   private view: vscode.WebviewView | undefined;
+  /** The scene the view shows, beside its title. */
+  private scene: string | undefined;
   private ready = false;
 
   constructor(
@@ -41,6 +43,7 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
+    webviewView.description = this.scene;
     this.ready = false;
     webviewView.webview.options = {
       enableScripts: true,
@@ -49,7 +52,7 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.html(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (tookTextFocus(message)) {
+      if (tookTextFocus(message, webviewView.webview)) {
         return;
       }
       if (message.type === 'ready') {
@@ -127,5 +130,13 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+  }
+
+  /** Name the scene the view shows, beside its title. */
+  describe(scene: string | undefined): void {
+    this.scene = scene;
+    if (this.view) {
+      this.view.description = scene;
+    }
   }
 }

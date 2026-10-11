@@ -2,8 +2,9 @@
 // as it changes. VS Code cannot see into a webview: its `inputFocus` stays
 // false while a box in here has the focus, so the studio's Cmd/Ctrl+Z binding
 // took the key from the box and undid the scene instead of the typing. The
-// host keeps `magpylib-studio.textFocus` from what this says, and the binding
-// stands aside while it holds; VS Code's own undo then reaches the box.
+// host keeps `magpylib-studio.textFocus` from what this says, and while it
+// holds the key goes to the box instead: VS Code's own undo, or in a scene's
+// tab, which VS Code's undo never reaches, the host's word to undo it here.
 
 /** Input types that take typing; a slider, a checkbox or a colour does not. */
 const TYPED = new Set([
@@ -67,4 +68,18 @@ export function watchTextFocus(post) {
     away = true;
     check();
   });
+  // In a scene's tab VS Code's own undo goes to the custom editor and never
+  // reaches the page, so the host says when to undo the typing; the browser's
+  // own undo of the box is what runs.
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+    if (message && message.type === "typing" && typing(message.command)) {
+      document.execCommand(message.command);
+    }
+  });
+}
+
+/** The two commands the host may send for the box with the focus. */
+function typing(command) {
+  return command === "undo" || command === "redo";
 }

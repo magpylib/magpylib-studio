@@ -66,6 +66,7 @@ _PUBLIC = {
     "mirror",
     "reset_style",
     "load_scene",
+    "replace_scene",
     "load_script",
     "load_captured",
     "apply_builder_script",
@@ -160,7 +161,8 @@ class Engine:
     def open_session(self, session, scene=None, path=None, base_dir=None):
         """Open a session named `session` and load it in the same call: from
         `scene`, a document, or `path`, a file holding one (and the folder its
-        relative mesh paths are relative to). Neither opens an empty scene.
+        relative mesh paths are relative to). Neither opens an empty scene,
+        in `base_dir` when given.
         A load that fails opens nothing and says why, as `load_scene` does.
         """
         if not isinstance(session, str) or not session:
@@ -177,6 +179,10 @@ class Engine:
             result = opened.load_scene(path if scene is None else scene, base_dir)
             if not result["ok"]:
                 return result
+        elif base_dir is not None:
+            # an empty scene still has a folder: a mesh added to it later
+            # resolves a relative path against it
+            opened.set_base_dir(base_dir)
         self._sessions[session] = opened
         self._named.add(session)
         return {**result, "session": session}

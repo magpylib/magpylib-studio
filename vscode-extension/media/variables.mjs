@@ -58,6 +58,8 @@ window.addEventListener("message", (event) => {
     panel.refresh();
   } else if (message.type === "help") {
     panel.help();
+  } else if (message.type === "typing") {
+    // the box's own undo: textFocus.mjs runs it
   } else {
     // A message the host sends and this end does not handle is a broken
     // contract, not a no-op: it is how "what can go in a value" stayed

@@ -1,5 +1,24 @@
 import * as vscode from 'vscode';
 
+import type { SceneDocument } from './scenes';
+
+/** A scene open in a tab: a top-level row, its objects under it. `doc` is
+ *  missing for a tab VS Code has not loaded yet -- a scene behind another tab
+ *  after a reload -- which loads when its row is opened. */
+export interface SceneRoot {
+  kind: 'scene';
+  uri: vscode.Uri;
+  doc?: SceneDocument;
+  /** The group its tab is in, where it loads. */
+  column?: vscode.ViewColumn;
+}
+
+/** The one row of an empty scene, which adds its first object. */
+export interface SceneHint {
+  kind: 'hint';
+  scene: SceneDocument;
+}
+
 export interface SceneObject {
   id: string;
   type: string;
@@ -18,6 +37,8 @@ export interface SceneObject {
    *  disconnected mesh computes a field, and the number is wrong — so the
    *  row says so rather than waiting to be clicked. */
   mesh?: MeshStatus;
+  /** The scene the row is in, set by the tree. */
+  scene?: SceneDocument;
 }
 
 /** The engine's verdict on one mesh; see `magpylib_studio/meshes.py`. */
@@ -74,12 +95,27 @@ export interface SceneOperation {
   pending?: boolean;
   /** The last rebuild could not apply it. */
   error?: string;
+  /** The scene the row is in, set by the tree. */
+  scene?: SceneDocument;
 }
 
-export type SceneNode = SceneObject | SceneOperation;
+export type SceneNode = SceneRoot | SceneHint | SceneObject | SceneOperation;
 
 export function isOperation(node: SceneNode): node is SceneOperation {
   return (node as SceneOperation).kind === 'operation';
+}
+
+export function isSceneRoot(node: SceneNode): node is SceneRoot {
+  return (node as SceneRoot).kind === 'scene';
+}
+
+function isHint(node: SceneNode): node is SceneHint {
+  return (node as SceneHint).kind === 'hint';
+}
+
+/** An object's row, not a scene's, a step's or the hint's. */
+export function isObject(node: SceneNode | undefined): node is SceneObject {
+  return node !== undefined && !('kind' in node);
 }
 
 // Wireframe SVGs in media/icons, one per magpylib class, colored by
@@ -144,37 +180,125 @@ const OPERATION_ICONS: Record<string, string> = {
 };
 
 /**
- * Sidebar scene outline. The engine reports a flat list with `parent` ids
- * (depth-first); the root call fetches and caches it, child calls slice it.
- * Drag & drop reparents: onto a Collection = move in, onto a plain object =
- * move next to it, onto empty space = move to the scene root.
+ * Sidebar outline of every open scene, each a top-level row with its objects
+ * under it, as Unity's Hierarchy shows the scenes it has loaded. The engine
+ * reports a scene's objects as a flat list with `parent` ids (depth-first);
+ * the scene's row fetches and caches it, child calls slice it. Drag & drop
+ * reparents within a scene: onto a Collection = move in, onto a plain object
+ * = move next to it, onto the scene's row = move to its root.
  */
 export class SceneTreeProvider
   implements
     vscode.TreeDataProvider<SceneNode>,
     vscode.TreeDragAndDropController<SceneNode>
 {
-  private emitter = new vscode.EventEmitter<void>();
+  private emitter = new vscode.EventEmitter<SceneNode | undefined | void>();
   readonly onDidChangeTreeData = this.emitter.event;
   readonly dragMimeTypes = [TREE_MIME];
   readonly dropMimeTypes = [TREE_MIME];
-  private objects: SceneObject[] = [];
-  private operations: SceneOperation[] = [];
-  private absent: SceneObject[] = [];
+  /** Each scene's rows, as last read, and which need reading again. */
+  private rows = new Map<
+    SceneDocument,
+    { objects: SceneObject[]; operations: SceneOperation[]; absent: SceneObject[] }
+  >();
+  private stale = new Set<SceneDocument>();
+  /** One row object per scene, so that a scene's rows can be refreshed alone. */
+  private roots = new Map<string, SceneRoot>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly listObjects: () => Promise<SceneObject[]>,
-    private readonly moveObject: (id: string, parent: string | null) => Promise<void>,
-    private readonly listOperations: () => Promise<SceneOperation[]>,
+    private readonly scenes: () => SceneRoot[],
+    private readonly isFront: (doc: SceneDocument) => boolean,
+    private readonly listObjects: (doc: SceneDocument) => Promise<SceneObject[]>,
+    private readonly moveObject: (
+      doc: SceneDocument,
+      id: string,
+      parent: string | null,
+    ) => Promise<void>,
+    private readonly listOperations: (doc: SceneDocument) => Promise<SceneOperation[]>,
+    private readonly load: (root: SceneRoot) => void,
   ) {}
 
-  refresh(): void {
-    this.emitter.fire();
+  /** Read `doc`'s rows again, and only its; with no scene, the scene rows
+   *  themselves -- names, marks, which is in front. */
+  refresh(doc?: SceneDocument): void {
+    if (!doc) {
+      this.emitter.fire();
+      return;
+    }
+    this.stale.add(doc);
+    const root = this.roots.get(doc.uri.toString());
+    this.emitter.fire(root);
   }
 
   getTreeItem(node: SceneNode): vscode.TreeItem {
+    if (isSceneRoot(node)) {
+      return this.sceneItem(node);
+    }
+    if (isHint(node)) {
+      const item = new vscode.TreeItem('Add an object…');
+      item.id = `${node.scene.key}/hint`;
+      item.iconPath = new vscode.ThemeIcon('add');
+      item.command = {
+        command: 'magpylib-studio.addObject',
+        title: 'Add Object…',
+        arguments: [node],
+      };
+      return item;
+    }
     return isOperation(node) ? this.operationItem(node) : this.objectItem(node);
+  }
+
+  private sceneItem(root: SceneRoot): vscode.TreeItem {
+    const doc = root.doc;
+    const name = root.uri.path.split('/').pop() || root.uri.path;
+    const front = doc !== undefined && this.isFront(doc);
+    // The scene in front is the one the views below and the commands act on:
+    // its name is marked, as a match is in a list.
+    const item = new vscode.TreeItem(
+      front ? { label: name, highlights: [[0, name.length]] } : name,
+      doc ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
+    );
+    item.id = `scene:${root.uri.toString()}`;
+    const twins = this.scenes().filter(
+      (other) => other.uri.toString() !== root.uri.toString() && other.uri.path.split('/').pop() === name,
+    );
+    const folder = twins.length ? root.uri.path.split('/').slice(-2, -1)[0] : undefined;
+    item.description = [
+      doc?.dirty ? '•' : undefined,
+      folder,
+      doc ? undefined : 'not loaded',
+      doc?.problem ? 'could not be read' : undefined,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const where = root.uri.scheme === 'file' ? root.uri.fsPath : 'not saved yet';
+    item.tooltip = new vscode.MarkdownString(
+      `**${name}** — ${where}\n\n` +
+        (!doc
+          ? 'Not loaded yet: click to open it.'
+          : front
+            ? 'In front: the Variables, Inspector and Undo views show this scene, ' +
+              'and the buttons on this row act on it.'
+            : 'Click to bring it in front.') +
+        (doc?.dirty ? '\n\nUnsaved changes.' : ''),
+    );
+    item.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'magnet.svg');
+    // Not /^magpy/, which every object menu matches. What the row offers
+    // follows what the scene is: Revert needs a file, Save needs something
+    // unsaved, Show the Whole Scene a history rolled back.
+    item.contextValue = doc
+      ? 'sceneRow' +
+        (doc.untitled ? 'Untitled' : 'File') +
+        (doc.dirty ? 'Unsaved' : '') +
+        (doc.rolledBack ? 'RolledBack' : '')
+      : 'unloadedSceneRow';
+    item.command = {
+      command: 'magpylib-studio.showScene',
+      title: 'Show the Scene',
+      arguments: [root],
+    };
+    return item;
   }
 
   /**
@@ -186,7 +310,7 @@ export class SceneTreeProvider
       operation.label,
       vscode.TreeItemCollapsibleState.None,
     );
-    item.id = `op-${operation.id}`;
+    item.id = `${operation.scene?.key}/op-${operation.id}`;
     item.tooltip = new vscode.MarkdownString(
       '`' + operation.source + '`' +
         (operation.error ? `\n\n$(error) ${operation.error}` : '') +
@@ -224,8 +348,9 @@ export class SceneTreeProvider
     // a row those steps cannot be reached from. Only what contains objects
     // opens on its own — steps wait to be asked for, so a ring of twelve does
     // not arrive as twenty-four rows.
-    const contains = this.objects.some((o) => o.parent === obj.id);
-    const steps = this.operations.some((op) => op.target === obj.id);
+    const rows = obj.scene && this.rows.get(obj.scene);
+    const contains = rows?.objects.some((o) => o.parent === obj.id) ?? false;
+    const steps = rows?.operations.some((op) => op.target === obj.id) ?? false;
     const item = new vscode.TreeItem(
       obj.label,
       contains
@@ -234,7 +359,7 @@ export class SceneTreeProvider
           ? vscode.TreeItemCollapsibleState.Collapsed
           : vscode.TreeItemCollapsibleState.None,
     );
-    item.id = obj.id;
+    item.id = `${obj.scene?.key}/${obj.id}`;
     if (obj.absent) {
       // A headstone: the object is not in the scene, but its steps are still
       // in the log, and every one of them can be selected, edited, reordered
@@ -266,7 +391,7 @@ export class SceneTreeProvider
       item.command = {
         command: 'magpylib-studio.selectObject',
         title: 'Select in Studio',
-        arguments: [obj.id],
+        arguments: [obj.id, obj],
       };
       // deliberately outside the magpy* namespace: every scene-view menu
       // entry is gated on /^magpy/, so this matches none of them
@@ -326,7 +451,7 @@ export class SceneTreeProvider
     item.command = {
       command: 'magpylib-studio.selectObject',
       title: 'Select in Studio',
-      arguments: [obj.id],
+      arguments: [obj.id, obj],
     };
     return item;
   }
@@ -337,10 +462,14 @@ export class SceneTreeProvider
    * scene proper — they are what the scene used to have, or does not have
    * yet, and either way not part of reading what is in front of you.
    */
-  private absentObjects(): SceneObject[] {
-    const live = new Set(this.objects.map((o) => o.id));
+  private absentObjects(
+    scene: SceneDocument,
+    objects: SceneObject[],
+    operations: SceneOperation[],
+  ): SceneObject[] {
+    const live = new Set(objects.map((o) => o.id));
     const steps = new Map<string, SceneOperation[]>();
-    for (const op of this.operations) {
+    for (const op of operations) {
       if (!live.has(op.target)) {
         const own = steps.get(op.target) ?? [];
         own.push(op);
@@ -349,6 +478,7 @@ export class SceneTreeProvider
     }
     return [...steps].map(([id, own]) => ({
       id,
+      scene,
       type: '',
       label: id,
       parent: null,
@@ -366,21 +496,63 @@ export class SceneTreeProvider
 
   async getChildren(element?: SceneNode): Promise<SceneNode[]> {
     if (!element) {
-      [this.objects, this.operations] = await Promise.all([
-        this.listObjects(),
-        this.listOperations(),
-      ]);
-      this.absent = this.absentObjects();
-      return [...this.objects.filter((o) => o.parent === null), ...this.absent];
+      const scenes = this.scenes();
+      const live = new Set(scenes.map((root) => root.uri.toString()));
+      for (const key of [...this.roots.keys()]) {
+        if (!live.has(key)) {
+          this.roots.delete(key);
+        }
+      }
+      for (const doc of [...this.rows.keys()]) {
+        if (!scenes.some((root) => root.doc === doc)) {
+          this.rows.delete(doc);
+        }
+      }
+      return scenes.map((root) => {
+        const key = root.uri.toString();
+        const kept = this.roots.get(key);
+        if (kept && kept.doc === root.doc) {
+          kept.column = root.column;
+          return kept;
+        }
+        this.roots.set(key, root);
+        return root;
+      });
     }
-    if (isOperation(element)) {
+    if (isSceneRoot(element)) {
+      const doc = element.doc;
+      if (!doc) {
+        this.load(element); // opened, it is listed with its rows
+        return [];
+      }
+      let rows = this.rows.get(doc);
+      if (!rows || this.stale.has(doc)) {
+        this.stale.delete(doc);
+        const [objects, operations] = await Promise.all([
+          this.listObjects(doc),
+          this.listOperations(doc),
+        ]);
+        for (const row of [...objects, ...operations]) {
+          row.scene = doc;
+        }
+        rows = { objects, operations, absent: this.absentObjects(doc, objects, operations) };
+        this.rows.set(doc, rows);
+      }
+      const top = [...rows.objects.filter((o) => o.parent === null), ...rows.absent];
+      return top.length ? top : [{ kind: 'hint', scene: doc }];
+    }
+    if (isOperation(element) || isHint(element) || !element.scene) {
+      return [];
+    }
+    const rows = this.rows.get(element.scene);
+    if (!rows) {
       return [];
     }
     // An object's own steps first, then whatever it contains: how this came
     // to be, before what is inside it.
     return [
-      ...this.operations.filter((op) => op.target === element.id),
-      ...this.objects.filter((o) => o.parent === element.id),
+      ...rows.operations.filter((op) => op.target === element.id),
+      ...rows.objects.filter((o) => o.parent === element.id),
     ];
   }
 
@@ -390,7 +562,7 @@ export class SceneTreeProvider
     // not dragged either - they are reordered from their own menu, where
     // "earlier"/"later" says what moving one actually means.
     const movable = source.filter(
-      (o): o is SceneObject => !isOperation(o) && !o.derived && !o.absent,
+      (o): o is SceneObject => isObject(o) && !o.derived && !o.absent,
     );
     if (movable.length) {
       dataTransfer.set(TREE_MIME, new vscode.DataTransferItem(movable));
@@ -404,18 +576,33 @@ export class SceneTreeProvider
     const source = dataTransfer.get(TREE_MIME)?.value as SceneObject[] | undefined;
     // Dropping *onto* a headstone would read as "put it where that used to
     // be", which is not a place: the scene has no such parent to join.
-    if (!source?.length || (target && (isOperation(target) || target.absent))) {
+    if (
+      !source?.length ||
+      (target && (isOperation(target) || isHint(target) || (isObject(target) && target.absent)))
+    ) {
+      return;
+    }
+    const scene = source[0].scene;
+    const into = target === undefined ? scene : isSceneRoot(target) ? target.doc : target.scene;
+    if (!scene || !into) {
+      return;
+    }
+    if (into !== scene) {
+      void vscode.window.showInformationMessage(
+        'Magpylib Studio: copying an object into another scene comes next; ' +
+          'for now an object moves within its own scene.',
+      );
       return;
     }
     const parent =
-      target === undefined
+      target === undefined || isSceneRoot(target)
         ? null
         : target.type === 'Collection' && !target.derived
           ? target.id
           : target.parent;
     for (const obj of source) {
       if (obj.id !== parent && (obj.parent ?? null) !== parent) {
-        await this.moveObject(obj.id, parent); // engine rejects cycles cleanly
+        await this.moveObject(scene, obj.id, parent); // engine rejects cycles cleanly
       }
     }
   }

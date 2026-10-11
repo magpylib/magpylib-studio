@@ -81,7 +81,14 @@ export class EngineClient {
     return this.killed;
   }
 
-  request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+  /** `session` names the scene the request is for; without it the request
+   *  goes to the engine's one unnamed scene, which it refuses once any scene
+   *  has been opened by name. */
+  request<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    session?: string,
+  ): Promise<T> {
     if (this.exited) {
       return Promise.reject(new Error('engine is not running'));
     }
@@ -90,7 +97,10 @@ export class EngineClient {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
     });
     try {
-      this.proc.stdin.write(JSON.stringify({ id, method, params: params ?? {} }) + '\n');
+      const message = session === undefined
+        ? { id, method, params: params ?? {} }
+        : { id, session, method, params: params ?? {} };
+      this.proc.stdin.write(JSON.stringify(message) + '\n');
     } catch (err) {
       this.pending.delete(id);
       return Promise.reject(

@@ -5041,6 +5041,13 @@ class MagpylibStudioSession:
             self.forget_history()
         return result
 
+    def replace_scene(self, scene, base_dir=None):
+        """Replace the document with `scene` as one step to undo: a Revert to
+        the file, or the file changed on disk, where what the scene held is
+        one undo away rather than gone. `load_scene` is for opening, which
+        starts the history instead."""
+        return self._replace(scene, base_dir, "replace scene")
+
     def _replace(self, scene, base_dir, label):
         """Replace the whole document with `scene`, as one step labelled
         `label` to undo.

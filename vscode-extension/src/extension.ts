@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -5,7 +6,21 @@ import * as vscode from 'vscode';
 import { PythonExtension } from '@vscode/python-extension';
 import { EngineClient } from './engineClient';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
-import { setTextFocus, tookTextFocus } from './textFocus';
+import {
+  addScene,
+  bringToFront,
+  frontScene,
+  newSessionName,
+  onDidChangeFront,
+  onDidChangeScenes,
+  openScenes,
+  removeScene,
+  SCENE_VIEW_TYPE,
+  SceneDocument,
+  sceneFor,
+  sceneOfNode,
+} from './scenes';
+import { setTextFocus, tookTextFocus, undoTyping } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
@@ -16,22 +31,24 @@ import {
 } from './scriptViewer';
 import {
   iconFor,
+  isObject,
   isOperation,
   meshFault,
   MeshStatus,
   SceneNode,
   SceneObject,
   SceneOperation,
+  SceneRoot,
   SceneTreeProvider,
 } from './sceneTree';
 
 let engine: EngineClient | undefined;
-let currentPanel: vscode.WebviewPanel | undefined;
 let fieldPanel: vscode.WebviewPanel | undefined;
 let selectedObjectId: string | undefined;
 let sceneTree: SceneTreeProvider | undefined;
 let sceneTreeView: vscode.TreeView<SceneNode> | undefined;
-let clipboard: { id: string; cut: boolean } | undefined;
+/** What Copy or Cut took, and from which scene: an id means nothing in another. */
+let clipboard: { id: string; cut: boolean; scene: SceneDocument | undefined } | undefined;
 let historyTree: HistoryTreeProvider | undefined;
 let variablesTree: VariablesViewProvider | undefined;
 let inspector: InspectorViewProvider | undefined;
@@ -83,21 +100,20 @@ const SCRIPT_TAB_HEADER = [
   '',
 ].join('\n');
 
-/** The file this scene is saved to and from, and whether it has changed since.
- *  The engine holds one scene with no name of its own, so the name lives here:
- *  it is what Save saves to, what the view title shows, and what is reopened
- *  next time this workspace is. */
-let sceneFile: vscode.Uri | undefined;
-let sceneDirty = false;
-/** Written beside the script tab whenever the scene changes, so a crash or a
- *  reload is recoverable — the scene is otherwise only in the subprocess.
- *  Set during activation, like refreshScript. */
-let sceneBackupFile: vscode.Uri | undefined;
-let writeSceneBackup: (() => Promise<void>) | undefined;
-let rememberSceneState: (() => Thenable<void>) | undefined;
-let backupTimer: ReturnType<typeof setTimeout> | undefined;
-/** Remembered per workspace: the file to reopen, and whether what was in the
- *  editor differed from it. */
+/** An edit of a scene, told to VS Code, which marks the scene's tab unsaved
+ *  and backs it up. Fired once per edit: see broadcastMutation. */
+const sceneEdited = new vscode.EventEmitter<
+  vscode.CustomDocumentContentChangeEvent<SceneDocument>
+>();
+/** Where each open scene's recovery copy is written, in extension storage:
+ *  set at activation. VS Code's own backups miss the edits since it last
+ *  saved its editor state, about a minute (plans/several-scenes.md §8). */
+let recoveryDir: vscode.Uri | undefined;
+/** The pending settle of each scene with an edit not yet settled. */
+const settleTimers = new Map<SceneDocument, ReturnType<typeof setTimeout>>();
+/** Before scenes were tabs, the one scene the workspace last had and whether
+ *  it had unsaved changes: opened once as a tab by an upgraded extension,
+ *  then forgotten. */
 const SCENE_STATE_KEY = 'magpylib-studio.scene';
 /** Remembered globally (not per workspace): whether the getting-started
  *  walkthrough has already been shown, so it opens once per install. */
@@ -1509,58 +1525,112 @@ async function installEngineNow(): Promise<void> {
     });
 }
 
-/** The scene lives in the engine process and nowhere else, so a process that
- *  dies takes it with it: the replacement starts empty. True while there is a
- *  scene to put back, and until it has been. */
-let restoreAfterRestart = false;
-/** Set from the moment an engine dies until its replacement has been given
- *  the backup back. Without it the first edit after a crash writes the empty
- *  scene over the backup — the only copy of whatever was unsaved. */
-let backupSuspended = false;
-/** Whether backup.magpy.json holds *this* session's scene. It does once we
- *  have written it, and not before: a backup left by a previous window must
- *  not be poured into a fresh engine that never had a scene. */
-let backupIsCurrent = false;
+/** A way to the engine for one scene: each request carries its session. */
+export interface SceneEngine {
+  request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>;
+}
 
-/**
- * Give a freshly started engine the scene the last one died with.
- *
- * Same file the reload path reads, for the same reason — but a crash gets no
- * activation to hang the work off, so it happens here, before the caller's
- * own request goes down the pipe.
- */
-async function restoreEngineScene(client: EngineClient): Promise<void> {
-  try {
-    if (!sceneBackupFile) {
-      return;
-    }
-    const bytes = await vscode.workspace.fs.readFile(sceneBackupFile);
-    const doc = JSON.parse(Buffer.from(bytes).toString('utf8'));
-    const result = (await client.request('load_scene', { scene: doc })) as {
-      ok: boolean;
-      error?: string;
-    };
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-    vscode.window.setStatusBarMessage(
-      'Magpylib Studio: the engine restarted; the scene came back from the backup',
-      4000,
-    );
-  } catch (err) {
-    engineOutput?.appendLine(
-      `[could not restore the scene after the engine restarted: ` +
-        `${err instanceof Error ? err.message : err}]`,
-    );
-    vscode.window.showWarningMessage(
-      'Magpylib Studio: the engine restarted and its scene could not be ' +
-        'restored — the studio is showing an empty one. Do not save over ' +
-        'your file.',
-    );
-  } finally {
-    backupSuspended = false;
-    refreshSurfaces();
+/** Where requests go with no scene open: a scene that is never shown nor
+ *  saved, so that the side bar reads an empty one rather than an error, and
+ *  a list of examples needs no tab. Edits are never sent here: see
+ *  `ensureFrontScene`. */
+const scratch = new SceneDocument(vscode.Uri.parse('magpylib-studio:/no-scene'), () => {});
+
+/** The engine as seen by `doc`: its session opened first if this engine has
+ *  not opened it yet -- the first request, or the first since an engine
+ *  restarted, which takes every scene with it and is given each one back
+ *  from the last document it settled on. */
+function engineFor(context: vscode.ExtensionContext, doc: SceneDocument): SceneEngine {
+  return {
+    request: async <T = unknown>(method: string, params?: Record<string, unknown>) => {
+      const client = await getRawEngine(context);
+      await openSession(client, doc);
+      return client.request<T>(method, params, doc.session);
+    },
+  };
+}
+
+/** The scene a running command acts on: the row it was run from, or the
+ *  scene in front when it started -- none, when no scene was open. Kept
+ *  through every await of the command, so that one asking questions first
+ *  ends in the scene it began in, whatever came in front meanwhile. A scene
+ *  the command itself opens or brings in front becomes its scene (see the
+ *  onDidChangeFront listener); one the person clicks meanwhile does not. */
+const commandScene = new AsyncLocalStorage<{ scene: SceneDocument | undefined }>();
+
+/** Put `doc` in front, and make it the running command's scene: a scene the
+ *  command opened, or the row it acts on. Said outright rather than left to
+ *  the front changing, which it does not when VS Code put the tab in front
+ *  first. */
+function actOn(doc: SceneDocument): void {
+  bringToFront(doc);
+  const box = commandScene.getStore();
+  if (box) {
+    box.scene = doc;
   }
+}
+
+/** The scene to act on now: the running command's, else the one in front.
+ *  A command whose scene was closed under it stops there. */
+function actingScene(): SceneDocument | undefined {
+  const box = commandScene.getStore();
+  if (!box) {
+    return frontScene();
+  }
+  if (box.scene && !openScenes().includes(box.scene)) {
+    throw new Error(`${box.scene.name} was closed meanwhile, so nothing was done`);
+  }
+  return box.scene;
+}
+
+/** The engine for the scene acted on: a running command's, else the scene in
+ *  front, as every view of one scene speaks to it. */
+function getEngine(context: vscode.ExtensionContext): Promise<SceneEngine> {
+  try {
+    return Promise.resolve(engineFor(context, actingScene() ?? scratch));
+  } catch (err) {
+    return Promise.reject(err);
+  }
+}
+
+function openSession(client: EngineClient, doc: SceneDocument): Promise<void> {
+  if (doc.engine === client && doc.opening) {
+    return doc.opening;
+  }
+  const again = doc.engine !== undefined;
+  if (again) {
+    doc.session = newSessionName(); // a name is used once, in any engine
+  }
+  doc.engine = client;
+  doc.opening = (async () => {
+    const result = await client.request<{ ok: boolean; error?: string }>('open_session', {
+      session: doc.session,
+      ...(doc.lastDocument !== undefined ? { scene: doc.lastDocument } : {}),
+      base_dir: doc.baseDir ?? null,
+    });
+    if (!result.ok) {
+      // Opened empty, so the tab and the side bar work, and marked: a scene
+      // that could not be read is never saved, or the empty one would go over
+      // the file it could not read.
+      doc.problem = result.error ?? 'unreadable';
+      doc.lastDocument = undefined;
+      await client.request('open_session', { session: doc.session, base_dir: doc.baseDir ?? null });
+      void vscode.window.showErrorMessage(
+        `Magpylib Studio: could not open ${doc.name} -- ${doc.problem}. ` +
+          'It is shown empty, and will not be saved over.',
+      );
+    } else if (again && doc !== scratch) {
+      vscode.window.setStatusBarMessage(
+        `Magpylib Studio: the engine restarted; ${doc.name} came back as last settled`,
+        4000,
+      );
+      for (const panel of doc.panels) {
+        void panel.webview.postMessage({ type: 'refresh' });
+      }
+      refreshSurfaces();
+    }
+  })();
+  return doc.opening;
 }
 
 /** One start at a time. Finding an interpreter is asynchronous now, so two
@@ -1569,18 +1639,13 @@ async function restoreEngineScene(client: EngineClient): Promise<void> {
  *  the first running with nobody listening to it. */
 let startingEngine: Promise<EngineClient> | undefined;
 
-function getEngine(context: vscode.ExtensionContext): Promise<EngineClient> {
+function getRawEngine(context: vscode.ExtensionContext): Promise<EngineClient> {
   if (engine?.isRunning) {
     return Promise.resolve(engine);
   }
-  // There was one and it is gone — crashed, or restarted onto another
-  // interpreter — so it took the scene with it. Nothing may write the backup
-  // until the replacement has been given that scene back, because the backup
-  // is the only place it still exists.
-  if (engine && backupIsCurrent) {
-    restoreAfterRestart = true;
-    backupSuspended = true;
-  }
+  // There was one and it is gone -- crashed, or restarted onto another
+  // interpreter -- so it took every scene with it. Each is opened again in
+  // the new one when it is next asked for (see openSession).
   startingEngine ??= startEngine(context).finally(() => {
     startingEngine = undefined;
   });
@@ -1645,12 +1710,6 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
     }
   };
   engine = client;
-  // Before the caller's own request: load_scene is queued first, so whatever
-  // it asked for is answered against the scene it expects to be there.
-  if (restoreAfterRestart) {
-    restoreAfterRestart = false;
-    await restoreEngineScene(client);
-  }
   return client;
 }
 
@@ -1658,7 +1717,14 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
  *  Steps are selectable too, but the object shortcuts do not apply to them. */
 function treeSelection(): SceneObject | undefined {
   const selected = sceneTreeView?.selection[0];
-  return selected && !isOperation(selected) ? selected : undefined;
+  if (!isObject(selected)) {
+    return undefined;
+  }
+  // a key pressed on a row acts on that row's scene
+  if (selected.scene) {
+    actOn(selected.scene);
+  }
+  return selected;
 }
 
 /** The magpylib logo, shared by the activity bar and the panel tabs. */
@@ -1666,15 +1732,17 @@ function logoUri(context: vscode.ExtensionContext): vscode.Uri {
   return vscode.Uri.joinPath(context.extensionUri, 'media', 'magnet.svg');
 }
 
-/** Route webview 'rpcRequest' messages through the shared engine. */
-function wireRpcRouter(context: vscode.ExtensionContext, webview: vscode.Webview): void {
+/** Route webview 'rpcRequest' messages to the engine, for the scene `scene`
+ *  says: a scene's own tab is drawn for that scene, the field panel for the
+ *  one in front. */
+function wireRpcRouter(webview: vscode.Webview, scene: () => Promise<SceneEngine>): void {
   webview.onDidReceiveMessage(async (message) => {
     if (message.type !== 'rpcRequest') {
       return;
     }
     const { reqId, method, params } = message;
     try {
-      const result = await (await getEngine(context)).request(method, params);
+      const result = await (await scene()).request(method, params);
       webview.postMessage({ type: 'rpcResult', reqId, method, result });
     } catch (err) {
       webview.postMessage({
@@ -1701,21 +1769,37 @@ const PANEL_OPTIONS = (context: vscode.ExtensionContext) => ({
   localResourceRoots: [context.extensionUri],
 });
 
-/** Fill in a panel — a new one, or one VS Code has restored after a reload.
- *  Everything a panel needs is here rather than at the creation site, because
- *  a restored panel arrives already created and needs all of it too. */
-function adoptStudioPanel(
+/** What a scene's view sends when a person acts in it. */
+const ACTS = new Set([
+  'selectObject',
+  'transformObjects',
+  'previewTransform',
+  'setVisible',
+  'undo',
+  'redo',
+  'dragStart',
+]);
+
+/** Fill in a scene's tab: the studio's view, drawn for that scene. */
+function adoptScenePanel(
   context: vscode.ExtensionContext,
+  doc: SceneDocument,
   panel: vscode.WebviewPanel,
 ): void {
-  currentPanel = panel;
+  doc.panels.add(panel);
   panel.iconPath = logoUri(context); // tabs render icons in full colour
   panel.webview.options = PANEL_OPTIONS(context);
   panel.webview.html = createWebviewHtml(context, panel.webview);
-  wireRpcRouter(context, panel.webview);
+  wireRpcRouter(panel.webview, () => Promise.resolve(engineFor(context, doc)));
   panel.webview.onDidReceiveMessage((message) => {
-    if (tookTextFocus(message)) {
+    if (tookTextFocus(message, panel.webview)) {
       return;
+    }
+    // What a person does in the view, they do to its scene, which the act
+    // puts in front. Only that: a tab behind keeps asking the engine for what
+    // it draws, and that must not move the side bar to it.
+    if (ACTS.has(message.type)) {
+      bringToFront(doc);
     }
     if (message.type === 'selectObject') {
       // a pick in the 3D view is the same act as clicking the Scene tree
@@ -1737,29 +1821,43 @@ function adoptStudioPanel(
     } else if (message.type === 'dragStart') {
       void beginDragFromPanel(context);
     } else if (message.type === 'ready') {
-      panel.webview.postMessage({ type: 'select', objectId: selectedObjectId });
+      panel.webview.postMessage({ type: 'select', objectId: doc.selected });
+    }
+  });
+  if (panel.active) {
+    bringToFront(doc);
+  }
+  panel.onDidChangeViewState((event) => {
+    if (event.webviewPanel.active) {
+      bringToFront(doc);
     }
   });
   panel.onDidDispose(() => {
-    currentPanel = undefined;
+    doc.panels.delete(panel);
     setTextFocus(false);
   });
 }
 
-function openStudioPanel(context: vscode.ExtensionContext): void {
-  if (currentPanel) {
-    currentPanel.reveal();
+/** The tabs of the scene in front, to tell what the side bar did. */
+function postToFrontScene(message: unknown): void {
+  for (const panel of frontScene()?.panels ?? []) {
+    void panel.webview.postMessage(message);
+  }
+}
+
+/** Show the scene in front, or a new one when none is open. */
+async function showFrontScene(): Promise<void> {
+  const doc = frontScene();
+  if (!doc) {
+    await vscode.commands.executeCommand('magpylib-studio.newScene');
     return;
   }
-  adoptStudioPanel(
-    context,
-    vscode.window.createWebviewPanel(
-      STUDIO_PANEL,
-      'Magpylib Scene',
-      vscode.ViewColumn.One,
-      PANEL_OPTIONS(context),
-    ),
-  );
+  const [panel] = doc.panels;
+  if (panel) {
+    panel.reveal(panel.viewColumn);
+  } else {
+    await vscode.commands.executeCommand('vscode.openWith', doc.uri, SCENE_VIEW_TYPE);
+  }
 }
 
 /** The Field panel says when its script is listening, and until it does a
@@ -1787,9 +1885,9 @@ function adoptFieldPanel(
   panel.iconPath = logoUri(context);
   panel.webview.options = PANEL_OPTIONS(context);
   panel.webview.html = createFieldViewHtml(context, panel.webview);
-  wireRpcRouter(context, panel.webview);
+  wireRpcRouter(panel.webview, () => getEngine(context));
   panel.webview.onDidReceiveMessage((message) => {
-    if (tookTextFocus(message) || message.type !== 'ready') {
+    if (tookTextFocus(message, panel.webview) || message.type !== 'ready') {
       return;
     }
     fieldReady = true;
@@ -2009,12 +2107,17 @@ function finishPreview(panel: vscode.WebviewPanel): void {
 
 function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string): void {
   selectedObjectId = objectId;
+  const doc = frontScene();
+  if (doc) {
+    doc.selected = objectId;
+  }
   inspector?.select(objectId);
-  if (currentPanel) {
-    currentPanel.webview.postMessage({ type: 'select', objectId });
-    currentPanel.reveal(undefined, true); // keep focus in the sidebar
-  } else {
-    openStudioPanel(context); // its 'ready' asks for the selection itself
+  const [panel] = doc?.panels ?? [];
+  if (panel) {
+    panel.webview.postMessage({ type: 'select', objectId });
+    panel.reveal(panel.viewColumn, true); // keep focus in the sidebar
+  } else if (doc) {
+    void showFrontScene(); // its 'ready' asks for the selection itself
   }
 }
 
@@ -2025,33 +2128,87 @@ function selectObjectInStudio(context: vscode.ExtensionContext, objectId: string
  * borrowed rather than invented.
  */
 function showSceneFile(): void {
-  if (sceneTreeView) {
-    const name = sceneFile ? basename(sceneFile) : 'Untitled';
-    sceneTreeView.description = sceneDirty ? `${name} •` : name;
-  }
+  const doc = frontScene();
+  // each scene's row carries its name and its dot
+  sceneTree?.refresh();
   void vscode.commands.executeCommand(
     'setContext',
     'magpylib-studio.sceneFile',
-    sceneFile !== undefined,
+    doc !== undefined && !doc.untitled,
   );
-  void vscode.commands.executeCommand('setContext', 'magpylib-studio.sceneDirty', sceneDirty);
+  void vscode.commands.executeCommand(
+    'setContext',
+    'magpylib-studio.sceneDirty',
+    doc?.dirty ?? false,
+  );
 }
 
 function basename(uri: vscode.Uri): string {
   return uri.path.split('/').pop() || uri.path;
 }
 
-/** Keep the crash backup roughly current without writing on every keystroke.
- *  Slower than the redraw debounce on purpose: a redraw has to feel instant,
- *  a backup only has to beat the next crash. */
-function scheduleBackup(): void {
-  if (backupTimer) {
-    clearTimeout(backupTimer);
+/** Where `doc`'s recovery copy is written: a scene document, which opens as
+ *  any other, with the scene it is a copy of named beside it. */
+function recoveryFile(doc: SceneDocument): vscode.Uri | undefined {
+  return recoveryDir && vscode.Uri.joinPath(recoveryDir, `${doc.key}.magpy.json`);
+}
+
+function recoveryOrigin(doc: SceneDocument): vscode.Uri | undefined {
+  return recoveryDir && vscode.Uri.joinPath(recoveryDir, `${doc.key}.from`);
+}
+
+/** Take the document a scene settled on a second after its last edit: what a
+ *  restarted engine is given back, written as the scene's recovery copy.
+ *  Slower than the redraw on purpose: a redraw has to feel instant, this only
+ *  has to beat the next crash. */
+function scheduleSettle(context: vscode.ExtensionContext, doc: SceneDocument): void {
+  clearTimeout(settleTimers.get(doc));
+  settleTimers.set(
+    doc,
+    setTimeout(() => {
+      settleTimers.delete(doc);
+      void settle(context, doc);
+    }, 1000),
+  );
+}
+
+async function settle(context: vscode.ExtensionContext, doc: SceneDocument): Promise<void> {
+  if (doc.problem || !openScenes().includes(doc)) {
+    return;
   }
-  backupTimer = setTimeout(() => {
-    backupTimer = undefined;
-    void writeSceneBackup?.();
-  }, 1000);
+  try {
+    doc.lastDocument = await engineFor(context, doc).request('to_dict');
+    const file = recoveryFile(doc);
+    if (file && doc.dirty) {
+      await vscode.workspace.fs.createDirectory(recoveryDir!);
+      await vscode.workspace.fs.writeFile(
+        file,
+        Buffer.from(JSON.stringify(doc.lastDocument, null, 2) + '\n', 'utf8'),
+      );
+      await vscode.workspace.fs.writeFile(
+        recoveryOrigin(doc)!,
+        Buffer.from(doc.uri.toString() + '\n', 'utf8'),
+      );
+    }
+  } catch (err) {
+    // A copy that cannot be written must not interrupt editing; the next
+    // edit tries again. Said all the same: a copy that never lands is
+    // invisible exactly until it is needed.
+    engineOutput?.appendLine(
+      `[recovery copy of ${doc.name} not written: ${err instanceof Error ? err.message : err}]`,
+    );
+  }
+}
+
+/** A scene saved, reverted or closed has no unsaved work to recover. */
+function dropRecovery(doc: SceneDocument): void {
+  clearTimeout(settleTimers.get(doc));
+  settleTimers.delete(doc);
+  for (const file of [recoveryFile(doc), recoveryOrigin(doc)]) {
+    if (file) {
+      void vscode.workspace.fs.delete(file).then(undefined, () => {});
+    }
+  }
 }
 
 /** How long a burst of edits may collapse into one pass. Measured from the
@@ -2083,9 +2240,12 @@ function refreshSurfaces(): void {
   }
   refreshTimer = setTimeout(() => {
     refreshTimer = undefined;
-    currentPanel?.webview.postMessage({ type: 'refresh' });
+    postToFrontScene({ type: 'refresh' });
     fieldPanel?.webview.postMessage({ type: 'refresh' });
-    sceneTree?.refresh();
+    const front = frontScene();
+    if (front) {
+      sceneTree?.refresh(front); // its rows, and no other scene's
+    }
     historyTree?.refresh();
     variablesTree?.refresh();
     inspector?.refresh();
@@ -2095,26 +2255,55 @@ function refreshSurfaces(): void {
 }
 
 /** An edit happened somewhere (inspector, tree action, panel, script tab):
- *  the document now differs from its file, and every surface is stale. */
+ *  the scene in front now differs from its file, and every surface is stale.
+ *  Every path that changes a scene ends up here, which makes it the one place
+ *  that can tell VS Code the scene's tab is unsaved -- once per edit, so that
+ *  an edit made while a save was writing is not lost to the save clearing the
+ *  mark (plans/several-scenes.md §8). */
 function broadcastMutation(): void {
-  // Every path that changes the scene ends up here, which makes it the one
-  // place that can honestly say the scene no longer matches its file. Set
-  // outside the debounce: a caller that saves right after mutating (or that
-  // marks the scene clean, like opening a file) must see it immediately.
-  if (!sceneDirty) {
-    sceneDirty = true;
-    showSceneFile();
-    // Recorded now rather than with the backup a second later: if the window
-    // goes away in between, "there were unsaved changes" is the fact that
-    // matters, and it is better to offer a backup one edit stale than to
-    // reopen the saved file as though nothing had happened.
-    void rememberSceneState?.();
+  // the scene the edit went to: a command's own, or the one in front
+  const box = commandScene.getStore();
+  const doc = box ? box.scene : frontScene();
+  if (doc && openScenes().includes(doc)) {
+    doc.revision += 1;
+    if (!doc.dirty) {
+      doc.dirty = true;
+      showSceneFile();
+    }
+    sceneEdited.fire({ document: doc });
+    if (activeContext) {
+      scheduleSettle(activeContext, doc);
+    }
+    if (doc !== frontScene()) {
+      // edited behind: its own tab and rows, the views being on another
+      for (const panel of doc.panels) {
+        void panel.webview.postMessage({ type: 'refresh' });
+      }
+      sceneTree?.refresh(doc);
+    }
   }
-  scheduleBackup();
   refreshSurfaces();
 }
 
+/** Set at activation, for the module-level functions that need it. */
+let activeContext: vscode.ExtensionContext | undefined;
+
 export function activate(context: vscode.ExtensionContext): void {
+  activeContext = context;
+  /** Every command of the studio: one run from a row of the tree, its menu
+   *  or its buttons, acts on the row's scene, which it puts in front first. */
+  const registerCommand = <A extends unknown[]>(
+    id: string,
+    handler: (...args: A) => unknown,
+  ): vscode.Disposable =>
+    vscode.commands.registerCommand(id, (...args: A) => {
+      const row = sceneOfNode(args[0]);
+      if (row) {
+        bringToFront(row);
+      }
+      const scene = row ?? commandScene.getStore()?.scene ?? frontScene();
+      return commandScene.run({ scene }, () => handler(...args));
+    });
   // Tell a script run from this window's terminals where to leave a payload,
   // so `show()` can draw into *this* window rather than guessing at one. The
   // address only, never a backend name: `pytest` in the same terminal is
@@ -2152,35 +2341,97 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   activateScriptViewer(context);
 
+  /** The rows of the tree: every scene open in a tab, in the order they
+   *  opened, then the tabs VS Code has not loaded yet. A scene in a diff, or
+   *  from git, is not one being edited, and is left out. */
+  const sceneRoots = (): SceneRoot[] => {
+    const roots = new Map<string, SceneRoot>();
+    for (const doc of [...openScenes()].sort((a, b) => a.openedAt - b.openedAt)) {
+      if (doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled') {
+        const [panel] = doc.panels;
+        roots.set(doc.uri.toString(), {
+          kind: 'scene',
+          uri: doc.uri,
+          doc,
+          column: panel?.viewColumn,
+        });
+      }
+    }
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const input = tab.input;
+        if (
+          input instanceof vscode.TabInputCustom &&
+          input.viewType === SCENE_VIEW_TYPE &&
+          !roots.has(input.uri.toString())
+        ) {
+          roots.set(input.uri.toString(), {
+            kind: 'scene',
+            uri: input.uri,
+            column: group.viewColumn,
+          });
+        }
+      }
+    }
+    return [...roots.values()];
+  };
+
+  /** Whether any scene is open in a tab, for the title bar's Close All. */
+  const showScenesOpen = () =>
+    void vscode.commands.executeCommand(
+      'setContext',
+      'magpylib-studio.scenesOpen',
+      sceneRoots().length > 0,
+    );
+
+  /** Open a scene's tab where it is, the focus left in the side bar. */
+  const loadSceneTab = (root: SceneRoot) =>
+    vscode.commands.executeCommand('vscode.openWith', root.uri, SCENE_VIEW_TYPE, {
+      viewColumn: root.column,
+      preserveFocus: true,
+      preview: false,
+    });
+
   const tree = new SceneTreeProvider(
     context.extensionUri,
-    async () => {
+    sceneRoots,
+    (doc) => doc === frontScene(),
+    async (doc) => {
       try {
-        return await (await getEngine(context)).request<SceneObject[]>('list_objects');
+        return await engineFor(context, doc).request<SceneObject[]>('list_objects');
       } catch (err) {
         engineOutput?.appendLine(`scene view: ${err instanceof Error ? err.message : err}`);
         return [];
       }
     },
-    async (id, parent) => {
+    async (doc, id, parent) => {
+      bringToFront(doc);
       await mutateFromTree('move_object', { object_id: id, parent });
     },
-    async () => {
+    async (doc) => {
       try {
-        const { events, rollback } = await (await getEngine(context)).request<{
+        const { events, rollback } = await engineFor(context, doc).request<{
           events: Omit<SceneOperation, 'kind'>[];
           rollback: number | null;
         }>('get_events');
         // the engine owns this state — any edit returns to the end of the
-        // history — so the context key is read back rather than tracked
-        void vscode.commands.executeCommand(
-          'setContext', 'magpylib-studio.rolledBack', rollback !== null,
-        );
+        // history — so it is read back rather than tracked
+        const rolledBack = rollback !== null;
+        if (doc.rolledBack !== rolledBack) {
+          doc.rolledBack = rolledBack;
+          setTimeout(() => sceneTree?.refresh(), 0); // the row's own button
+        }
+        if (doc === frontScene()) {
+          void vscode.commands.executeCommand(
+            'setContext', 'magpylib-studio.rolledBack', rolledBack,
+          );
+        }
         return events.map((event) => ({ ...event, kind: 'operation' as const }));
       } catch {
         return [];
       }
     },
+    (root) => void loadSceneTab(root),
   );
   sceneTree = tree;
 
@@ -2221,7 +2472,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // edits: a variable can move anything in the scene, and unlike a gizmo
       // drag there is no pose reply for the view to redraw from. The panel
       // collapses what it cannot keep up with, so this cannot outrun it.
-      currentPanel?.webview.postMessage({ type: 'refresh' });
+      postToFrontScene({ type: 'refresh' });
       refreshLiveSurfaces();
     },
   );
@@ -2304,7 +2555,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (await mutateFromTree('load_captured', { scene: importedScenes.indexOf(pick) })) {
       followNewScene();
     }
-    openStudioPanel(context);
+    void showFrontScene();
   };
 
   /** Run a user script through the engine importer and show the result. */
@@ -2313,6 +2564,11 @@ export function activate(context: vscode.ExtensionContext): void {
    *  arriving on a different scene with a prompt to go looking for yours is a
    *  poor answer to having clicked on it. */
   const importScript = async (uri: vscode.Uri, scene?: number) => {
+    // What arrives opens a tab of its own rather than replacing the scene in
+    // front (plans/several-scenes.md §5).
+    if (!(await newSceneTab())) {
+      return;
+    }
     try {
       const result = (await (await getEngine(context)).request('load_script', {
         path: uri.fsPath,
@@ -2329,7 +2585,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       }
       broadcastMutation();
-      openStudioPanel(context);
+      void showFrontScene();
       // The studio is its sidebar as much as its panel: the tree, the
       // inspector, the variables and the history are where an imported scene
       // is actually worked on. Leaving the container closed makes an import
@@ -3154,6 +3410,11 @@ export function activate(context: vscode.ExtensionContext): void {
     params: Record<string, unknown>,
     { checkVariables = true } = {},
   ): Promise<boolean> => {
+    // An edit with no scene open starts one: Add Object on an empty side bar
+    // means "in a new scene", not "nowhere".
+    if (!actingScene() && !(await newSceneTab())) {
+      return false;
+    }
     // whatever was typed may name variables that do not exist yet
     if (
       checkVariables &&
@@ -3397,10 +3658,11 @@ export function activate(context: vscode.ExtensionContext): void {
    * patterns included, and unlike the script tab nothing regenerates it.
    */
   const exportScript = async (kind: 'magpylib' | 'builder') => {
-    const folder = sceneFile
-      ? vscode.Uri.joinPath(sceneFile, '..')
+    const front = actingScene();
+    const folder = front?.baseDir
+      ? vscode.Uri.file(front.baseDir)
       : vscode.workspace.workspaceFolders?.[0]?.uri;
-    const name = sceneFile ? basename(sceneFile).replace(/\.magpy\.json$/, '') : 'scene';
+    const name = front ? front.name.replace(/\.magpy\.json$/, '') : 'scene';
     // Beside the scene and sorted next to it, without taking the plain
     // export's name: a folder may well hold both.
     const file = kind === 'builder' ? `${name}_build.py` : `${name}.py`;
@@ -3427,235 +3689,231 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  /** Remember which file this workspace was last editing, and whether what
-   *  was on screen still matched it. Per workspace, not global: two windows
-   *  are two scenes, and each should come back to its own. */
-  const rememberScene = () =>
-    context.workspaceState.update(SCENE_STATE_KEY, {
-      file: sceneFile?.toString(),
-      dirty: sceneDirty,
+  recoveryDir = vscode.Uri.joinPath(scriptDir, 'recovery');
+
+  /** The scene `uri` once VS Code has opened its document. */
+  const sceneOpened = async (uri: vscode.Uri): Promise<SceneDocument | undefined> => {
+    for (let i = 0; i < 40; i++) {
+      const doc = sceneFor(uri);
+      if (doc) {
+        return doc;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return undefined;
+  };
+
+  /** Open `uri` in its tab, or bring its tab forward, and put it in front.
+   *  Where the scene in front is, rather than wherever the focus happens to
+   *  be: the script tab beside the scenes stays in sight. */
+  const openSceneTab = async (uri: vscode.Uri): Promise<SceneDocument | undefined> => {
+    const [beside] = frontScene()?.panels ?? [];
+    await vscode.commands.executeCommand('vscode.openWith', uri, SCENE_VIEW_TYPE, {
+      preview: false,
+      viewColumn: beside?.viewColumn ?? vscode.ViewColumn.One,
     });
-  rememberSceneState = rememberScene;
+    const doc = await sceneOpened(uri);
+    if (doc) {
+      actOn(doc);
+    }
+    return doc;
+  };
 
-  /** Point the studio at a file (or at nothing, for an unsaved scene) and
-   *  record whether it currently differs from it. */
-  const setSceneFile = async (
-    uri: vscode.Uri | undefined,
-    dirty = false,
-    { rebase = false, baseDir }: { rebase?: boolean; baseDir?: string } = {},
-  ) => {
-    sceneFile = uri;
-    sceneDirty = dirty;
+  /** A new untitled scene in a tab of its own, in front. It is named in the
+   *  workspace folder, where its first save then starts rather than at the
+   *  root of the disk (plans/several-scenes.md §8). */
+  const newSceneTab = async (): Promise<SceneDocument | undefined> => {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+    const taken = new Set(openScenes().map((doc) => doc.name));
+    let uri: vscode.Uri;
+    for (let n = 1; ; n++) {
+      const name = `Untitled-${n}${SCENE_EXTENSION}`;
+      uri = folder
+        ? vscode.Uri.joinPath(folder, name).with({ scheme: 'untitled' })
+        : vscode.Uri.parse(`untitled:${name}`);
+      if (!taken.has(name) && !(folder && (await exists(vscode.Uri.joinPath(folder, name))))) {
+        break;
+      }
+    }
+    return openSceneTab(uri);
+  };
+
+  /** What VS Code is about to open for Save As's destination: the session of
+   *  the scene saved there, which the new document adopts instead of reading
+   *  the file -- its undo, its selection. */
+  const handovers = new Map<string, { doc: SceneDocument; timer: ReturnType<typeof setTimeout> }>();
+
+  const closeSession = (doc: SceneDocument) => {
+    if (engine?.isRunning && doc.engine === engine) {
+      engine.request('close_session', { session: doc.session }).catch(() => {});
+    }
+  };
+
+  const disposeScene = (doc: SceneDocument) => {
+    removeScene(doc);
+    dropRecovery(doc);
+    if (!doc.handedOver) {
+      closeSession(doc);
+    }
+  };
+
+  /** The scene's document, written to `target`. A scene that could not be
+   *  read is shown empty, and that empty scene must not go over the file. */
+  const writeScene = async (doc: SceneDocument, target: vscode.Uri) => {
+    if (doc.problem) {
+      throw new Error(`${doc.name} could not be read (${doc.problem}), so it is not written`);
+    }
+    const scene = await engineFor(context, doc).request('to_dict');
+    await vscode.workspace.fs.writeFile(
+      target,
+      Buffer.from(JSON.stringify(scene, null, 2) + '\n', 'utf8'),
+    );
+    doc.lastDocument = scene;
+  };
+
+  /** A save has written what the scene held at `revision`. VS Code clears the
+   *  dot as the save returns, whatever came meanwhile: an edit that did is
+   *  told again, so its tab stays marked. */
+  const saved = (doc: SceneDocument, revision: number) => {
+    if (doc.revision === revision) {
+      doc.dirty = false;
+      dropRecovery(doc);
+    } else {
+      setTimeout(() => sceneEdited.fire({ document: doc }), 0);
+    }
     showSceneFile();
-    // A mesh path in the document is relative to the document, which only
-    // this side knows: the engine was started wherever the editor happened to
-    // start it.
-    //
-    // `rebase` says the document *moved* rather than that it was opened from
-    // here — Save As. Its relative mesh paths still mean the old directory,
-    // so the engine rewrites them to mean the same files from the new one.
-    // Opening is the opposite case and must not rebase: there the paths
-    // already say what they mean.
-    //
-    // With no file at all the workspace folder stands in, rather than
-    // nothing: a relative path in an unsaved scene has to resolve against
-    // *something*, and leaving it to the engine's working directory makes it
-    // depend on how the editor was launched.
-    const base =
-      baseDir ??
-      (uri
-        ? path.dirname(uri.fsPath)
-        : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
-    try {
-      const moved = (await (
-        await getEngine(context)
-      ).request('set_base_dir', { path: base ?? null, rebase })) as {
-        ok: boolean;
-        error?: string;
-        rebased?: number;
-      };
-      if (!moved.ok) {
-        // Swallowing this is how a scene ends up drawn as broken with no
-        // explanation: the meshes are the part of it that a directory change
-        // can invalidate, and they are exactly the part nothing else reports.
-        vscode.window.showWarningMessage(
-          `Magpylib Studio: the scene could not be rebuilt for its new ` +
-            `location — ${moved.error ?? 'unknown error'}`,
+  };
+
+  const sceneEditor: vscode.CustomEditorProvider<SceneDocument> = {
+    onDidChangeCustomDocument: sceneEdited.event,
+    async openCustomDocument(uri, opening) {
+      const handed = handovers.get(uri.toString());
+      if (handed) {
+        handovers.delete(uri.toString());
+        clearTimeout(handed.timer);
+        const doc = new SceneDocument(uri, disposeScene);
+        doc.session = handed.doc.session;
+        doc.engine = handed.doc.engine;
+        doc.opening = handed.doc.opening;
+        doc.lastDocument = handed.doc.lastDocument;
+        doc.selected = handed.doc.selected;
+        addScene(doc);
+        return doc;
+      }
+      const doc = new SceneDocument(uri, disposeScene);
+      try {
+        let bytes: Uint8Array | undefined;
+        if (opening.backupId) {
+          bytes = await vscode.workspace.fs.readFile(vscode.Uri.parse(opening.backupId));
+          doc.dirty = true;
+        } else if (opening.untitledDocumentData?.byteLength) {
+          bytes = opening.untitledDocumentData;
+          doc.dirty = true;
+        } else if (uri.scheme !== 'untitled') {
+          bytes = await vscode.workspace.fs.readFile(uri);
+        }
+        if (bytes?.byteLength) {
+          doc.lastDocument = JSON.parse(Buffer.from(bytes).toString('utf8'));
+        }
+      } catch (err) {
+        doc.problem = err instanceof Error ? err.message : String(err);
+        void vscode.window.showErrorMessage(
+          `Magpylib Studio: could not read ${doc.name} -- ${doc.problem}. ` +
+            'It is shown empty, and will not be saved over.',
         );
-      } else if (moved.rebased) {
-        // The paths in the document changed, so what is on screen was built
-        // from something else a moment ago.
-        broadcastMutation();
       }
-    } catch {
-      // An engine that is not up yet is told at load time instead, which is
-      // the only moment it matters — see the open path below.
-    }
-    await rememberScene();
-  };
-
-  sceneBackupFile = vscode.Uri.joinPath(scriptDir, 'backup.magpy.json');
-  writeSceneBackup = async () => {
-    // An engine that has just restarted holds an empty scene until it has
-    // been given the backup back. Writing now would overwrite the very file
-    // that restore is about to read — and that file is the only copy.
-    if (backupSuspended) {
-      return;
-    }
-    try {
-      const doc = await (await getEngine(context)).request('to_dict');
-      await vscode.workspace.fs.createDirectory(scriptDir);
-      await vscode.workspace.fs.writeFile(
-        sceneBackupFile!,
-        Buffer.from(JSON.stringify(doc, null, 2) + '\n', 'utf8'),
-      );
-      backupIsCurrent = true;
-      await rememberScene();
-    } catch (err) {
-      // A backup that cannot be written must not interrupt editing; the next
-      // mutation tries again, and the worst case is what we had before it.
-      // Said out loud all the same: a backup that never lands is invisible
-      // exactly until the moment it was needed.
-      engineOutput?.appendLine(
-        `[scene backup not written: ${err instanceof Error ? err.message : err}]`,
-      );
-    }
-  };
-
-  /**
-   * Save the scene. With a file already, that is all it does; without one —
-   * or for Save As — it asks where, and from then on the scene has a name.
-   */
-  const saveScene = async ({ prompt = false } = {}): Promise<boolean> => {
-    let target = prompt ? undefined : sceneFile;
-    if (!target) {
-      const folder = sceneFile
-        ? vscode.Uri.joinPath(sceneFile, '..')
-        : vscode.workspace.workspaceFolders?.[0]?.uri;
-      target = await vscode.window.showSaveDialog({
-        // The scene is the document; the script is an export of it, and lives
-        // on its own command so that choosing where to save cannot silently
-        // choose a lossy format (a script carries no slider bounds and no
-        // hidden flags — see "Export as Python Script").
-        filters: { 'Magpylib scene': ['magpy.json'] },
-        defaultUri: folder && vscode.Uri.joinPath(folder, `scene${SCENE_EXTENSION}`),
-        saveLabel: 'Save Scene',
+      addScene(doc);
+      try {
+        // Opened now, so the tab's first draw finds its scene there.
+        await openSession(await getRawEngine(context), doc);
+      } catch {
+        // No engine: starting one has said why, and the scene opens with it.
+      }
+      return doc;
+    },
+    async resolveCustomEditor(doc, panel) {
+      adoptScenePanel(context, doc, panel);
+    },
+    async saveCustomDocument(doc) {
+      const revision = doc.revision;
+      await writeScene(doc, doc.uri);
+      saved(doc, revision);
+    },
+    async saveCustomDocumentAs(doc, destination) {
+      // Written with its mesh paths already meaning the new folder, and put
+      // back if the write fails: a save that did not happen leaves the scene
+      // as it was.
+      const scene = engineFor(context, doc);
+      const folder = path.dirname(destination.fsPath);
+      const moving = doc.baseDir !== folder;
+      if (moving) {
+        await scene.request('set_base_dir', { path: folder, rebase: true });
+      }
+      try {
+        await writeScene(doc, destination);
+      } catch (err) {
+        if (moving) {
+          await scene.request('set_base_dir', { path: doc.baseDir ?? null, rebase: true });
+        }
+        throw err;
+      }
+      doc.handedOver = true;
+      const key = destination.toString();
+      handovers.set(key, {
+        doc,
+        // Saved under a name the studio does not open, nothing adopts it.
+        timer: setTimeout(() => {
+          handovers.delete(key);
+          doc.handedOver = false;
+          if (!openScenes().includes(doc)) {
+            closeSession(doc);
+          }
+        }, 10_000),
       });
-      if (!target) {
-        return false;
+    },
+    async revertCustomDocument(doc) {
+      const scene = JSON.parse(
+        Buffer.from(await vscode.workspace.fs.readFile(doc.uri)).toString('utf8'),
+      );
+      // One step to undo: what the tab had is one undo away.
+      const result = await engineFor(context, doc).request<{ ok: boolean; error?: string }>(
+        'replace_scene',
+        { scene, base_dir: doc.baseDir ?? null },
+      );
+      if (!result.ok) {
+        throw new Error(result.error);
       }
-    }
-    // Before the bytes, not after: a scene saved into a new directory has to
-    // be written with its mesh paths already meaning that directory, or the
-    // file on disk names parts relative to where the scene used to live.
-    const cameFrom = sceneFile;
-    const movedTo = path.dirname(target.fsPath);
-    const movingHouse = sceneFile
-      ? path.dirname(sceneFile.fsPath) !== movedTo
-      : movedTo !== vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (movingHouse) {
-      await setSceneFile(target, sceneDirty, { rebase: true });
-    }
-    try {
-      const doc = await (await getEngine(context)).request('to_dict');
-      await vscode.workspace.fs.writeFile(
-        target,
-        Buffer.from(JSON.stringify(doc, null, 2) + '\n', 'utf8'),
-      );
-    } catch (err) {
-      // Put the paths back. A save that did not happen must leave the scene
-      // as it was, and the rebase above already rewrote every relative mesh
-      // path to mean a directory this scene is now not in.
-      if (movingHouse) {
-        await setSceneFile(cameFrom, sceneDirty, { rebase: true });
+      doc.problem = undefined;
+      doc.lastDocument = scene;
+      doc.dirty = false;
+      dropRecovery(doc);
+      for (const panel of doc.panels) {
+        void panel.webview.postMessage({ type: 'refresh' });
       }
-      vscode.window.showErrorMessage(
-        `Magpylib Studio: could not save — ${err instanceof Error ? err.message : err}`,
-      );
-      return false;
-    }
-    await setSceneFile(target);
-    vscode.window.setStatusBarMessage(`Magpylib Studio: saved ${basename(target)}`, 2000);
-    return true;
+      if (doc === frontScene()) {
+        followNewScene();
+        showSceneFile();
+        refreshSurfaces();
+      }
+    },
+    async backupCustomDocument(doc, { destination }) {
+      await writeScene(doc, destination);
+      return {
+        id: destination.toString(),
+        delete: () => {
+          void vscode.workspace.fs.delete(destination).then(undefined, () => {});
+        },
+      };
+    },
   };
 
-  /**
-   * Open a scene file into the engine.
-   *
-   * The bytes are read here rather than handed to the engine as a path, so
-   * this works wherever VS Code can reach — a remote workspace, a virtual
-   * filesystem — instead of only where the Python process can open() it.
-   */
-  const openSceneFile = async (
-    uri: vscode.Uri,
-    { reveal = true, baseDir }: { reveal?: boolean; baseDir?: string } = {},
-  ): Promise<boolean> => {
-    let scene: unknown;
-    try {
-      scene = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8'));
-    } catch (err) {
-      vscode.window.showErrorMessage(
-        `Magpylib Studio: could not read ${basename(uri)} — ` +
-          `${err instanceof Error ? err.message : err}`,
-      );
-      return false;
-    }
-    // base_dir with the scene rather than after it: a mesh source is resolved
-    // while the document is being built, so a relative path has to be
-    // answerable before load_scene returns, not once the file is set.
-    //
-    // `baseDir` overrides where that is, for the one case where the file
-    // being read is not where the scene lives: the crash backup, which sits
-    // in extension storage while its relative mesh paths mean the folder the
-    // scene was last saved in. Without it the meshes resolve against the
-    // storage directory, are lost to `broken`, and stay drawn that way —
-    // correcting the base afterwards rebuilds the scene but nothing had told
-    // the views to look again.
-    const loaded = await mutateFromTree(
-      'load_scene',
-      { scene, base_dir: baseDir ?? path.dirname(uri.fsPath) },
-      { checkVariables: false },
-    );
-    if (!loaded) {
-      return false; // the engine said why (wrong format, or a newer version)
-    }
-    followNewScene();
-    await setSceneFile(uri);
-    if (reveal) {
-      // Opening a scene *you asked to open* should show it. Reopening one at
-      // startup should not: a window that puts a plot tab in front of you
-      // before you have done anything has taken a decision that was yours.
-      openStudioPanel(context);
-    }
-    return true;
-  };
-
-  /**
-   * Stop before something that would throw away unsaved work.
-   *
-   * Programmatic callers (tests, a URI handler) pass `discardChanges` to say
-   * they have already decided; leaving it out is what a person clicking a
-   * menu means, and they get asked.
-   */
-  const confirmDiscard = async (what: string, options?: Discard): Promise<boolean> => {
-    if (!sceneDirty || options?.discardChanges) {
-      return true;
-    }
-    const name = sceneFile ? basename(sceneFile) : 'this scene';
-    const answer = await vscode.window.showWarningMessage(
-      `${name} has unsaved changes.`,
-      { modal: true, detail: `They will be lost by ${what}.` },
-      'Save',
-      "Don't Save",
-    );
-    if (answer === 'Save') {
-      return saveScene();
-    }
-    return answer === "Don't Save";
-  };
-
+  /** The Undo view, which names the scene its history is of. */
+  const historyView = vscode.window.createTreeView('magpylib-studio.historyView', {
+    treeDataProvider: history,
+  });
   sceneTreeView = vscode.window.createTreeView('magpylib-studio.sceneView', {
     treeDataProvider: tree,
+    showCollapseAll: true,
     dragAndDropController: tree,
   });
   showSceneFile();
@@ -3666,10 +3924,45 @@ export function activate(context: vscode.ExtensionContext): void {
     // A reload brings the tabs back, and without these VS Code has no way to
     // put anything in them: the scene and the script tab both come back, and
     // the 3D view coming back empty is the odd one out.
+    // A scene is a tab of its own now: the one 3D panel an older version left
+    // open is closed, and its scene opened as a tab (upgradeRememberedScene).
     vscode.window.registerWebviewPanelSerializer(STUDIO_PANEL, {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel) {
-        adoptStudioPanel(context, panel);
+        panel.dispose();
       },
+    }),
+    vscode.window.registerCustomEditorProvider(SCENE_VIEW_TYPE, sceneEditor, {
+      // Only here does a custom editor take it (plans/several-scenes.md §8).
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: false,
+    }),
+    // A scene opened or closed, or a tab moved: the tree's scene rows, and
+    // whether there is any scene to close.
+    onDidChangeScenes(() => {
+      tree.refresh();
+      showScenesOpen();
+    }),
+    vscode.window.tabGroups.onDidChangeTabs(() => {
+      tree.refresh();
+      showScenesOpen();
+    }),
+    // Every view of one scene shows the scene in front.
+    onDidChangeFront((doc) => {
+      // Brought in front by a running command itself -- a scene it opened, a
+      // row it read -- that scene is the command's from here.
+      const box = commandScene.getStore();
+      if (box && doc) {
+        box.scene = doc;
+      }
+      // The views below the tree show the scene in front, and say which.
+      variablesTree?.describe(doc?.name);
+      inspector?.describe(doc?.name);
+      historyView.description = doc?.name;
+      selectedObjectId = doc?.selected;
+      inspector?.select(selectedObjectId);
+      showSceneFile();
+      followNewScene();
+      refreshSurfaces();
     }),
     vscode.window.registerWebviewPanelSerializer(FIELD_PANEL, {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel) {
@@ -3698,9 +3991,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // reason (it keeps the whole webview running), and neither sidebar view
     // needs it — both rebuild from the engine the moment they report ready.
     vscode.window.registerWebviewViewProvider(InspectorViewProvider.viewId, inspector),
-    vscode.window.registerTreeDataProvider('magpylib-studio.historyView', history),
+    historyView,
     vscode.window.registerWebviewViewProvider(VariablesViewProvider.viewId, variables),
-    vscode.commands.registerCommand('magpylib-studio.setUnits', async () => {
+    registerCommand('magpylib-studio.setUnits', async () => {
       // One button for both: what lengths are shown in, and what fields are.
       const { model_unit: length, field_unit: field } = await (
         await getEngine(context)
@@ -3726,7 +4019,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.commands.executeCommand(pick.command);
       }
     }),
-    vscode.commands.registerCommand('magpylib-studio.setFieldUnit', async () => {
+    registerCommand('magpylib-studio.setFieldUnit', async () => {
       // What a field is shown in; the document's numbers stay tesla.
       const { field_unit: current } = await (
         await getEngine(context)
@@ -3742,7 +4035,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await mutateFromTree('set_field_unit', { unit: pick.label });
       }
     }),
-    vscode.commands.registerCommand('magpylib-studio.setLengthUnit', async () => {
+    registerCommand('magpylib-studio.setLengthUnit', async () => {
       // What lengths are shown in, and what an export to a CAD or FEM tool
       // writes. The document's numbers stay metres either way.
       const { model_unit: current } = await (
@@ -3759,7 +4052,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await mutateFromTree('set_model_unit', { unit: pick.label });
       }
     }),
-    vscode.commands.registerCommand('magpylib-studio.addVariable', async () => {
+    registerCommand('magpylib-studio.addVariable', async () => {
       const {
         model_unit: lengthUnit,
         field_unit: fieldUnit,
@@ -3877,29 +4170,29 @@ export function activate(context: vscode.ExtensionContext): void {
         picked.unit ? { unit: picked.unit, symbol: picked.symbol } : undefined,
       );
     }),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.editVariable',
       async (variable: Variable) => editVariable(variable),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.renameVariable',
       async (variable: Variable) => renameVariable(variable),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.removeVariable',
       async (variable: Variable) => {
         await mutateFromTree('remove_variable', { name: variable.name });
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.setVariableBounds',
       async (variable: Variable) => editVariableProperties(variable),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.duplicateAround',
       async (obj: SceneObject) => patternObject(obj),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.selectOperation',
       (operation: SceneOperation) => {
         // selecting a step shows the object it acted on, so the 3D view and
@@ -3908,7 +4201,7 @@ export function activate(context: vscode.ExtensionContext): void {
         inspector?.showOperation(operation.id);
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.editOperation',
       async (operation: SceneOperation) => {
         // Same as selecting it, but says where the values are: a step's
@@ -3921,7 +4214,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.operationEarlier',
       async (operation: SceneOperation) =>
         applyLogEdit('move_event', {
@@ -3929,7 +4222,7 @@ export function activate(context: vscode.ExtensionContext): void {
           index: Math.max(0, operation.index - 1),
         }),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.operationLater',
       async (operation: SceneOperation) =>
         applyLogEdit('move_event', {
@@ -3937,12 +4230,12 @@ export function activate(context: vscode.ExtensionContext): void {
           index: operation.index + 1,
         }),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.removeOperation',
       async (operation: SceneOperation) =>
         applyLogEdit('remove_event', { event_id: operation.id }),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.rollbackTo',
       async (operation: SceneOperation) => {
         // "up to and including this step", which is what pointing at a step
@@ -3955,12 +4248,12 @@ export function activate(context: vscode.ExtensionContext): void {
         refreshSurfaces();
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.rollbackClear', async () => {
+    registerCommand('magpylib-studio.rollbackClear', async () => {
       await (await getEngine(context)).request('set_rollback', {});
       refreshSurfaces();
     }),
-    vscode.commands.registerCommand('magpylib-studio.sweep', async () => sweepVariable()),
-    vscode.commands.registerCommand(
+    registerCommand('magpylib-studio.sweep', async () => sweepVariable()),
+    registerCommand(
       'magpylib-studio.gotoHistory',
       async (entry: HistoryEntry) => {
         const result = (await (await getEngine(context)).request('goto_history', {
@@ -3973,7 +4266,7 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.workspace.registerTextDocumentContentProvider('magpylib-studio', sceneDocProvider),
-    vscode.commands.registerCommand('magpylib-studio.viewScript', async () => {
+    registerCommand('magpylib-studio.viewScript', async () => {
       // Reuse the group it is already in, the way the Studio and Field panels
       // reveal themselves. `Beside` is relative to whatever is focused, so
       // running this from the script's own column opens another one each time.
@@ -4022,65 +4315,82 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       await applyScriptFile(doc).catch(reportScriptTabError);
     }),
-    vscode.commands.registerCommand('magpylib-studio.saveScene', () => saveScene()),
-    vscode.commands.registerCommand('magpylib-studio.saveSceneAs', () =>
-      saveScene({ prompt: true }),
-    ),
-    vscode.commands.registerCommand('magpylib-studio.exportScript', () =>
+    // The scene in front, through VS Code's own Save and Save As: the side
+    // bar's buttons and keys act on it wherever the focus is.
+    registerCommand('magpylib-studio.saveScene', async () => {
+      const doc = actingScene();
+      return doc ? (await vscode.workspace.save(doc.uri)) !== undefined : false;
+    }),
+    registerCommand('magpylib-studio.saveSceneAs', async () => {
+      const doc = actingScene();
+      return doc ? (await vscode.workspace.saveAs(doc.uri)) !== undefined : false;
+    }),
+    registerCommand('magpylib-studio.exportScript', () =>
       exportScript('magpylib'),
     ),
-    vscode.commands.registerCommand('magpylib-studio.exportBuilderScript', () =>
+    registerCommand('magpylib-studio.exportBuilderScript', () =>
       exportScript('builder'),
     ),
-    vscode.commands.registerCommand('magpylib-studio.newScene', async (options?: Discard) => {
-      if (!(await confirmDiscard('starting a new scene', options))) {
+    // A new scene, an opened one: a tab each, the others left as they are.
+    // `options` is what a caller passed when a new scene replaced the open
+    // one; nothing is replaced now, so there is nothing to discard.
+    registerCommand('magpylib-studio.newScene', async (_options?: Discard) => {
+      await newSceneTab();
+    }),
+    /** Close every scene's tab and nothing else; VS Code asks once about the
+     *  unsaved ones. */
+    registerCommand('magpylib-studio.closeAllScenes', async () => {
+      const tabs = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter(
+          (tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === SCENE_VIEW_TYPE,
+        );
+      await vscode.window.tabGroups.close(tabs);
+    }),
+    /** Close the scene in front: its tab, which asks about unsaved changes. */
+    registerCommand('magpylib-studio.closeScene', async () => {
+      const doc = actingScene();
+      if (!doc) {
         return;
       }
-      if (await mutateFromTree('clear_scene', {})) {
-        followNewScene();
-        await setSceneFile(undefined);
-      }
+      const tabs = vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter(
+          (tab) =>
+            tab.input instanceof vscode.TabInputCustom &&
+            tab.input.uri.toString() === doc.uri.toString(),
+        );
+      await vscode.window.tabGroups.close(tabs);
     }),
-    /** Put the scene away: no file, nothing in it, and its views shut.
-     *
-     * The same clearing as New Scene, which is all the engine can offer --
-     * there is always a document, so an empty one is what "no scene" means.
-     * What closing adds is the views: leaving the 3D and field panels open
-     * on an empty scene is how a studio ends up showing nothing and looking
-     * broken rather than looking closed.
-     */
-    vscode.commands.registerCommand('magpylib-studio.closeScene', async (options?: Discard) => {
-      if (!(await confirmDiscard('closing the scene', options))) {
-        return;
-      }
-      if (await mutateFromTree('clear_scene', {})) {
-        followNewScene();
-        await setSceneFile(undefined);
-        currentPanel?.dispose();
-        fieldPanel?.dispose();
-      }
-    }),
-    vscode.commands.registerCommand('magpylib-studio.revertScene', async () => {
-      if (!sceneFile) {
+    registerCommand('magpylib-studio.revertScene', async () => {
+      const doc = actingScene();
+      if (!doc || doc.untitled) {
         return;
       }
       const answer = await vscode.window.showWarningMessage(
-        `Discard changes and reload ${basename(sceneFile)}?`,
-        { modal: true },
+        `Discard changes and reload ${doc.name}?`,
+        { modal: true, detail: 'The changes stay one undo away.' },
         'Revert',
       );
-      if (answer === 'Revert') {
-        await openSceneFile(sceneFile);
+      if (answer !== 'Revert') {
+        return;
       }
+      // VS Code's own Revert, on the scene's tab, so its dot clears with it.
+      const [panel] = doc.panels;
+      if (panel) {
+        panel.reveal(panel.viewColumn, false);
+      } else {
+        await vscode.commands.executeCommand('vscode.openWith', doc.uri, SCENE_VIEW_TYPE);
+      }
+      await vscode.commands.executeCommand('workbench.action.files.revert');
     }),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.loadScene',
-      async (uri?: vscode.Uri, options?: Discard) => {
-        if (!(await confirmDiscard('opening another scene', options))) {
-          return;
-        }
+      async (uri?: unknown, _options?: Discard) => {
+        // A button in the tree's title bar is handed the row that is
+        // selected, which is not a file to open: only a Uri is one.
         const target =
-          uri ??
+          (uri instanceof vscode.Uri ? uri : undefined) ??
           (
             await vscode.window.showOpenDialog({
               filters: { 'Magpylib scene': ['magpy.json', 'json'] },
@@ -4090,16 +4400,13 @@ export function activate(context: vscode.ExtensionContext): void {
             })
           )?.[0];
         if (target) {
-          await openSceneFile(target);
+          await openSceneTab(target);
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.importScript',
-      async (options?: Discard) => {
-        if (!(await confirmDiscard('importing a script', options))) {
-          return;
-        }
+      async (_options?: Discard) => {
         const picks = await vscode.window.showOpenDialog({
           filters: { 'Python script': ['py'] },
           canSelectMany: false,
@@ -4109,7 +4416,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.openScriptInStudio',
       async (uri?: vscode.Uri, scene?: number) => {
         const target = uri ?? vscode.window.activeTextEditor?.document.uri;
@@ -4118,11 +4425,11 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.switchScene', switchImportedScene),
+    registerCommand('magpylib-studio.switchScene', switchImportedScene),
     // The switch, reachable by search rather than only from a notice that is
     // shown once and then never again. Declining it has to be a door, not a
     // one-way valve.
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.toggleDrawScriptsHere',
       async () => {
         const on = !drawScriptsHere();
@@ -4136,28 +4443,28 @@ export function activate(context: vscode.ExtensionContext): void {
         );
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.openStudio', () =>
-      openStudioPanel(context),
+    registerCommand('magpylib-studio.openStudio', () =>
+      showFrontScene(),
     ),
-    vscode.commands.registerCommand('magpylib-studio.openFieldView', () =>
+    registerCommand('magpylib-studio.openFieldView', () =>
       openFieldPanel(context),
     ),
-    vscode.commands.registerCommand('magpylib-studio.undo', () => undoRedo('undo')),
-    vscode.commands.registerCommand('magpylib-studio.redo', () => undoRedo('redo')),
+    registerCommand('magpylib-studio.undo', () => undoRedo('undo')),
+    registerCommand('magpylib-studio.redo', () => undoRedo('redo')),
+    registerCommand('magpylib-studio.undoTyping', () => undoTyping('undo')),
+    registerCommand('magpylib-studio.redoTyping', () => undoTyping('redo')),
     // A redraw, not an edit: the scene is unchanged, so this must not mark it
     // as having unsaved changes.
-    vscode.commands.registerCommand('magpylib-studio.refreshScene', () =>
+    registerCommand('magpylib-studio.refreshScene', () =>
       refreshSurfaces(),
     ),
     // The name may be passed in — from a keybinding, a task, or a test —
     // in which case there is nothing to ask.
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.loadExample',
-      async (name?: string, options?: Discard) => {
-        if (!(await confirmDiscard('loading an example', options))) {
-          return;
-        }
-        let chosen = name;
+      async (name?: unknown, _options?: Discard) => {
+        // as for Open Scene: a row handed over by the title bar is no name
+        let chosen = typeof name === 'string' ? name : undefined;
         if (!chosen) {
           const { examples } = await (await getEngine(context)).request<{
             examples: { name: string; label: string; description: string }[];
@@ -4173,24 +4480,54 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           chosen = pick.e.name;
         }
-        if (await mutateFromTree('load_example', { name: chosen })) {
+        // In a tab of its own, and unsaved from the start: an untitled tab
+        // that is not marked is neither backed up nor asked about, and would
+        // come back from a reload empty (plans/several-scenes.md §4).
+        if ((await newSceneTab()) && (await mutateFromTree('load_example', { name: chosen }))) {
           followNewScene();
-          // An example is a starting point, not a document: it has no file of
-          // its own, and nothing in it is yours until you change something.
-          // Marked unsaved on arrival it asked to be saved on the way out of
-          // every example anyone looked at, which is a modal dialog in front
-          // of work nobody did. Save still asks where to put it — that comes
-          // from having no file, not from being dirty — and the first edit
-          // marks it like any other scene.
-          await setSceneFile(undefined);
         }
-        openStudioPanel(context); // loading a scene should show it
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.selectObject', (objectId: string) =>
-      selectObjectInStudio(context, objectId),
+    registerCommand('magpylib-studio.selectObject', (objectId: string, node?: SceneObject) => {
+      // a row of the tree passes itself after the id: its scene comes in front
+      const scene = sceneOfNode(node);
+      if (scene) {
+        actOn(scene);
+      }
+      selectObjectInStudio(context, objectId);
+    }),
+    /** A saved scene's file, from its row: VS Code's own commands, given
+     *  the file rather than the row. */
+    registerCommand('magpylib-studio.revealSceneInExplorer', (root?: SceneRoot) =>
+      root ? vscode.commands.executeCommand('revealInExplorer', root.uri) : undefined,
     ),
-    vscode.commands.registerCommand(
+    registerCommand('magpylib-studio.revealSceneInOS', (root?: SceneRoot) =>
+      root ? vscode.commands.executeCommand('revealFileInOS', root.uri) : undefined,
+    ),
+    registerCommand('magpylib-studio.revealSceneInFileManager', (root?: SceneRoot) =>
+      root ? vscode.commands.executeCommand('revealFileInOS', root.uri) : undefined,
+    ),
+    registerCommand('magpylib-studio.copyScenePath', async (root?: SceneRoot) => {
+      if (root) {
+        await vscode.env.clipboard.writeText(root.uri.fsPath);
+      }
+    }),
+    /** A scene's row: its tab shown, the focus left in the side bar. */
+    registerCommand('magpylib-studio.showScene', async (root?: SceneRoot) => {
+      if (!root) {
+        return;
+      }
+      if (root.doc) {
+        actOn(root.doc);
+        const [panel] = root.doc.panels;
+        if (panel) {
+          panel.reveal(panel.viewColumn, true);
+          return;
+        }
+      }
+      await loadSceneTab(root);
+    }),
+    registerCommand(
       'magpylib-studio.removeObject',
       (node?: SceneNode) => {
         // Also on a `created` row, where removing has two meanings and both
@@ -4199,16 +4536,20 @@ export function activate(context: vscode.ExtensionContext): void {
         // this deletes it as a step of its own — recorded, like every other
         // thing that happened to the scene, and undone by dropping that step.
         const target =
-          node && isOperation(node) ? node.target : (node ?? treeSelection())?.id;
+          node && isOperation(node)
+            ? node.target
+            : isObject(node)
+              ? node.id
+              : treeSelection()?.id;
         return target
           ? mutateFromTree('remove_object', { object_id: target })
           : undefined;
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.resetStyle', (obj: SceneObject) =>
+    registerCommand('magpylib-studio.resetStyle', (obj: SceneObject) =>
       mutateFromTree('reset_style', { object_id: obj.id }),
     ),
-    vscode.commands.registerCommand('magpylib-studio.moveTo', async (obj: SceneObject) => {
+    registerCommand('magpylib-studio.moveTo', async (obj: SceneObject) => {
       const objects = await (await getEngine(context)).request<SceneObject[]>('list_objects');
       const subtree = new Set([obj.id]); // no moving into itself/descendants
       for (let grew = true; grew; ) {
@@ -4243,7 +4584,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const parent = targets.find((t) => t.label === pick)?.parent ?? null;
       await mutateFromTree('move_object', { object_id: obj.id, parent });
     }),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.addObject',
       async (obj?: SceneObject) => {
         const pick = await vscode.window.showQuickPick(
@@ -4401,7 +4742,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.addMesh',
       async (obj?: SceneObject) => {
         // Which of the two ways to make a mesh, asked where the difference
@@ -4433,7 +4774,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await vscode.commands.executeCommand(source.command, obj);
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.importMesh',
       async (obj?: SceneObject) => {
         const picked = await vscode.window.showOpenDialog({
@@ -4446,8 +4787,8 @@ export function activate(context: vscode.ExtensionContext): void {
             Meshes: ['stl', 'obj', 'ply', 'vtk', 'vtp', 'vtu'],
             'All files': ['*'],
           },
-          defaultUri: sceneFile
-            ? vscode.Uri.joinPath(sceneFile, '..')
+          defaultUri: actingScene()?.baseDir
+            ? vscode.Uri.file(actingScene()!.baseDir!)
             : vscode.workspace.workspaceFolders?.[0]?.uri,
         });
         if (!picked?.length) {
@@ -4523,9 +4864,8 @@ export function activate(context: vscode.ExtensionContext): void {
         // was built from usually travel together, and an absolute path is
         // right on exactly one machine. `..` means the file is outside the
         // document's folder, where relative buys nothing and reads worse.
-        const base = sceneFile
-          ? path.dirname(sceneFile.fsPath)
-          : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const base =
+          actingScene()?.baseDir ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         const relative = base ? path.relative(base, file.fsPath) : '';
         const stored = relative && !relative.startsWith('..') ? relative : file.fsPath;
         const params: Record<string, unknown> = {
@@ -4551,7 +4891,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.meshFromPoints',
       async (obj?: SceneObject) => {
         const id = await vscode.window.showInputBox({
@@ -4622,7 +4962,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.meshFromFormula',
       async (obj?: SceneObject) => {
         // The presets are the documentation. Two exponents is not a thing
@@ -4704,7 +5044,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.setPosition',
       async (obj: SceneObject) => {
         const current = (await (await getEngine(context)).request('get_transform', {
@@ -4726,7 +5066,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.moveBy',
       async (obj: SceneObject) => {
         const kind = await askPathKind(`Move "${obj.label}"`);
@@ -4846,7 +5186,7 @@ export function activate(context: vscode.ExtensionContext): void {
         });
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.rotateBy',
       async (obj: SceneObject) => {
         const kind = await askPathKind(`Rotate "${obj.label}"`);
@@ -4953,10 +5293,10 @@ export function activate(context: vscode.ExtensionContext): void {
         });
       },
     ),
-    vscode.commands.registerCommand('magpylib-studio.clearPath', (obj: SceneObject) =>
+    registerCommand('magpylib-studio.clearPath', (obj: SceneObject) =>
       mutateFromTree('clear_path', { object_id: obj.id }),
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.pixelGrid',
       async (obj?: SceneObject) => {
         const target = obj ?? treeSelection();
@@ -5017,37 +5357,52 @@ export function activate(context: vscode.ExtensionContext): void {
         openFieldPanel(context); // the map is the point of making a grid
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.toggleVisibility',
       (obj: SceneObject) =>
         mutateFromTree('set_visible', { object_id: obj.id, visible: !obj.visible }),
     ),
-    vscode.commands.registerCommand('magpylib-studio.copyObject', (obj?: SceneObject) => {
+    registerCommand('magpylib-studio.copyObject', (obj?: SceneObject) => {
       const target = obj ?? treeSelection();
       if (target) {
-        clipboard = { id: target.id, cut: false };
+        clipboard = { id: target.id, cut: false, scene: actingScene() };
+        void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', true);
         vscode.window.setStatusBarMessage(
           `Magpylib Studio: copied "${target.label}"`,
           2000,
         );
       }
     }),
-    vscode.commands.registerCommand('magpylib-studio.cutObject', (obj?: SceneObject) => {
+    registerCommand('magpylib-studio.cutObject', (obj?: SceneObject) => {
       const target = obj ?? treeSelection();
       if (target) {
-        clipboard = { id: target.id, cut: true };
+        clipboard = { id: target.id, cut: true, scene: actingScene() };
+        void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', true);
         vscode.window.setStatusBarMessage(`Magpylib Studio: cut "${target.label}"`, 2000);
       }
     }),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.pasteObject',
-      async (obj?: SceneObject) => {
+      async (obj?: SceneNode) => {
         if (!clipboard) {
           vscode.window.setStatusBarMessage('Magpylib Studio: nothing to paste', 2000);
           return;
         }
+        // The row pasted onto, whose scene came in front with it. A scene's
+        // own row means its top level.
+        const target = isObject(obj) ? obj : obj ? undefined : treeSelection();
+        // An id names an object in its own scene only: pasted into another it
+        // would copy, or for a Cut move, whatever that scene has under the
+        // same id. Copying across scenes is its own step (plan §5.1).
+        if (clipboard.scene !== actingScene()) {
+          vscode.window.showInformationMessage(
+            `Magpylib Studio: "${clipboard.id}" was copied from ` +
+              `${clipboard.scene?.name ?? 'a scene now closed'}; pasting into ` +
+              'another scene is not possible yet. Paste it into its own scene.',
+          );
+          return;
+        }
         // Paste into a collection when one is targeted, else at the scene root.
-        const target = obj ?? treeSelection();
         const parent =
           target?.type === 'Collection' ? target.id : (target?.parent ?? null);
         if (clipboard.cut) {
@@ -5056,12 +5411,13 @@ export function activate(context: vscode.ExtensionContext): void {
             parent,
           });
           clipboard = undefined; // a cut object can only land once
+          void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', false);
         } else {
           await mutateFromTree('copy_object', { object_id: clipboard.id, parent });
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.renameObject',
       async (obj?: SceneObject) => {
         const target = obj ?? treeSelection();
@@ -5082,7 +5438,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
-    vscode.commands.registerCommand(
+    registerCommand(
       'magpylib-studio.newCollection',
       async (obj?: SceneObject) => {
         const id = await vscode.window.showInputBox({
@@ -5109,69 +5465,49 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   /**
-   * Come back to whatever this workspace was editing.
-   *
-   * The scene lives in a subprocess that dies with the window, so without
-   * this a reload silently starts from an empty scene — which is the one way
-   * the studio could lose work outright. Nothing remembered means nothing to
-   * do, so a workspace that has never opened a scene does not even start the
-   * engine.
+   * Before scenes were tabs, a workspace remembered its one scene, and kept a
+   * backup of its unsaved changes. Opened once as a tab -- marked unsaved,
+   * with those changes, when it had some -- then forgotten: from here on VS
+   * Code brings the tabs back.
    */
-  const restoreScene = async () => {
+  const upgradeRememberedScene = async () => {
     const remembered = context.workspaceState.get<{ file?: string; dirty?: boolean }>(
       SCENE_STATE_KEY,
     );
-    if (!remembered?.file && !remembered?.dirty) {
+    if (!remembered) {
       return;
     }
+    await context.workspaceState.update(SCENE_STATE_KEY, undefined);
+    const backup = vscode.Uri.joinPath(scriptDir, 'backup.magpy.json');
     const file = remembered.file ? vscode.Uri.parse(remembered.file) : undefined;
-    // Unsaved changes go through the backup, which is the only copy of them.
-    //
-    // Restored, not offered. Asking was worse in all three directions: the
-    // question interrupts every single window that had an unfinished scene in
-    // it — which during extension development is every F5 — and *dismissing*
-    // a notification is not an answer, so it came back next time and the time
-    // after. VS Code's own hot exit does not ask either; it brings unsaved
-    // editors back dirty and lets you decide once you can see them. The scene
-    // comes back the same way: marked unsaved, named in the view title, and
-    // one New Scene away from gone.
-    if (remembered.dirty && sceneBackupFile && (await exists(sceneBackupFile))) {
-      if (
-        await openSceneFile(sceneBackupFile, {
-          reveal: false,
-          // The backup is bytes in extension storage; the scene they describe
-          // lives where it was last saved, and its relative mesh paths mean
-          // that folder rather than this one.
-          baseDir: file
-            ? path.dirname(file.fsPath)
-            : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        })
-      ) {
-        // what is on disk is now what the engine holds, which is what makes
-        // it usable again if this engine dies too
-        backupIsCurrent = true;
-        // it is those changes the user is editing, not the backup file itself
-        await setSceneFile(file, true);
-        vscode.window.setStatusBarMessage(
-          `Magpylib Studio: restored unsaved changes${file ? ` to ${basename(file)}` : ''}`,
-          4000,
+    let doc = file ? sceneFor(file) : undefined;
+    if (!doc && file && (await exists(file))) {
+      doc = await openSceneTab(file);
+    }
+    if (remembered.dirty && (await exists(backup))) {
+      doc ??= await newSceneTab();
+      try {
+        const scene = JSON.parse(
+          Buffer.from(await vscode.workspace.fs.readFile(backup)).toString('utf8'),
         );
-        return;
+        if (doc) {
+          await mutateFromTree(
+            'replace_scene',
+            { scene, base_dir: doc.baseDir ?? null },
+            { checkVariables: false },
+          );
+        }
+      } catch (err) {
+        engineOutput?.appendLine(
+          `[the last unsaved changes could not be read: ${err instanceof Error ? err.message : err}]`,
+        );
       }
-      // the backup was unreadable; fall through to the saved file, if any
     }
-    if (file && (await exists(file))) {
-      await openSceneFile(file, { reveal: false });
-    } else if (file) {
-      await setSceneFile(undefined);
-      vscode.window.showWarningMessage(
-        `Magpylib Studio: ${basename(file)} is no longer there; starting empty.`,
-      );
-    }
+    void vscode.workspace.fs.delete(backup).then(undefined, () => {});
   };
 
   void adoptRestoredScriptTab();
-  void restoreScene();
+  void upgradeRememberedScene();
 
   // First activation on this machine, any workspace: open the walkthrough
   // once. Global rather than per-workspace state — a returning user opening
@@ -5187,14 +5523,12 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
-  // A backup is debounced by a second, so on a clean shutdown there is often
-  // one still pending — write it before the engine holding the scene goes.
-  // (A crash gets no such courtesy, which is what the debounce is short for.)
-  if (backupTimer) {
-    clearTimeout(backupTimer);
-    backupTimer = undefined;
-    await writeSceneBackup?.();
+  // VS Code backs up what is unsaved before it shuts the extension down; a
+  // recovery copy still pending is for a crash, which this is not.
+  for (const timer of settleTimers.values()) {
+    clearTimeout(timer);
   }
+  settleTimers.clear();
   engine?.dispose();
   engine = undefined;
 }
@@ -5225,10 +5559,11 @@ export function sceneFileState(): {
   dirty: boolean;
   backup: string | undefined;
 } {
+  const doc = frontScene();
   return {
-    file: sceneFile?.toString(),
-    dirty: sceneDirty,
-    backup: sceneBackupFile?.toString(),
+    file: doc && !doc.untitled ? doc.uri.toString() : undefined,
+    dirty: doc?.dirty ?? false,
+    backup: doc && recoveryFile(doc)?.toString(),
   };
 }
 
@@ -5396,4 +5731,9 @@ export function createFieldViewHtml(
   <script nonce="${nonce}" src="${fieldScriptUri}"></script>
 </body>
 </html>`;
+}
+
+/** The Scenes tree, for the integration tests to read its rows. */
+export function sceneTreeForTest(): SceneTreeProvider {
+  return sceneTree!;
 }

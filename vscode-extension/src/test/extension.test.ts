@@ -10,10 +10,42 @@ import {
   incrementRamp,
   meaning,
   sceneFileState,
+  sceneTreeForTest,
   splitTerms,
   stopEngineForTest,
 } from '../extension';
-import { SceneObject, SceneOperation, SceneTreeProvider } from '../sceneTree';
+import { bringToFront, frontScene, SceneDocument } from '../scenes';
+import {
+  SceneNode,
+  SceneObject,
+  SceneOperation,
+  SceneRoot,
+  SceneTreeProvider,
+} from '../sceneTree';
+
+/** A tree of one scene, read from `objects` and `operations`, and the rows
+ *  of that scene: what is under its row. */
+async function oneSceneTree(
+  objects: SceneObject[],
+  operations: SceneOperation[],
+): Promise<{ tree: SceneTreeProvider; roots: SceneNode[] }> {
+  const doc = new SceneDocument(vscode.Uri.file('/test.magpy.json'), () => {});
+  const root: SceneRoot = { kind: 'scene', uri: doc.uri, doc };
+  const tree = new SceneTreeProvider(
+    vscode.Uri.file('/'),
+    () => [root],
+    () => true,
+    async () => objects,
+    async () => {},
+    async () => operations,
+    () => {},
+  );
+  const [row] = await tree.getChildren();
+  return { tree, roots: await tree.getChildren(row) };
+}
+
+/** A row's id, for a row that has one. */
+const idOf = (node: SceneNode) => (node as SceneObject).id;
 
 /**
  * End-to-end through the real vscode API: activation, the engine subprocess,
@@ -886,11 +918,12 @@ suite('magpylib-studio', () => {
   test('the scene knows its file, and says so when it drifts from it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
-    // An example is a starting point, not a document: no file, and nothing
-    // unsaved until something is changed. Save still has somewhere to ask
-    // about, because there is no file — being dirty was never what did that.
+    // An example opens in an untitled tab of its own, unsaved from the start:
+    // an untitled tab that is not marked is neither backed up nor asked about
+    // on closing, and would come back from a reload empty. No file, so Save
+    // asks where.
     assert.strictEqual(sceneFileState().file, undefined);
-    assert.strictEqual(sceneFileState().dirty, false, 'an untouched example is not work');
+    assert.strictEqual(sceneFileState().dirty, true, 'an example in its tab is not marked');
 
     const file = tempScene('state.magpy.json');
     await writeJson(file, await scene());
@@ -962,21 +995,27 @@ suite('magpylib-studio', () => {
 
   test('an engine that dies comes back holding the same scene', async function () {
     this.timeout(60000);
-    // The subprocess owning the scene can go away without the window going
-    // with it, and the replacement starts empty. Nothing the user did caused
-    // that, so nothing they did should be lost by it.
+    // The subprocess owning every scene can go away without the window going
+    // with it, and the replacement starts empty. Each scene is given back the
+    // document it last settled on, a second after its last edit -- so an edit
+    // not yet saved survives it.
     const before = await loadExample('coil', 'coil');
     const file = tempScene('crash.magpy.json');
     await writeJson(file, before);
     await vscode.commands.executeCommand('magpylib-studio.loadScene', file, DISCARD);
-    await sceneWhere(holding('coil'), 'the file to open');
-
-    // The backup is what the restart reads, so it has to be there first —
-    // exactly as it would be in a session that had been running a while.
+    await sceneWhere(holding('turn'), 'the file to open');
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'turn',
+      type: 'current.Circle',
+      label: 'turn',
+      parent: 'coil',
+      visible: true,
+    });
+    const edited = await sceneWhere(without('turn'), 'the removal to land');
     await fileWhere(
       vscode.Uri.parse(sceneFileState().backup!),
-      (doc) => ids(doc.objects as { id: string }[]).has('coil'),
-      'the backup to be written',
+      (doc) => !ids(doc.objects as { id: string }[]).has('turn'),
+      'the edit to settle',
     );
 
     stopEngineForTest();
@@ -985,29 +1024,172 @@ suite('magpylib-studio', () => {
     // cache until something fires its change event, so reading it straight
     // after the crash would answer out of the cache and prove nothing. Save
     // goes to the engine for `to_dict`, which starts the replacement — and
-    // that is the call that has to see a restored scene rather than an empty
-    // one, since it is about to write the file.
+    // that is the call that has to see the scene given back rather than an
+    // empty one, since it is about to write the file.
     await vscode.commands.executeCommand('magpylib-studio.saveScene');
     assert.deepStrictEqual(
       await readJson(file),
-      before,
+      edited,
       'the scene did not survive the engine restarting',
     );
+  });
+
+  test('two scenes open side by side, each its own in the tree', async function () {
+    this.timeout(60000);
+    // Two tabs, two sessions: the tree lists both, each with its own rows,
+    // and an edit lands in the scene in front and nowhere else.
+    const halbach = tempScene('two-halbach.magpy.json');
+    await writeJson(halbach, await loadExample('halbach', 'halbach'));
+    const coil = tempScene('two-coil.magpy.json');
+    await writeJson(coil, await loadExample('coil', 'coil'));
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
+    await sceneWhere(holding('coil'), 'the coil in front');
+
+    const tree = sceneTreeForTest();
+    const rows = await tree.getChildren();
+    const named = (uri: vscode.Uri) =>
+      rows.find((row) => (row as SceneRoot).uri?.toString() === uri.toString()) as SceneRoot;
+    assert.ok(named(halbach) && named(coil), 'both scenes are listed');
+    const under = async (uri: vscode.Uri) => (await tree.getChildren(named(uri))).map(idOf);
+    assert.ok((await under(halbach)).includes('halbach'), 'the halbach row holds the halbach');
+    assert.ok((await under(coil)).includes('coil'), 'and the coil row the coil');
+
+    // an edit in the scene in front, the coil: the halbach keeps its own
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'turn',
+      type: 'current.Circle',
+      label: 'turn',
+      parent: 'coil',
+      visible: true,
+    });
+    await sceneWhere(without('turn'), 'the removal to land in the coil');
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    await sceneWhere(holding('halbach'), 'the halbach in front again');
+    const tab = (uri: vscode.Uri) =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find(
+          (t) => t.input instanceof vscode.TabInputCustom && t.input.uri.toString() === uri.toString(),
+        );
+    assert.strictEqual(tab(coil)?.isDirty, true, 'the coil carries its edit');
+    assert.strictEqual(tab(halbach)?.isDirty, false, 'the halbach was not touched');
+
+    // Undo is each scene's own: in the halbach it finds nothing of the
+    // coil's to take back, and in the coil it takes back the coil's edit.
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    await pause(300);
+    assert.ok(
+      ids((await scene()).objects).has('halbach'),
+      'an undo in the halbach changed the halbach',
+    );
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
+    await sceneWhere(holding('coil'), 'the coil in front again');
+    assert.ok(!ids((await scene()).objects).has('turn'), "the halbach's undo reached the coil");
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    await sceneWhere(holding('turn'), "the coil's undo to bring its turn back");
+
+    // A copy taken in one scene does not paste into another: its id means
+    // nothing there, or another object. (Copying across is a step of its own.)
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    await sceneWhere(holding('halbach'), 'the halbach in front to copy from');
+    await vscode.commands.executeCommand('magpylib-studio.copyObject', {
+      id: 'r2',
+      type: 'magnet.Cuboid',
+      label: 'Magnet 2',
+      parent: 'ring2',
+      visible: true,
+    });
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
+    const coilBefore = await sceneWhere(holding('coil'), 'the coil in front to paste into');
+    await vscode.commands.executeCommand('magpylib-studio.pasteObject');
+    await pause(300);
+    assert.deepStrictEqual(
+      (await scene()).events,
+      coilBefore.events,
+      "a copy from the halbach landed in the coil",
+    );
+
+    // Pasted onto its own scene's row, a copy lands at that scene's top level.
+    // A group, since a pattern's source needs one to stand in (plan §5.1).
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    const halbachBefore = await sceneWhere(holding('halbach'), 'the halbach in front again');
+    await vscode.commands.executeCommand('magpylib-studio.copyObject', {
+      id: 'ring2',
+      type: 'Collection',
+      label: 'Ring 2',
+      parent: 'halbach',
+      visible: true,
+    });
+    await vscode.commands.executeCommand('magpylib-studio.pasteObject', named(halbach));
+    await sceneWhere(
+      (doc) => doc.objects.length === halbachBefore.objects.length + 1,
+      'the copy to land at the top of the halbach',
+    );
+
+    // A command that asks first ends in the scene it began in, though another
+    // came in front while it asked.
+    const answers = answering({
+      pick: (items) => items.find((item) => item.label === 'Collection'),
+    });
+    const window = vscode.window as unknown as Record<string, unknown>;
+    window.showInputBox = async () => {
+      await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
+      await sceneWhere(holding('coil'), 'the coil to come in front mid-question');
+      return 'late';
+    };
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.addObject');
+    } finally {
+      answers.restore();
+    }
+    assert.ok(!ids((await scene()).objects).has('late'), 'it landed in the coil, in front');
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    await sceneWhere(holding('late'), 'the group to land in the halbach, where it began');
   });
 
   test('a scene from a newer version is refused, leaving the open one alone', async function () {
     this.timeout(60000);
     const intact = await loadExample('halbach', 'halbach');
+    const open = frontScene()!;
 
+    // It opens in a tab of its own, which says it could not be read and is
+    // never written over: the empty scene it shows must not go over a file
+    // a newer version wrote.
     const file = tempScene('from-the-future.magpy.json');
     await writeJson(file, { version: 99, events: [], objects: [] });
     await vscode.commands.executeCommand('magpylib-studio.loadScene', file, DISCARD);
-    await pause(500); // asserting that nothing happens; there is no event to await
-
+    await until(
+      () => errorsShown.some((m) => m.includes('could not open from-the-future')),
+      'the refusal to be said',
+    );
+    const unreadable = frontScene()!;
+    assert.notStrictEqual(unreadable, open, 'the file opened in a tab of its own');
+    assert.match(String(unreadable.problem), /newer magpylib-studio/);
+    // an edit, so that there is something to save
+    const answers = answering({
+      pick: (items) => items.find((item) => item.label === 'Collection'),
+      input: ['group'],
+    });
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.addObject');
+    } finally {
+      answers.restore();
+    }
+    await sceneWhere(holding('group'), 'the edit to land');
+    await vscode.workspace.save(unreadable.uri).then(undefined, () => undefined);
     assert.deepStrictEqual(
-      (await scene()).events,
+      await readJson(file),
+      { version: 99, events: [], objects: [] },
+      'a scene that could not be read was written over its file',
+    );
+
+    // and the scene that was open is as it was
+    bringToFront(open);
+    assert.deepStrictEqual(
+      (await sceneWhere(holding('halbach'), 'the halbach in front again')).events,
       intact.events,
-      'a document we cannot read replaced the one we could',
+      'a document we cannot read changed the one we could',
     );
   });
 
@@ -1094,23 +1276,16 @@ suite('magpylib-studio', () => {
       step('e7', 'stranded', 'rotate_from_angax', { error: 'targets unknown object' }),
       step('e8', 'later', 'create', { pending: true }),
     ];
-    const tree = new SceneTreeProvider(
-      vscode.Uri.file('/'),
-      async () => objects,
-      async () => {},
-      async () => operations,
-    );
-
-    const roots = await tree.getChildren();
+    const { tree, roots } = await oneSceneTree(objects, operations);
     assert.deepStrictEqual(
-      roots.map((n) => n.id),
+      roots.map(idOf),
       ['ring', 'gone', 'stranded', 'later'],
       'the scene, then what it no longer has, in log order',
     );
 
     // the bug this all started from: a leaf with a history and no chevron
     const inRing = await tree.getChildren(roots[0]);
-    assert.deepStrictEqual(inRing.map((n) => n.id), [
+    assert.deepStrictEqual(inRing.map(idOf), [
       'e1',
       'm',
     ]);
@@ -1121,7 +1296,7 @@ suite('magpylib-studio', () => {
       'a magnet with steps has to be openable',
     );
     assert.deepStrictEqual(
-      (await tree.getChildren(magnet)).map((n) => n.id),
+      (await tree.getChildren(magnet)).map(idOf),
       ['e2', 'e3'],
     );
     assert.strictEqual(
@@ -1138,7 +1313,7 @@ suite('magpylib-studio', () => {
       ['removed', 'not built', 'not applied'],
     );
     assert.deepStrictEqual(
-      (await tree.getChildren(gone)).map((n) => n.id),
+      (await tree.getChildren(gone)).map(idOf),
       ['e4', 'e5', 'e6'],
     );
     const item = tree.getTreeItem(gone);
@@ -1173,13 +1348,7 @@ suite('magpylib-studio', () => {
         mesh: { open: true, open_edges: 12, faces: 10, source: 'rotor.stl · 10 faces' },
       },
     ];
-    const tree = new SceneTreeProvider(
-      vscode.Uri.file('/'),
-      async () => objects,
-      async () => {},
-      async () => [],
-    );
-    const roots = await tree.getChildren();
+    const { tree, roots } = await oneSceneTree(objects, []);
 
     const good = tree.getTreeItem(roots[0] as SceneObject);
     assert.strictEqual(good.description, 'cube.stl · 12 faces', 'where it came from');
@@ -1247,18 +1416,10 @@ suite('magpylib-studio', () => {
       'a generated mesh is its formula, not the points it came out as',
     );
 
-    // `saveSceneAs` takes no target: it always asks, so a test has to answer.
-    // Handing it a Uri instead is what left this sitting on a save dialog in a
-    // window nobody was watching — the failure the comment on the save test
-    // above predicts, arriving as a hang rather than a red line.
+    // Written as Save writes it and opened through the real command. Save As
+    // is VS Code's own now, whose dialog a test cannot answer.
     const file = tempScene('formula.magpy.json');
-    const answers = answering({ save: file });
-    try {
-      await vscode.commands.executeCommand('magpylib-studio.saveSceneAs');
-      await fileWhere(file, (d) => Array.isArray(d.events), 'the scene to be written');
-    } finally {
-      answers.restore();
-    }
+    await writeJson(file, doc);
 
     await vscode.commands.executeCommand('magpylib-studio.newScene', DISCARD);
     await sceneWhere(nothing, 'the scene to clear');

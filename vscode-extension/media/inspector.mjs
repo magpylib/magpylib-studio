@@ -46,6 +46,8 @@ window.addEventListener("message", (event) => {
     panel.showStep(message.eventId);
   } else if (message.type === "refresh") {
     panel.refresh();
+  } else if (message.type === "typing") {
+    // the box's own undo: textFocus.mjs runs it
   } else {
     // Nothing else posts into this webview, so an unknown type means the
     // two ends disagree — visible beats silent.
