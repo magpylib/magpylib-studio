@@ -188,6 +188,12 @@ All notable changes to the Magpylib Studio extension.
   turns the whole collection as one edit to it, rather than one to each object
   in it.
 
+- **One engine, several scenes.** The engine serves a session per scene, each
+  under a name the host gives it (`open_session`, `close_session`), and says
+  what it speaks (`version`, protocol 2). A request that names no session still
+  goes to the one scene a host drives, as before. The extension does not use
+  names yet.
+
 ### Changed
 
 - **Opening a scene starts the undo history.** A file, a script or an example

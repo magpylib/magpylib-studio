@@ -356,11 +356,11 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    an outside write, Source Control diffs and merges, a split, twenty WebGL
    tabs. By hand: keys in the view and in a text box, and an extension-host
    restart with an unsaved scene.
-1. **The engine's sessions** (about ½ day): `serve`'s table, `open_session` that
-   loads, `close_session`, `version`, random names, refusal without a session
-   after an open, one mesh cache per process. Three engine fixes it rests on are
-   made already, with this plan's revision: a copy's pose, an id reused after a
-   removal, Save As then undo breaking mesh paths.
+1. **The engine's sessions** -- done 2026-10-11 (about ½ day): `serve`'s table,
+   `open_session` that loads, `close_session`, `version`, random names, refusal
+   without a session after an open, one mesh cache per process. Three engine
+   fixes it rests on are made already, with this plan's revision: a copy's pose,
+   an id reused after a removal, Save As then undo breaking mesh paths.
 2. **Every view and request carries its scene** (1–2 days): a handle
    `{engine, session}` through the extension's forty-odd call sites and the side
    bar's views, each drawn for one session. Still one scene, the suite green,

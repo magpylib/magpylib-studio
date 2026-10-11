@@ -377,8 +377,28 @@ line — no ports, no framework.
 <- {"id": 2, "error": {"type": "KeyError", "message": "..."}}
 ```
 
+**One engine, a session per scene.** `open_session(session, scene?, path?)`
+opens a session under a name the host chooses and loads it in the same call;
+from then on a request names its session beside the method, and the answer names
+it back. `close_session` drops one. A name is used once, closed ones included,
+so a stale one can only miss. A request that names no session goes to a session
+of its own only on a connection that has never opened one by name -- the
+one-scene host, the "Try it" below; after an `open_session` it is refused
+(`SessionError`), so a call that forgot its scene fails rather than reading an
+empty one. `version` says the package's version, the protocol number
+(`rpc.PROTOCOL`, 2 since sessions) and the newest document version read. Every
+session resolves meshes through one cache per process, keyed by what the source
+read, so a part in two scenes is reoriented once.
+
+```
+-> {"id": 3, "method": "open_session", "params": {"session": "4f2a9c", "path": "ring.magpy.json"}}
+-> {"id": 4, "session": "4f2a9c", "method": "undo"}
+<- {"id": 4, "session": "4f2a9c", "result": {...}}
+```
+
 | group     | methods                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| engine    | `open_session` · `close_session` · `version`                                                                                                                                                                                                                                                                                                                                                   |
 | inspect   | `list_objects` · `object_tree` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                                                                                                                                                                                                               |
 | structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                                                                                                                                                                                                                      |
 | edit      | `apply_edit` (style) · `set_param` · `reset_style` · `apply_edits` / `apply_calls` (what a view's drag sends) · `begin_interaction` · `end_interaction`                                                                                                                                                                                                                                        |

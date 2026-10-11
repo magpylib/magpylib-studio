@@ -2377,7 +2377,7 @@ def _drop_from_variants(doc, name):
 class MagpylibStudioSession:
     """A live magpylib scene plus the document it was built from."""
 
-    def __init__(self, scene: dict | None = None):
+    def __init__(self, scene: dict | None = None, mesh_cache: dict | None = None):
         # start empty; older documents carry their ops per object, not as a log
         self.doc = _canonical(
             _migrate_events(scene if scene is not None else {"objects": []})
@@ -2423,8 +2423,9 @@ class MagpylibStudioSession:
         #: what it read (see meshes._cache_key). This is not an optimisation
         #: to be dropped when it gets awkward: reorienting a 20k-face mesh
         #: takes 16 s and a rebuild happens on every slider drag, so without
-        #: it a scene with one CAD part in it cannot be edited at all.
-        self._mesh_cache: dict = {}
+        #: it a scene with one CAD part in it cannot be edited at all. An
+        #: engine serving several scenes hands each the same one.
+        self._mesh_cache: dict = {} if mesh_cache is None else mesh_cache
         #: object id -> what the checks found, filled while building. Kept
         #: beside the objects rather than on them because the built object
         #: has its checks skipped: it is the cache that knows.
