@@ -1,7 +1,7 @@
 // The Variables view: the package's own panel -- `magpylib_studio/static/
 // variables.mjs`, copied to widget/ by `harness/copy-widget.js` beside the
 // notebook widget's bundle -- mounted in a sidebar webview. The same rows the
-// widget floats over its view (docs/plans/variables-in-widget.md); what
+// widget docks beside its view (docs/decisions.md#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them); what
 // differs is where the calls go. Here they go through the extension host, as
 // every panel's do, so that an edit refreshes the 3D view, the Inspector, the
 // field view, the history and the script tab, and marks the scene unsaved.

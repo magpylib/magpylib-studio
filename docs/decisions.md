@@ -7,25 +7,34 @@ status line, nothing else. Each record says what was decided, what was rejected
 and why, so the question is not re-litigated later. Code cites a record by its
 anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 
-| #                                                                 | Decision                                            | Status                                                               |
-| ----------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
-| [0001](#0001-the-document-is-the-log)                             | The document is the log                             | accepted, July 2026, as built                                        |
-| [0002](#0002-record-the-call-not-the-result)                      | Record the call, not the result                     | accepted, July–August 2026, as built                                 |
-| [0003](#0003-expressions-are-hermetic)                            | Expressions are hermetic                            | accepted, July 2026, as built                                        |
-| [0004](#0004-script-generation-is-one-way)                        | Script generation is one-way                        | accepted 2026-08-24 (`9932f4f`), argued in                           |
-| [0005](#0005-undo-is-snapshots)                                   | Undo is snapshots                                   | accepted, August 2026                                                |
-| [0006](#0006-a-scene-written-in-code-records-through-the-session) | A scene written in code records through the session | accepted 2026-10-01 (B1, `bec78f6`), 2026-10-05 (B2), with step      |
-| [0007](#0007-the-script-tab-is-builder-code)                      | The script tab is builder code                      | accepted 2026-10-06 (roadmap R1, `2c90793`)                          |
-| [0008](#0008-units-are-metadata)                                  | Units are metadata                                  | accepted 2026-10-06, extended 2026-10-07 (roadmap R2, #28)           |
-| [0009](#0009-agents-write-builder-code-through-a-skill)           | Agents write builder code through a skill           | accepted 2026-10-06 and 2026-10-07 (roadmap R3 and its four          |
-| [0010](#0010-the-notebook-widget-edits-with-the-package-alone)    | The notebook widget edits with the package alone    | accepted 2026-09-29 (#18 and `094150d`; TASKS W1)                    |
-| [0011](#0011-one-view)                                            | One view                                            | accepted 2026-09-30 (`f5cb85d`; TASKS W2)                            |
-| [0012](#0012-validation-is-shared-and-reported)                   | Validation is shared and reported                   | accepted, July 2026, as built; restated for agents in `plans/fem.md` |
-| [0013](#0013-the-saved-file-is-the-document)                      | The saved file is the document                      | accepted, August 2026, as built                                      |
-| [0014](#0014-the-window-stamp-says-where-never-whether)           | The window stamp says where, never whether          | accepted, August 2026 (v0.4.0)                                       |
-| [0015](#0015-the-name-stays-magpylib-studio)                      | The name stays magpylib-studio                      | accepted 2026-10-06                                                  |
-| [0016](#0016-released-magpylib-through-a-shim-until-the-release)  | Released magpylib through a shim until the release  | accepted, August 2026 (`style_compat.py`); the same pattern is       |
-| [0017](#0017-the-scene-is-a-function-in-plain-magpylib-recorded)  | The scene is a function in plain magpylib, recorded | accepted 2026-10-09, as built                                        |
+| #                                                                                              | Decision                                                     | Status                                                               |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| [0001](#0001-the-document-is-the-log)                                                          | The document is the log                                      | accepted, July 2026, as built                                        |
+| [0002](#0002-record-the-call-not-the-result)                                                   | Record the call, not the result                              | accepted, July–August 2026, as built                                 |
+| [0003](#0003-expressions-are-hermetic)                                                         | Expressions are hermetic                                     | accepted, July 2026, as built                                        |
+| [0004](#0004-script-generation-is-one-way)                                                     | Script generation is one-way                                 | accepted 2026-08-24 (`9932f4f`), argued in                           |
+| [0005](#0005-undo-is-snapshots)                                                                | Undo is snapshots                                            | accepted, August 2026                                                |
+| [0006](#0006-a-scene-written-in-code-records-through-the-session)                              | A scene written in code records through the session          | accepted 2026-10-01 (B1, `bec78f6`), 2026-10-05 (B2), with step      |
+| [0007](#0007-the-script-tab-is-builder-code)                                                   | The script tab is builder code                               | accepted 2026-10-06 (roadmap R1, `2c90793`)                          |
+| [0008](#0008-units-are-metadata)                                                               | Units are metadata                                           | accepted 2026-10-06, extended 2026-10-07 (roadmap R2, #28)           |
+| [0009](#0009-agents-write-builder-code-through-a-skill)                                        | Agents write builder code through a skill                    | accepted 2026-10-06 and 2026-10-07 (roadmap R3 and its four          |
+| [0010](#0010-the-notebook-widget-edits-with-the-package-alone)                                 | The notebook widget edits with the package alone             | accepted 2026-09-29 (#18 and `094150d`; TASKS W1)                    |
+| [0011](#0011-one-view)                                                                         | One view                                                     | accepted 2026-09-30 (`f5cb85d`; TASKS W2)                            |
+| [0012](#0012-validation-is-shared-and-reported)                                                | Validation is shared and reported                            | accepted, July 2026, as built; restated for agents in `plans/fem.md` |
+| [0013](#0013-the-saved-file-is-the-document)                                                   | The saved file is the document                               | accepted, August 2026, as built                                      |
+| [0014](#0014-the-window-stamp-says-where-never-whether)                                        | The window stamp says where, never whether                   | accepted, August 2026 (v0.4.0)                                       |
+| [0015](#0015-the-name-stays-magpylib-studio)                                                   | The name stays magpylib-studio                               | accepted 2026-10-06                                                  |
+| [0016](#0016-released-magpylib-through-a-shim-until-the-release)                               | Released magpylib through a shim until the release           | accepted, August 2026 (`style_compat.py`); the same pattern is       |
+| [0017](#0017-the-scene-is-a-function-in-plain-magpylib-recorded)                               | The scene is a function in plain magpylib, recorded          | accepted 2026-10-09, as built                                        |
+| [0018](#0018-a-view-is-read-only-until-its-pencil-is-pressed)                                  | A view is read only until its pencil is pressed              | accepted 2026-10-09, as built; amended 2026-10-10                    |
+| [0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)                        | The editor's panels are the widget's, and a host mounts them | accepted 2026-10-09, as built                                        |
+| [0020](#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone) | A bare sensor is drawn at the studio's size                  | accepted 2026-10-09, as built                                        |
+| [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built                                        |
+| [0022](#0022-what-the-widget-is-and-is-not)                                                    | What the widget is, and is not                               | accepted 2026-10-10                                                  |
+| [0023](#0023-the-inspector-is-the-widgets-object-panel-compact)                                | The Inspector is the widget's object panel, compact          | accepted 2026-10-10, as built                                        |
+| [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
+| [0025](#0025-a-panel-is-a-widget-of-its-own-where-a-host-places-it)                            | A panel is a widget of its own where a host places it        | accepted 2026-10-10, as built                                        |
+| [0026](#0026-variants-are-named-value-sets-inside-a-scene)                                     | Variants are named value sets inside a scene                 | accepted 2026-10-11, as built (#32)                                  |
 
 ---
 
@@ -1340,3 +1349,61 @@ asks".
   model per widget, and a panel the host can place is a widget.
 - The panel talking to the kernel on its own: two editors of one session, each
   drawing and telling the notebook, where the view already does both.
+
+## 0026. Variants are named value sets inside a scene
+
+**Status:** accepted 2026-10-11, as built (#32). **Record of:**
+`plans/several-scenes.md` and the review of #32.
+
+### Context
+
+A second setting of the same design -- a compact ring and a wide one, a nominal
+and a worst case -- was a second file: a copy of the whole scene, drifting from
+the first with its first edit. Roadmap R9 named variants as not separate scenes:
+"a named value set inside the scene, as OpenSCAD's Customizer keeps presets".
+
+### Decision
+
+- **A variant is a named set of values for the variables that hold one**: a
+  finite number, or a choice's name; never a formula, which is what a variable
+  is rather than a value it was left at. The document keeps them as
+  `variants: {name: {variable: value}}`, in the variables' order. An older
+  studio carries the key untouched
+  ([0013](#0013-the-saved-file-is-the-document)), so the version stays 3.
+- **Not a mode.** Using one sets the variables it names, as one step to undo.
+  Which one the scene is in is read off the variables, never stored: of those
+  whose values hold, the one naming the most. A variant may leave variables out,
+  and those keep their values.
+- **Checked as the combination it makes.** Values the limits refuse, its own or
+  a formula's following them, are refused when it is saved; a change of limits
+  that would strand one is refused, naming it; one a later formula strands is
+  listed as unusable, shown and not offered.
+- **In code, the mark holds them**: `@scene(variants={...})`, each value checked
+  against its parameter's annotation where it is written. `ring.variants[name]`
+  is a plain mapping, so `ring(**ring.variants["wide"])` is plain magpylib at
+  those values. The script tab writes them back in the signature's order, and
+  names at its top what the mark cannot hold. A saved scene's variants are laid
+  over the mark's by name when the document is first read; one the scene can no
+  longer take whole is left out with a warning, and the mark's of that name
+  stays.
+- **In the panel, a toggle each**, the one in force pressed, one press one step;
+  a dropdown past four. In a notebook, `view.save_variant(name)` keeps the
+  values from a cell and hands back the scene function's parameters, for the
+  mark; making, renaming and removing variants there is code's
+  ([0022](#0022-what-the-widget-is-and-is-not)).
+- Saving, renaming and removing a variant rebuild nothing: no object follows a
+  variant until it is used.
+
+### Rejected
+
+- **Variants as files**, a copy of the scene per setting: the copies drift apart
+  with the first edit.
+- **A sidecar file of values**, as OpenSCAD keeps its presets beside the
+  `.scad`: a second file to move, rename and version with each scene, for what
+  is part of what the scene says.
+- **An active variant that slider edits are written into**, as CAD
+  configurations have it: sliders with a mode, and where an edit lands a matter
+  of state.
+- **Formulas in a variant**: one that put a number in a formula's place would
+  undo a definition each time it was used.
+- **The dropdown alone**: two clicks, and plain, where a few toggles take one.

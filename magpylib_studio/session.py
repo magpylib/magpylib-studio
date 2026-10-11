@@ -5436,8 +5436,8 @@ class MagpylibStudioSession:
 
         A scene with variants lists them too, `variants`, each a variable's
         value by its name, and says which one the variables are in now,
-        `variant`: the first whose values all hold, or None once a slider
-        has moved off them -- and `unusable`, each variant that cannot be
+        `variant`: of those whose values all hold, the one naming the most,
+        or None once a slider has moved off them -- and `unusable`, each variant that cannot be
         used as the scene stands, with why. See `use_variant`.
         """
         variables = self.doc.get("variables") or {}
