@@ -35,6 +35,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
 | [0025](#0025-a-panel-is-a-widget-of-its-own-where-a-host-places-it)                            | A panel is a widget of its own where a host places it        | accepted 2026-10-10, as built                                        |
 | [0026](#0026-variants-are-named-value-sets-inside-a-scene)                                     | Variants are named value sets inside a scene                 | accepted 2026-10-11, as built (#32)                                  |
+| [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built                                        |
 
 ---
 
@@ -1422,3 +1423,58 @@ the first with its first edit. Roadmap R9 named variants as not separate scenes:
 - **Formulas in a variant**: one that put a number in a formula's place would
   undo a definition each time it was used.
 - **The dropdown alone**: two clicks, and plain, where a few toggles take one.
+
+## 0027. The scale is said round the scene, or in its corner
+
+**Status:** accepted 2026-10-12, as built. **Record of:** `plans/view-cube.md`,
+now deleted.
+
+### Context
+
+The view said its scale one way: the graduated box, Plotly's, round the scene
+and ticked on three edges. Right for a figure, and in the way while editing: it
+frames the scene a little wider than the objects, and its numbers sit over
+whatever is near its edge. CAD views say the same two things -- which way the
+scene faces, and how big it is -- in a corner instead: a view cube and a scale
+bar.
+
+### Decision
+
+- **`axes` takes three values**: `"box"`, the default; `"cube"`; and `"none"`.
+  `True` and `False`, which the trait took before there was a choice, are read
+  as the box and none, so a cell that says `axes=False` and a page saved before
+  this keep working. The widget's button goes round the three.
+- **The cube is a control, the bar is part of the picture.** A click on a face,
+  an edge or a corner of the cube looks from there -- twenty-six views, through
+  `axisView`, snapped as the 1, 3 and 7 keys snap; a press on it never picks
+  what is behind it, and the handles stand down until it is let go. The PNG a
+  view saves keeps the bar, in the corner the cube left, and not the cube.
+- **Both are drawn by the renderer into its own canvas**, after the scene in
+  the same frame: a second scene in a corner viewport, and a plane in pixel
+  space. No frame of their own: a view at rest still draws nothing.
+- **Lengths are said in the unit that reads best** -- `1 mm`, not `0.001 m` --
+  whatever unit the payload's axis labels name: the bar's length, and the box's
+  numbers and axis names, in one unit for all three axes so their numbers
+  compare.
+- **The bar is measured at the orbit centre**: a round length, 1, 2 or 5 times
+  a power of ten. Exact in a parallel view;
+  in perspective, exact at the depth of the point the view turns about, which
+  is what F puts on the selection.
+- **The host says what it floats over the corner** (`keepClear`): the
+  rectangles of its editing column and its transport, whenever either comes,
+  goes or moves. The square stands clear of them, and the renderer measures
+  nothing between times.
+
+### Rejected
+
+- **three's `ViewHelper`**: a ball of axes, not a cube, and its views assume y
+  up -- in a z-up scene they come out rolled.
+- **The cube as HTML over the canvas**: it would stay behind when a pooled
+  renderer moved on, and be missing from a resting view's picture.
+- **A scale bar only in parallel view**, where it is exact everywhere: the
+  default view is perspective, and a bar exact at the orbit centre says more
+  than none.
+- **Animated turns to the chosen view**: the keys snap, and so does this.
+- **The host's insets as CSS properties the renderer reads**: a style read per
+  frame and per pointer move, for a value that changes when a column comes or
+  goes.

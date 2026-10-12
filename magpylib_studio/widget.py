@@ -66,6 +66,9 @@ DEFAULT_HEIGHT = threejs.DEFAULT_HEIGHT
 #: What the export button saves the file as, before the browser asks.
 EXPORT_NAME = "magpylib-scene.html"
 
+#: The ways `SceneWidget.axes` says the scene's scale.
+AXES = ("box", "cube", "none")
+
 #: A saved view: the widget itself, run against a model this page holds. The
 #: bundle and the scene travel gzipped and in base64 -- a third of the size,
 #: and nothing in them can close the script element they sit in -- and are
@@ -191,9 +194,14 @@ class SceneWidget(anywidget.AnyWidget):
     #: Which objects are not drawn, by the same ids. Written by the legend's
     #: eye, and assignable from the notebook like `selected`.
     hidden = traitlets.List(traitlets.Unicode()).tag(sync=True)
-    #: Whether the graduated box -- the scene's scale -- is drawn. A cell can
-    #: put it away for a clean picture, and an export keeps it that way.
-    axes = traitlets.Bool(True).tag(sync=True)
+    #: How the scene's scale is said: ``"box"``, the graduated box round it;
+    #: ``"cube"``, a scale bar and a cube to look from a side by, in a corner;
+    #: or ``"none"``. A cell can put it away for a clean picture, and an
+    #: export keeps it that way. ``True`` and ``False``, which it took before
+    #: there was a choice, are the box and none.
+    axes = traitlets.Union(
+        [traitlets.Enum(AXES), traitlets.Bool()], default_value="box"
+    ).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and
     #: the system's setting when nothing behind it says.
@@ -773,6 +781,15 @@ class SceneWidget(anywidget.AnyWidget):
             # number as text: the trait says the scene as it is, not what
             # was assigned.
             self.variables = _values_of(self._session)
+
+    @traitlets.validate("axes")
+    def _axes_named(self, proposal):
+        # One of AXES, whichever way it was asked for: the view, a saved page
+        # and a reader of the trait then meet one value, not two spellings.
+        value = proposal["value"]
+        if isinstance(value, bool):
+            return "box" if value else "none"
+        return value
 
     @traitlets.validate("editable")
     def _something_to_edit(self, proposal):

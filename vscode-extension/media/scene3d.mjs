@@ -39,9 +39,10 @@ let outlines = [];
 let hintIds = [];
 let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
-// Whether the host wants that box. Held here, like hiding, because the box is
-// drawn again on every redraw; the panel never says, and always has it.
-let axesShown = true;
+// How the host wants the scale said: "box", "cube" -- the view cube and the
+// scale bar, in a corner -- or "none". Held here, like hiding, because the box
+// is drawn again on every redraw.
+let axesMode = "box";
 let selectedIds = []; // the primary is first: what the sidebar is showing
 // What a drag of several objects turns. It stands at the middle of the
 // selection and is never drawn -- only the motion it makes is read off it.
@@ -170,6 +171,7 @@ function redraw() {
   requestAnimationFrame(() => {
     frameAsked = false;
     renderer.render(scene, camera);
+    drawCorner(true);
   });
 }
 
@@ -579,17 +581,18 @@ function setSpaces(chosen = {}) {
   setGizmoMode(gizmoMode);
 }
 
-/** Look down an axis, from where the camera already is. */
+/** Look from `x, y, z` -- along an axis, or from an edge or a corner of the
+ *  view cube -- at the distance the camera already is. */
 function axisView(x, y, z) {
   if (!camera) return;
   const distance = camera.position.distanceTo(controls.target) || 1;
+  const from = new THREE.Vector3(x, y, z).normalize();
   // z is up in a magpylib scene, so looking straight down it needs another
-  // reference or the view has no defined roll
+  // reference or the view has no defined roll. Asked of the direction made a
+  // unit first: a corner's (1, -1, 1) is not looking down z.
   camera.up.set(0, 0, 1);
-  if (Math.abs(z) > 0.99) camera.up.set(0, 1, 0);
-  camera.position
-    .copy(controls.target)
-    .addScaledVector(new THREE.Vector3(x, y, z).normalize(), distance);
+  if (Math.abs(from.z) > 0.99) camera.up.set(0, 1, 0);
+  camera.position.copy(controls.target).addScaledVector(from, distance);
   controls.update();
 }
 
@@ -607,12 +610,39 @@ function axisView(x, y, z) {
 function watchPicks() {
   const down = new THREE.Vector2();
   const element = renderer.domElement;
-  element.addEventListener("pointerdown", (event) =>
-    down.set(event.clientX, event.clientY),
-  );
+  let onCube = false; // whether the press began on the view cube
+  // Bound before the handles are made, so this runs ahead of their own: a
+  // handle behind the cube must not take a press meant for the cube, and is
+  // off until the press ends. The orbit is left on, so dragging the cube
+  // turns the view as dragging anywhere else does.
+  element.addEventListener("pointerdown", (event) => {
+    down.set(event.clientX, event.clientY);
+    // the main button only: the others pan and zoom, here as anywhere
+    onCube = event.button === 0 && Boolean(cubeTarget(event));
+    if (onCube && gizmo) gizmo.enabled = false;
+  });
+  const letGo = () => {
+    if (onCube && gizmo) gizmo.enabled = true;
+    const was = onCube;
+    onCube = false;
+    return was;
+  };
+  element.addEventListener("pointercancel", letGo);
+  element.addEventListener("pointermove", (event) => {
+    if (!event.buttons) markCube(cubeTarget(event));
+  });
+  element.addEventListener("pointerleave", () => markCube(null));
   element.addEventListener("pointerup", (event) => {
+    const fromCube = letGo();
+    markCube(cubeTarget(event)); // a drag may have ended off the cube
     // orbiting also ends in a pointerup: only a press that stayed put is a click
     if (down.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 4) {
+      return;
+    }
+    // a click on the cube is a view, never a pick of what is behind it
+    if (fromCube) {
+      const looking = cubeTarget(event);
+      if (looking) axisView(...looking);
       return;
     }
     // a handle under the pointer was the target of the press, not the object
@@ -757,11 +787,15 @@ function setHidden(objectIds) {
   drawHints();
 }
 
-/** Show the graduated box -- the scene's scale -- or put it away. Framing
- *  leaves room for its numbers only while it is there. */
-function setAxes(on) {
-  axesShown = on;
-  if (axes) axes.visible = on;
+/** Say the scene's scale with the graduated box, with the view cube and a
+ *  scale bar, or not at all: `"box"`, `"cube"` or `"none"`. Framing leaves
+ *  room for the box's numbers only while it is there. */
+function setAxes(mode) {
+  axesMode = mode === "cube" || mode === "none" ? mode : "box";
+  if (axes) axes.visible = axesMode === "box";
+  // Whatever was under the pointer was under it in the last view drawn,
+  // which a pooled renderer is moving on from.
+  markCube(null);
 }
 
 /** Outline these objects faintly -- what a click would select -- or, given
@@ -1480,6 +1514,7 @@ function setCamera(state) {
 function snapshot() {
   if (!renderer) return null;
   renderer.render(scene, camera);
+  drawCorner(false); // the scale bar is part of the picture; the cube, a control
   return renderer.domElement.toDataURL("image/png");
 }
 
@@ -1490,6 +1525,7 @@ function snapshot() {
 function still() {
   if (!renderer) return null;
   renderer.render(scene, camera);
+  drawCorner(true);
   const source = renderer.domElement;
   const copy = document.createElement("canvas");
   copy.width = source.width;
@@ -1557,12 +1593,43 @@ function niceStep(rough) {
   return [1, 2, 5, 10].find((n) => rough <= n * decade * 1.5) * decade;
 }
 
+// Metres per unit an axis label may name a length in, and the units a length
+// is said in. The box and the scale bar say a length in the one that reads
+// best, whatever the scene is drawn in: "1 mm", not "0.001 m".
+const METRES = {
+  km: 1e3,
+  m: 1,
+  dm: 0.1,
+  cm: 0.01,
+  mm: 1e-3,
+  µm: 1e-6, // the micro sign, and the Greek letter it is confused with
+  μm: 1e-6,
+  um: 1e-6,
+  nm: 1e-9,
+};
+const SAID_IN = [
+  ["km", 1e3],
+  ["m", 1],
+  ["mm", 1e-3],
+  ["µm", 1e-6],
+  ["nm", 1e-9],
+];
+
+/** The unit `metres` reads best in -- the largest it is at least one of --
+ *  as `[name, metres per one]`. */
+function readsBest(metres) {
+  return (
+    SAID_IN.find(([, per]) => metres >= per * (1 - 1e-9)) ?? SAID_IN.at(-1)
+  );
+}
+
 /** The box, ticks and names that say how big any of this is.
  *
  * Magpylib scenes are measurements, and a view of one that does not say what
  * scale it is at leaves you judging a magnet by eye. Plotly draws a graduated
- * cube; this is the same idea with the labels magpylib itself supplies, so
- * the units follow whatever the scene is drawn in.
+ * cube; this is the same idea with the axis names magpylib itself supplies,
+ * numbered in the unit that reads best for the box's size -- one for all
+ * three axes, so their numbers compare.
  */
 function drawAxes(ranges, labels) {
   if (axes) {
@@ -1574,7 +1641,17 @@ function drawAxes(ranges, labels) {
     });
     axes = null;
   }
+  // The unit the coordinates are in, for the box's numbers and the scale
+  // bar: magpylib names it in each axis's label, "x (mm)".
+  unit = /\(([^)]+)\)\s*$/.exec(labels?.x ?? "")?.[1] ?? "";
   if (!ranges) return;
+  // The box's numbers in the unit that reads best for its largest; a unit
+  // this does not know is kept, numbers and names as they came.
+  const factor = METRES[unit];
+  const [shown, per] = factor
+    ? readsBest(Math.max(...ranges.flat().map(Math.abs)) * factor)
+    : [unit, 1];
+  const toShown = (value) => (value * (factor ?? 1)) / per;
 
   const low = new THREE.Vector3(ranges[0][0], ranges[1][0], ranges[2][0]);
   const high = new THREE.Vector3(ranges[0][1], ranges[1][1], ranges[2][1]);
@@ -1599,7 +1676,10 @@ function drawAxes(ranges, labels) {
     new THREE.Vector3(0, 1, 0),
     new THREE.Vector3(0, 0, 1),
   ];
-  const names = [labels?.x ?? "x", labels?.y ?? "y", labels?.z ?? "z"];
+  const names = ["x", "y", "z"].map((name) => {
+    const label = labels?.[name] ?? name;
+    return factor ? label.replace(/\(([^)]+)\)\s*$/, `(${shown})`) : label;
+  });
   for (let axis = 0; axis < 3; axis++) {
     const from = low.getComponent(axis);
     const to = high.getComponent(axis);
@@ -1616,7 +1696,7 @@ function drawAxes(ranges, labels) {
       const at = low.clone();
       at.setComponent(axis, value);
       const label = textSprite(
-        Number(value.toPrecision(4)).toString(),
+        Number(toShown(value).toPrecision(4)).toString(),
         ink,
         text,
       );
@@ -1630,7 +1710,7 @@ function drawAxes(ranges, labels) {
       .add(outward.clone().multiplyScalar(2.4));
     axes.add(name);
   }
-  axes.visible = axesShown;
+  axes.visible = axesMode === "box";
   scene.add(axes);
   // Placed now, not at the first frame. A Box3Helper is the unit cube it is
   // built as until `updateMatrixWorld` fits it to its box, which a render
@@ -1638,6 +1718,390 @@ function drawAxes(ranges, labels) {
   // axes with the objects, comes before any render. Measured unplaced, a
   // scene in centimetres was framed as two metres of nothing round a speck.
   axes.updateMatrixWorld(true);
+}
+
+// --- the view cube and the scale bar -----------------------------------------
+// The other way to say which way the scene faces and how big it is: in a
+// corner, rather than round the scene
+// (docs/decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner).
+// Both are drawn into the canvas after the scene, in the same frame -- not
+// laid over it as HTML: a pooled renderer moves between views, and the canvas
+// is what moves with it, and what a resting view's picture is taken from.
+
+const CUBE_SIZE = 84; // the cube's square in the corner, in CSS pixels
+const CORNER_MARGIN = 8; // from the view's edges, as the widget's tools sit
+// How far in from an edge a press means the edge rather than the face, as a
+// share of a side: the faces keep most of the cube, the edges stay easy to hit.
+const CUBE_EDGE = 0.2;
+// The handles' red, green and blue, dark enough to read on a light face and
+// light enough on a dark one.
+const AXIS_INKS = { x: "#e5484d", y: "#2f9e44", z: "#3b82f6" };
+const BAR_LONGEST = 120; // CSS pixels; a round length is never under 2/5 of it
+const BAR_ROOM = { width: BAR_LONGEST + 16, height: 30 };
+
+let unit = ""; // the scene's length unit, for the scale bar
+let corner = null; // the cube's scene and camera, in the colours it was made in
+let marked = null; // the part of the cube under the pointer, as "x,y,z"
+let bar = null; // the scale bar's canvas, and what was last painted on it
+let insets = { right: 0, bottom: 0 }; // how far in the host pushes the square
+const cubeRay = new THREE.Raycaster();
+
+/** The cube, in the colours the view wears now: made when first wanted, and
+ *  again when the theme changes under it. */
+function dressCorner() {
+  const ink = cssColor("--vscode-editorLineNumber-foreground", "#888");
+  const paper = cssColor("--vscode-editor-background", "#1e1e1e");
+  if (corner?.ink === ink && corner?.paper === paper) return;
+  dropCorner();
+  // BoxGeometry's faces in its own order, named as the scene has them: the
+  // box is turned a quarter about x, so that its labels stand up in a z-up
+  // scene -- its +y is the scene's +z, its +z the scene's -y. Shaded a face
+  // apart, top lightest, so the cube reads as a solid at any angle. The
+  // bottom's name is turned half round, to read upright from below.
+  const faces = [
+    ["+x", "x", 0.1],
+    ["−x", "x", 0.1],
+    ["+z", "z", 0.2],
+    ["−z", "z", 0.05, Math.PI],
+    ["−y", "y", 0.15],
+    ["+y", "y", 0.15],
+  ];
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    faces.map(
+      ([label, axis, shade, turn = 0]) =>
+        new THREE.MeshBasicMaterial({
+          map: faceTexture(label, AXIS_INKS[axis], ink, paper, shade, turn),
+        }),
+    ),
+  );
+  body.rotation.x = Math.PI / 2;
+  body.updateMatrixWorld();
+  const mark = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshBasicMaterial({
+      color: SELECTION_COLOUR,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+    }),
+  );
+  const cubeScene = new THREE.Scene();
+  cubeScene.add(body, mark);
+  const half = 0.95; // the cube's corners, with room for the mark round them
+  corner = {
+    ink,
+    paper,
+    body,
+    mark,
+    scene: cubeScene,
+    camera: new THREE.OrthographicCamera(-half, half, half, -half, 0.1, 10),
+  };
+  placeMark();
+}
+
+function dropCorner() {
+  if (!corner) return;
+  for (const material of corner.body.material) {
+    material.map.dispose();
+    material.dispose();
+  }
+  corner.body.geometry.dispose();
+  corner.mark.geometry.dispose();
+  corner.mark.material.dispose();
+  corner = null;
+}
+
+/** One face of the cube: its shade of the background, its edge, its name --
+ *  turned by `turn`. */
+function faceTexture(label, labelInk, ink, paper, shade, turn) {
+  const side = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = side;
+  const context = canvas.getContext("2d");
+  context.fillStyle = paper;
+  context.fillRect(0, 0, side, side);
+  context.fillStyle = ink;
+  context.globalAlpha = shade;
+  context.fillRect(0, 0, side, side);
+  // the cube's edges, drawn on its faces: a line is a pixel wide whatever
+  // the screen, and these are seen at a quarter of their size
+  context.globalAlpha = 0.6;
+  context.strokeStyle = ink;
+  context.lineWidth = 6;
+  context.strokeRect(3, 3, side - 6, side - 6);
+  context.globalAlpha = 1;
+  context.fillStyle = labelInk;
+  context.font = "600 46px sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.translate(side / 2, side / 2);
+  context.rotate(turn);
+  context.fillText(label, 0, 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** Turn the cube's camera as the view's is turned. */
+function aimCorner() {
+  corner.camera.quaternion.copy(camera.quaternion);
+  corner.camera.position.set(0, 0, 3).applyQuaternion(camera.quaternion);
+  corner.camera.updateMatrixWorld();
+}
+
+/** Where a press at `event` on the cube says to look from -- a face, an edge
+ *  or a corner, as `[x, y, z]` each -1, 0 or 1 -- or null when it is not on
+ *  the cube. */
+function cubeTarget(event) {
+  if (axesMode !== "cube" || !renderer) return null;
+  // Where the pointer is on the canvas, as the event already says. Asked of
+  // the layout instead, every move of the pointer over the view would be a
+  // measurement, for the few that are over the cube.
+  const size = renderer.getSize(new THREE.Vector2());
+  const [left, top] = cornerAt(size);
+  const at = new THREE.Vector2(
+    ((event.offsetX - left) / CUBE_SIZE) * 2 - 1,
+    -((event.offsetY - top) / CUBE_SIZE) * 2 + 1,
+  );
+  if (Math.abs(at.x) > 1 || Math.abs(at.y) > 1) return null;
+  if (!corner) dressCorner();
+  aimCorner();
+  cubeRay.setFromCamera(at, corner.camera);
+  const hit = cubeRay.intersectObject(corner.body)[0];
+  if (!hit) return null;
+  // within CUBE_EDGE of a side is that side too: an edge is two, a corner three
+  return hit.point
+    .toArray()
+    .map((along) => (Math.abs(along) > 0.5 - CUBE_EDGE ? Math.sign(along) : 0));
+}
+
+/** Where the cube's square stands on a view `size` across: its left edge
+ *  and its top, in CSS pixels from the view's top left. In from the bottom
+ *  right corner, and from whatever the host floats there (`keepClear`). */
+function cornerAt(size) {
+  return [
+    size.x - CORNER_MARGIN - insets.right - CUBE_SIZE,
+    size.y - CORNER_MARGIN - insets.bottom - CUBE_SIZE,
+  ];
+}
+
+/** Stand the cube and the bar clear of `rects`: what the host floats over
+ *  the view, where each is now, as DOMRects. One that reaches into the
+ *  corner pushes the square the shorter way out of its way -- a column down
+ *  the right-hand edge pushes it left, a bar along the foot pushes it up.
+ *  The host says again whenever what it floats comes, goes or moves; nothing
+ *  is measured between times. */
+function keepClear(rects) {
+  insets = { right: 0, bottom: 0 };
+  if (!host) return;
+  // The element the view hangs in, not the canvas: a host asks from its own
+  // resize observer, which runs before this module's has sized the canvas to
+  // it, and the canvas then still measures as it was.
+  const view = host.getBoundingClientRect();
+  const tall = CORNER_MARGIN + CUBE_SIZE; // the square's reach up from the foot
+  const wide = tall + BAR_ROOM.width; // and in from the edge, bar and all
+  for (const rect of rects ?? []) {
+    if (rect.right <= view.right - wide || rect.bottom <= view.bottom - tall) {
+      continue;
+    }
+    const left = view.right - rect.left;
+    const up = view.bottom - rect.top;
+    if (left < up) insets.right = Math.max(insets.right, left);
+    else insets.bottom = Math.max(insets.bottom, up);
+  }
+}
+
+/** Mark the part of the cube a click would look from -- given nothing,
+ *  nothing -- and point at it. */
+function markCube(direction) {
+  const key = direction ? direction.join(",") : null;
+  if (key === marked) return;
+  marked = key;
+  if (renderer) renderer.domElement.style.cursor = direction ? "pointer" : "";
+  placeMark();
+  redraw();
+}
+
+/** The mark round what `marked` names: a slab standing a little proud of the
+ *  cube, so that only its outside shows -- a face's middle, an edge's strip
+ *  either side of it, a corner's three squares. */
+function placeMark() {
+  if (!corner) return;
+  const { mark } = corner;
+  mark.visible = Boolean(marked);
+  if (!marked) return;
+  const proud = 0.02;
+  marked
+    .split(",")
+    .map(Number)
+    .forEach((side, axis) => {
+      mark.position.setComponent(
+        axis,
+        side * (0.5 - CUBE_EDGE / 2 + proud / 2),
+      );
+      mark.scale.setComponent(
+        axis,
+        side ? CUBE_EDGE + proud : 1 - 2 * CUBE_EDGE,
+      );
+    });
+}
+
+/** Draw the cube and the scale bar over what was just drawn, when the scale
+ *  is said that way. `withCube` false leaves the cube out: a picture of the
+ *  view keeps the bar, which is part of what it shows, and not the control. */
+function drawCorner(withCube) {
+  if (axesMode !== "cube" || !renderer) return;
+  const size = renderer.getSize(new THREE.Vector2());
+  if (!corner) dressCorner();
+  renderer.autoClear = false;
+  renderer.clearDepth(); // the scene's depths are nothing to the cube
+  if (withCube) {
+    aimCorner();
+    const [left, top] = cornerAt(size);
+    const foot = size.y - top - CUBE_SIZE;
+    renderer.setViewport(left, foot, CUBE_SIZE, CUBE_SIZE);
+    renderer.render(corner.scene, corner.camera);
+    renderer.setViewport(0, 0, size.x, size.y);
+    drawBar(size, left, foot);
+  } else {
+    // nothing floats over a picture, and the cube is not in it: the bar
+    // takes the corner
+    drawBar(size, size.x - CORNER_MARGIN, CORNER_MARGIN);
+  }
+  renderer.autoClear = true;
+}
+
+/** How long one CSS pixel is in the scene, at the point the view turns
+ *  about: everywhere, in a parallel view; in perspective, at that depth. */
+function scenePerPixel(height) {
+  const seen = camera.isOrthographicCamera
+    ? camera.top - camera.bottom
+    : 2 *
+      camera.position.distanceTo(controls.target) *
+      Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  return seen / camera.zoom / height;
+}
+
+/** A bar of a round length -- 1, 2 or 5 times a power of ten, in the scene's
+ *  unit -- ending `right` across the view and standing `bottom` up from its
+ *  foot, in CSS pixels. */
+function drawBar(size, right, bottom) {
+  const perPixel = scenePerPixel(size.y);
+  if (!(perPixel > 0 && Number.isFinite(perPixel))) return;
+  const most = BAR_LONGEST * perPixel;
+  const decade = Math.pow(10, Math.floor(Math.log10(most)));
+  // a half too, for the decade a rounding log10 puts one too high
+  const length = [5, 2, 1, 0.5].map((n) => n * decade).find((n) => n <= most);
+  const text = sayLength(length);
+  const ratio = renderer.getPixelRatio();
+  if (bar?.ratio !== ratio) {
+    dropBar();
+    bar = makeBar(ratio);
+  }
+  paintBar(text, length / perPixel);
+  const { width, height } = BAR_ROOM;
+  bar.plane.position.set(right - width / 2, bottom + height / 2, 0);
+  bar.plane.scale.set(width, height, 1);
+  Object.assign(bar.camera, { right: size.x, top: size.y });
+  bar.camera.updateProjectionMatrix();
+  renderer.render(bar.scene, bar.camera);
+}
+
+/** `length`, in the scene's unit, in the unit that reads best. A unit this
+ *  does not know is said as it is. */
+function sayLength(length) {
+  const factor = METRES[unit];
+  if (!factor) return `${Number(length.toPrecision(3))} ${unit}`.trim();
+  const [name, per] = readsBest(length * factor);
+  return `${Number(((length * factor) / per).toPrecision(3))} ${name}`;
+}
+
+/** The scale bar's plane, with a canvas of its own to paint, at `ratio`
+ *  device pixels to the CSS pixel. The canvas is never resized: a texture's
+ *  size is fixed once it is on the GPU. */
+function makeBar(ratio) {
+  const canvas = document.createElement("canvas");
+  canvas.width = BAR_ROOM.width * ratio;
+  canvas.height = BAR_ROOM.height * ratio;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = false; // drawn pixel for pixel
+  texture.minFilter = THREE.LinearFilter;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  const barScene = new THREE.Scene();
+  barScene.add(plane);
+  return {
+    ratio,
+    canvas,
+    texture,
+    plane,
+    scene: barScene,
+    // in CSS pixels from the view's bottom left; its right and top are the
+    // view's size, set as it is drawn
+    camera: new THREE.OrthographicCamera(0, 1, 1, 0, -1, 1),
+    painted: "",
+  };
+}
+
+function dropBar() {
+  if (!bar) return;
+  bar.texture.dispose();
+  bar.plane.geometry.dispose();
+  bar.plane.material.dispose();
+  bar = null;
+}
+
+/** Paint the bar `pixels` long, named `text` -- only when that, or the
+ *  theme, has changed since it was last painted. */
+function paintBar(text, pixels) {
+  const { ink, paper } = corner;
+  const key = [text, pixels.toFixed(1), ink, paper].join("|");
+  if (key === bar.painted) return;
+  bar.painted = key;
+  const { width, height } = BAR_ROOM;
+  const context = bar.canvas.getContext("2d");
+  context.setTransform(bar.ratio, 0, 0, bar.ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  const right = width - 8;
+  const left = right - pixels;
+  const y = height - 7;
+  context.font = "12px sans-serif";
+  // over the bar's middle, unless a short bar's name would run off the end
+  const middle = Math.min(
+    (left + right) / 2,
+    width - 2 - context.measureText(text).width / 2,
+  );
+  // each over a halo of the background, to read over whatever is behind it
+  const ends = () => {
+    context.beginPath();
+    context.moveTo(left, y - 5);
+    context.lineTo(left, y);
+    context.lineTo(right, y);
+    context.lineTo(right, y - 5);
+  };
+  context.lineJoin = context.lineCap = "round";
+  context.strokeStyle = paper;
+  context.lineWidth = 4;
+  ends();
+  context.stroke();
+  context.textAlign = "center";
+  context.lineWidth = 3;
+  context.strokeText(text, middle, y - 6);
+  context.strokeStyle = context.fillStyle = ink;
+  context.lineWidth = 1.5;
+  ends();
+  context.stroke();
+  context.fillText(text, middle, y - 6);
+  bar.texture.needsUpdate = true;
 }
 
 /** Drop every node but the ones held, freeing what they hold on the GPU.
@@ -1968,6 +2432,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // last scene's -- and came up zoomed in, the numbers off the edge, unless
   // something happened to fit it again.
   drawAxes(payload.ranges, payload.labels);
+  if (corner) dressCorner(); // in the theme the scene was just drawn in
   // Refit when there was nothing to look at before. A scene that arrives
   // empty and is filled by a later refresh -- which is what a parametric
   // example does -- would otherwise keep the camera fitted to the empty one.
@@ -2025,6 +2490,7 @@ export const scene3d = drawingAfter({
   highlight,
   hint,
   setAxes,
+  keepClear,
   setHidden,
   setGizmoMode,
   constrainAxis,

@@ -263,7 +263,14 @@ of one shape, sized and coloured as magpylib sizes and colours them
 the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
 drawing. It picks, multi-selects, drags with handles (move, turn, resize, aim a
 polarization; world or object axes; one-axis locks; snapping), hides, plays
-paths, and has one keys table both hosts use. A drag goes through
+paths, and has one keys table both hosts use. It says the scene's scale one of
+three ways (`setAxes`, the widget's `axes`): the graduated box round the scene;
+a view cube and a scale bar, drawn into the canvas's corner after the scene in
+the same frame, the cube a click away from twenty-six views and the bar a round
+length at the orbit centre, said in the unit that reads best, kept by the PNG
+where the cube is not; or neither
+([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner)).
+A drag goes through
 `static/drag.mjs`: open an undo group, pace previews with one request in flight,
 send the final pose through `apply_edits`, close the group. `apply_edits` turns
 the view's edits into `set_transform` / `set_param` calls in the session,
