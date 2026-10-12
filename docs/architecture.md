@@ -270,16 +270,15 @@ the same frame, the cube a click away from twenty-six views and the bar a round
 length at the orbit centre, said in the unit that reads best, kept by the PNG
 where the cube is not; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner)).
-A drag goes through
-`static/drag.mjs`: open an undo group, pace previews with one request in flight,
-send the final pose through `apply_edits`, close the group. `apply_edits` turns
-the view's edits into `set_transform` / `set_param` calls in the session,
-batched into one undo step, for every host; with `define`, a bare variable's
-name typed where a number was, that the document lacks, is made at the value it
-replaces, in that kind of unit, in the same step. The payload says the scene's
-`units` and the `expressions` written behind the pose fields, so the view's
-readout shows `gap` in the scene's millimetres and reads `15 mm`, `5°` or a name
-back through `quantity`.
+A drag goes through `static/drag.mjs`: open an undo group, pace previews with
+one request in flight, send the final pose through `apply_edits`, close the
+group. `apply_edits` turns the view's edits into `set_transform` / `set_param`
+calls in the session, batched into one undo step, for every host; with `define`,
+a bare variable's name typed where a number was, that the document lacks, is
+made at the value it replaces, in that kind of unit, in the same step. The
+payload says the scene's `units` and the `expressions` written behind the pose
+fields, so the view's readout shows `gap` in the scene's millimetres and reads
+`15 mm`, `5°` or a name back through `quantity`.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is

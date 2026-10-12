@@ -1449,21 +1449,20 @@ bar.
   `axisView`, snapped as the 1, 3 and 7 keys snap; a press on it never picks
   what is behind it, and the handles stand down until it is let go. The PNG a
   view saves keeps the bar, in the corner the cube left, and not the cube.
-- **Both are drawn by the renderer into its own canvas**, after the scene in
-  the same frame: a second scene in a corner viewport, and a plane in pixel
-  space. No frame of their own: a view at rest still draws nothing.
+- **Both are drawn by the renderer into its own canvas**, after the scene in the
+  same frame: a second scene in a corner viewport, and a plane in pixel space.
+  No frame of their own: a view at rest still draws nothing.
 - **Lengths are said in the unit that reads best** -- `1 mm`, not `0.001 m` --
   whatever unit the payload's axis labels name: the bar's length, and the box's
   numbers and axis names, in one unit for all three axes so their numbers
   compare.
-- **The bar is measured at the orbit centre**: a round length, 1, 2 or 5 times
-  a power of ten. Exact in a parallel view;
-  in perspective, exact at the depth of the point the view turns about, which
-  is what F puts on the selection.
-- **The host says what it floats over the corner** (`keepClear`): the
-  rectangles of its editing column and its transport, whenever either comes,
-  goes or moves. The square stands clear of them, and the renderer measures
-  nothing between times.
+- **The bar is measured at the orbit centre**: a round length, 1, 2 or 5 times a
+  power of ten. Exact in a parallel view; in perspective, exact at the depth of
+  the point the view turns about, which is what F puts on the selection.
+- **The host says what it floats over the corner** (`keepClear`): the rectangles
+  of its editing column and its transport, whenever either comes, goes or moves.
+  The square stands clear of them, and the renderer measures nothing between
+  times.
 
 ### Rejected
 
