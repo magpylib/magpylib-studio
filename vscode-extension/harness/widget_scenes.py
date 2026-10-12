@@ -146,14 +146,14 @@ def scene_with_variables():
         free: float = 3.0,
     ):
         derived("half", r / 2)
-        magnet = magpy.magnet.Cuboid(
+        m = magpy.magnet.Cuboid(
             dimension=(0.01, 0.01, 0.01),
             polarization=(0, 0, 1),
             position=(r, 0, 0),
             style_label="m",
         )
-        magpy.Collection(magnet, style_label="ring")
-        duplicate_around(magnet, count=n, axis=axis)
+        magpy.Collection(m, style_label="ring")
+        duplicate_around(m, count=n, axis=axis)
 
     return SceneWidget(design, editable=True)
 

@@ -338,10 +338,10 @@ async function openScriptTab(): Promise<vscode.TextDocument> {
 async function editAndSave(tab: vscode.TextDocument, edit: (text: string) => string) {
   const edited = edit(tab.getText());
   assert.notStrictEqual(edited, tab.getText(), 'the edit changed nothing');
-  const editor = await vscode.window.showTextDocument(tab);
-  await editor.edit((builder) => {
-    builder.replace(new vscode.Range(0, 0, tab.lineCount, 0), edited);
-  });
+  // to the document, not through an editor VS Code may have replaced since
+  const change = new vscode.WorkspaceEdit();
+  change.replace(tab.uri, new vscode.Range(0, 0, tab.lineCount, 0), edited);
+  assert.ok(await vscode.workspace.applyEdit(change), 'the edit was not applied');
   await tab.save();
 }
 
@@ -1353,7 +1353,11 @@ suite('magpylib-studio', () => {
     const dragged = new vscode.DataTransfer();
     tree.handleDrag([(await row(heading(halbach), 'r2'))!], dragged);
     await tree.handleDrop(heading(coil), dragged);
-    await sceneWhere(holding('r2'), 'the dragged magnet copied into the coil, in front');
+    // the coil and the magnet together: the halbach holds an r2 of its own
+    await sceneWhere(
+      (doc) => ids(doc.objects).has('coil') && ids(doc.objects).has('r2'),
+      'the dragged magnet copied into the coil, in front',
+    );
     assert.strictEqual(frontScene(), doc(coil));
     assert.strictEqual(tab(halbach)?.isDirty, false, 'a drag across moved the magnet');
 
