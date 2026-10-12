@@ -4,8 +4,9 @@
   payload from the fixtures, read only, with nothing to ask python for.
   `?out=readings.json&index=0` names the fixture and, for a file holding a
   list, which entry; `?dark` and `?light` say what the page is; `?tools`
-  keeps the hover bar in sight, `?editable` offers the pencil. No check reads
-  this page; a person does, by screenshot.
+  keeps the hover bar in sight, `?editable` offers the pencil, `?axes=cube`
+  says the scale another way. No check reads this page; a person does, by
+  screenshot.
 -->
 <html>
   <head>
@@ -30,13 +31,14 @@
       ).json();
       if (Array.isArray(fixture))
         fixture = fixture[Number(query.get("index") ?? 0)];
-      const payload = fixture.scene ?? fixture.payload ?? fixture;
+      const payload =
+        fixture.scene ?? fixture.payload ?? fixture.state?.payload ?? fixture;
       const values = {
         payload,
         tree: fixture.tree ?? fixture.state?.tree ?? [],
         selected: [],
         hidden: [],
-        axes: true,
+        axes: query.get("axes") ?? "box",
         theme: "auto",
         height: Number(query.get("height") ?? 520),
         frames: 1,

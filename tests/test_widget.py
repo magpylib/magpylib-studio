@@ -271,6 +271,19 @@ def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing, served
     assert view._scene is None
 
 
+def test_the_scale_is_said_one_of_three_ways():
+    """The box, the cube or none -- and True and False, which the trait took
+    before there was a choice, as the box and none: a cell or a saved page
+    from then still says what it said."""
+    view = widget.SceneWidget()
+    assert view.axes == "box"
+    for given, said in [("cube", "cube"), (False, "none"), (True, "box")]:
+        view.axes = given
+        assert view.axes == said
+    with pytest.raises(traitlets.TraitError):
+        view.axes = "cubes"
+
+
 @needs_scene_graph
 def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch):
     """One call for both: how to draw, for magpylib, and how to show it."""
@@ -285,7 +298,7 @@ def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch
     view = widget.SceneWidget(
         *scene_objects, height=600, theme="dark", axes=False, zoom=2
     )
-    assert (view.height, view.theme, view.axes) == (600, "dark", False)
+    assert (view.height, view.theme, view.axes) == (600, "dark", "none")
     assert given == {"zoom": 2}
 
     given.clear()
@@ -798,7 +811,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["state"]["payload"] == view.payload
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
-    assert saved["state"]["axes"] is False  # on by default; put away here
+    assert saved["state"]["axes"] == "none"  # the box by default; put away here
     assert saved["state"]["theme"] == "dark"
     # A page with no python behind it offers no export of its own.
     assert saved["state"]["standalone"] is True

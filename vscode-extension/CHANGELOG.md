@@ -8,6 +8,20 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A view cube and a scale bar, in place of the box</summary>
+
+The axes button in the view's tools goes round three ways to show the scale: the
+graduated box, as before; a view cube in the corner with a scale bar beside it;
+and none. Click a face, an edge or a corner of the cube to look from there, and
+drag it to orbit. The bar is a round length in the unit that reads best — 1 mm,
+not 0.001 m — exact in a parallel view and at the orbit centre in perspective,
+and the picture a view saves keeps it. The box's numbers read the same way: a
+scene two centimetres across is ticked in millimetres. From code, `axes="box"`,
+`"cube"` or `"none"`; `True` and `False` still mean the box and none.
+
+</details>
+
+<details>
 <summary>Several scenes at once, each in a tab of its own</summary>
 
 A `.magpy.json` opens in its own tab, with its own undo, unsaved dot and script

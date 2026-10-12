@@ -552,10 +552,11 @@ def _(mo):
 def _(SceneWidget, magpy, mo, np):
     def _played_in_the_browser():
         rotor = magpy.magnet.Cylinder(
-            polarization=(1, 0, 0), dimension=(4, 1), style_label="rotor"
+            polarization=(1, 0, 0), dimension=(0.04, 0.01), style_label="rotor"
         )
         sweep = magpy.Sensor(
-            position=np.linspace((-6, 0, 1.5), (6, 0, 1.5), 60), style_label="sweep"
+            position=np.linspace((-0.06, 0, 0.015), (0.06, 0, 0.015), 60),
+            style_label="sweep",
         )
         sweep.style.arrows.x.show = True
         sweep.style.arrows.y.show = True
@@ -576,18 +577,18 @@ def _(SceneWidget, magpy, mo, np):
         turn = np.linspace(0, 2 * np.pi, steps)
         spinner = magpy.magnet.Cylinder(
             polarization=np.column_stack([np.cos(turn), np.sin(turn), np.zeros(steps)]),
-            dimension=(2, 1),
+            dimension=(0.02, 0.01),
             style_label="spinner",
         )
         coil = magpy.current.Circle(
-            diameter=np.linspace(2, 5, steps),
+            diameter=np.linspace(0.02, 0.05, steps),
             current=np.linspace(1, 100, steps),
-            position=(0, 0, 1.5),
+            position=(0, 0, 0.015),
             style_label="coil",
         )
         probe = magpy.Sensor(
-            pixel=np.linspace((-3, 0, 0), (3, 0, 0), 13),
-            position=(0, 0, -1.5),
+            pixel=np.linspace((-0.03, 0, 0), (0.03, 0, 0), 13),
+            position=(0, 0, -0.015),
             style_label="probe",
         )
         probe.style.pixel.field.source = "B"
@@ -606,9 +607,9 @@ def _(SceneWidget, magpy, mo, np):
 
     def _editing():
         rotor = magpy.magnet.Cuboid(
-            dimension=(1, 1, 1), polarization=(0, 0, 1), style_label="rotor"
+            dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), style_label="rotor"
         )
-        pickup = magpy.Sensor(position=(0, 0, 2), style_label="pickup")
+        pickup = magpy.Sensor(position=(0, 0, 0.02), style_label="pickup")
         return mo.vstack(
             [
                 mo.md(

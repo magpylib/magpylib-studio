@@ -182,6 +182,10 @@ const ICONS = {
   axes:
     '<path d="M4 13.5V2.5M2.5 4 4 2.5 5.5 4"/>' +
     '<path d="M4 13.5h9.5M12 12l1.5 1.5-1.5 1.5"/><path d="M4 13.5 8.5 9"/>',
+  cube:
+    '<path d="M10.5 1.75l3.25 1.75v3.5l-3.25 1.75-3.25-1.75v-3.5z"/>' +
+    '<path d="M7.25 3.5l3.25 1.75 3.25-1.75M10.5 5.25v3.5"/>' +
+    '<path d="M2 11.5v2h7v-2"/>',
   fit:
     '<path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5"/>' +
     '<rect x="5.5" y="5.5" width="5" height="5" rx="1"/>',
@@ -343,6 +347,31 @@ const KEY_LIST = {
   ],
 };
 
+/** The axes button's round: each way the scale is said, its icon, what it is
+ *  called -- in full, and in a word or two as the next one -- and the next. */
+const AXES = {
+  box: {
+    icon: "axes",
+    says: "Scale: the graduated box",
+    named: "the box",
+    next: "cube",
+  },
+  cube: {
+    icon: "cube",
+    says: "Scale: a view cube and a scale bar",
+    named: "the view cube",
+    next: "none",
+  },
+  none: { icon: "axes", says: "Scale: not shown", named: "none", next: "box" },
+};
+
+/** One of `AXES`, from what the model holds: `true` and `false` are what a
+ *  view saved before there was a choice holds. */
+function axesChoice(value) {
+  if (AXES[value]) return value;
+  return value === false ? "none" : "box";
+}
+
 /** The theme button's round: each choice, what it is called, and the next. */
 const THEMES = {
   auto: { says: "Theme: as the notebook is", next: "light" },
@@ -412,10 +441,8 @@ function render({ model, el }) {
       "shift-H shows only it",
     () => showLegend(!legendOpen),
   );
-  const axesButton = iconButton(
-    "axes",
-    "Axes — the box that gives the scene its scale",
-    () => commit("axes", !model.get("axes")),
+  const axesButton = iconButton("axes", "", () =>
+    commit("axes", AXES[axesChoice(model.get("axes"))].next),
   );
   const fitButton = iconButton(
     "fit",
@@ -1004,7 +1031,10 @@ function render({ model, el }) {
   // until something looks again. Drawing did -- a renderer loaded a moment
   // later, and the view went from the system's colours to the page's before
   // your eyes -- and a view with no renderer to draw with never did at all.
-  const placing = new ResizeObserver(retheme);
+  const placing = new ResizeObserver(() => {
+    retheme();
+    keepCorner(); // what floats over the view moved with its edges
+  });
   placing.observe(el);
 
   const stateOf = () => ({
@@ -1022,12 +1052,29 @@ function render({ model, el }) {
     pressed(legendButton, open);
   }
 
-  /** The graduated box, as the model has it: a trait, like hiding, so a
+  /** How the scale is said, as the model has it: a trait, like hiding, so a
    *  cell can put it away for a clean picture and an export keeps it so. */
   function showAxes() {
-    const on = Boolean(model.get("axes"));
-    pressed(axesButton, on);
-    if (drawing()) api.setAxes(on);
+    const choice = axesChoice(model.get("axes"));
+    const { icon, says, next } = AXES[choice];
+    setIcon(axesButton, icon);
+    name(axesButton, `${says} — click for ${AXES[next].named}`);
+    pressed(axesButton, choice !== "none");
+    if (drawing()) api.setAxes(choice);
+  }
+
+  /** What floats over the view's bottom-right corner, where it is now, for
+   *  the renderer's view cube and scale bar to stand clear of: the editing
+   *  column, which reaches down there in a view under about 520px tall, and
+   *  the transport. Told again whenever either comes or goes, and when the
+   *  view is resized. */
+  function keepCorner() {
+    if (!drawing()) return;
+    api.keepClear(
+      [editBar, transport]
+        .filter((part) => !part.hidden)
+        .map((part) => part.getBoundingClientRect()),
+    );
   }
 
   /** The renderer answers with the projection now in force. */
@@ -1305,6 +1352,7 @@ function render({ model, el }) {
     const animated = frames() > 1;
     transport.hidden = !animated;
     el.classList.toggle("magpy-animated", animated);
+    keepCorner();
     scrub.max = String(Math.max(1, frames() - 1));
     scrub.value = String(shown);
     showStep();
@@ -1548,6 +1596,7 @@ function render({ model, el }) {
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
     if (!editable() && drawing()) api.setGizmoMode("none");
+    keepCorner(); // the column came, went, or changed its height
   }
 
   /** The pencil, where it can do something: a view with objects named to
@@ -2054,7 +2103,7 @@ function render({ model, el }) {
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
-    api.setAxes(Boolean(model.get("axes")));
+    api.setAxes(axesChoice(model.get("axes")));
     api.watchCamera(tellCamera);
     if (!framed) {
       // A pooled renderer comes with the last widget's projection and the
@@ -2067,6 +2116,9 @@ function render({ model, el }) {
     still?.remove(); // the canvas takes its place in the same frame
     still = null;
     api.render(view, payload, { keepCamera: framed });
+    // After the render, which hangs a pooled renderer in this view: asked
+    // before, it would measure against the view it came from.
+    keepCorner();
     // A saved view opens where it was looking when it was saved, and a woken
     // one where it was looking when it was put to rest. A live one has no
     // camera to start from, and frames the scene.

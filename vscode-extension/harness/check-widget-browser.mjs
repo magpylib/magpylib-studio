@@ -27,8 +27,8 @@
  * - a studio webview telling its host when a box that takes typing has the
  *   focus, for the undo keys to stand aside (`widget-pages/text-focus.html`);
  * - a saved page (`write_html`): its legend, the camera it was saved with,
- *   selecting and hiding from the legend, the picture tool, full screen, and
- *   a run that plays with no python behind it;
+ *   selecting and hiding from the legend, the picture tool, the view cube,
+ *   full screen, and a run that plays with no python behind it;
  * - what a selection is drawn with: a shape's edges, its path apart.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
@@ -1967,6 +1967,77 @@ async function savedView(port, base, out, expected) {
       return seen.size;`);
     return colours > 20 ? null : `the picture has ${colours} colours`;
   });
+
+  await check(
+    "the view cube turns the view, and stays out of the picture",
+    async () => {
+      await tab.hover(await tab.evaluate(centreOf(VIEW)));
+      await wait(300);
+      await tab.click(await tab.evaluate(centreOf(tool("Scale")))); // the box's next
+      try {
+        return await cubeTurnsTheView();
+      } finally {
+        // the cube's next is none, and none's the box the checks after expect
+        for (let i = 0; i < 2; i++) {
+          await tab.click(await tab.evaluate(centreOf(tool("Scale"))));
+        }
+      }
+    },
+  );
+
+  async function cubeTurnsTheView() {
+    // The middle of the cube's corner. The saved camera looks from -y and a
+    // little above, so what is there is the middle of the -y face.
+    const cube = await tab.evaluate(`
+      const box = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+      return { x: box.right - 8 - 42, y: box.bottom - 8 - 42 };`);
+    await tab.hover(cube);
+    await wait(200);
+    await tab.click(cube);
+    await wait(300);
+    const { position, target } = await tab.evaluate(
+      "return window.scene3d.cameraState()",
+    );
+    const looking = position.map((at, axis) => at - target[axis]);
+    const along = looking.map((part) => part / Math.hypot(...looking));
+    if (rounded(along) !== rounded([0, -1, 0])) {
+      return `the -y face looks along ${rounded(along)}`;
+    }
+    // In the picture the cube is not drawn, and the bar takes its corner:
+    // one colour, the background's, above the bar where the cube is on
+    // screen; more than one along the foot, where the bar is.
+    const seen = await tab.evaluate(`
+      const image = new Image();
+      image.src = window.scene3d.snapshot();
+      await image.decode();
+      const canvas = ${VIEW}.querySelector("canvas");
+      const scale = image.width / canvas.clientWidth;
+      const c = document.createElement("canvas");
+      c.width = image.width;
+      c.height = image.height;
+      const g = c.getContext("2d");
+      g.drawImage(image, 0, 0);
+      const colours = (left, top, width, height) => {
+        const data = g.getImageData(
+          left * scale, top * scale, width * scale, height * scale,
+        ).data;
+        const seen = new Set();
+        for (let i = 0; i < data.length; i += 4) {
+          seen.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+        }
+        return seen.size;
+      };
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      return {
+        cube: colours(w - 92, h - 92, 84, 54),
+        bar: colours(w - 144, h - 38, 136, 30),
+      };`);
+    if (seen.cube > 1) {
+      return `the picture shows the cube (${seen.cube} colours)`;
+    }
+    return seen.bar > 1 ? null : "the picture has no scale bar";
+  }
 
   await check("full screen takes the screen and gives it back", async () => {
     const inCell = await tab.evaluate(`return ${VIEW}.clientHeight`);

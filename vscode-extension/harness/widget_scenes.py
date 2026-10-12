@@ -332,7 +332,7 @@ def main(out):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the ring's magnets have no names
         small = SceneWidget(small_ring(), editable=True)
-    if small._camera is not None or not small.axes:
+    if small._camera is not None or small.axes != "box":
         raise SystemExit("small.html: a view never drawn, with its axes on")
     small.write_html(out / "small.html")
     span = max(high - low for low, high in small.payload["ranges"])
