@@ -66,7 +66,6 @@ import sys
 import textwrap
 import typing
 import warnings
-import weakref
 from contextvars import ContextVar
 
 import annotated_types
@@ -590,9 +589,10 @@ class _Assignments(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-#: What `_assignments` found, by code object, forgotten with it: a script
-#: run again is compiled again.
-_ASSIGNED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: Where `_assignments` keeps what it found, on the function itself: it goes
+#: with the function, and a script run again is a new one. Not by code
+#: object: two compare equal while one of them is being collected.
+_ASSIGNED = "_magpylib_studio_assignments"
 
 
 def keep_source(filename, text):
@@ -608,38 +608,34 @@ def _assignments(fn):
     each statement `_Assignments` finds. Nothing where the source cannot be
     read: then ids come from labels."""
     fn = inspect.unwrap(fn)
-    code = getattr(fn, "__code__", None)
-    if code is None:
-        return []
-    if code not in _ASSIGNED:
-        found = []
-        try:
-            lines, first = inspect.getsourcelines(fn)
-            tree = ast.parse(textwrap.dedent("".join(lines)))
-        except (OSError, TypeError, SyntaxError):
-            tree = None
-        node = tree and next(
-            (
-                n
-                for n in tree.body
-                if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-            ),
-            None,
-        )
-        if node is not None:
-            seen = _Assignments()
-            for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
-                seen.bound[arg.arg] += 1
-            for statement in node.body:
-                seen.visit(statement)
-            offset = first - 1
-            found = [
-                (start + offset, end + offset, name, callee, calls)
-                for start, end, name, callee, calls in seen.found
-                if seen.bound[name] == 1 and not name.startswith("_")
-            ]
-        _ASSIGNED[code] = found
-    return _ASSIGNED[code]
+    kept = getattr(fn, "__dict__", {}).get(_ASSIGNED)
+    if kept is not None:
+        return kept
+    found = []
+    try:
+        lines, first = inspect.getsourcelines(fn)
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError):
+        tree = None
+    node = tree and next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)),
+        None,
+    )
+    if node is not None:
+        seen = _Assignments()
+        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+            seen.bound[arg.arg] += 1
+        for statement in node.body:
+            seen.visit(statement)
+        offset = first - 1
+        found = [
+            (start + offset, end + offset, name, callee, calls)
+            for start, end, name, callee, calls in seen.found
+            if seen.bound[name] == 1 and not name.startswith("_")
+        ]
+    with contextlib.suppress(AttributeError, TypeError):
+        fn.__dict__[_ASSIGNED] = found
+    return found
 
 
 class _Recorder:
