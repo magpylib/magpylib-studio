@@ -2721,12 +2721,13 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /** Whether any scene is open in a tab, for the title bar's Close All. */
-  const showScenesOpen = () =>
-    void vscode.commands.executeCommand(
-      'setContext',
-      'magpylib-studio.scenesOpen',
-      sceneRoots().length > 0,
-    );
+  const showScenesOpen = () => {
+    const count = sceneRoots().length;
+    void vscode.commands.executeCommand('setContext', 'magpylib-studio.scenesOpen', count > 0);
+    // Open Scenes is shown for two or more, as Source Control lists
+    // repositories only when there are several: one scene is Objects alone
+    void vscode.commands.executeCommand('setContext', 'magpylib-studio.severalScenes', count > 1);
+  };
 
   /** Open a scene's tab where it is, the focus left in the side bar. */
   const loadSceneTab = (root: SceneRoot) =>
@@ -5633,18 +5634,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     /** A saved scene's file, from its row: VS Code's own commands, given
      *  the file rather than the row. */
-    registerCommand('magpylib-studio.revealSceneInExplorer', (root?: SceneRoot) =>
-      root ? vscode.commands.executeCommand('revealInExplorer', root.uri) : undefined,
-    ),
-    registerCommand('magpylib-studio.revealSceneInOS', (root?: SceneRoot) =>
-      root ? vscode.commands.executeCommand('revealFileInOS', root.uri) : undefined,
-    ),
-    registerCommand('magpylib-studio.revealSceneInFileManager', (root?: SceneRoot) =>
-      root ? vscode.commands.executeCommand('revealFileInOS', root.uri) : undefined,
-    ),
+    // From Objects' title bar, with one scene open, there is no row: the
+    // scene in front.
+    registerCommand('magpylib-studio.revealSceneInExplorer', (root?: SceneRoot) => {
+      const uri = root?.uri ?? actingScene()?.uri;
+      return uri ? vscode.commands.executeCommand('revealInExplorer', uri) : undefined;
+    }),
+    registerCommand('magpylib-studio.revealSceneInOS', (root?: SceneRoot) => {
+      const uri = root?.uri ?? actingScene()?.uri;
+      return uri ? vscode.commands.executeCommand('revealFileInOS', uri) : undefined;
+    }),
+    registerCommand('magpylib-studio.revealSceneInFileManager', (root?: SceneRoot) => {
+      const uri = root?.uri ?? actingScene()?.uri;
+      return uri ? vscode.commands.executeCommand('revealFileInOS', uri) : undefined;
+    }),
     registerCommand('magpylib-studio.copyScenePath', async (root?: SceneRoot) => {
-      if (root) {
-        await vscode.env.clipboard.writeText(root.uri.fsPath);
+      const uri = root?.uri ?? actingScene()?.uri;
+      if (uri) {
+        await vscode.env.clipboard.writeText(uri.fsPath);
       }
     }),
     /** A scene's row: its tab shown, the focus left in the side bar. */
