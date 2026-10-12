@@ -30,12 +30,13 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   scene opens, a list of them, one line each, shows above, as Source Control's
   Repositories do (shown or hidden from then on in the side bar's views menu):
   the objects shown are those of the one picked (Cmd-click picks several, each
-  under its own heading), one icon per type (magnets red, currents blue, sensors green).
-  Clicking an object opens the plot and loads it in the Inspector. With no scene
-  open the view offers **New Scene**, **Open Scene…** and **Load Example
-  Scene…**, which picks between six — a Halbach stack, a solenoid, a mirrored
-  pair, a magnet array, a parametric measuring plane and a turning magnet with
-  field arrows, each built from a couple of steps rather than a heap of objects.
+  under its own heading), one icon per type (magnets red, currents blue, sensors
+  green). Clicking an object opens the plot and loads it in the Inspector. With
+  no scene open the view offers **New Scene**, **Open Scene…** and **Load
+  Example Scene…**, which picks between six — a Halbach stack, a solenoid, a
+  mirrored pair, a magnet array, a parametric measuring plane and a turning
+  magnet with field arrows, each built from a couple of steps rather than a heap
+  of objects.
 - **The construction history is in that tree**, under the object it happened to:
   expand a magnet and you get _created_, _orbit 36° about z_, and so on, before
   whatever it contains. Steps are named for what they did; the call that did it

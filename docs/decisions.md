@@ -872,13 +872,13 @@ set of real scripts there is.
   object moves its create inside the group, as if made there; on one with steps
   it is a reparent, with a warning. `obj.parent = group` is a reparent outright,
   keeping the pose, as the tree's drag does. Arguments are kept in the order
-  written. An id is the variable the object is assigned to, where that name
-  held no other object while the function ran -- read off the running
-  function's frame, never parsed from its source; else the label, else the
-  class, settled once the function has returned. `name(obj, id)` still says
-  one outright, and the writer emits it only where the name it writes cannot
-  be the id -- since 2026-10-12; before, ids came from labels and every
-  built-in example's script named each object by hand.
+  written. An id is the variable the object is assigned to, where that name held
+  no other object while the function ran -- read off the running function's
+  frame, never parsed from its source; else the label, else the class, settled
+  once the function has returned. `name(obj, id)` still says one outright, and
+  the writer emits it only where the name it writes cannot be the id -- since
+  2026-10-12; before, ids came from labels and every built-in example's script
+  named each object by hand.
 - **Style is read between calls**, as magpylib keeps what an object was given
   before its style is ever made, and written as edits by dotted path; the
   recorder never creates a style, since `copy()` labels a copy differently once
@@ -912,10 +912,9 @@ set of real scripts there is.
   kept): unlike `name()`, it says what Python cannot -- that the formula is a
   variable of the scene, listed in the panel and named in every formula that
   uses it, and its unit. Without it, `stagger / 2` would carry the formula's
-  text, already pasted in by the time anything records it, and the unit would
-  be a guess from the first use. Its double name is the `x = Symbol('x')`
-  idiom. It stands with the pattern words, which also say what plain magpylib
-  cannot.
+  text, already pasted in by the time anything records it, and the unit would be
+  a guess from the first use. Its double name is the `x = Symbol('x')` idiom. It
+  stands with the pattern words, which also say what plain magpylib cannot.
 
 ### Measured
 

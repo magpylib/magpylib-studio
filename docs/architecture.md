@@ -377,25 +377,25 @@ until a second scene opens and then the person's to show or hide from the views
 menu (a line per open scene, its file's commands on it -- Save, Close, Save As,
 Revert, Export, Reveal; picking one, or several with Cmd-click, picks what
 Objects shows; while it is hidden those commands are in Objects' title bar
-instead), Objects (the scenes picked, each under its own heading, or one's objects
-at the top, nested as grouped with each object's steps under them; drag and drop
-to reparent within a scene and to copy into another, rename, copy, cut, paste --
-across scenes a copy, a Cut moving it, one undo where it landed putting it back
-in both -- delete, hide), the
-Inspector (a webview whose widgets are built from the style schema; properties
-and pose take expressions, shown in the scene's units), the Variables view (a
-webview, because a tree row cannot hold a slider: the package's `variables.mjs`,
-the widget's own panel, with its calls routed through the extension host, and
-the variants kept, renamed and deleted from its title bar; the Inspector is
-`inspector.mjs` the same way, in full), the Undo view, and the Field panel on
-demand, which belongs to the scene it was opened for. Each scene has its script
-tab: a real file in extension storage, named after the scene in a folder keyed
-by where the scene is, holding `to_builder_script()`, regenerated on every edit
-unless it is dirty or holds refused text, applied to its own scene on a
-deliberate save. Only `broadcastMutation()` marks a scene unsaved, redrawing
-does not. Cmd/Ctrl+Z in a box of a webview undoes the typing: the webviews say
-when a box has the focus (`magpylib-studio.textFocus`), and in a scene's tab,
-which VS Code's own undo never reaches, the host asks the page to undo it.
+instead), Objects (the scenes picked, each under its own heading, or one's
+objects at the top, nested as grouped with each object's steps under them; drag
+and drop to reparent within a scene and to copy into another, rename, copy, cut,
+paste -- across scenes a copy, a Cut moving it, one undo where it landed putting
+it back in both -- delete, hide), the Inspector (a webview whose widgets are
+built from the style schema; properties and pose take expressions, shown in the
+scene's units), the Variables view (a webview, because a tree row cannot hold a
+slider: the package's `variables.mjs`, the widget's own panel, with its calls
+routed through the extension host, and the variants kept, renamed and deleted
+from its title bar; the Inspector is `inspector.mjs` the same way, in full), the
+Undo view, and the Field panel on demand, which belongs to the scene it was
+opened for. Each scene has its script tab: a real file in extension storage,
+named after the scene in a folder keyed by where the scene is, holding
+`to_builder_script()`, regenerated on every edit unless it is dirty or holds
+refused text, applied to its own scene on a deliberate save. Only
+`broadcastMutation()` marks a scene unsaved, redrawing does not. Cmd/Ctrl+Z in a
+box of a webview undoes the typing: the webviews say when a box has the focus
+(`magpylib-studio.textFocus`), and in a scene's tab, which VS Code's own undo
+never reaches, the host asks the page to undo it.
 
 Webview JavaScript lives in `media/*.js|mjs` under a nonce CSP, never inside
 TypeScript template literals; `harness/` checks that, the message contract, the
