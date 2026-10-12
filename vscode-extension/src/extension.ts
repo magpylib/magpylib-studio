@@ -2984,10 +2984,6 @@ export function activate(context: vscode.ExtensionContext): void {
         ok: boolean;
         error?: string;
       };
-      if (process.env.MAGPYLIB_STUDIO_TRACE_FRONT) {
-        // eslint-disable-next-line no-console -- TEMPORARY
-        console.log(`[front] ${method} in ${actingScene()?.name}: ${JSON.stringify(result)}`);
-      }
       if (result.ok) {
         broadcastMutation();
       } else {
@@ -7051,14 +7047,6 @@ export function showScenesForTest(docs: SceneDocument[]): void {
 /** Open Scenes, for the integration tests to read its rows. */
 export function openScenesForTest(): OpenScenesProvider {
   return openScenesList!;
-}
-
-/** TEMPORARY: the front scene's undo history, for a race CI hits. */
-export async function historyForTest(): Promise<unknown> {
-  const doc = frontScene();
-  return doc && activeContext
-    ? engineFor(activeContext, doc).request('get_history')
-    : undefined;
 }
 
 /** Whether Open Scenes is showing, for the integration tests. */
