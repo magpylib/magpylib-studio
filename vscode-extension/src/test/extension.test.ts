@@ -1246,8 +1246,10 @@ suite('magpylib-studio', () => {
 
     // Undo is each scene's own: in the halbach it finds nothing of the
     // coil's to take back, and in the coil it takes back the coil's edit.
+    console.log('[front] the test: undo in the halbach, now');
     await vscode.commands.executeCommand('magpylib-studio.undo');
     await pause(300);
+    console.log(`[front] the test: after the undo, ${frontScene()?.name} is in front`);
     assert.ok(
       ids((await scene()).objects).has('halbach'),
       'an undo in the halbach changed the halbach',

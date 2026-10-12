@@ -24,6 +24,7 @@ export default defineConfig({
   files: "out/test/**/*.test.js",
   workspaceFolder: "..",
   launchArgs: ["--user-data-dir", userDataDir],
+  env: { MAGPYLIB_STUDIO_TRACE_FRONT: "1" }, // TEMPORARY: see scenes.ts
   mocha: {
     ui: "tdd",
     timeout: 60000, // the engine spawns Python; the first run downloads VS Code

@@ -163,6 +163,12 @@ export function bringToFront(doc: SceneDocument): void {
   if (at <= 0) {
     return;
   }
+  if (process.env.MAGPYLIB_STUDIO_TRACE_FRONT) {
+    // TEMPORARY: which call put which scene in front, for a race CI hits
+    const from = (new Error().stack ?? '').split('\n').slice(2, 7).map((l) => l.trim());
+    // eslint-disable-next-line no-console -- TEMPORARY
+    console.log(`[front] ${doc.name} <- ${from.join(' | ')}`);
+  }
   open.splice(at, 1);
   open.unshift(doc);
   frontChanged.fire(doc);
