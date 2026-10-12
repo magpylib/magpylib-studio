@@ -1472,6 +1472,14 @@ async function installEngineNow(): Promise<void> {
             [...pythonPrefixArgs, '-m', 'venv', venvDir],
             60000,
           );
+          if (venvResult.error?.includes('ENOENT')) {
+            // nothing to run: no Python at all, as on a new machine
+            throw new Error(
+              `no Python found. Install Python ${PYTHON_FLOOR} or newer ` +
+                `(${pythonInstallTip()}) and try again — or install uv ` +
+                '(astral.sh/uv), which this button will use automatically.',
+            );
+          }
           if (!venvResult.ok) {
             throw new Error(
               venvResult.stderr.trim() ||

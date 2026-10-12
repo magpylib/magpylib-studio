@@ -192,6 +192,8 @@ bar for paths. Chart mode and Animate sit beneath the view. Hiding objects (H,
 ### Fixed
 
 - Cmd/Ctrl+Z in a text box undoes the typing, not the scene.
+- Install the Engine on a machine with no Python says to install one, instead
+  of "spawn python3 ENOENT".
 - A box's values are split at commas, so `0, 0, gap * 2` is accepted.
 - A copy of an object in a turned group stands where the object stands.
 - Removing an object and adding another with the same id no longer mixes them
