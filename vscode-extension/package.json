@@ -1198,6 +1198,7 @@
     "copy:widget": "node harness/copy-widget.js",
     "check:widget-browser": "node harness/check-widget-browser.mjs",
     "check:window": "node harness/check-window-life.mjs",
+    "screenshot": "node harness/screenshot.mjs",
     "check:version": "node harness/check-version.js",
     "inspect": "node harness/webview-harness.js inspector",
     "test": "vscode-test",

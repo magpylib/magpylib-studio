@@ -1,0 +1,14 @@
+{
+  "name": "screenshot-driver",
+  "displayName": "Magpylib Studio screenshot driver",
+  "description": "Sets up the window for harness/screenshot.mjs. Not shipped.",
+  "publisher": "magpylib",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./driver.js"
+}

@@ -105,6 +105,12 @@ scene tab and eight take in memory. It opens windows on the screen for two or
 three minutes, and leaves its profiles in a `mwc-…` folder in the system temp
 folder.
 
+**The README's screenshot**, after a change that shows in it:
+`npm run screenshot` (macOS, after `npm run compile`) opens the Halbach example
+in a VS Code of its own and writes `docs/halbach.png`, which both READMEs show.
+VS Code renders its own window, so it needs no screen-recording permission; it
+takes about a minute.
+
 **By hand, the scenes**, after a change to the tabs, the side bar or the undo
 keys -- the two the script cannot do:
 
