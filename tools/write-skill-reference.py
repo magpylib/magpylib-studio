@@ -113,7 +113,7 @@ def reference():
         "allow-list's own names, and all a scene can hold. Over a variable,\n"
         f"numpy's {numpy} write these expressions, as does arithmetic, and\n"
         "the builtins `abs` and `round`; any other numpy function refuses. The\n"
-        "constants as handles are `from magpylib_studio.recording import pi, tau, e`.\n",
+        "constants as handles are `from magpylib_studio import pi, tau, e`.\n",
         "## The session\n",
         "`fn.build().session` is the scene's `MagpylibStudioSession`;\n"
         "`MagpylibStudioSession()` is an empty one, to open a saved scene into.\n"

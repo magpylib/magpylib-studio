@@ -694,7 +694,7 @@ def test_an_expressions_functions_and_constants_are_written_as_numpys_and_the_sc
     )["ok"]
     script = session.to_builder_script()
     assert "w = derived('w', np.sin(pi / 4) * r)" in script
-    assert "from magpylib_studio.recording import pi" in script
+    assert "from magpylib_studio import derived, pi, scene" in script
     assert same_document(rebuilt(session).to_dict(), session.to_dict())
 
 

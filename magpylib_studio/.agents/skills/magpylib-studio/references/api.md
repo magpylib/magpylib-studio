@@ -185,7 +185,7 @@ sphere, 2/2 a diamond; `around` and `across` how many samples.
 allow-list's own names, and all a scene can hold. Over a variable,
 numpy's `np.sin`, `np.cos`, `np.tan`, `np.arcsin`, `np.arccos`, `np.arctan`, `np.arctan2`, `np.sqrt`, `np.exp`, `np.log`, `np.hypot`, `np.radians`, `np.deg2rad`, `np.degrees`, `np.rad2deg`, `np.absolute`, `np.minimum`, `np.maximum` write these expressions, as does arithmetic, and
 the builtins `abs` and `round`; any other numpy function refuses. The
-constants as handles are `from magpylib_studio.recording import pi, tau, e`.
+constants as handles are `from magpylib_studio import pi, tau, e`.
 
 ## The session
 

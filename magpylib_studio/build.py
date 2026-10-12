@@ -1100,15 +1100,9 @@ class _ScriptWriter:
         lines.append(self._import("magpylib", "magpy"))
         words = ", ".join(
             word if self.alias[word] == word else f"{word} as {self.alias[word]}"
-            for word in sorted(self.words)
+            for word in sorted(self.words | self.constants)
         )
         lines.append(f"from magpylib_studio import {words}")
-        if self.constants:
-            constants = ", ".join(
-                name if self.alias[name] == name else f"{name} as {self.alias[name]}"
-                for name in sorted(self.constants)
-            )
-            lines.append(f"from magpylib_studio.recording import {constants}")
         return lines
 
     def _import(self, module, word):
@@ -1325,8 +1319,15 @@ class _ScriptWriter:
         else:
             call = f"{self.alias['magpy']}.{kind}"
         parts += [(key, self.value(value, table=True)) for key, value in params.items()]
-        if style:
-            parts.append(("style", repr(_nested(style))))
+        # magpylib's own spelling, `style_label="Ring"`, where a path has no
+        # underscore of its own to be read wrong; the rest as `style={...}`
+        spelt = {path: v for path, v in style.items() if "_" not in path}
+        parts += [
+            (f"style_{path.replace('.', '_')}", repr(v)) for path, v in spelt.items()
+        ]
+        nested = {path: v for path, v in style.items() if path not in spelt}
+        if nested:
+            parts.append(("style", repr(_nested(nested))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
         # The id the recorder gives it: the name it is assigned to, unless an
         # object before it has that id, then its label or its class. Where the
