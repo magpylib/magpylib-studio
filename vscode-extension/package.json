@@ -328,6 +328,26 @@
         "category": "Magpylib Studio"
       },
       {
+        "command": "magpylib-studio.saveVariant",
+        "title": "Save as Variant...",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.saveOverVariant",
+        "title": "Save Over the Variant in Use",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.renameVariant",
+        "title": "Rename Variant...",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.removeVariant",
+        "title": "Delete Variant...",
+        "category": "Magpylib Studio"
+      },
+      {
         "command": "magpylib-studio.setVariableBounds",
         "title": "Variable Properties..."
       },
@@ -460,8 +480,12 @@
     "views": {
       "magpylib-studio": [
         {
+          "id": "magpylib-studio.openScenesView",
+          "name": "Open Scenes"
+        },
+        {
           "id": "magpylib-studio.sceneView",
-          "name": "Scenes",
+          "name": "Objects",
           "contextualTitle": "magpylib Scene"
         },
         {
@@ -497,8 +521,13 @@
         "contents": "Scripts you run in this window draw with their own backend. The studio can take them instead, so a plain `magpy.show()` opens a panel here.\n[Draw Scripts in a Panel](command:magpylib-studio.toggleDrawScriptsHere)"
       },
       {
-        "view": "magpylib-studio.sceneView",
+        "view": "magpylib-studio.openScenesView",
         "contents": "No scene is open.\n[New Scene](command:magpylib-studio.newScene)\nAn empty scene, in a tab of its own.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA finished scene to drag, measure and take apart.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY, in a new scene."
+      },
+      {
+        "view": "magpylib-studio.sceneView",
+        "when": "!magpylib-studio.scenesOpen",
+        "contents": "The objects of the scenes picked in Open Scenes show here."
       }
     ],
     "walkthroughs": [
@@ -627,34 +656,79 @@
           "group": "navigation@3"
         },
         {
+          "command": "magpylib-studio.saveVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@1"
+        },
+        {
+          "command": "magpylib-studio.saveOverVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@2"
+        },
+        {
+          "command": "magpylib-studio.renameVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@3"
+        },
+        {
+          "command": "magpylib-studio.removeVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@4"
+        },
+        {
           "command": "magpylib-studio.newScene",
-          "when": "view == magpylib-studio.sceneView",
+          "when": "view == magpylib-studio.openScenesView",
           "group": "navigation@0"
         },
         {
           "command": "magpylib-studio.loadScene",
-          "when": "view == magpylib-studio.sceneView",
+          "when": "view == magpylib-studio.openScenesView",
           "group": "navigation@1"
         },
         {
+          "command": "magpylib-studio.closeAllScenes",
+          "when": "view == magpylib-studio.openScenesView && magpylib-studio.scenesOpen",
+          "group": "navigation@2"
+        },
+        {
           "command": "magpylib-studio.loadExample",
-          "when": "view == magpylib-studio.sceneView",
+          "when": "view == magpylib-studio.openScenesView",
           "group": "1_open@1"
         },
         {
           "command": "magpylib-studio.importScript",
-          "when": "view == magpylib-studio.sceneView",
+          "when": "view == magpylib-studio.openScenesView",
           "group": "1_open@2"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@0"
+        },
+        {
+          "command": "magpylib-studio.viewScript",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "magpylib-studio.openFieldView",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "magpylib-studio.pasteObject",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.canPaste",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "magpylib-studio.newCollection",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "1_edit@2"
         },
         {
           "command": "magpylib-studio.refreshScene",
           "when": "view == magpylib-studio.sceneView",
           "group": "2_view@1"
-        },
-        {
-          "command": "magpylib-studio.closeAllScenes",
-          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
-          "group": "navigation@2"
         }
       ],
       "explorer/context": [
@@ -681,99 +755,109 @@
       ],
       "view/item/context": [
         {
+          "command": "magpylib-studio.saveScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow.*Unsaved/",
+          "group": "inline@1"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "inline@2"
+        },
+        {
+          "command": "magpylib-studio.saveScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "1_file@1"
+        },
+        {
+          "command": "magpylib-studio.saveSceneAs",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "1_file@2"
+        },
+        {
+          "command": "magpylib-studio.revertScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "1_file@3"
+        },
+        {
+          "command": "magpylib-studio.exportScript",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "2_export@1"
+        },
+        {
+          "command": "magpylib-studio.exportBuilderScript",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "2_export@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInExplorer",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "3_reveal@1"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInOS",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/ && isMac",
+          "group": "3_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInFileManager",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/ && !isMac",
+          "group": "3_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.copyScenePath",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "3_reveal@3"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "4_close@1"
+        },
+        {
+          "command": "magpylib-studio.rollbackClear",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead.*RolledBack/",
+          "group": "inline@0"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "inline@1"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "0_add@1"
+        },
+        {
+          "command": "magpylib-studio.newCollection",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "0_add@2"
+        },
+        {
+          "command": "magpylib-studio.pasteObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/ && magpylib-studio.canPaste",
+          "group": "0_add@3"
+        },
+        {
+          "command": "magpylib-studio.viewScript",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "1_views@1"
+        },
+        {
+          "command": "magpylib-studio.openFieldView",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "1_views@2"
+        },
+        {
           "command": "magpylib-studio.rollbackClear",
           "when": "view == magpylib-studio.sceneView && viewItem =~ /RolledBack/",
           "group": "inline@0"
         },
         {
-          "command": "magpylib-studio.addObject",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "inline@1"
-        },
-        {
           "command": "magpylib-studio.saveScene",
           "when": "view == magpylib-studio.sceneView && viewItem =~ /Unsaved/",
           "group": "inline@2"
-        },
-        {
-          "command": "magpylib-studio.closeScene",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "inline@3"
-        },
-        {
-          "command": "magpylib-studio.addObject",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "0_add@1"
-        },
-        {
-          "command": "magpylib-studio.newCollection",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "0_add@2"
-        },
-        {
-          "command": "magpylib-studio.viewScript",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "1_views@1"
-        },
-        {
-          "command": "magpylib-studio.openFieldView",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "1_views@2"
-        },
-        {
-          "command": "magpylib-studio.saveScene",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "2_file@1"
-        },
-        {
-          "command": "magpylib-studio.saveSceneAs",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "2_file@2"
-        },
-        {
-          "command": "magpylib-studio.revertScene",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRowFile/",
-          "group": "2_file@3"
-        },
-        {
-          "command": "magpylib-studio.exportScript",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "3_export@1"
-        },
-        {
-          "command": "magpylib-studio.exportBuilderScript",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "3_export@2"
-        },
-        {
-          "command": "magpylib-studio.pasteObject",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/ && magpylib-studio.canPaste",
-          "group": "0_add@3"
-        },
-        {
-          "command": "magpylib-studio.revealSceneInExplorer",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRowFile/",
-          "group": "4_reveal@1"
-        },
-        {
-          "command": "magpylib-studio.revealSceneInOS",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRowFile/ && isMac",
-          "group": "4_reveal@2"
-        },
-        {
-          "command": "magpylib-studio.revealSceneInFileManager",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRowFile/ && !isMac",
-          "group": "4_reveal@2"
-        },
-        {
-          "command": "magpylib-studio.copyScenePath",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRowFile/",
-          "group": "4_reveal@3"
-        },
-        {
-          "command": "magpylib-studio.closeScene",
-          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneRow/",
-          "group": "5_close@1"
         },
         {
           "command": "magpylib-studio.toggleVisibility",

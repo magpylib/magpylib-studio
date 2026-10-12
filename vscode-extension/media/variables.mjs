@@ -17,6 +17,9 @@ watchTextFocus((focused) =>
 );
 let nextReqId = 1;
 const pending = new Map();
+/** The scene the view is drawn for, named in every request: a value
+ *  committed as another scene comes in front still lands in this one. */
+let scene = null;
 
 function rpc(method, params = {}, { preview = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -24,6 +27,7 @@ function rpc(method, params = {}, { preview = false } = {}) {
     pending.set(reqId, { resolve, reject });
     vscodeApi.postMessage({
       type: "rpcRequest",
+      scene,
       reqId,
       method,
       params,
@@ -37,9 +41,9 @@ const panel = createVariables(document.getElementById("panel"), {
   rpc,
   actions: {
     edit: (name) =>
-      vscodeApi.postMessage({ type: "action", action: "edit", name }),
+      vscodeApi.postMessage({ type: "action", action: "edit", name, scene }),
     remove: (name) =>
-      vscodeApi.postMessage({ type: "action", action: "remove", name }),
+      vscodeApi.postMessage({ type: "action", action: "remove", name, scene }),
   },
   empty:
     "No variables yet. A named number any position, dimension or angle can " +
@@ -58,6 +62,8 @@ window.addEventListener("message", (event) => {
     panel.refresh();
   } else if (message.type === "help") {
     panel.help();
+  } else if (message.type === "scene") {
+    scene = message.key;
   } else if (message.type === "typing") {
     // the box's own undo: textFocus.mjs runs it
   } else {

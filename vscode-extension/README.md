@@ -17,21 +17,23 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
 
 ## What it provides
 
-- **Command** `Magpylib Studio: Open Scene View` — the "Magpylib Scene" tab: a
-  live three.js scene you can work in. Click an object to select it, ⌘-click to
-  add to the selection, and drag the handles to move (W), turn (E), resize (R)
-  or aim a polarization (P) — along world or object axes, snapping to round
-  steps with S. Paths play, with a scrubber. Every drag is one step in the
-  history and one undo, and the field follows as you go. A **Chart** button
-  swaps in the Plotly figure, which is read only and has its own animation.
-- **Scene view** — the magpylib-logo icon in the activity bar opens a sidebar
-  tree of the scene's objects, nested as they are grouped, one icon per type
-  (magnets red, currents blue, sensors green). Clicking an object opens the plot
-  and loads it in the Inspector. The scene starts **empty**: the view offers
-  **Load Example Scene…**, which picks between six — a Halbach stack, a
-  solenoid, a mirrored pair, a magnet array, a parametric measuring plane and a
-  turning magnet with field arrows, each built from a couple of steps rather
-  than a heap of objects.
+- **A tab per scene** — a `.magpy.json` opens in the studio, a live three.js
+  scene you can work in; several open side by side, each with its own undo,
+  saved with VS Code's own Save. Click an object to select it, ⌘-click to add to
+  the selection, and drag the handles to move (W), turn (E), resize (R) or aim a
+  polarization (P) — along world or object axes, snapping to round steps with S.
+  Paths play, with a scrubber. Every drag is one step in the history and one
+  undo, and the field follows as you go. A **Chart** button swaps in the Plotly
+  figure, which is read only and has its own animation.
+- **Open Scenes and Objects** — the magpylib-logo icon in the activity bar opens
+  a list of the open scenes, one line each, and below it the objects of the one
+  picked (Cmd-click picks several, each under its own heading), nested as they
+  are grouped, one icon per type (magnets red, currents blue, sensors green).
+  Clicking an object opens the plot and loads it in the Inspector. With no scene
+  open the view offers **New Scene**, **Open Scene…** and **Load Example
+  Scene…**, which picks between six — a Halbach stack, a solenoid, a mirrored
+  pair, a magnet array, a parametric measuring plane and a turning magnet with
+  field arrows, each built from a couple of steps rather than a heap of objects.
 - **The construction history is in that tree**, under the object it happened to:
   expand a magnet and you get _created_, _orbit 36° about z_, and so on, before
   whatever it contains. Steps are named for what they did; the call that did it

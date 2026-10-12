@@ -194,3 +194,12 @@ def test_a_replaced_scene_is_one_undo_away():
     assert [o["id"] for o in answers[2]["result"]] == ["b"]
     assert answers[3]["result"]["ok"]
     assert [o["id"] for o in answers[4]["result"]] == ["a"]
+
+
+def test_a_replacement_is_named_in_the_history():
+    """The file changed on disk comes in as a step that says so."""
+    session = MagpylibStudioSession()
+    other = MagpylibStudioSession()
+    other.add_object(**cube("b"))
+    assert session.replace_scene(other.to_dict(), label="changed on disk")["ok"]
+    assert session.get_history()["entries"][-1]["label"] == "changed on disk"

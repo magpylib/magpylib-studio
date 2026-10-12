@@ -188,14 +188,43 @@ All notable changes to the Magpylib Studio extension.
   turns the whole collection as one edit to it, rather than one to each object
   in it.
 
+- **Several scenes at once.** A `.magpy.json` opens in a tab of its own, and
+  several sit side by side, each with its own undo, its own unsaved dot and its
+  own script tab; New Scene, Load Example and Import Script open a new tab
+  rather than replacing the scene open. In the side bar, as Source Control lists
+  repositories and their changes, **Open Scenes** lists the open scenes one line
+  each -- Save, Close, Save As, Revert, Export, Reveal on its line, New Scene,
+  Open Scene and Close All Scenes above -- and **Objects** shows the objects of
+  the scene picked there, or of several picked with Cmd-click, each under its
+  own heading; the Variables, Inspector and Undo views show the scene in front
+  and name it. A command acts on the scene it started in, however long it asks,
+  and a value typed in a side view lands in the scene it was typed for.
+- **A scene's file is watched.** A change made elsewhere -- git, another editor,
+  an agent -- comes into its tab as one undo step, unsaved changes or not; a
+  file that does not read is not loaded, and the save asks before writing over
+  it. A rename or a move in the Explorer keeps the scene's unsaved changes and
+  undo.
+- **After a crash.** Unsaved changes VS Code did not bring back after a crash of
+  its own are offered back from a copy the studio keeps of each scene. An engine
+  that dies gives every scene back as it was a second after its last edit, one
+  at a time; a scene whose restore stops the engine again is kept out, shown
+  empty and never saved over.
+- **Variants from the side bar**: Save as Variant, Save Over the Variant in Use,
+  Rename and Delete, in the Variables view's menu.
 - **One engine, several scenes.** The engine serves a session per scene, each
   under a name the host gives it (`open_session`, `close_session`), and says
   what it speaks (`version`, protocol 2). A request that names no session still
-  goes to the one scene a host drives, as before. The extension does not use
-  names yet.
+  goes to the one scene a host drives, as before. `replace_scene` replaces a
+  scene as one step to undo.
 
 ### Changed
 
+- **VS Code 1.109 or later.** Before it, Save As and an untitled scene's first
+  save left the old tab marked unsaved.
+- **A scene is VS Code's own document.** Save, Save As and Revert are VS Code's,
+  and so is the question on closing a tab with unsaved changes. An example opens
+  unsaved, so that it is backed up and asked about. The one scene an older
+  version remembered opens once as a tab; its 3D panel closes.
 - **Opening a scene starts the undo history.** A file, a script or an example
   loaded is where the scene begins, not an edit of what was open, so the first
   undo after it takes back the first edit and never the whole scene. The script

@@ -41,6 +41,19 @@ export class SceneDocument implements vscode.CustomDocument {
   selected: string | undefined;
   /** Its history is rolled back: the scene shows an earlier step. */
   rolledBack = false;
+  /** The file's text as this tab last read or wrote it: a change on disk is
+   *  any other text, and a write of this tab's own is not one. */
+  diskText: string | undefined;
+  /** What is wrong between the scene and its file, said on its row: changed
+   *  on disk and not loaded, or deleted. */
+  diskNote: string | undefined;
+  /** Watches the file for changes made elsewhere. */
+  watcher: vscode.Disposable | undefined;
+  /** Putting it back into a restarted engine stopped that engine too: it is
+   *  kept out, shown empty and never saved, until Try Again. */
+  lost = false;
+  /** Its script tab: the scene as a function, applied on a deliberate save. */
+  readonly script: ScriptTabState = { held: false };
   /** Names this scene's recovery copy, kept apart from its session's name,
    *  which changes when an engine restarts. */
   readonly key = newSessionName();
@@ -82,6 +95,25 @@ export class SceneDocument implements vscode.CustomDocument {
 }
 
 let opened = 0;
+
+/** What a scene's script tab knows of itself. */
+export interface ScriptTabState {
+  /** What was last written into the file: the scene changes far more often
+   *  than its script does, and rewriting it on every edit would reload the
+   *  editor under the person for nothing. */
+  onDisk?: string;
+  /** The tab holds text the scene has not taken: the engine refused it, or
+   *  auto-save wrote it before anyone asked for it to run. Saved, so not
+   *  dirty, but no more the scene's than unsaved text is, and not to be
+   *  written over. */
+  held: boolean;
+  /** The script last rendered into the tab: what the text being edited there
+   *  started from. A scene that has moved on since would be undone by
+   *  applying the tab, so a save asks. */
+  rendered?: string;
+  /** Why the tab was last saved: only a deliberate save applies. */
+  saveReason?: vscode.TextDocumentSaveReason;
+}
 
 /** The open scenes, the one in front first and the rest by when they were
  *  last in front. */

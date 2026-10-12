@@ -17,12 +17,15 @@ watchTextFocus((focused) =>
 );
 let nextReqId = 1;
 const pending = new Map();
+/** The scene the view is drawn for, named in every request: a value
+ *  committed as another scene comes in front still lands in this one. */
+let scene = null;
 
 function rpc(method, params = {}) {
   return new Promise((resolve, reject) => {
     const reqId = nextReqId++;
     pending.set(reqId, { resolve, reject });
-    vscodeApi.postMessage({ type: "rpcRequest", reqId, method, params });
+    vscodeApi.postMessage({ type: "rpcRequest", scene, reqId, method, params });
   });
 }
 
@@ -46,6 +49,8 @@ window.addEventListener("message", (event) => {
     panel.showStep(message.eventId);
   } else if (message.type === "refresh") {
     panel.refresh();
+  } else if (message.type === "scene") {
+    scene = message.key;
   } else if (message.type === "typing") {
     // the box's own undo: textFocus.mjs runs it
   } else {

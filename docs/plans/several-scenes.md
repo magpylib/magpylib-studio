@@ -365,11 +365,12 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    `{engine, session}` through the extension's forty-odd call sites and the side
    bar's views, each drawn for one session. Still one scene, the suite green,
    and nothing moved that step 3 deletes.
-3. **Tabs, the tree of every open scene, and crash safety, as one release** (5–7
-   days): the custom editor, its document as the per-scene object, the scene in
-   front, the watcher, Save As's hand-over, the recovery copy, a box's own undo
-   in the view, the upgrade, the variants' side bar actions. The first slice
-   anyone sees, and the riskiest, which step 0 de-risks.
+3. **Tabs, the tree of every open scene, and crash safety, as one release** --
+   built 2026-10-12, its by-hand checks to do (5–7 days): the custom editor, its
+   document as the per-scene object, the scene in front, the watcher, Save As's
+   hand-over, the recovery copy, a box's own undo in the view, the upgrade, the
+   variants' side bar actions. The first slice anyone sees, and the riskiest,
+   which step 0 de-risks.
 4. **Copying across scenes** (about 2 days), engine and interface together: the
    exporter, the import, paste and drag, the clipboard; a copy within a scene
    through the same exporter.

@@ -180,12 +180,159 @@ const OPERATION_ICONS: Record<string, string> = {
 };
 
 /**
- * Sidebar outline of every open scene, each a top-level row with its objects
- * under it, as Unity's Hierarchy shows the scenes it has loaded. The engine
- * reports a scene's objects as a flat list with `parent` ids (depth-first);
- * the scene's row fetches and caches it, child calls slice it. Drag & drop
- * reparents within a scene: onto a Collection = move in, onto a plain object
- * = move next to it, onto the scene's row = move to its root.
+ * A scene's row: in Open Scenes, where it is picked, saved and closed, and as
+ * a heading in Objects, when several are shown there.
+ */
+function sceneRowItem(
+  root: SceneRoot,
+  extensionUri: vscode.Uri,
+  all: SceneRoot[],
+  isFront: (doc: SceneDocument) => boolean,
+  as: 'list' | 'heading',
+  shown: (doc: SceneDocument) => boolean = () => true,
+): vscode.TreeItem {
+  const doc = root.doc;
+  const name = root.uri.path.split('/').pop() || root.uri.path;
+  const front = doc !== undefined && isFront(doc);
+  const picked = doc !== undefined && shown(doc);
+  // The scene in front is the one the views below and the commands act on:
+  // its name is marked, as a match is in a list.
+  const item = new vscode.TreeItem(
+    front ? { label: name, highlights: [[0, name.length]] } : name,
+    as === 'list'
+      ? vscode.TreeItemCollapsibleState.None
+      : vscode.TreeItemCollapsibleState.Expanded,
+  );
+  item.id = `${as}:${root.uri.toString()}`;
+  const twins = all.filter(
+    (other) =>
+      other.uri.toString() !== root.uri.toString() && other.uri.path.split('/').pop() === name,
+  );
+  const folder = twins.length ? root.uri.path.split('/').slice(-2, -1)[0] : undefined;
+  item.description = [
+    doc?.dirty ? '•' : undefined,
+    folder,
+    doc ? undefined : 'not loaded',
+    doc?.problem ? 'could not be read' : undefined,
+    doc?.diskNote,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const where = root.uri.scheme === 'file' ? root.uri.fsPath : 'not saved yet';
+  item.tooltip = new vscode.MarkdownString(
+    `**${name}** — ${where}\n\n` +
+      (!doc
+        ? 'Not loaded yet: click to open it.'
+        : front
+          ? 'In front: the Variables, Inspector and Undo views show this scene, ' +
+            'and the buttons on its rows act on it.'
+          : 'Click to bring it in front.') +
+      (as === 'list'
+        ? picked
+          ? '\n\nShown in Objects. Cmd/Ctrl-click another to show several.'
+          : '\n\nClick to show it in Objects; Cmd/Ctrl-click to add it.'
+        : '') +
+      (doc?.dirty ? '\n\nUnsaved changes.' : ''),
+  );
+  // In colour, the scenes Objects shows; grey, the others: which is picked
+  // reads at a glance, where a selection is faint once the focus is elsewhere.
+  item.iconPath = vscode.Uri.joinPath(
+    extensionUri,
+    'media',
+    picked ? 'magnet.svg' : 'magnet-muted.svg',
+  );
+  // Not /^magpy/, which every object menu matches. What the row offers
+  // follows what the scene is: Revert needs a file, Save needs something
+  // unsaved, Show the Whole Scene a history rolled back.
+  item.contextValue = doc
+    ? (as === 'list' ? 'sceneRow' : 'sceneHead') +
+      (doc.untitled ? 'Untitled' : 'File') +
+      (doc.dirty ? 'Unsaved' : '') +
+      (doc.rolledBack ? 'RolledBack' : '')
+    : 'unloadedSceneRow';
+  item.command = {
+    command: 'magpylib-studio.showScene',
+    title: 'Show the Scene',
+    arguments: [root],
+  };
+  return item;
+}
+
+/**
+ * Open Scenes: a line per open scene, never longer than the number of scenes,
+ * as Source Control lists its repositories. What is picked here is what
+ * Objects shows; a click also brings the scene's tab forward.
+ */
+export class OpenScenesProvider implements vscode.TreeDataProvider<SceneRoot> {
+  private emitter = new vscode.EventEmitter<SceneRoot | undefined | void>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  /** One row object per scene, for selecting it from outside. */
+  private roots = new Map<string, SceneRoot>();
+
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly scenes: () => SceneRoot[],
+    private readonly isFront: (doc: SceneDocument) => boolean,
+    /** Whether Objects shows `doc`: its row's logo is in colour. */
+    private readonly isShown: (doc: SceneDocument) => boolean,
+  ) {}
+
+  refresh(): void {
+    this.emitter.fire();
+  }
+
+  /** The row of `doc`, once listed. */
+  rowOf(doc: SceneDocument): SceneRoot | undefined {
+    return [...this.roots.values()].find((root) => root.doc === doc);
+  }
+
+  getTreeItem(root: SceneRoot): vscode.TreeItem {
+    return sceneRowItem(
+      root,
+      this.extensionUri,
+      this.scenes(),
+      this.isFront,
+      'list',
+      this.isShown,
+    );
+  }
+
+  getParent(): undefined {
+    return undefined; // a flat list
+  }
+
+  getChildren(element?: SceneRoot): SceneRoot[] {
+    if (element) {
+      return [];
+    }
+    const scenes = this.scenes();
+    const live = new Set(scenes.map((root) => root.uri.toString()));
+    for (const key of [...this.roots.keys()]) {
+      if (!live.has(key)) {
+        this.roots.delete(key);
+      }
+    }
+    return scenes.map((root) => {
+      const key = root.uri.toString();
+      const kept = this.roots.get(key);
+      if (kept && kept.doc === root.doc) {
+        kept.column = root.column;
+        return kept;
+      }
+      this.roots.set(key, root);
+      return root;
+    });
+  }
+}
+
+/**
+ * Objects: the scenes picked in Open Scenes, each under its own heading with
+ * its objects under it, as Source Control's Changes shows each repository
+ * picked; one scene picked, its objects at the top. The engine reports a
+ * scene's objects as a flat list with `parent` ids (depth-first); the scene's
+ * row fetches and caches it, child calls slice it. Drag & drop reparents
+ * within a scene: onto a Collection = move in, onto a plain object = move next
+ * to it, onto the scene's heading or empty space = move to its root.
  */
 export class SceneTreeProvider
   implements
@@ -204,6 +351,8 @@ export class SceneTreeProvider
   private stale = new Set<SceneDocument>();
   /** One row object per scene, so that a scene's rows can be refreshed alone. */
   private roots = new Map<string, SceneRoot>();
+  /** The one scene shown, its rows at the top rather than under a heading. */
+  private single: SceneRoot | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -227,8 +376,8 @@ export class SceneTreeProvider
       return;
     }
     this.stale.add(doc);
-    const root = this.roots.get(doc.uri.toString());
-    this.emitter.fire(root);
+    // its rows are the tree's top when it is the one scene shown
+    this.emitter.fire(this.single?.doc === doc ? undefined : this.roots.get(doc.uri.toString()));
   }
 
   getTreeItem(node: SceneNode): vscode.TreeItem {
@@ -250,55 +399,7 @@ export class SceneTreeProvider
   }
 
   private sceneItem(root: SceneRoot): vscode.TreeItem {
-    const doc = root.doc;
-    const name = root.uri.path.split('/').pop() || root.uri.path;
-    const front = doc !== undefined && this.isFront(doc);
-    // The scene in front is the one the views below and the commands act on:
-    // its name is marked, as a match is in a list.
-    const item = new vscode.TreeItem(
-      front ? { label: name, highlights: [[0, name.length]] } : name,
-      doc ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
-    );
-    item.id = `scene:${root.uri.toString()}`;
-    const twins = this.scenes().filter(
-      (other) => other.uri.toString() !== root.uri.toString() && other.uri.path.split('/').pop() === name,
-    );
-    const folder = twins.length ? root.uri.path.split('/').slice(-2, -1)[0] : undefined;
-    item.description = [
-      doc?.dirty ? '•' : undefined,
-      folder,
-      doc ? undefined : 'not loaded',
-      doc?.problem ? 'could not be read' : undefined,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const where = root.uri.scheme === 'file' ? root.uri.fsPath : 'not saved yet';
-    item.tooltip = new vscode.MarkdownString(
-      `**${name}** — ${where}\n\n` +
-        (!doc
-          ? 'Not loaded yet: click to open it.'
-          : front
-            ? 'In front: the Variables, Inspector and Undo views show this scene, ' +
-              'and the buttons on this row act on it.'
-            : 'Click to bring it in front.') +
-        (doc?.dirty ? '\n\nUnsaved changes.' : ''),
-    );
-    item.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'magnet.svg');
-    // Not /^magpy/, which every object menu matches. What the row offers
-    // follows what the scene is: Revert needs a file, Save needs something
-    // unsaved, Show the Whole Scene a history rolled back.
-    item.contextValue = doc
-      ? 'sceneRow' +
-        (doc.untitled ? 'Untitled' : 'File') +
-        (doc.dirty ? 'Unsaved' : '') +
-        (doc.rolledBack ? 'RolledBack' : '')
-      : 'unloadedSceneRow';
-    item.command = {
-      command: 'magpylib-studio.showScene',
-      title: 'Show the Scene',
-      arguments: [root],
-    };
-    return item;
+    return sceneRowItem(root, this.extensionUri, this.scenes(), this.isFront, 'heading');
   }
 
   /**
@@ -508,7 +609,7 @@ export class SceneTreeProvider
           this.rows.delete(doc);
         }
       }
-      return scenes.map((root) => {
+      const roots = scenes.map((root) => {
         const key = root.uri.toString();
         const kept = this.roots.get(key);
         if (kept && kept.doc === root.doc) {
@@ -518,6 +619,9 @@ export class SceneTreeProvider
         this.roots.set(key, root);
         return root;
       });
+      // one scene: its rows, the view's title naming it
+      this.single = roots.length === 1 && roots[0].doc ? roots[0] : undefined;
+      return this.single ? this.getChildren(this.single) : roots;
     }
     if (isSceneRoot(element)) {
       const doc = element.doc;
