@@ -385,7 +385,8 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    bar's views, each drawn for one session. Still one scene, the suite green,
    and nothing moved that step 3 deletes.
 3. **Tabs, the tree of every open scene, and crash safety, as one release** --
-   built 2026-10-12, its by-hand checks to do (5–7 days): the custom editor, its
+   built 2026-10-12; a reload, a crash and eight tabs checked by
+   `npm run check:window` the same day (5–7 days): the custom editor, its
    document as the per-scene object, the scene in front, the watcher, Save As's
    hand-over, the recovery copy, a box's own undo in the view, the upgrade, the
    variants' side bar actions. The first slice anyone sees, and the riskiest,
@@ -407,7 +408,10 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
   keeping the undo history;
 - by hand, in CONTRIBUTING's list: a reload with two unsaved scenes; VS Code
   killed a few seconds after an edit, the copy offered back; Cmd+Z in a value
-  field; eight tabs' memory.
+  field; eight tabs' memory. Scripted since, but for Cmd+Z and an
+  extension-host restart (`npm run check:window`): the reload and the crash
+  pass, and a scene tab takes 25 to 35 MB more, all of it in the views, the
+  engine's share flat.
 
 Then this plan goes: its decisions become records, and what it built is in
 architecture.md.
