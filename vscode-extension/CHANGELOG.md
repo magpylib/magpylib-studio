@@ -215,7 +215,10 @@ All notable changes to the Magpylib Studio extension.
   under a name the host gives it (`open_session`, `close_session`), and says
   what it speaks (`version`, protocol 2). A request that names no session still
   goes to the one scene a host drives, as before. `replace_scene` replaces a
-  scene as one step to undo.
+  scene as one step to undo. The extension asks first, and refuses an engine
+  from before several scenes -- which would serve every tab from one scene -- or
+  one newer than it understands; Install the Engine now upgrades an engine
+  already there.
 
 ### Changed
 
@@ -295,6 +298,9 @@ All notable changes to the Magpylib Studio extension.
 
 ### Fixed
 
+- On a dark theme the logo on a scene's tab wore a white outline, a halo where
+  the traced image had a white edge. Dark themes now get it without, the magpie
+  drawn light.
 - Cmd/Ctrl+Z in a box -- a variable's value, an object's parameter, the field
   panel's offset -- undid the scene instead of the typing, and Shift+Cmd/Ctrl+Z
   redid it. The studio's undo keys now stand aside while a box has the focus, in

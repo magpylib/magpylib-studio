@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 
 import {
+  engineMismatch,
   evenRamp,
   incrementRamp,
   meaning,
@@ -1507,6 +1508,19 @@ suite('magpylib-studio', () => {
    * exactly 0.02 there, which is a different number, and that difference
    * quietly cost almost every path its compact form.
    */
+  test('an engine is refused unless it speaks the protocol this extension does', () => {
+    // An engine from before several scenes does not know `version`, and would
+    // take every request as its one scene's: refused, not used quietly.
+    assert.match(
+      String(engineMismatch(undefined, { type: 'MethodError', message: "unknown method 'version'" })),
+      /before several scenes/,
+    );
+    assert.match(String(engineMismatch({})), /did not say which version/);
+    assert.match(String(engineMismatch({ protocol: 1 })), /older than this extension needs/);
+    assert.match(String(engineMismatch({ protocol: 3 })), /update the extension/);
+    assert.strictEqual(engineMismatch({ protocol: 2 }), undefined, 'the engine of this repo is refused');
+  });
+
   test('an even ramp is spaced the way the call that writes it spaces it', () => {
     assert.deepStrictEqual(evenRamp([0, 0, 0.1], 5), [
       [0, 0, 0],

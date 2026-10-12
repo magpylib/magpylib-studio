@@ -149,6 +149,8 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   // masks it to a monochrome silhouette; as an <img> here it keeps its own
   // colours, which is what makes the button read as "the studio" at a glance.
   const logoUri = mediaUri(webview, context.extensionUri, 'magnet.svg');
+  // on a dark theme, the one without the white outline that shows as a halo
+  const darkLogoUri = mediaUri(webview, context.extensionUri, 'magnet-dark.svg');
   // VS Code's own icon font, so Re-run wears the same glyph as Run everywhere
   // else in the editor. The stylesheet names the font file beside it, which
   // resolves against this URI -- and `font-src` is already in the CSP.
@@ -206,7 +208,7 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   <div id="bar">
     <span id="status">Waiting for a figure…</span>
     <button id="promote" hidden title="Runs this script again in the studio, which takes its objects">
-      <img src="${logoUri}" alt="" />Open in Magpylib Studio
+      <img class="on-light" src="${logoUri}" alt="" /><img class="on-dark" src="${darkLogoUri}" alt="" />Open in Magpylib Studio
     </button>
   </div>
   <div id="stage">

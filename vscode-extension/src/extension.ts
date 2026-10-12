@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonExtension } from '@vscode/python-extension';
-import { EngineClient } from './engineClient';
+import { EngineClient, EngineError } from './engineClient';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import {
   addScene,
@@ -1484,7 +1484,8 @@ async function installEngineNow(): Promise<void> {
         progress.report({ message: 'pip install magpylib-studio…' });
         const pipResult = await run(
           pythonExe!,
-          ['-m', 'pip', 'install', 'magpylib-studio'],
+          // --upgrade: an engine too old to serve is installed already
+          ['-m', 'pip', 'install', '--upgrade', 'magpylib-studio'],
           180000,
         );
         if (!pipResult.ok) {
@@ -1506,6 +1507,7 @@ async function installEngineNow(): Promise<void> {
     .getConfiguration('magpylib-studio')
     .update('pythonPath', pythonExe, vscode.ConfigurationTarget.Workspace);
   cachedPython = undefined; // re-probe: the freshly configured path wins next
+  refusedEngine = undefined;
   refreshSurfaces();
 
   vscode.window
@@ -1735,6 +1737,41 @@ function tellRestart(context: vscode.ExtensionContext, lost: SceneDocument | und
   }
 }
 
+/** The engine protocols this extension speaks: 2 is a session per scene
+ *  (`rpc.PROTOCOL`). An engine outside the range is refused: one from before
+ *  sessions ignores their names and would serve every tab from one scene,
+ *  without a word, and a newer one may speak what this does not know. */
+const ENGINE_PROTOCOL = { min: 2, max: 2 };
+
+/** Why the engine that answered `version` so cannot serve this extension, or
+ *  undefined when it can. `error` is what the request raised instead. */
+export function engineMismatch(
+  answer: { protocol?: unknown } | undefined,
+  error?: { type?: string; message?: string },
+): string | undefined {
+  if (error) {
+    return error.type === 'MethodError'
+      ? 'it is from before several scenes, and would serve every tab from one scene'
+      : `it did not say which version it is (${error.message ?? 'no answer'})`;
+  }
+  const protocol = answer?.protocol;
+  if (typeof protocol !== 'number') {
+    return 'it did not say which version it is';
+  }
+  if (protocol < ENGINE_PROTOCOL.min) {
+    return `it speaks protocol ${protocol}, older than this extension needs (${ENGINE_PROTOCOL.min})`;
+  }
+  if (protocol > ENGINE_PROTOCOL.max) {
+    return `it is newer than this extension (protocol ${protocol}); update the extension`;
+  }
+  return undefined;
+}
+
+/** The interpreter whose engine was refused, and why: not started again until
+ *  the interpreter changes or the engine is installed anew, so that one
+ *  refusal is said once rather than on every request. */
+let refusedEngine: { python: string; reason: string } | undefined;
+
 /** One start at a time. Finding an interpreter is asynchronous now, so two
  *  callers arriving in that window would otherwise each spawn an engine —
  *  and the second would silently become the one holding the scene, leaving
@@ -1792,6 +1829,9 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
       });
     throw new Error('no usable Python interpreter for the engine');
   }
+  if (refusedEngine?.python === pythonPath) {
+    throw new Error(`the engine in ${pythonPath} was refused: ${refusedEngine.reason}`);
+  }
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoRoot(context);
   engineOutput.appendLine(`[starting engine: ${pythonPath}]`);
   const client = new EngineClient(pythonPath, cwd);
@@ -1822,6 +1862,41 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
         });
     }
   };
+  // Asked before anything else: an engine that cannot serve several scenes
+  // must not be handed one. A process that died on starting has said so
+  // through onExit, and its error is passed on as it is.
+  const said = await client.request<{ protocol?: unknown }>('version').then(
+    (answer) => ({ answer, error: undefined }),
+    (error: unknown) => {
+      if (!(error instanceof EngineError)) {
+        throw error;
+      }
+      return { answer: undefined, error: error.rpcError };
+    },
+  );
+  const mismatch = engineMismatch(said.answer, said.error);
+  if (mismatch) {
+    client.dispose();
+    refusedEngine = { python: pythonPath, reason: mismatch };
+    engineOutput.appendLine(`[engine refused: ${mismatch}]`);
+    const newer = mismatch.includes('newer than this extension');
+    void vscode.window
+      .showErrorMessage(
+        `Magpylib Studio: the engine in ${pythonPath} cannot be used: ${mismatch}.`,
+        ...(newer ? [] : ['Install the Engine', 'Open Settings']),
+      )
+      .then((choice) => {
+        if (choice === 'Install the Engine') {
+          void installEngine();
+        } else if (choice === 'Open Settings') {
+          void vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            'magpylib-studio.pythonPath',
+          );
+        }
+      });
+    throw new Error(`the engine in ${pythonPath} was refused: ${mismatch}`);
+  }
   engine = client;
   return client;
 }
@@ -1840,9 +1915,13 @@ function treeSelection(): SceneObject | undefined {
   return selected;
 }
 
-/** The magpylib logo, shared by the activity bar and the panel tabs. */
-function logoUri(context: vscode.ExtensionContext): vscode.Uri {
-  return vscode.Uri.joinPath(context.extensionUri, 'media', 'magnet.svg');
+/** The magpylib logo for a tab: on a dark theme the version without its
+ *  white outline, which shows there as a halo. */
+function logoUri(context: vscode.ExtensionContext): { light: vscode.Uri; dark: vscode.Uri } {
+  return {
+    light: vscode.Uri.joinPath(context.extensionUri, 'media', 'magnet.svg'),
+    dark: vscode.Uri.joinPath(context.extensionUri, 'media', 'magnet-dark.svg'),
+  };
 }
 
 /** Route webview 'rpcRequest' messages to the engine, for the scene `scene`
@@ -4735,6 +4814,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       cachedPython = undefined;
+      refusedEngine = undefined;
       if (engine?.isRunning) {
         vscode.window.setStatusBarMessage(
           'Magpylib Studio: restarting the engine on the new interpreter',

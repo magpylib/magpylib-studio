@@ -236,11 +236,12 @@ function sceneRowItem(
   );
   // In colour, the scenes Objects shows; grey, the others: which is picked
   // reads at a glance, where a selection is faint once the focus is elsewhere.
-  item.iconPath = vscode.Uri.joinPath(
-    extensionUri,
-    'media',
-    picked ? 'magnet.svg' : 'magnet-muted.svg',
-  );
+  // A dark theme gets the logo without its white outline, the bird drawn light.
+  const logo = picked ? 'magnet' : 'magnet-muted';
+  item.iconPath = {
+    light: vscode.Uri.joinPath(extensionUri, 'media', `${logo}.svg`),
+    dark: vscode.Uri.joinPath(extensionUri, 'media', `${logo}-dark.svg`),
+  };
   // Not /^magpy/, which every object menu matches. What the row offers
   // follows what the scene is: Revert needs a file, Save needs something
   // unsaved, Show the Whole Scene a history rolled back.
