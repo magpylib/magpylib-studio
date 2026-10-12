@@ -154,9 +154,10 @@ keywords are magpylib's (`polarization`, `position`, `style_label`).
 
 ### `name(obj, object_id)`
 
-Give an object the id `object_id` in the document, where its label (or
-its class) would give another. Rarely needed by hand: the script tab
-writes it where a scene's ids are not what its labels give.
+Give an object the id `object_id` in the document, where neither the
+variable it is assigned to nor its label gives it. Rarely needed: an
+object is named by the variable that holds it, and the script tab writes
+it only where it cannot write that variable.
 
 ### `TriangularMesh.from_file(path, *, scale=None, sha256=None, **kwargs)`
 

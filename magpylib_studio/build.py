@@ -782,8 +782,12 @@ def rebuilt(session):
     """`session`'s scene built again from its own builder script, as a
     session: what the script tab says the scene is, to set beside what it
     is. Raises whatever running the script raises."""
+    from magpylib_studio import recording
+
     namespace = {"__name__": "__main__"}
-    code = compile(script_of(session), "<the scene's builder script>", "exec")
+    text = script_of(session)
+    recording.keep_source("<the scene's builder script>", text)
+    code = compile(text, "<the scene's builder script>", "exec")
     with (
         resolving_against(session._base_dir),
         contextlib.redirect_stdout(sys.stderr),
@@ -1324,10 +1328,16 @@ class _ScriptWriter:
         if style:
             parts.append(("style", repr(_nested(style))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
-        # The id the recorder would give it, from its label or its class; where
-        # the document's differs, the script says so.
-        base = style.get("label") or kind.rsplit(".", 1)[-1].lower()
-        expected = self._unique_id(base, self.ids)
+        # The id the recorder gives it: the name it is assigned to, unless an
+        # object before it has that id, then its label or its class. Where the
+        # document's differs -- its name taken in the script -- the script
+        # says so.
+        if name not in self.ids:
+            expected = name
+            self.ids.add(name)
+        else:
+            base = style.get("label") or kind.rsplit(".", 1)[-1].lower()
+            expected = self._unique_id(base, self.ids)
         if expected != event["target"]:
             self.ids.discard(expected)
             self.ids.add(event["target"])

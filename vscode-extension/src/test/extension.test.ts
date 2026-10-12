@@ -564,7 +564,7 @@ suite('magpylib-studio', () => {
     await sceneWhere(holding('coil'), 'the coil example to load');
     const coil = await openScriptTab();
     assert.notStrictEqual(coil.uri.toString(), halbach.uri.toString(), 'the two scenes share a tab');
-    await textWhere(coil, (text) => text.includes("name(coil, 'coil')"), "the coil's own script");
+    await textWhere(coil, (text) => text.includes('coil = magpy.Collection('), "the coil's own script");
     await pause(300);
     assert.ok(halbach.getText().includes('magpy.Group('), "the halbach's tab lost its text");
     await closeScriptTab(coil);

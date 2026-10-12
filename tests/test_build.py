@@ -25,6 +25,7 @@ from magpylib_studio.recording import (
     duplicate_along,
     duplicate_around,
     hide,
+    keep_source,
     mirror,
     name,
     pi,
@@ -268,14 +269,14 @@ def test_a_child_added_fresh_is_created_inside_its_collection():
     @scene
     def design(r: float = 0.02):
         magnet = magpy.magnet.Cuboid(position=(r, 0, 0), **CUBE)
-        name(magpy.Collection(magnet), "ring")
+        ring = magpy.Collection(magnet)  # noqa: F841 - its name is its id
         magnet.move((0, 0, 0.01))
 
     events = design.build().to_dict()["events"]
     assert [(e["op"], e["target"]) for e in events] == [
         ("create", "ring"),
-        ("create", "cuboid"),
-        ("move", "cuboid"),
+        ("create", "magnet"),
+        ("move", "magnet"),
     ]
     assert events[1]["parent"] == "ring"
     assert events[1]["params"]["position"] == ["=r", 0, 0]
@@ -307,7 +308,7 @@ def test_a_property_read_is_todays_number_and_says_so():
 
     with pytest.warns(UserWarning, match="today's number"):
         s = design.build()
-    (second,) = [e for e in s.to_dict()["events"] if e["target"] == "cuboid_2"]
+    (second,) = [e for e in s.to_dict()["events"] if e["target"] == "cuboid"]
     assert second["params"]["position"] == [0.04, 0.0, 0.0]
 
 
@@ -512,12 +513,70 @@ def test_a_copy_is_recorded_with_its_overrides():
 
     s = design.build()
     creates = [e for e in s.to_dict()["events"] if e["op"] == "create"]
-    assert [e["target"] for e in creates] == ["collection", "A", "A_1"]
+    assert [e["target"] for e in creates] == ["ring", "a", "a_1"]
     assert creates[2]["style"] == {"label": "A_01"}  # magpylib's own convention
     assert creates[2]["params"]["position"] == [0, "=r", 0]
-    assert creates[2]["parent"] == "collection"
-    assert s.session._objs["A_1"].position == pytest.approx([0, 0.02, 0])
+    assert creates[2]["parent"] == "ring"
+    assert s.session._objs["a_1"].position == pytest.approx([0, 0.02, 0])
     assert len(design().sources_all) == 2
+
+
+def test_an_object_is_named_by_the_variable_it_is_assigned_to():
+    """The name the function knows it by is its id, its label what it shows:
+    no `name()` to say so. Where a name is no one object's -- made in a
+    loop, bound twice, one of two of a kind in a statement -- the label
+    is, else the class; `name()` still says outright."""
+
+    @scene
+    def design(n: Count(2, 9) = 3):
+        stack = magpy.Collection(style_label="Halbach stack")
+        r1 = magpy.magnet.Cuboid(
+            position=(0.02, 0, 0),
+            style_label="Magnet 1",
+            **CUBE,
+        )
+        stack.add(r1)
+        duplicate_around(r1, count=n, axis="z")
+        for z in (0.01, 0.02):
+            probe = magpy.Sensor(position=(0, 0, z), style_label=f"probe at {z}")
+        twice = magpy.Sensor(style_label="first")
+        twice = magpy.Sensor(style_label="second")
+        pair = magpy.Collection(magpy.Collection(style_label="inner"))
+        told = name(magpy.Sensor(), "said")
+        return stack, probe, twice, pair, told
+
+    built = design.build().session
+    ids = {o["id"]: o["label"] for o in built.list_objects() if "#" not in o["id"]}
+    assert ids["stack"] == "Halbach stack"
+    assert ids["r1"] == "Magnet 1"
+    assert {"probe_at_0_01", "probe_at_0_02", "first", "second"} <= set(ids)
+    assert {"inner", "collection", "said"} <= set(ids)
+    assert "pair" not in ids and "twice" not in ids and "probe" not in ids
+
+
+def test_without_its_source_a_scene_names_by_labels():
+    """Code run from text nobody kept: the labels, as before."""
+    namespace = {}
+    exec(  # noqa: S102
+        "import magpylib as magpy\n"
+        "from magpylib_studio import scene\n"
+        "@scene\n"
+        "def design():\n"
+        "    magnet = magpy.Sensor(style_label='probe')\n",
+        namespace,
+    )
+    ids = [o["id"] for o in namespace["design"].build().session.list_objects()]
+    assert ids == ["probe"]
+
+
+@pytest.mark.parametrize(
+    "example", [e["name"] for e in MagpylibStudioSession().list_examples()["examples"]]
+)
+def test_an_examples_script_names_nothing_by_hand(example):
+    """Its objects are named by the variables the script assigns them to."""
+    session = MagpylibStudioSession()
+    session.load_example(example)
+    assert "name(" not in session.to_builder_script()
 
 
 def test_a_pose_set_outright_and_a_turn_by_rotation():
@@ -570,7 +629,9 @@ def test_a_scene_in_a_session_that_holds_one_knows_its_ids():
 def rebuilt(session):
     """Run `session`'s script; the scene the function it defines builds."""
     namespace = {}
-    exec(compile(session.to_builder_script(), "<scene>", "exec"), namespace)  # noqa: S102
+    text = session.to_builder_script()
+    keep_source("<scene>", text)
+    exec(compile(text, "<scene>", "exec"), namespace)  # noqa: S102
     (design,) = [v for v in namespace.values() if isinstance(v, SceneFunction)]
     return design.build()
 

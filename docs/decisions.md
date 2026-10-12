@@ -872,9 +872,13 @@ set of real scripts there is.
   object moves its create inside the group, as if made there; on one with steps
   it is a reparent, with a warning. `obj.parent = group` is a reparent outright,
   keeping the pose, as the tree's drag does. Arguments are kept in the order
-  written. Ids come from the label, else the class; `name(obj, id)` says an id
-  the label does not give, and the writer emits it only where the document's id
-  differs.
+  written. An id is the variable the object is assigned to, where that
+  statement runs once and the name is bound nowhere else in the function (read
+  from its source, which a script run from text keeps for this); else the
+  label, else the class. `name(obj, id)` still says one outright, and the writer
+  emits it only where the name it writes cannot be the id -- since 2026-10-12;
+  before, ids came from labels and every built-in example's script named each
+  object by hand.
 - **Style is read between calls**, as magpylib keeps what an object was given
   before its style is ever made, and written as edits by dotted path; the
   recorder never creates a style, since `copy()` labels a copy differently once

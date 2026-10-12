@@ -80,8 +80,9 @@ variables (bounds and kinds in `Annotated[...]`: `Length`, `Angle`, `Count`)
 and its body is magpylib. Called, it is plain magpylib; `.build()` makes it a
 studio scene. The studio's own steps — `derived`, `duplicate_around`,
 `duplicate_along`, `mirror`, `place`, `sampled`, `grid`, `hide`, `unhide`,
-`remove`, `name`, `TriangularMesh.from_file` and the like — are one step each,
-and an object's `style_label` is its id. A call the scene cannot take fails at
+`remove`, `TriangularMesh.from_file` and the like — are one step each, and an
+object's id is the variable it is assigned to (`r1 = magpy.magnet.Cuboid(...)`),
+else its `style_label`. A call the scene cannot take fails at
 its line and says why. **Open in Magpylib Studio** on such a script opens its
 scene, and `to_builder_script()` writes any scene back as a function.
 

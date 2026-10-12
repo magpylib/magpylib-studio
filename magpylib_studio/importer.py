@@ -400,6 +400,10 @@ def run_script(path):
     # between the patch and the `try` that undoes it left magpylib's show()
     # capturing into a dead list for the rest of the engine's life.
     code = compile(source, str(path), "exec")
+    # the text run, not whatever the file holds by the time it is read
+    from magpylib_studio import recording
+
+    recording.keep_source(str(path), source)
     targets = _show_patch_targets()
     originals = [getattr(owner, name) for owner, name in targets]
     # The studio's own drawing goes through show() too (a `SceneWidget` a

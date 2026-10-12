@@ -53,14 +53,20 @@ give. Everything else is magpylib's.
 
 from __future__ import annotations
 
+import ast
+import collections
 import contextlib
 import dataclasses
 import functools
 import inspect
+import linecache
 import math
 import numbers
+import sys
+import textwrap
 import typing
 import warnings
+import weakref
 from contextvars import ContextVar
 
 import annotated_types
@@ -338,7 +344,7 @@ class SceneFunction:
         document = build.Scene(
             values=values, model_unit=self.model_unit, field_unit=self.field_unit
         )
-        recorder = _Recorder(document)
+        recorder = _Recorder(document, self._fn)
         handles = {
             spec["name"]: document.variable(
                 spec["name"],
@@ -515,12 +521,137 @@ def _leaves(value):
         yield value
 
 
+def _callee_names(call):
+    """The names a call is spelt with: `magpy.magnet.Cuboid(...)` is
+    Cuboid's, `TriangularMesh.from_file(...)` TriangularMesh's."""
+    names, func = set(), call.func
+    while isinstance(func, ast.Attribute):
+        names.add(func.attr)
+        func = func.value
+    if isinstance(func, ast.Name):
+        names.add(func.id)
+    return names
+
+
+class _Assignments(ast.NodeVisitor):
+    """In one function's body, the statements `name = SomeClass(...)` that
+    run once -- outside any loop -- to a name bound nowhere else in it."""
+
+    def __init__(self):
+        self.bound = collections.Counter()
+        self.found = []
+        self.loops = 0
+
+    def skip(self, node):
+        """Another scope: its names are not the function's."""
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = skip
+    visit_ClassDef = visit_ListComp = visit_SetComp = visit_DictComp = skip
+    visit_GeneratorExp = skip
+
+    def loop(self, node):
+        self.loops += 1
+        self.generic_visit(node)
+        self.loops -= 1
+
+    visit_For = visit_AsyncFor = visit_While = loop
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Store):
+            self.bound[node.id] += 1
+
+    def visit_Global(self, node):
+        self.bound.update(dict.fromkeys(node.names, 2))
+
+    visit_Nonlocal = visit_Global
+
+    def visit_Assign(self, node):
+        target = node.targets[0] if len(node.targets) == 1 else None
+        if (
+            not self.loops
+            and isinstance(target, ast.Name)
+            and isinstance(node.value, ast.Call)
+        ):
+            calls = collections.Counter(
+                name
+                for call in ast.walk(node.value)
+                if isinstance(call, ast.Call)
+                for name in _callee_names(call)
+            )
+            self.found.append(
+                (
+                    node.lineno,
+                    node.end_lineno,
+                    target.id,
+                    _callee_names(node.value),
+                    calls,
+                )
+            )
+        self.generic_visit(node)
+
+
+#: What `_assignments` found, by code object, forgotten with it: a script
+#: run again is compiled again.
+_ASSIGNED: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def keep_source(filename, text):
+    """Keep `text` as the source of code compiled under `filename`, where
+    `inspect` reads it: a scene function run from text names its objects by
+    the variables it assigns them to, which needs its source."""
+    linecache.cache[filename] = (len(text), None, text.splitlines(True), filename)
+
+
+def _assignments(fn):
+    """Where `fn` makes an object and names it: (first line, last line,
+    name, the names the call is spelt with, every call's names in it), for
+    each statement `_Assignments` finds. Nothing where the source cannot be
+    read: then ids come from labels."""
+    fn = inspect.unwrap(fn)
+    code = getattr(fn, "__code__", None)
+    if code is None:
+        return []
+    if code not in _ASSIGNED:
+        found = []
+        try:
+            lines, first = inspect.getsourcelines(fn)
+            tree = ast.parse(textwrap.dedent("".join(lines)))
+        except (OSError, TypeError, SyntaxError):
+            tree = None
+        node = tree and next(
+            (
+                n
+                for n in tree.body
+                if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+            ),
+            None,
+        )
+        if node is not None:
+            seen = _Assignments()
+            for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                seen.bound[arg.arg] += 1
+            for statement in node.body:
+                seen.visit(statement)
+            offset = first - 1
+            found = [
+                (start + offset, end + offset, name, callee, calls)
+                for start, end, name, callee, calls in seen.found
+                if seen.bound[name] == 1 and not name.startswith("_")
+            ]
+        _ASSIGNED[code] = found
+    return _ASSIGNED[code]
+
+
 class _Recorder:
     """Maps the hook's events onto the builder's steps, one `Scene` at a
     time. The objects are real magpylib objects, built from the resolved
     arguments; the document keeps the arguments as written."""
 
-    def __init__(self, document):
+    def __init__(self, document, fn=None):
+        #: The scene function, whose names give the objects it names their
+        #: ids (`variable_for`).
+        self.code = getattr(inspect.unwrap(fn), "__code__", None) if fn else None
+        self.assigned = _assignments(fn) if fn else []
         self.document = document
         self.session = document._session
         self.objects = {}  # id(magpylib object) -> builder Object
@@ -558,15 +689,41 @@ class _Recorder:
             )
         return found
 
+    def variable_for(self, cls):
+        """The name the scene function gives the `cls` being made, where it
+        gives it one: `r1 = magpy.magnet.Cuboid(...)`, run once, and `r1`
+        bound nowhere else in it. That is the object's id, as it is the
+        name the function knows it by; its label stays what it shows."""
+        if self.code is None or not self.assigned:
+            return None
+        frame = sys._getframe(1)
+        while frame is not None and frame.f_code is not self.code:
+            frame = frame.f_back
+        if frame is None:
+            return None
+        line = frame.f_lineno
+        for start, end, name, callee, calls in self.assigned:
+            # one call of its kind in the statement, or which would it be?
+            if (
+                start <= line <= end
+                and cls.__name__ in callee
+                and calls[cls.__name__] == 1
+                and name not in self.document._ids
+            ):
+                return name
+        return None
+
     def register(self, obj, type_, params, style_kwargs, style):
         """A new object: its create step, at the scene's root for now. The
         style is kept as the document keeps it, by dotted path, whether it
-        was given nested or as `style_label`-shaped keywords."""
+        was given nested or as `style_label`-shaped keywords. Its id is the
+        name the function gives it, else its label, else its class."""
         style = {
             **_flat_style(_value(style or {})),
             **_flat_style({k[len("style_") :]: v for k, v in style_kwargs.items()}),
         }
-        object_id, style = self.document._named(None, type_, style, {})
+        named = self.variable_for(hook.magpylib_class(type(obj)))
+        object_id, style = self.document._named(named, type_, style, {})
         if type_ == "Collection":
             recorded = build.Collection(self.document, object_id, style, ())
         else:
@@ -906,9 +1063,10 @@ def derived(name, formula, *, unit=None):
 
 
 def name(obj, object_id):
-    """Give an object the id `object_id` in the document, where its label (or
-    its class) would give another. Rarely needed by hand: the script tab
-    writes it where a scene's ids are not what its labels give."""
+    """Give an object the id `object_id` in the document, where neither the
+    variable it is assigned to nor its label gives it. Rarely needed: an
+    object is named by the variable that holds it, and the script tab writes
+    it only where it cannot write that variable."""
     recorder = _BUILDING.get()
     if recorder is not None:
         recorder.rename(obj, object_id)
