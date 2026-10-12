@@ -136,7 +136,7 @@ def scene_with_variables():
     and one that follows the others."""
     from typing import Annotated, Literal
 
-    from magpylib_studio import Bounds, Count, derived, duplicate_around, name, scene
+    from magpylib_studio import Bounds, Count, derived, duplicate_around, scene
 
     @scene
     def design(
@@ -146,16 +146,16 @@ def scene_with_variables():
         free: float = 3.0,
     ):
         derived("half", r / 2)
-        magnet = name(
-            magpy.magnet.Cuboid(
-                dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), position=(r, 0, 0)
-            ),
-            "m",
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.01, 0.01, 0.01),
+            polarization=(0, 0, 1),
+            position=(r, 0, 0),
+            style_label="m",
         )
-        name(magpy.Collection(magnet), "ring")
+        magpy.Collection(magnet, style_label="ring")
         duplicate_around(magnet, count=n, axis=axis)
 
-    return SceneWidget(design.build(), editable=True)
+    return SceneWidget(design, editable=True)
 
 
 def main(out):

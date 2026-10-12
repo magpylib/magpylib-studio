@@ -940,8 +940,9 @@ drag.
   handles out.** `editable` is whether they are out: `editable=True` from the
   start, the pencil later, `view.editable = True` from code. The view sets the
   trait itself and saves it, so in marimo the cells that read the view re-run as
-  they do for a selection. `editable=None` is a view for looking only, a figure
-  handed to someone else: no pencil, and the trait refuses to turn on.
+  they do for a selection. `editable="never"` (first spelt `None`, still read
+  so) is a view for looking only, a figure handed to someone else: no pencil,
+  and the trait refuses to turn on.
 - **A scene written in code, or a path, is shown as its own session.** Nothing
   is copied: the document is the one source, so its field, its file and its code
   read the same session the view draws, a drag is a step in that scene, and a

@@ -8,7 +8,7 @@ import magpylib as magpy
 import numpy as np
 
 from evals import kit
-from magpylib_studio import duplicate_around, name, scene
+from magpylib_studio import duplicate_around, scene
 
 TITLE = "A Halbach assembly: 0.1 T, uniform to 3 %, from 10 mm cubes"
 KIND = "design"
@@ -88,17 +88,15 @@ def reference(work, condition):
 
     @scene
     def design():
-        stack = name(magpy.Collection(), "stack")
+        stack = magpy.Collection(style_label="stack")
         for number, z in enumerate((-0.012, 0.0, 0.012)):
-            ring = name(magpy.Collection(), f"ring{number}")
+            ring = magpy.Collection(style_label=f"ring{number}")
             stack.add(ring)
-            cube = name(
-                magpy.magnet.Cuboid(
-                    dimension=(EDGE, EDGE, EDGE),
-                    polarization=(POLARIZATION, 0, 0),
-                    position=(0.022, 0, z),
-                ),
-                f"cube{number}",
+            cube = magpy.magnet.Cuboid(
+                dimension=(EDGE, EDGE, EDGE),
+                polarization=(POLARIZATION, 0, 0),
+                position=(0.022, 0, z),
+                style_label=f"cube{number}",
             )
             ring.add(cube)
             duplicate_around(cube, count=8, axis="z", spin=45)

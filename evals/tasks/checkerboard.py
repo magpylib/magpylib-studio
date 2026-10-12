@@ -7,7 +7,7 @@ import magpylib as magpy
 import numpy as np
 
 from evals import kit
-from magpylib_studio import name, scene
+from magpylib_studio import scene
 
 TITLE = "A 4 × 4 checkerboard of alternating cubes"
 KIND = "design"
@@ -84,7 +84,7 @@ def reference(work, condition):
 
     @scene
     def design():
-        board = name(magpy.Collection(), "board")
+        board = magpy.Collection(style_label="board")
         for x in STEPS:
             for y in STEPS:  # fixed places: a loop over literals is plain Python
                 board.add(
