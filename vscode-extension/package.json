@@ -725,12 +725,12 @@
         {
           "command": "magpylib-studio.newScene",
           "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
-          "group": "0_scenes@1"
+          "group": "navigation@3"
         },
         {
           "command": "magpylib-studio.loadScene",
           "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
-          "group": "0_scenes@2"
+          "group": "navigation@4"
         },
         {
           "command": "magpylib-studio.loadExample",
