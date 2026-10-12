@@ -5163,6 +5163,25 @@ class MagpylibStudioSession:
         result = self._mutate_doc(mutate, f"adopt {object_id}")
         return {**result, "fresh": True} if result["ok"] else result
 
+    def _rename_ids(self, renames):
+        """Give objects other ids, every step that names them following: the
+        names a scene function knows its objects by, once it has run
+        (`recording`). Not a change to the scene, but recorded as one, before
+        a build forgets its history."""
+
+        def follow(object_id):
+            return renames.get(object_id, object_id)
+
+        def mutate(doc):
+            for event in doc.get("events") or []:
+                event["target"] = follow(event["target"])
+                if event.get("parent") is not None:
+                    event["parent"] = follow(event["parent"])
+                if event.get("children"):
+                    event["children"] = [follow(c) for c in event["children"]]
+
+        return self._mutate_doc(mutate, "name")
+
     def _rename_fresh(self, object_id, new_id):
         """Give an object another id, while nothing but its own create (and
         its children's) names it: `scene.name`. Later, an id is what every

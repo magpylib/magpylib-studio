@@ -25,7 +25,6 @@ from magpylib_studio.recording import (
     duplicate_along,
     duplicate_around,
     hide,
-    keep_source,
     mirror,
     name,
     pi,
@@ -513,19 +512,20 @@ def test_a_copy_is_recorded_with_its_overrides():
 
     s = design.build()
     creates = [e for e in s.to_dict()["events"] if e["op"] == "create"]
-    assert [e["target"] for e in creates] == ["ring", "a", "a_1"]
+    assert [e["target"] for e in creates] == ["ring", "a", "b"]
     assert creates[2]["style"] == {"label": "A_01"}  # magpylib's own convention
     assert creates[2]["params"]["position"] == [0, "=r", 0]
     assert creates[2]["parent"] == "ring"
-    assert s.session._objs["a_1"].position == pytest.approx([0, 0.02, 0])
+    assert s.session._objs["b"].position == pytest.approx([0, 0.02, 0])
     assert len(design().sources_all) == 2
 
 
 def test_an_object_is_named_by_the_variable_it_is_assigned_to():
     """The name the function knows it by is its id, its label what it shows:
-    no `name()` to say so. Where a name is no one object's -- made in a
-    loop, bound twice, one of two of a kind in a statement -- the label
-    is, else the class; `name()` still says outright."""
+    no `name()` to say so, and nothing parsed -- the names are read off the
+    running function. Where a name is no one object's -- made in a loop,
+    assigned twice -- the label is, else the class; `name()` still says
+    outright."""
 
     @scene
     def design(n: Count(2, 9) = 3):
@@ -550,12 +550,13 @@ def test_an_object_is_named_by_the_variable_it_is_assigned_to():
     assert ids["stack"] == "Halbach stack"
     assert ids["r1"] == "Magnet 1"
     assert {"probe_at_0_01", "probe_at_0_02", "first", "second"} <= set(ids)
-    assert {"inner", "collection", "said"} <= set(ids)
-    assert "pair" not in ids and "twice" not in ids and "probe" not in ids
+    assert {"pair", "inner", "said"} <= set(ids)  # the group the name holds
+    assert "twice" not in ids and "probe" not in ids and "told" not in ids
 
 
-def test_without_its_source_a_scene_names_by_labels():
-    """Code run from text nobody kept: the labels, as before."""
+def test_a_scene_run_from_text_is_named_by_its_variables_too():
+    """No source is read, so none has to be kept: code run from a string
+    names its objects as a file's does."""
     namespace = {}
     exec(  # noqa: S102
         "import magpylib as magpy\n"
@@ -566,7 +567,7 @@ def test_without_its_source_a_scene_names_by_labels():
         namespace,
     )
     ids = [o["id"] for o in namespace["design"].build().session.list_objects()]
-    assert ids == ["probe"]
+    assert ids == ["magnet"]
 
 
 @pytest.mark.parametrize(
@@ -629,9 +630,7 @@ def test_a_scene_in_a_session_that_holds_one_knows_its_ids():
 def rebuilt(session):
     """Run `session`'s script; the scene the function it defines builds."""
     namespace = {}
-    text = session.to_builder_script()
-    keep_source("<scene>", text)
-    exec(compile(text, "<scene>", "exec"), namespace)  # noqa: S102
+    exec(compile(session.to_builder_script(), "<scene>", "exec"), namespace)  # noqa: S102
     (design,) = [v for v in namespace.values() if isinstance(v, SceneFunction)]
     return design.build()
 

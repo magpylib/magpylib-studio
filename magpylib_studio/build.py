@@ -782,12 +782,8 @@ def rebuilt(session):
     """`session`'s scene built again from its own builder script, as a
     session: what the script tab says the scene is, to set beside what it
     is. Raises whatever running the script raises."""
-    from magpylib_studio import recording
-
     namespace = {"__name__": "__main__"}
-    text = script_of(session)
-    recording.keep_source("<the scene's builder script>", text)
-    code = compile(text, "<the scene's builder script>", "exec")
+    code = compile(script_of(session), "<the scene's builder script>", "exec")
     with (
         resolving_against(session._base_dir),
         contextlib.redirect_stdout(sys.stderr),
@@ -887,7 +883,6 @@ class _ScriptWriter:
         self.words = set()
         self.typing = set()
         self.constants = set()
-        self.ids = set()
         from magpylib_studio import importer
 
         self._unique_id = importer._unique_id
@@ -1329,19 +1324,10 @@ class _ScriptWriter:
         if nested:
             parts.append(("style", repr(_nested(nested))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
-        # The id the recorder gives it: the name it is assigned to, unless an
-        # object before it has that id, then its label or its class. Where the
-        # document's differs -- its name taken in the script -- the script
-        # says so.
-        if name not in self.ids:
-            expected = name
-            self.ids.add(name)
-        else:
-            base = style.get("label") or kind.rsplit(".", 1)[-1].lower()
-            expected = self._unique_id(base, self.ids)
-        if expected != event["target"]:
-            self.ids.discard(expected)
-            self.ids.add(event["target"])
+        # The recorder names it by the variable it is assigned to; only where
+        # that cannot be its id -- a name the script has for something else
+        # -- does the script say the id outright.
+        if name != event["target"]:
             lines.append(f"{self.word('name')}({name}, {event['target']!r})")
         parent = event.get("parent")
         if parent:

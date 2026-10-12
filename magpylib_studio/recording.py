@@ -53,17 +53,13 @@ give. Everything else is magpylib's.
 
 from __future__ import annotations
 
-import ast
-import collections
 import contextlib
 import dataclasses
 import functools
 import inspect
-import linecache
 import math
 import numbers
 import sys
-import textwrap
 import typing
 import warnings
 from contextvars import ContextVar
@@ -520,134 +516,24 @@ def _leaves(value):
         yield value
 
 
-def _callee_names(call):
-    """The names a call is spelt with: `magpy.magnet.Cuboid(...)` is
-    Cuboid's, `TriangularMesh.from_file(...)` TriangularMesh's."""
-    names, func = set(), call.func
-    while isinstance(func, ast.Attribute):
-        names.add(func.attr)
-        func = func.value
-    if isinstance(func, ast.Name):
-        names.add(func.id)
-    return names
-
-
-class _Assignments(ast.NodeVisitor):
-    """In one function's body, the statements `name = SomeClass(...)` that
-    run once -- outside any loop -- to a name bound nowhere else in it."""
-
-    def __init__(self):
-        self.bound = collections.Counter()
-        self.found = []
-        self.loops = 0
-
-    def skip(self, node):
-        """Another scope: its names are not the function's."""
-
-    visit_FunctionDef = visit_AsyncFunctionDef = visit_Lambda = skip
-    visit_ClassDef = visit_ListComp = visit_SetComp = visit_DictComp = skip
-    visit_GeneratorExp = skip
-
-    def loop(self, node):
-        self.loops += 1
-        self.generic_visit(node)
-        self.loops -= 1
-
-    visit_For = visit_AsyncFor = visit_While = loop
-
-    def visit_Name(self, node):
-        if isinstance(node.ctx, ast.Store):
-            self.bound[node.id] += 1
-
-    def visit_Global(self, node):
-        self.bound.update(dict.fromkeys(node.names, 2))
-
-    visit_Nonlocal = visit_Global
-
-    def visit_Assign(self, node):
-        target = node.targets[0] if len(node.targets) == 1 else None
-        if (
-            not self.loops
-            and isinstance(target, ast.Name)
-            and isinstance(node.value, ast.Call)
-        ):
-            calls = collections.Counter(
-                name
-                for call in ast.walk(node.value)
-                if isinstance(call, ast.Call)
-                for name in _callee_names(call)
-            )
-            self.found.append(
-                (
-                    node.lineno,
-                    node.end_lineno,
-                    target.id,
-                    _callee_names(node.value),
-                    calls,
-                )
-            )
-        self.generic_visit(node)
-
-
-#: Where `_assignments` keeps what it found, on the function itself: it goes
-#: with the function, and a script run again is a new one. Not by code
-#: object: two compare equal while one of them is being collected.
-_ASSIGNED = "_magpylib_studio_assignments"
-
-
-def keep_source(filename, text):
-    """Keep `text` as the source of code compiled under `filename`, where
-    `inspect` reads it: a scene function run from text names its objects by
-    the variables it assigns them to, which needs its source."""
-    linecache.cache[filename] = (len(text), None, text.splitlines(True), filename)
-
-
-def _assignments(fn):
-    """Where `fn` makes an object and names it: (first line, last line,
-    name, the names the call is spelt with, every call's names in it), for
-    each statement `_Assignments` finds. Nothing where the source cannot be
-    read: then ids come from labels."""
-    fn = inspect.unwrap(fn)
-    kept = getattr(fn, "__dict__", {}).get(_ASSIGNED)
-    if kept is not None:
-        return kept
-    found = []
-    try:
-        lines, first = inspect.getsourcelines(fn)
-        tree = ast.parse(textwrap.dedent("".join(lines)))
-    except (OSError, TypeError, SyntaxError):
-        tree = None
-    node = tree and next(
-        (n for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)),
-        None,
-    )
-    if node is not None:
-        seen = _Assignments()
-        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
-            seen.bound[arg.arg] += 1
-        for statement in node.body:
-            seen.visit(statement)
-        offset = first - 1
-        found = [
-            (start + offset, end + offset, name, callee, calls)
-            for start, end, name, callee, calls in seen.found
-            if seen.bound[name] == 1 and not name.startswith("_")
-        ]
-    with contextlib.suppress(AttributeError, TypeError):
-        fn.__dict__[_ASSIGNED] = found
-    return found
-
-
 class _Recorder:
     """Maps the hook's events onto the builder's steps, one `Scene` at a
     time. The objects are real magpylib objects, built from the resolved
     arguments; the document keeps the arguments as written."""
 
     def __init__(self, document, fn=None):
-        #: The scene function, whose names give the objects it names their
-        #: ids (`variable_for`).
+        #: The scene function's code, to find its frame by (`watch`).
         self.code = getattr(inspect.unwrap(fn), "__code__", None) if fn else None
-        self.assigned = _assignments(fn) if fn else []
+        #: Its frame, once found: kept, so its names can be read after it
+        #: has returned.
+        self.frame = None
+        #: Each of its names, and the objects it has been seen holding.
+        self.held = {}
+        #: Objects `name()` gave an id outright.
+        self.by_hand = set()
+        #: The objects made, in order, each with what its label (or class)
+        #: would make its id: an unnamed one's id is settled at the end.
+        self.made = []
         self.document = document
         self.session = document._session
         self.objects = {}  # id(magpylib object) -> builder Object
@@ -685,41 +571,21 @@ class _Recorder:
             )
         return found
 
-    def variable_for(self, cls):
-        """The name the scene function gives the `cls` being made, where it
-        gives it one: `r1 = magpy.magnet.Cuboid(...)`, run once, and `r1`
-        bound nowhere else in it. That is the object's id, as it is the
-        name the function knows it by; its label stays what it shows."""
-        if self.code is None or not self.assigned:
-            return None
-        frame = sys._getframe(1)
-        while frame is not None and frame.f_code is not self.code:
-            frame = frame.f_back
-        if frame is None:
-            return None
-        line = frame.f_lineno
-        for start, end, name, callee, calls in self.assigned:
-            # one call of its kind in the statement, or which would it be?
-            if (
-                start <= line <= end
-                and cls.__name__ in callee
-                and calls[cls.__name__] == 1
-                and name not in self.document._ids
-            ):
-                return name
-        return None
-
     def register(self, obj, type_, params, style_kwargs, style):
         """A new object: its create step, at the scene's root for now. The
         style is kept as the document keeps it, by dotted path, whether it
-        was given nested or as `style_label`-shaped keywords. Its id is the
-        name the function gives it, else its label, else its class."""
+        was given nested or as `style_label`-shaped keywords. Its id is its
+        label, else its class, until the function's names say otherwise
+        (`name_by_variables`)."""
+        self.watch()  # every object is made here, while the function runs
         style = {
             **_flat_style(_value(style or {})),
             **_flat_style({k[len("style_") :]: v for k, v in style_kwargs.items()}),
         }
-        named = self.variable_for(hook.magpylib_class(type(obj)))
-        object_id, style = self.document._named(named, type_, style, {})
+        object_id, style = self.document._named(None, type_, style, {})
+        self.made.append(
+            (id(obj), style.get("label") or type_.rsplit(".", 1)[-1].lower())
+        )
         if type_ == "Collection":
             recorded = build.Collection(self.document, object_id, style, ())
         else:
@@ -734,6 +600,7 @@ class _Recorder:
         return recorded
 
     def rename(self, obj, object_id):
+        self.by_hand.add(id(obj))
         recorded = self.known(obj)
         if object_id == recorded.id:
             return
@@ -799,6 +666,7 @@ class _Recorder:
             )
 
     def on_event(self, event):
+        self.watch()
         self.flush_styles()
         getattr(self, f"_on_{event.kind}")(event)
 
@@ -1026,8 +894,83 @@ class _Recorder:
                     self.call(None, "reset_style", object_id, path)
             self.seen[object_id] = now
 
+    # -- names, read from the running function
+
+    def watch(self):
+        """Note which of the scene function's names hold which objects, now.
+
+        Read off its frame as it runs -- found the first time something is
+        recorded, and kept, so that what its names hold at the end can be
+        read once it has returned. Nothing is parsed: these are the names the
+        function has, holding what they hold."""
+        if self.code is None:
+            return
+        if self.frame is None:
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code is not self.code:
+                frame = frame.f_back
+            if frame is None:
+                return
+            self.frame = frame
+        for name, value in dict(self.frame.f_locals).items():
+            if id(value) in self.objects and not name.startswith("_"):
+                held = self.held.setdefault(name, [])
+                if id(value) not in held:
+                    held.append(id(value))
+
+    def name_by_variables(self):
+        """Give each object the name the function knows it by, as its id:
+        `r1 = magpy.magnet.Cuboid(..., style_label="Magnet 1")` is `r1`, its
+        label still what it shows. A name that held more than one object --
+        in a loop, or assigned twice -- names none of them, and an object
+        without a name of its own takes its label (else its class) for its
+        id, after the names have theirs; an id `name()` gave stays. The first
+        name an object was given wins over a second one for it."""
+        from magpylib_studio import importer
+
+        keep = {
+            key: recorded.id
+            for key, recorded in self.objects.items()
+            if key in self.by_hand
+        }
+        taken = set(keep.values())
+        named = {}
+        for name, held in self.held.items():
+            key = held[0] if len(held) == 1 else None
+            if key is None or key in keep or key in named or name in taken:
+                continue
+            named[key] = name
+            taken.add(name)
+        final = dict(keep)
+        final.update(named)
+        for key, base in self.made:
+            if key not in final:
+                final[key] = importer._unique_id(base, taken)
+        # copies nothing names keep what the copy gave them
+        for key, recorded in self.objects.items():
+            final.setdefault(key, recorded.id)
+        renames = {
+            self.objects[key].id: new
+            for key, new in final.items()
+            if self.objects[key].id != new
+        }
+        if not renames:
+            return
+        with hook.nested():
+            result = self.session._rename_ids(renames)
+        if not result["ok"]:
+            raise BuildError(result["error"])
+        for recorded in self.objects.values():
+            recorded.id = renames.get(recorded.id, recorded.id)
+        self.document._ids = {renames.get(i, i) for i in self.document._ids}
+        self.live = {renames.get(i, i): obj for i, obj in self.live.items()}
+        self.seen = {renames.get(i, i): style for i, style in self.seen.items()}
+        self.moved_by_variables = {renames.get(i, i) for i in self.moved_by_variables}
+
     def finish(self):
+        self.watch()
         self.flush_styles()
+        self.name_by_variables()
 
 
 def _descendants(obj):

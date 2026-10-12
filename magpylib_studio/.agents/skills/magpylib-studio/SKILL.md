@@ -44,9 +44,9 @@ the scene cannot take fails at its line and says why.
   `.from_hull(points)` and `.from_superquadric(size, roundness)` (a mesh by its
   source), and `place` for an orientation stated outright. An object's id is the
   variable it is assigned to (`r1 = magpy.magnet.Cuboid(...)` is `r1`), where
-  that statement runs once and the name is bound nowhere else in the function;
-  else its `style_label` with spaces as underscores, else its class. Its label
-  stays what the tree shows.
+  that name held no other object while the function ran (a name reused in a
+  loop names none); else its `style_label` with spaces as underscores, else its
+  class. Its label stays what the tree shows.
 - Called plainly, `ring(n=12)` returns magpylib objects at those values: a real
   field from `getB`, no studio involved. `ring.build()` is the document;
   `ring.build().save("ring.magpy.json")` writes it.
