@@ -13,9 +13,10 @@ What changed in Magpylib Studio: the VS Code extension and the
 A `.magpy.json` opens in its own tab, with its own undo, unsaved dot and script
 tab. New Scene, Load Example and Import Script open a new tab instead of
 replacing the scene that is open. In the side bar, **Objects** shows the
-objects of the scene in front. With two or more open, **Open Scenes** lists them
-above it, as Source Control lists repositories only when there are several, and
-Objects shows the ones picked there (Cmd-click picks several). The Variables,
+objects of the scene in front. When a second opens, **Open Scenes** lists them
+above it, as Source Control's Repositories do, and Objects shows the ones picked
+there (Cmd-click picks several); the side bar's views menu shows or hides it.
+The Variables,
 Inspector and Undo views follow the scene in front.
 
 </details>

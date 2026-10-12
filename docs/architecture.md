@@ -371,11 +371,12 @@ focus is in the side bar or another editor. A command acts on the scene it
 started in through every question it asks (an `AsyncLocalStorage` holds it); a
 side view names the scene it was drawn for in every request.
 
-The sidebar, as Source Control's Repositories and Changes: Open Scenes, shown
-once two or more scenes are open (a line per open scene, its file's commands on
-it -- Save, Close, Save As, Revert, Export, Reveal; picking one, or several with
-Cmd-click, picks what Objects shows; with one scene its commands are in Objects'
-title bar instead), Objects (the scenes picked, each under its own heading, or one's objects
+The sidebar, as Source Control's Repositories and Changes: Open Scenes, hidden
+until a second scene opens and then the person's to show or hide from the views
+menu (a line per open scene, its file's commands on it -- Save, Close, Save As,
+Revert, Export, Reveal; picking one, or several with Cmd-click, picks what
+Objects shows; while it is hidden those commands are in Objects' title bar
+instead), Objects (the scenes picked, each under its own heading, or one's objects
 at the top, nested as grouped with each object's steps under them; drag and drop
 to reparent within a scene and to copy into another, rename, copy, cut, paste --
 across scenes a copy, a Cut moving it, one undo where it landed putting it back

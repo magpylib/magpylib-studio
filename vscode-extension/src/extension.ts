@@ -53,6 +53,7 @@ let sceneTree: SceneTreeProvider | undefined;
 let sceneTreeView: vscode.TreeView<SceneNode> | undefined;
 /** Open Scenes: the list of open scenes above Objects. */
 let openScenesList: OpenScenesProvider | undefined;
+let openScenesTreeView: vscode.TreeView<SceneRoot> | undefined;
 /** The scenes Objects shows: those picked in Open Scenes. */
 let shownScenes = new Set<SceneDocument>();
 /** An object written as a scene of its own, to paste into another
@@ -2721,12 +2722,35 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /** Whether any scene is open in a tab, for the title bar's Close All. */
+  /** Open Scenes is hidden until a second scene opens, as Source Control
+   *  shows its repositories once there are several; from then on, shown or
+   *  hidden is the person's, from the views menu. It is shown where the
+   *  studio's side bar is, never by taking the side bar from another view:
+   *  `due` until that side bar is in sight. */
+  let scenesBefore = 0;
+  let openScenesDue = false;
   const showScenesOpen = () => {
     const count = sceneRoots().length;
     void vscode.commands.executeCommand('setContext', 'magpylib-studio.scenesOpen', count > 0);
-    // Open Scenes is shown for two or more, as Source Control lists
-    // repositories only when there are several: one scene is Objects alone
-    void vscode.commands.executeCommand('setContext', 'magpylib-studio.severalScenes', count > 1);
+    if (count > 1 && scenesBefore < 2) {
+      openScenesDue = true;
+    } else if (count < 2) {
+      openScenesDue = false;
+    }
+    scenesBefore = count;
+    showOpenScenesIfDue();
+  };
+  const showOpenScenesIfDue = () => {
+    const [first] = openScenesList?.getChildren() ?? [];
+    if (!openScenesDue || !first || !sceneTreeView?.visible) {
+      return;
+    }
+    openScenesDue = false;
+    if (!openScenesView.visible) {
+      void Promise.resolve(openScenesView.reveal(first, { select: false, focus: false })).catch(
+        () => undefined,
+      );
+    }
   };
 
   /** Open a scene's tab where it is, the focus left in the side bar. */
@@ -4890,6 +4914,7 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: openList,
     canSelectMany: true,
   });
+  openScenesTreeView = openScenesView;
   /** Objects says which scene it shows, or how many. */
   const describeObjects = () => {
     const shown = shownRoots();
@@ -4900,6 +4925,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   // What is picked in Open Scenes is what Objects shows. The scene in front
   // stays in front when it is among them; else the last one picked comes.
+  /** The rows `pickFront` selected, whose selection VS Code tells back a
+   *  moment later: by then another scene may be in front, and taking the
+   *  echo for a pick would put the earlier one back. */
+  const selectedHere = new Set<SceneDocument>();
   openScenesView.onDidChangeSelection((event) => {
     for (const root of event.selection) {
       if (!root.doc) {
@@ -4911,6 +4940,9 @@ export function activate(context: vscode.ExtensionContext): void {
       .filter((doc): doc is SceneDocument => doc !== undefined);
     if (!picked.length) {
       return;
+    }
+    if (picked.length === 1 && selectedHere.delete(picked[0])) {
+      return; // the studio's own selection, coming back
     }
     shownScenes = new Set(picked);
     const front = frontScene();
@@ -4928,6 +4960,7 @@ export function activate(context: vscode.ExtensionContext): void {
       shownScenes = new Set([doc]);
       const row = openList.rowOf(doc);
       if (row && openScenesView.visible) {
+        selectedHere.add(doc); // each comes back in its turn
         void openScenesView.reveal(row, { select: true, focus: false });
       }
     }
@@ -4940,6 +4973,8 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
     dragAndDropController: tree,
   });
+  // the studio's side bar in sight: Open Scenes, if a second scene asked for it
+  context.subscriptions.push(sceneTreeView.onDidChangeVisibility(() => showOpenScenesIfDue()));
   showSceneFile();
 
   context.subscriptions.push(
@@ -6936,4 +6971,9 @@ export function showScenesForTest(docs: SceneDocument[]): void {
 /** Open Scenes, for the integration tests to read its rows. */
 export function openScenesForTest(): OpenScenesProvider {
   return openScenesList!;
+}
+
+/** Whether Open Scenes is showing, for the integration tests. */
+export function openScenesShownForTest(): boolean {
+  return openScenesTreeView?.visible ?? false;
 }

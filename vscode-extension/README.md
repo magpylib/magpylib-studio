@@ -26,10 +26,11 @@ same scene, and saving an edit to it rebuilds the scene from what you wrote._
   undo, and the field follows as you go. A **Chart** button swaps in the Plotly
   figure, which is read only and has its own animation.
 - **Objects and Open Scenes** — the magpylib-logo icon in the activity bar opens
-  the objects of the scene in front, nested as they are grouped. With two or
-  more scenes open, a list of them, one line each, shows above, as Source
-  Control lists repositories only when there are several: the objects shown are
-  those of the one picked (Cmd-click picks several, each under its own heading), one icon per type (magnets red, currents blue, sensors green).
+  the objects of the scene in front, nested as they are grouped. When a second
+  scene opens, a list of them, one line each, shows above, as Source Control's
+  Repositories do (shown or hidden from then on in the side bar's views menu):
+  the objects shown are those of the one picked (Cmd-click picks several, each
+  under its own heading), one icon per type (magnets red, currents blue, sensors green).
   Clicking an object opens the plot and loads it in the Inspector. With no scene
   open the view offers **New Scene**, **Open Scene…** and **Load Example
   Scene…**, which picks between six — a Halbach stack, a solenoid, a mirrored

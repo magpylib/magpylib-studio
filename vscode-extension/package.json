@@ -482,7 +482,8 @@
         {
           "id": "magpylib-studio.openScenesView",
           "name": "Open Scenes",
-          "when": "magpylib-studio.severalScenes"
+          "when": "magpylib-studio.scenesOpen",
+          "visibility": "hidden"
         },
         {
           "id": "magpylib-studio.sceneView",
@@ -724,67 +725,67 @@
         },
         {
           "command": "magpylib-studio.newScene",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
           "group": "navigation@3"
         },
         {
           "command": "magpylib-studio.loadScene",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
           "group": "navigation@4"
         },
         {
           "command": "magpylib-studio.loadExample",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
           "group": "0_scenes@3"
         },
         {
           "command": "magpylib-studio.importScript",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
           "group": "0_scenes@4"
         },
         {
           "command": "magpylib-studio.saveSceneAs",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.scenesOpen",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
           "group": "3_file@1"
         },
         {
           "command": "magpylib-studio.revertScene",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.sceneFile",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
           "group": "3_file@2"
         },
         {
           "command": "magpylib-studio.exportScript",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.scenesOpen",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
           "group": "4_export@1"
         },
         {
           "command": "magpylib-studio.exportBuilderScript",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.scenesOpen",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
           "group": "4_export@2"
         },
         {
           "command": "magpylib-studio.revealSceneInExplorer",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.sceneFile",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
           "group": "5_reveal@1"
         },
         {
           "command": "magpylib-studio.revealSceneInOS",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.sceneFile && isMac",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile && isMac",
           "group": "5_reveal@2"
         },
         {
           "command": "magpylib-studio.revealSceneInFileManager",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.sceneFile && !isMac",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile && !isMac",
           "group": "5_reveal@2"
         },
         {
           "command": "magpylib-studio.copyScenePath",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.sceneFile",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
           "group": "5_reveal@3"
         },
         {
           "command": "magpylib-studio.closeScene",
-          "when": "view == magpylib-studio.sceneView && !magpylib-studio.severalScenes && magpylib-studio.scenesOpen",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
           "group": "6_close@1"
         },
         {

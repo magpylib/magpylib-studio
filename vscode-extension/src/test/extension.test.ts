@@ -12,6 +12,7 @@ import {
   meaning,
   findRecoveryForTest,
   openScenesForTest,
+  openScenesShownForTest,
   sceneFileState,
   sceneTreeForTest,
   showScenesForTest,
@@ -404,6 +405,20 @@ suite('magpylib-studio', () => {
     const registered = new Set(await vscode.commands.getCommands(true));
     const missing = declared.filter((c) => !registered.has(c));
     assert.deepStrictEqual(missing, [], 'declared but never registered');
+  });
+
+  test('Open Scenes shows itself once a second scene opens', async function () {
+    this.timeout(60000);
+    // First among the scene tests, so it starts with none open. One scene is
+    // Objects alone, as one repository is Source Control's Changes alone;
+    // a second brings the list, in the studio's side bar once it is shown.
+    await vscode.commands.executeCommand('magpylib-studio.sceneView.focus');
+    await vscode.commands.executeCommand('magpylib-studio.newScene', DISCARD);
+    await sceneWhere(nothing, 'one scene open');
+    await pause(500); // asserting that nothing happens
+    assert.strictEqual(openScenesShownForTest(), false, 'Open Scenes showed for one scene');
+    await vscode.commands.executeCommand('magpylib-studio.newScene', DISCARD);
+    await until(() => openScenesShownForTest(), 'Open Scenes to show for two scenes');
   });
 
   test('the engine builds a scene and the virtual document shows it', async function () {
