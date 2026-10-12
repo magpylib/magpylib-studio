@@ -1,956 +1,413 @@
 # Changelog
 
-All notable changes to the Magpylib Studio extension.
+What changed in Magpylib Studio: the VS Code extension and the
+`magpylib-studio` Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
 ### Added
 
-- **The 3D view in a notebook.** `SceneWidget(objects)` from
-  `magpylib_studio.widget`, or `magpy.show(..., backend="widget")`, draws the
-  studio's view in a Jupyter, marimo, VS Code or Colab cell: a legend nesting
-  the objects, the panel's keys, animation, export to one HTML file and to PNG.
-  `pip install "magpylib-studio[widget]"`, and magpylib main for the
-  display-backend API.
-- **Editing in a notebook.** `SceneWidget(..., editable=True)` puts the handles
-  over a studio session in the kernel, with nothing of the extension needed:
-  `objects`, `to_script()`, `undo()`, `save()`, `set(...)`, a `revision` once
-  per settled edit, and for a scene with variables a **sliders** toggle at the
-  foot of the edit column: the studio's Variables panel beside it — a slider
-  each, the scene following as one is dragged, a dropdown for a choice, `15 mm`
-  typed and read in its unit — with a `variables` trait a cell reads, assigns,
-  or ties another control to with `traitlets.link`. The studio's own Variables
-  view is that panel, mounted in the sidebar. A view is read only until the
-  pencil among its tools puts the handles out: a scene written in code or a path
-  is shown as its own session from the start, and the cell's own objects are
-  copied into one when the pencil is pressed. Undo stops where the view started,
-  and `reset()`, or the arrow under the undo buttons, takes every edit since
-  back in one undoable step. `editable=None` is a view for looking only: no
-  pencil, and `editable` refuses to turn on.
-- **Writing a scene in code.** A scene is a plain magpylib function under
-  `@scene`: its parameters are the variables, with their bounds and kinds in
-  `Annotated[...]` (`Length`, `Angle`, `Count`), its body is magpylib, and
-  `.build()` records what the body does into the document through a hook on
-  magpylib's objects. Called, the same function is plain magpylib. Studio's own
-  words — `derived`, `duplicate_around`, `duplicate_along`, `mirror`, `place`,
-  `sampled`, `hide`, `show`, `remove`, `TriangularMesh`, `name` — are one step
-  each. A call the scene cannot take fails at its line and says why; a property
-  read inside the scene is today's number, and a warning says so. **Open in
-  Magpylib Studio** on a scene script opens the scene it built, whole, and
-  `to_builder_script()` writes any scene back as such a function. Works on
-  released magpylib through a copy of the hook, and on magpylib's own when it
-  ships it. Checked on magpylib's own docs: nineteen of the twenty-three pages
-  that run here come back exact through the recorder.
-- **An Agent Skill** inside the package, `magpylib_studio/.agents/skills/`,
-  teaching coding agents to write scenes as functions, read the field, sweep a
-  variable and hand the result over; its API reference is generated from the
-  code and checked by the tests. `uvx library-skills` links it into a project.
-- **An agent evaluation** (`evals/`): magnetics tasks with checkable targets,
-  run by Claude Code headless with plain magpylib and with the skill, results
-  kept in the repository.
-- **A panel of its own.** `view.panel("variables")` and `view.panel("object")`
-  are the view's two panels as widgets the notebook places apart, beside the
-  view in an ipywidgets box, a marimo column or a sidecar. They edit the scene
-  through the view, which draws and tells the notebook as it does for its own
-  panels, and the view's selection, revision and theme reach them.
-- **The scene function itself.** `SceneWidget(ring)` takes the function and
-  builds it, marked `@scene` or plain, where it took `ring.build()`; the mark is
-  for a file, where it says which function is the scene, and for `build()`
-  without a view.
-- **Variants.** A scene keeps named sets of values for its variables:
-  `@scene(variants={"compact": {...}, "wide": {...}})` in code, checked against
-  each parameter's annotation where it is written; `view.save_variant(name)`
-  from a notebook cell; saved in the `.magpy.json` as `variants`, the format's
-  version unchanged. The variables panel shows a toggle per variant above the
-  sliders, the one the values are in pressed, and one press sets them all as one
-  step to undo; past four, a dropdown. `ring(**ring.variants["wide"])` is the
-  scene at those values in plain magpylib, and the script tab writes them in the
-  mark. A variant holds values, never a formula; values the limits refuse, alone
-  or through a formula, are refused when it is saved, and one the scene cannot
-  use as it stands is shown, not offered.
-- **Several values in one step.** `view.variables = {...}` sets everything it
-  changes together (`set_variables`): one rebuild where it was one per value,
-  checked as the combination it makes, and no step to undo for values the scene
-  already has.
-- **The view traces a pattern.** With a pattern's source selected, a dashed line
-  in the selection's colour runs through the copies, closed round a ring, so the
-  view says how the copies follow where the faint outlines say that they do.
-- **The Inspector makes a variable without asking.** A bare name typed into a
-  parameter or a pose in the sidebar goes to the engine, which makes it at the
-  value it replaces in the same step, as the notebook's panels have it; the
-  status bar says what was made. A step's own values still ask first.
-- **Plainer words.** `unhide(obj)` is the word for undoing `hide`, where `show`
-  was also magpylib's word for drawing. A mesh says where it comes from as a
-  call: `TriangularMesh.from_file(path, scale=...)`, `.from_hull(points)`,
-  `.from_superquadric(size, roundness)`, and the script tab writes them so. A
-  view for looking only is `editable="never"`, `None` kept. `grid(half, count)`
-  is a sensor's square of pixels as a formula of the variables, where the
-  examples spelt it as a `sampled` lambda.
-- **The examples name objects by their labels.** `style_label="magnet"` is the
-  id, spaces as underscores; `name()` stays for a saved scene whose id differs
-  from its label, which the script tab writes, and `place()` for an orientation
-  stated outright. Neither is in the examples any more.
-- **A pattern's copies follow a style edit.** A colour or any style set on the
-  source of a pattern reaches its copies, as a drag's pose does: the edit
-  replays the scene, where before it changed the source alone until the next
-  rebuild.
-- **The source is drawn full, its copies faint.** With a pattern's source
-  selected, the view outlines the source in full and its copies at a third, so
-  the family reads as one leader and its followers; a click on any of them
-  selects the source, as before.
-- **The panels dock beside the view.** The variables and object panels open in a
-  column beside the view, which refits to what is left, rather than floating
-  over it: a float had nowhere to go on a narrow view. A handle on the column's
-  inner edge drags its width; narrower than 720 pixels the column is a sheet
-  below the view, and the widget grows by it. The dock has one line of title and
-  a close mark; the column's toggles say which panel is open. In the title line,
-  one ↺ Restore for the variables a drag or a step took over, and one ↺ Reset
-  style for the appearance set on the selection, the label kept. `V` and `O`
-  open them from the keyboard. While the object panel shows the pose the readout
-  stays away, and comes back for the length of a drag; pose and properties are
-  headings, not folds.
-- **The object panel.** Beside the sliders toggle, an object toggle opens the
-  selection's parameters and pose over the view: the studio's Inspector, in its
-  compact form, in the scene's units with expressions as written. A value typed
-  is read by the engine, `12` or `1.5 cm`, and a variable's name binds the
-  number; a name the scene lacks is made at the value it replaces, which the
-  engine now does for the Inspector's own calls (`set_param` and `set_transform`
-  take `define`). Under them, the object's style tree folded under one heading,
-  read when opened: colour, opacity, label, the magnetization arrows, the path;
-  a value set there is one step to undo, told to the notebook as a `set` of
-  `style.<path>`. The studio's own Inspector is that panel, mounted in the
-  sidebar in full.
-- **The readout takes units and variables.** The numbers a drag writes, at the
-  foot of the view, show in the scene's units and take `15 mm`, `2 cm`, `5°` as
-  the Inspector's boxes do; a variable's name typed there binds the number to it
-  and shows in its place, and a name the scene lacks is made at the value it
-  replaces, one step to undo, name and all. The engine does the making
-  (`apply_edits(define=True)`), so the Inspector can ask the same.
-- **The view's tools in groups**, a rule between: the camera, what is shown, the
-  pencil, what you take away, the window. And **W**, **E**, **R** or **P** on a
-  view that offers the pencil put the handles out, as the pencil does, in that
-  mode.
-- An import of plain magpylib (`load_script`) now names the variables it turned
-  into numbers, where it used to say nothing.
-- **A drag's frame is one message.** A slider's or a handle's preview asks for
-  the scene in its own answer, where the view used to ask for it in a second
-  message: half the wait per frame on a notebook host whose every message costs,
-  marimo's most of all.
-- **A sensor's field arrows are drawn as instances.** A sensor whose pixels read
-  the field was one mesh of every arrow, a hundred kilobytes of a frame for the
-  Halbach example's 7 × 7 probe; its pixels now travel as a position, a
-  direction, a size and a colour each, and the view draws one shape that many
-  times, sized and coloured as magpylib does. The frame is a third of the size.
-  A sensor switched to the 2D `arrow` symbol no longer fails to draw.
-- **A bare sensor draws at the studio's size.** A sensor or dipole whose style
-  says no size used to draw a metre across in a scene function's scene, since
-  the studio draws them at their stated size and magpylib's default is 1; it is
-  5 mm now, a size the style does say is kept, and magpylib's display defaults
-  are put back after each drawing, where the studio used to leave them changed
-  for the notebook's own figures.
-- **Units.** A variable can say what it measures — length, angle, field, current
-  — chosen when **New Variable…** asks what it holds, or later under **Variable
-  Properties…**. Each prompt for a value says the unit a bare number is read in
-  — `a length, in m unless you type a unit` — with examples in the box
-  (`e.g. 0.015 or 15 mm or an expression like b * 2`). It is shown in SI unless
-  the scene says otherwise — the Variables panel shows `gap m` holding 0.015 —
-  and reads a unit when one is typed: `20 mm` and `2 cm` mean what they say.
-  While a value is typed, the box says what it means: `1` for a field is
-  `= 1 T`. Its ranges, Edit Variable and a sweep's range are read the same way,
-  and a sweep is plotted along `gap (m)`. **Units…** (the ruler on the Variables
-  view) shows a scene's lengths in mm (or cm, µm) and its fields in mT (or µT)
-  instead, and a bare number then means mm or mT; the scene itself stays in
-  metres and tesla, so nothing that was saved changes. A variable created by
-  typing its name into a box takes that box's unit: `gap` typed as a position is
-  a length, and it is created with its unit in one undo step. The examples say
-  what their variables measure.
-- **The scene's units everywhere.** The Inspector shows an object's dimension,
-  polarization, pose and steps in the scene's units — `dimension (mm)` holding
-  10 — and reads what is typed the same way: `12` is 12 mm, `1.5 cm` is 15 mm.
-  So does every box that asks for a length — Set Position…, Move By…, an anchor,
-  a mirror point, a step, a size, a pixel grid, the point editors — and every
-  polarization. Steps read `moved by (0, 0, 5) mm`, field maps have their axes
-  in mm, and the field plots are in mT.
-- A box's values are split at commas: `0, 0, gap * 2` and the sampled curve's
-  own example, `radius * cos(tau * turns * t)`, used to be split at their spaces
-  and refused.
-- A figure a script draws with `magpy.show(..., backend="studio")`, or with
-  **Draw scripts here** on, is now the notebook widget: the legend nesting the
-  objects as their collections do, the tools and the keys. `animation=True`
-  plays in the panel from the run the figure carries, where it used to fall back
-  to a still picture. Needs magpylib main for the legend and the display-backend
-  API.
-- A re-run of the script redraws the panel as you left it: what you hid, the
-  theme you chose and the camera stay. The picture button asks where to save the
-  PNG.
-- A collection has handles of its own in the 3D view. Select it in the Scene
-  tree or the legend, or press C on something inside it, and a drag moves and
-  turns the whole collection as one edit to it, rather than one to each object
-  in it.
+<details>
+<summary>Several scenes at once, each in a tab of its own</summary>
 
-- **Several scenes at once.** A `.magpy.json` opens in a tab of its own, and
-  several sit side by side, each with its own undo, its own unsaved dot and its
-  own script tab; New Scene, Load Example and Import Script open a new tab
-  rather than replacing the scene open. In the side bar, as Source Control lists
-  repositories and their changes, **Open Scenes** lists the open scenes one line
-  each -- Save, Close, Save As, Revert, Export, Reveal on its line, New Scene,
-  Open Scene and Close All Scenes above -- and **Objects** shows the objects of
-  the scene picked there, or of several picked with Cmd-click, each under its
-  own heading; the Variables, Inspector and Undo views show the scene in front
-  and name it. A command acts on the scene it started in, however long it asks,
-  and a value typed in a side view lands in the scene it was typed for.
-- **A scene's file is watched.** A change made elsewhere -- git, another editor,
-  an agent -- comes into its tab as one undo step, unsaved changes or not; a
-  file that does not read is not loaded, and the save asks before writing over
-  it. A rename or a move in the Explorer keeps the scene's unsaved changes and
-  undo.
-- **After a crash.** Unsaved changes VS Code did not bring back after a crash of
-  its own are offered back from a copy the studio keeps of each scene. An engine
-  that dies gives every scene back as it was a second after its last edit, one
-  at a time; a scene whose restore stops the engine again is kept out, shown
-  empty and never saved over.
-- **Variants from the side bar**: Save as Variant, Save Over the Variant in Use,
-  Rename and Delete, in the Variables view's menu.
-- **One engine, several scenes.** The engine serves a session per scene, each
-  under a name the host gives it (`open_session`, `close_session`), opened on
-  a document, a file or an example, and says what it speaks (`version`,
-  protocol 2). A request that names no session still
-  goes to the one scene a host drives, as before. `replace_scene` replaces a
-  scene as one step to undo. The extension asks first, and refuses an engine
-  from before several scenes -- which would serve every tab from one scene -- or
-  one newer than it understands; Install the Engine now upgrades an engine
-  already there.
+A `.magpy.json` opens in its own tab, with its own undo, unsaved dot and script
+tab. New Scene, Load Example and Import Script open a new tab instead of
+replacing the scene that is open. In the side bar, **Open Scenes** lists the
+open scenes (Cmd-click picks several) and **Objects** shows the objects of the
+ones picked. The Variables, Inspector and Undo views follow the scene in front.
+
+</details>
+
+<details>
+<summary>A scene's file is watched</summary>
+
+A change made elsewhere — git, another editor, an agent — comes into the tab as
+one undo step. Renaming or moving the file in the Explorer keeps its unsaved
+changes and its undo.
+
+</details>
+
+<details>
+<summary>Unsaved work survives a crash</summary>
+
+Unsaved changes VS Code did not bring back after a crash are offered back. If
+the engine stops, every scene comes back as it was a second after its last edit.
+
+</details>
+
+<details>
+<summary>The 3D view in a notebook</summary>
+
+`SceneWidget(objects)` from `magpylib_studio.widget`, or
+`magpy.show(..., backend="widget")`, draws the studio's view in a Jupyter,
+marimo, VS Code or Colab cell, with its legend, keys, animation and export to
+HTML or PNG. Install with `pip install "magpylib-studio[widget]"`; it needs
+magpylib's main branch.
+
+</details>
+
+<details>
+<summary>Editing in a notebook</summary>
+
+`SceneWidget(..., editable=True)` gives the view its editing handles, undo,
+`save()` and `to_script()`, without the extension. The pencil among the view's
+tools turns editing on; `editable="never"` is a view for looking only. A scene
+with variables gets a sliders panel, and its `variables` trait can be read, set
+or linked from a cell. `reset()` takes every edit back in one undoable step.
+`SceneWidget(ring)` takes a scene function directly.
+
+</details>
+
+<details>
+<summary>Writing a scene in code</summary>
+
+A scene is a plain magpylib function marked `@scene`: its parameters are the
+variables (bounds and kinds in `Annotated[...]`: `Length`, `Angle`, `Count`)
+and its body is magpylib. Called, it is plain magpylib; `.build()` makes it a
+studio scene. The studio's own steps — `derived`, `duplicate_around`,
+`duplicate_along`, `mirror`, `place`, `sampled`, `grid`, `hide`, `unhide`,
+`remove`, `name`, `TriangularMesh.from_file` and the like — are one step each,
+and an object's `style_label` is its id. A call the scene cannot take fails at
+its line and says why. **Open in Magpylib Studio** on such a script opens its
+scene, and `to_builder_script()` writes any scene back as a function.
+
+</details>
+
+<details>
+<summary>Variants: named sets of values</summary>
+
+A scene keeps named sets of values for its variables: `@scene(variants={...})`
+in code, `view.save_variant(name)` in a notebook, or the Variables view's menu
+(Save as Variant, Save Over, Rename, Delete). The variables panel shows a toggle
+per variant, and one press sets them all as one undo step. Variants are saved in
+the `.magpy.json`.
+
+</details>
+
+<details>
+<summary>Units: lengths in mm, fields in mT</summary>
+
+A variable can say what it measures — length, angle, field, current — and every
+box reads a unit when one is typed: `20 mm`, `2 cm`, `5°`. **Units…** (the ruler
+on the Variables view) shows lengths in mm, cm or µm and fields in mT or µT in
+the Inspector, the steps, the field maps and the plots, and a bare number then
+means that unit. The file stays in metres and tesla, so nothing saved changes.
+
+</details>
+
+<details>
+<summary>The Variables and Object panels beside the view</summary>
+
+Both panels dock in a column beside the view (`V`, `O`), or below it when the
+view is narrow. The Object panel shows the selection's parameters, pose and
+style in the scene's units; a value can be `12`, `1.5 cm` or a variable's name.
+↺ puts back variables a drag took over, or resets a style. In a notebook,
+`view.panel("variables")` and `view.panel("object")` place them anywhere. The
+studio's Variables view and Inspector are these same panels.
+
+</details>
+
+<details>
+<summary>A script's figures use the new view</summary>
+
+`magpy.show(..., backend="studio")`, or any `magpy.show()` with **Draw scripts
+here** on, draws the notebook widget: legend, tools and keys. `animation=True`
+plays in the panel. A re-run keeps what you hid, the theme and the camera.
+Needs magpylib's main branch.
+
+</details>
+
+- Typing a name the scene lacks into the Inspector or the drag readout makes
+  that variable, at the value it replaced, in one undo step.
+- A collection can be dragged as one: select it in the tree or the legend, or
+  press C on something inside it.
+- With a pattern's source selected, the source is outlined in full, its copies
+  faintly, with a dashed line through them. A style set on the source reaches
+  the copies at once.
+- The view's tools are grouped, and `W`, `E`, `R` or `P` put the handles out in
+  that mode.
+- `view.variables = {...}` sets several values in one step and one rebuild.
+- An import of plain magpylib names the variables it turned into numbers.
+- Dragging in a notebook waits half as long per frame, marimo most of all.
+- An Agent Skill in the package teaches coding agents to write scenes as
+  functions, read the field and sweep a variable; `uvx library-skills` links it
+  into a project.
 
 ### Changed
 
-- **VS Code 1.109 or later.** Before it, Save As and an untitled scene's first
-  save left the old tab marked unsaved.
-- **A scene is VS Code's own document.** Save, Save As and Revert are VS Code's,
-  and so is the question on closing a tab with unsaved changes. An example opens
-  in a preview tab named after it, with nothing unsaved and nothing to undo:
-  the next example takes its place without asking, its first edit keeps it and
-  marks it unsaved, and untouched it comes back after a reload. The one scene
-  an older version remembered opens once as a tab; its 3D panel closes.
-- **Opening a scene starts the undo history.** A file, a script or an example
-  loaded is where the scene begins, not an edit of what was open, so the first
-  undo after it takes back the first edit and never the whole scene. The script
-  tab's save and a view's reset still replace the document as one undoable step
-  each.
-- **The legend says what each row is and how many it stands for.** A row that is
-  not a group shows its kind as the tree's own icon -- the wireframe of a
-  cuboid, a cylinder, a loop, a sensor -- drawn in the colour the object is
-  drawn in, so a magnet shows its polarization colours through its own outline;
-  and a dot in the caret's slot, so a sensor at the top level no longer reads as
-  part of the group above it. A collection counts what is drawn under it, the
-  copies its patterns make included, and the source of a pattern says how many
-  it stands for (`×10`), where before a ring of ten listed one magnet and
-  counted one.
-- A selection is drawn in a bright green, in lines a pixel and a half wide: the
-  object's own edges, and its path apart, with larger markers. It used to be a
-  thin blue box round everything drawn for the object, path included: a magnet
-  on an orbit got a box the size of the ring, a selected ring of them a cage
-  that pointed at none, and the blue was magpylib's own. A sensor's field arrows
-  are boxed once, not outlined arrow by arrow. A selected collection takes in
-  the copies its patterns made: the array example's rows and layers were left
-  out, of the outline and of F's framing alike. The magnets' colours, which say
-  their magnetization, and a sensor's pixels, coloured by the field, are left as
-  they are. In the notebook widget too.
-- **The script tab is the scene as a function, and saving it applies it.** _Edit
-  Python Script_ shows the scene as a `@scene` function, and a save replaces the
-  scene with the one it builds, as one undo step, keeping every variable,
-  formula and pattern. A save that changes nothing records nothing, and one that
-  would change more than you edited is refused, naming the line where the tab
-  cannot say the scene exactly. A script that fails is refused with the line it
-  failed at and stays in the tab; plain magpylib is refused rather than
-  flattened (open it with **Open in Magpylib Studio**). If the scene changed
-  after the tab was written — an edit in the panel, an agent's, an undo — a save
-  asks first, since applying the tab would undo those changes. Auto-save does
-  not apply the tab, and the text it saves is not written over by an edit
-  elsewhere. **Export as Scene Script…** writes the function to a file of its
-  own, and opening that file finds the meshes beside it.
-- **The studio's 3D view is the notebook widget**, as the script panel already
-  was: one view, with the same controls and keys everywhere. The tools show on
-  the view's top-right corner when the pointer is on it; the editing handles
-  (move, turn, resize, aim, the axes) are a column down the right edge, with
-  undo and redo; the numbers a drag changes read out in the bottom-left corner
-  and take a typed value; the keys button lists every key; a path plays from a
-  bar along the foot. The widget's legend starts closed — the Scene tree is the
-  studio's — and is a button away. Chart mode and Animate are in a bar beneath
-  the view. Hiding from the view (H, ⇧H, the legend's eye) is one undoable step
-  however many objects it covers.
-- The package now writes figures as payload version 2, which this extension
-  reads along with version 1. An older extension skips them, and its **Magpylib
-  Studio Views** output says to update it.
-- The engine now turns a drag of the 3D view's handles into edits
-  (`apply_edits`), where the extension used to. This needs an engine from the
-  same release: with an older one, a drag is refused with "unknown method
-  'apply_edits'". Update both together.
-- The 3D view draws only when something in it changes, where it used to draw
-  every frame whether or not anything moved. An idle panel no longer keeps the
-  GPU busy.
+<details>
+<summary>A scene is a VS Code document</summary>
+
+Save, Save As, Revert and the question on closing a tab with unsaved changes are
+VS Code's own. An example opens in a preview tab named after it, with nothing
+unsaved: the next example takes its place, and the first edit keeps it. The one
+scene an older version remembered opens once as a tab.
+
+</details>
+
+<details>
+<summary>The script tab is the scene as a function, and saving applies it</summary>
+
+**Edit Python Script** shows the scene as a `@scene` function; saving replaces
+the scene with what it builds, as one undo step that keeps variables, formulas
+and patterns. A script that fails, or that would change more than you edited,
+is refused with the line why. If the scene changed since the tab was written,
+the save asks first. Auto-save does not apply the tab. **Export as Scene
+Script…** writes the function to a file.
+
+</details>
+
+<details>
+<summary>One 3D view, the same everywhere</summary>
+
+The studio's 3D view is the notebook widget, with the same controls and keys:
+tools at the top right, editing handles with undo and redo down the right edge,
+the numbers a drag changes at the bottom left (typeable), a key list, and a play
+bar for paths. Chart mode and Animate sit beneath the view. Hiding objects (H,
+⇧H, the legend's eye) is one undo step.
+
+</details>
+
+- The legend shows each object's kind as an icon in its colour, and counts
+  pattern copies (`×10`).
+- A selection is outlined in bright green along the object's own edges, instead
+  of a blue box round everything; a selected collection includes its pattern
+  copies.
+- Undo never goes back past opening a scene, a script or an example.
+- Needs VS Code 1.109 or later.
+- Update the engine with the extension: an older engine is refused, and
+  **Install the Engine** now upgrades one already installed.
+- In a scene written in code, a sensor or dipole with no size set is drawn 5 mm
+  across instead of a metre.
+- The 3D view draws only when something changes, so an idle panel leaves the GPU
+  alone.
 
 ### Removed
 
-- **`parse_script` and the old `apply_script`.** Script generation is one-way:
-  nothing parses code back into the document, and the matched emitter/parser
-  idioms went with it. The script tab applies a scene function instead (above);
-  plain magpylib comes in through **Open in Magpylib Studio**, by execution.
-- **The Copilot Chat tools** (`#magpyAdd`, `#magpyEdit` and the 22 others). A
-  coding agent now writes the scene as a function, taught by the Agent Skill the
-  Python package carries, and **Open in Magpylib Studio** opens what it wrote.
+- The Copilot Chat tools (`#magpyAdd` and the rest). A coding agent writes the
+  scene as a function instead, taught by the Agent Skill.
+- Saving the script tab no longer parses arbitrary code back into the scene.
+  Plain magpylib comes in through **Open in Magpylib Studio**.
 
 ### Fixed
 
-- On a dark theme the logo on a scene's tab wore a white outline, a halo where
-  the traced image had a white edge. Dark themes now get it without, the magpie
-  drawn light.
-- Cmd/Ctrl+Z in a box -- a variable's value, an object's parameter, the field
-  panel's offset -- undid the scene instead of the typing, and Shift+Cmd/Ctrl+Z
-  redid it. The studio's undo keys now stand aside while a box has the focus, in
-  its panels and in VS Code's own (the search box, a rename), and the box undoes
-  its own typing.
-- A copy of an object inside a turned group -- any magnet of the Halbach
-  example's second ring -- stood where the object would be had the group never
-  turned. It now stands where the object stands, and beside it keeps following
-  the same group and variables; pasted elsewhere, it is put where the object is.
-- Removing an object and adding another of the same id left both under that id:
-  a copy of the new one copied the removed one, and an edit of a parameter could
-  land on the removed one. The removed one's steps now keep an id of their own,
-  in files written before as well.
-- After Save As into another folder, an undo brought back mesh paths that meant
-  the old folder, and the mesh broke. The undo history is rebased with the
-  document.
-- Turning or resizing an object on a path with the handles turned or stretched
-  its path along with it, which jumped back when the handle was let go. The path
-  stays where it is, and moves only as the object's position does.
-- A drag of several objects that the engine refused said only "undefined". It
-  now says why.
-- A sensor that draws its own reading -- pixels coloured, or arrows, by the
-  field -- showed what it measured where a drag began until the drag ended. It
-  is now redrawn as it moves, like the rest of the scene.
-- A handle clicked and let go without moving left the drag's undo group open, so
-  the next edit anywhere was folded into it. The group now opens on the drag's
-  first move.
-- A drag of several objects that the engine refused in part moved the others. It
-  is now all or nothing.
-- A resize, an aim, or a number typed in the Inspector over a value written in
-  terms of a variable greyed the variable out with no ↺ to restore it, leaving
-  undo as the only way back. The expression is now kept on the object, and ↺ in
-  the Variables panel puts it back. The script is unchanged.
+- Cmd/Ctrl+Z in a text box undoes the typing, not the scene.
+- A box's values are split at commas, so `0, 0, gap * 2` is accepted.
+- A copy of an object in a turned group stands where the object stands.
+- Removing an object and adding another with the same id no longer mixes them
+  up.
+- Undo after Save As into another folder no longer breaks mesh paths.
+- Turning or resizing an object on a path no longer drags its path along.
+- A sensor's own reading is redrawn during a drag, not only after it.
+- A handle clicked without moving no longer swallows the next edit into its
+  undo step.
+- A drag of several objects is all or nothing, and a refusal says why.
+- A value typed over a variable's expression can be put back with ↺.
+- A sensor switched to the 2D `arrow` symbol draws.
+- No white halo round the logo on dark themes.
 
 ## [0.4.1]
 
-### Fixed
-
-- TypeScript now loads the Node and Mocha declarations explicitly, so the
-  extension integration tests compile in a fresh checkout without unresolved
-  `suite`, `suiteSetup` or `test` globals.
+- Maintenance release, no changes you would notice.
 
 ## [0.4.0]
 
 ### Added
 
-- **Triangular meshes — magnets shaped like the part they are.** `Add Object…`
-  gains **Triangular mesh**, which asks where the shape comes from: a mesh file
-  or the convex hull of a point cloud. STL is read by the engine itself, binary
-  and ASCII, with no new dependency; OBJ, PLY and the rest go through pyvista
-  where it is installed and say so where it is not. Until now
-  `magnet.TriangularMesh` was the one magpylib class the studio could show but
-  not make: its parameters are fifty thousand numbers, and there is no box to
-  type those into.
+<details>
+<summary>Triangular meshes: magnets shaped like the part</summary>
 
-  **The scene records the file, not the mesh.** A create event holds
-  `mesh_source` — the path, its scale, and a hash of what was in it — the same
-  way the transform log holds `move` rather than the pose it worked out. A
-  thousand-face part is four hundred bytes of document instead of two hundred
-  kilobytes of vertices, the script export still says `pv.read("rotor.stl")`
-  rather than the array that came out of it, and both survive the round trip
-  byte for byte. A file that has moved breaks its own object and nothing else; a
-  file that has _changed_ since the scene was saved says so.
+**Add Object… → Triangular mesh** reads an STL (built in; OBJ, PLY and others
+with pyvista) or takes the convex hull of a point cloud. The import asks the
+file's units and shows the size each answer gives. The scene records the file,
+not its vertices, and says when the file has moved or changed. A mesh that is
+open, disconnected or self-intersecting is flagged in the tree, the Inspector
+and the field view; inside-out faces are turned round and counted.
 
-  **The import is asked what units it is in.** No mesh format carries them, and
-  a 10 mm part read as metres is a magnet ten metres wide that still draws and
-  still computes a field. The dialog shows the size each answer produces, with
-  millimetres first because that is what a CAD export is.
+</details>
 
-  **A mesh that cannot be trusted says so wherever it is used.** Open,
-  disconnected and self-intersecting are checked on the way in and reported on
-  the tree row, in the Inspector and beside the field it produces — magpylib
-  computes a field for an open mesh, and that field is wrong in sign as well as
-  in size. Import still succeeds: a mesh you cannot load is a mesh you cannot
-  fix. Faces wound inconsistently are turned around on the way in and the count
-  is reported, because "12 of your 4000 faces were inside out" is the difference
-  between trusting this import and checking the next one.
+<details>
+<summary>The 3D view can be worked in</summary>
 
-  The checks are why the file is read once and remembered: reorienting a
-  20k-face mesh takes 16 s, and a scene is rebuilt from its log on every slider
-  drag. What a source resolves to is cached, and the object each rebuild
-  constructs is handed the answers rather than asked to find them again — which
-  the 3D view needs as much as the field does, since drawing a mesh whose checks
-  are unanswered re-runs the self-intersection test on the way to the screen
-  (283 ms a redraw on a 4000-face part, against 11 ms).
+Click an object to select it, Cmd-click to add to the selection, and drag the
+handles to move (`W`), turn (`E`), resize (`R`) or aim a polarization (`P`).
+`X`/`Y`/`Z` hold a drag to an axis, `L` uses the object's own axes, `S` snaps.
+A drag is one undo step.
 
-- **One formula, many solids — the seventh example scene.** A superellipsoid
-  magnet (Barr, IEEE CG&A 1(1), 1981; the family Gielis's superformula later
-  generalised): two roundness sliders over a size, which is enough to be a
-  block, a cylinder, a sphere, a rounded-edge disc or an octahedron and
-  everything between. The shapes with no magpylib class are the ones real
-  magnets actually are, and reaching them used to mean leaving for CAD and
-  coming back with an STL.
+</details>
 
-  The three that _do_ have a class make the example check itself: set the
-  sliders to a block, a cylinder or a sphere and the mesh reproduces what
-  magpylib computes analytically, within 0.2% at 13920 faces. `facets` is a
-  slider too, because the error falls as the square of the face count — 2.8% at
-  480 faces, 0.67% at 2112, 0.058% at 24960 — and a tolerance you can watch
-  converge is a different thing from one you are asked to accept.
+<details>
+<summary>A script's own show() draws in VS Code</summary>
 
-  Its shape is generated rather than read, which the engine takes advantage of:
-  a sheet wound consistently by construction needs one signed volume to point it
-  outward rather than magpylib's quadratic face repair, and a radial
-  parametrisation cannot self-intersect, so the most expensive check is not run
-  — it is _answered_. Reading a mesh from a file still gets all of it, because
-  nothing about an STL is known in advance.
+`magpy.show(..., backend="studio")` opens a panel beside the editor, and with
+**Draw scripts here** on (the default; it can be turned off) so does a plain
+`magpy.show()`. A re-run updates the panels; a badge says when the script was
+saved since it drew. **Open in Magpylib Studio** opens the script's scene for
+editing.
 
-- **"Field on a plane" is a question now: placement tolerance.** It was a bare
-  cube under an abstract square, and what it demonstrated was a limitation —
-  that a pixel grid's coordinates can be parametric while its resolution cannot.
-  The scene is the same shape and asks something real instead: a probe under a
-  magnet at an air gap, and a plane that _is_ the patch the probe might be
-  misplaced within. Dragging `tolerance` from a reflowed part's half-millimetre
-  out to six says what that costs — 7.8% variation across the patch against 75%
-  — which is the number a spec is written in and the reason to open a field map
-  at all.
+</details>
 
-  It stays a plane of Sensor pixels rather than a meshgrid of observer points,
-  and that is still the point: the grid is a scene object, drawn and saved and
-  exported, and it is the only shipped sensor `get_field_map` can read off,
-  since a heatmap needs pixels laid out as a grid rather than a run of points.
+<details>
+<summary>New examples: one formula, many solids; placement tolerance</summary>
 
-### Fixed
+A superellipsoid magnet whose two roundness sliders make a block, cylinder,
+sphere, rounded disc or octahedron, matching magpylib's exact field within 0.2%
+where it has one. "Field on a plane" is now a probe under a magnet, showing
+what a placement tolerance costs in field variation.
 
-- **An Inspector edit counts as an edit.** Typing a position, a dimension or a
-  style into the Inspector went to the 3D view and the Scene tree and nowhere
-  else. So the field panel went on showing a magnet that had moved, the script
-  view and `scene.json` stayed a step behind, and — the half that could cost you
-  work — the unsaved-changes mark stayed off and the crash backup went
-  unwritten, because both hang off the one call the Inspector was not making.
-  Every other way of editing the scene already went through it.
+</details>
 
-- **A drag that ends where it began leaves nothing behind.** The first value of
-  a drag records the state to come back to, so a slider taken somewhere and
-  released at the value it started from left a step that undid to exactly what
-  was already on screen — and, having recorded that step, had cleared the redo
-  stack to do it, making an undone edit unrepeatable for no reason. The engine
-  drops the step, and puts redo back, when a gesture closes on the document it
-  opened with.
-
-- **Variable sliders move the scene while you drag them — this time on any
-  scene.** The panel had been sending values since it shipped; what swallowed
-  them was the host. Every edit reset a 150 ms debounce before redrawing, and a
-  slider's values arrive as fast as the engine can answer them — 1.4 ms on a
-  small scene — so each one pushed the redraw out again and the 3D view only
-  caught up 150 ms after the drag ended. It fired on a scene heavy enough to
-  answer more slowly than the timer, which is why it looked like it worked.
-
-  A gesture is paced by the hand and the scene now, not by a clock: one value
-  per frame at most, and never a second one before the first has come back. That
-  is the screen's own rate on a small scene and the rebuild's on a large one — a
-  thousand cuboids answer in about 190 ms, and the drag runs at that instead of
-  pretending otherwise. Dragging a gizmo already worked this way. What a drag no
-  longer does is refresh the tree, the history, the script view and `scene.json`
-  per frame: those read from the same engine the view is waiting on, and they
-  catch up when the gesture ends.
-
-- **The helical winding example draws.** Its 3D view was empty, and had been
-  since it shipped. Magpylib separates the segments of a trace with NaN —
-  plotly's way of lifting the pen between the arrows along a current path, and
-  120 of the winding's 540 points are separators — but NaN is not JSON. The
-  engine wrote a bare `NaN` token, the extension's reader rejected the whole
-  response and returned _without resolving the request that asked for it_, so
-  the view waited forever for a scene that had already been computed. Pen-lifts
-  now travel as `null`, which JSON has, and the view puts the NaN back. The
-  camera could not have been aimed at one either: a single NaN vertex makes a
-  bounding sphere NaN, and `Box3.isEmpty()` is false for a box whose bounds are
-  NaN, so nothing noticed — traces are now bounded by their real points.
+- Paths play, with a play button, a scrubber and `space`.
+- A graduated box shows the scene's scale.
+- Navigation keys: `F` frames the selection, `Home` everything, `1` `3` `7`
+  look down the axes, `5` toggles a parallel projection, `Tab` walks the
+  objects, `H` hides (`⇧H` shows one alone).
+- Variable sliders move the scene while you drag them.
+- **Close Scene** on the Scene view's title bar.
 
 ### Changed
 
-- **The magnet array stacks.** It patterned a magnet into a row and the row into
-  a grid; it now patterns the grid into a stack as well, on a third count `nz`
-  that starts at 1 — so the scene opens as the flat array it has always been,
-  and the new slider is there when the question is how much the view can carry.
-  Each of the three counts spans 1 to 10 without leaving its soft range, and all
-  three at the top is a thousand cuboids. The probe above the array rides the
-  top of the stack rather than ending up inside it.
+- The 3D view is a three.js scene graph; the Plotly chart is one button away,
+  read only, with Animate.
+- The example scenes are sized like real magnets, in millimetres, with
+  Hall-probe-sized sensors.
+- The magnet array example stacks, with a third count `nz`.
+- Field maps and pixel grids are sized from the scene.
 
-- **The example scenes are sized like real magnets.** magpylib works in SI
-  units, so `dimension=[1, 1, 1]` is a magnet a metre on a side. Every shipped
-  scene is now what it was always meant to be: the Halbach is 10 mm cubes on a
-  23 mm ring, the solenoid is 10 mm across with a 2.5 mm pitch, the array is 10
-  mm tiles on a 15 mm pitch. The field they read is in the tens to hundreds of
-  millitesla, which is what a gaussmeter would say next to the real thing. The
-  sensors came with them: a Sensor's glyph is sized in metres — the studio pins
-  it that way so moving one object cannot rescale every other — so it kept
-  magpylib's default of 1 and was drawn a metre across beside 10 mm magnets.
-  Every example now says what size its sensor is, and it is a Hall probe's.
-- **Field extents follow the scene.** The measuring plane a field map covers,
-  and the pixel grid `set_pixel_grid` makes when you do not give it a size, come
-  from the size of the objects rather than from a constant in metres — which
-  drew a centimetre assembly as one bright pixel in the middle of a 2.4 m
-  square. The pixel-grid prompt starts blank and means "fit the scene".
+### Fixed
 
-- **The 3D view is a scene graph, not a chart.** It draws with three.js by
-  default now. Objects can be clicked, dragged, turned, resized and aimed; paths
-  play, and what the field decides — a sensor's arrows — is recomputed per frame
-  rather than posed. The Plotly view is one button away, read only.
-- **Animate paths belongs to the chart now.** It only ever meant "ask Plotly for
-  an animated figure", so it appears with the chart and nowhere else. The scene
-  graph runs the paths itself, with a play button and a scrubber, and asks for
-  one frame at a time rather than baking every frame into a figure.
-
-### Added
-
-- **A script's own `show()` can draw in this window.** Run a magpylib script
-  from a terminal here — the Run button, F5 and the integrated terminal all work
-  — and `magpy.show(..., backend="studio")` opens a panel beside your editor
-  instead of a browser tab, drawn by the same three.js scene graph the studio's
-  own view uses. One panel per `show()` call in the script, and a rerun updates
-  the panels already open, keeping the camera you left them at, rather than
-  opening a second set.
-
-  Installing the package is all the scene graph needs; magpylib finds the
-  backend by itself. For the Plotly chart instead, call
-  `magpylib_studio.plotly_view.draw_here()` once at the top of the script.
-
-  These panels are read only: no engine stands behind them, and by the time one
-  draws there is usually no script either.
-
-  **Draw scripts here** is on, so a plain `magpy.show()` draws in a panel rather
-  than opening a Matplotlib window. It applies to every script run from this
-  window's terminals — test runs excepted, a suite being what opens panels by
-  the dozen — and a script that sets its own backend keeps it. The first time a
-  panel appears, a notice offers to turn it off: a window cannot tell a person
-  running a script from anything else doing it, so this is a default rather than
-  an inference, and saying so once is the least it can do. Turning it off is not
-  a one-way door — **Magpylib Studio: Draw Scripts in a Panel** is in the
-  palette, an empty Scene view offers it, and the notice itself offers an undo.
-
-  Worth knowing while it is on: `show(return_fig=True)` hands back the studio's
-  payload rather than a Matplotlib figure, and animation and subplots fall back
-  with a warning, since the scene view does neither yet. A script that names its
-  own backend is untouched by any of this, and never triggers the notice.
-
-  A panel says when the script it came from has been **saved since it drew** — a
-  badge over the figure and a dot on the tab, since the tab is the only thing
-  visible while the panel is in a background group. Clicking the badge runs the
-  script again, in a terminal, with the interpreter and directory it ran in
-  before; the figure comes back to the same panel and the mark clears. Offered
-  rather than automatic: some scripts are expensive, and whether to pay that on
-  every save is the author's call, not the editor's.
-
-  **Open in Magpylib Studio** sits in the corner of the panel, for when looking
-  is no longer enough. It opens the script the figure came from, which the
-  studio runs and takes the objects of — so what you get is the scene the script
-  builds now, editable, with the history and the inspector. The picture itself
-  cannot be promoted: it is a rendering, and the objects behind it are gone.
-
-- **The 3D view can be worked in.** Click an object to select it anywhere else
-  in the studio, ⌘-click to add to the selection, and drag the handles to
-  **move** (`W`), **turn** (`E`), **resize** (`R`) or **aim a polarization**
-  (`P`). `X`/`Y`/`Z` hold a drag to one axis and `A` frees it, `L` swaps world
-  for the object's own axes, `S` snaps to round steps chosen from the scene's
-  own scale. Several objects dragged together move as one.
-
-  A drag is one thing to undo, however many frames it took, and everything that
-  follows from it keeps up as you go: the Inspector's numbers, the field, and
-  the rest of the scene. What it writes is recorded like any other edit, so the
-  history and the exported script get it.
-
-  Resizing drags the one parameter that scales the shape — a Cuboid's dimension,
-  a Sphere's diameter, a Cylinder's diameter and height, a mesh's vertices — and
-  holds it to the shape that parameter can take. Classes whose geometry does not
-  simply scale do not offer it.
-
-- **Paths play**, with a play button, a scrubber and `space`. Each frame is the
-  scene as computed at that step, so a sensor's arrows turn as the magnet that
-  makes them turns. A run lasts what `magpylib.defaults.display.animation.time`
-  says it should — five seconds by default — whatever the path's length.
-
-- **The scene says what scale it is at**: a graduated box at its extent with
-  magpylib's own axis names and units.
-
-- **Navigation**: `F` frames the selection and `Home` everything, `1`, `3` and
-  `7` look down the axes, `5` swaps perspective for a parallel projection —
-  which is how you tell whether two things line up — `Tab` walks the objects and
-  `H` hides one (`⇧H` shows it alone). The panel carries a key list.
-
-- **Variable sliders move the scene while you drag them**, rather than only on
-  release, and the whole drag is still one step in the history.
-
-- **Close Scene**, on the Scene view's title bar beside undo, redo and save. New
-  Scene already cleared the document, but it lived in the overflow menu with no
-  icon, and it left the 3D and field views open on an empty scene — which looks
-  broken rather than closed. Closing shuts them.
+- An Inspector edit marks the scene unsaved, writes the backup and updates the
+  field, script and `scene.json`.
+- A drag that ends where it began leaves no undo step.
+- Variable sliders redraw during the drag on any scene.
+- The helical winding example draws.
 
 ## [0.3.1]
 
 ### Fixed
 
-- **A numeral handed over as a string is a number.** A caller that sent `10` as
-  `"10"` got a string variable, and Python has an answer for every wrong thing
-  you can then do with one: `n * 2` was `"1010"`, adding two lengths
-  concatenated them, and the exported script said `range(1, '10')`. Nothing
-  raised. Bare numerals are now read as the numbers they spell, in variables,
-  parameters and steps alike — `"z"` is still an axis and a label reading `"10"`
-  is still text.
-
-- **A name is never quietly arithmetic.** A variable holding `"z"` used in a sum
-  now says so, rather than resolving to `"zz"` in a field asked for a length.
-
-- **Running an edited script keeps the variables it cannot state.** Adding one
-  `for` loop to the generated script dropped every variable in the scene. They
-  are carried across now, taking any new value the script's own `n = 5` line
-  gives them, and the import says when nothing refers to them any more.
-
-- **`remove_variable` can actually be called.** It was batchable, and described
-  as batchable, while the enum next to that description rejected it.
-  `duplicate_along` and `mirror` were missing there too; a test now compares the
-  schema against the engine's own list.
-
-- **Clearing the scene says it clears the variables**, which it always did.
+- A number sent as text (`"10"`) is read as a number.
+- A variable holding a name used in arithmetic says so.
+- Running an edited script keeps the scene's variables.
+- `remove_variable`, `duplicate_along` and `mirror` can be batched from chat.
+- Clearing the scene says it clears the variables.
 
 ## [0.3.0]
 
 ### Added
 
-- **A variable can be renamed** — under `⋯` in the Variables panel,
-  `rename_variable` on the engine. Everything written in terms of it is
-  rewritten through the syntax tree, so the scene is unchanged and the bounds
-  follow the name.
-
-- **A script says what its variables are allowed to be**, in the comment on each
-  one's line (`n = 10  # 2 to 60, slider 4 to 20, whole`), and reads them back.
-  Limits used to be editor-only, so a scene that travelled as a script arrived
-  with its sliders gone.
+- Rename a variable from `⋯` in the Variables panel; everything using it
+  follows.
+- A script keeps each variable's limits in a comment
+  (`n = 10  # 2 to 60, slider 4 to 20, whole`) and reads them back.
 
 ### Changed
 
-- **`⋯` on a variable opens a menu instead of a three-step wizard.** Pick the
-  name, a range, the kind, or clear the limits, and answer one box. Each entry
-  shows what it currently holds.
+- `⋯` on a variable opens a menu instead of a three-step wizard.
 
 ### Fixed
 
-- **An object shows the steps that built it, not just the ones that contain
-  other objects.** The scene view gave a row its chevron by counting child
-  objects alone, so a magnet's own history was there but unreachable — only
-  collections, which happen to contain something, ever showed their steps.
-
-- **An object the scene no longer has still shows its history**, under a dimmed
-  row saying why it is missing: deleted, rolled back past, or no longer built.
-  Deleting is recorded rather than erased, but the tree had nowhere to hang
-  those steps, which made deleting the one step it could not undo.
-
-- **Move Step Later on a "created" step is refused** instead of leaving the
-  object gone and its whole story broken. Nothing can happen to an object before
-  it exists.
-
-- **Pattern-along and mirror steps have their own glyph** instead of the
-  anonymous dot that means "no icon for this".
+- Every object shows the steps that built it, not only collections.
+- A deleted object's history is still shown, under a dimmed row saying why.
+- Move Step Later on a "created" step is refused.
+- Pattern-along and mirror steps have their own icon.
 
 ## [0.2.0]
 
 ### Added
 
-- **Move By… and Rotate… ask how the path is described, not just how long it
-  is.** There was one shape on offer — a total divided into equal steps — and no
-  way to say the other things people were holding. Four kinds now: **even
-  spread** as before (`np.linspace`); **by increment**, one step repeated
-  (`np.arange`), because "1 mm per step" is often the physical quantity and the
-  span the derived one; **custom points**, the path as a document, a step a
-  line, and the only kind that keeps expressions, since nothing in it is
-  divided; and **formula**, below. Which call built a path is recorded rather
-  than guessed — a quarter of increment-built paths are also exactly a linspace,
-  so the same input would otherwise export two ways depending on whether the
-  arithmetic coincided. The `move` and `rotate` tools take the same `spacing`
-  argument.
+<details>
+<summary>Paths and curves as formulas</summary>
 
-- **A run of points can be stated as the curve that draws it**, in a parameter
-  or a path:
+Move By… and Rotate… offer an even spread (`np.linspace`), a step repeated
+(`np.arange`), custom points, or a formula in `t`. A run of points — a path, a
+polyline's vertices — can be a formula whose count is a variable, so a helix's
+resolution is a slider. The script writes the matching numpy call.
 
-  ```
-  count: =round(per_turn * turns) + 1
-  of:    radius * cos(tau * turns * t)
-         radius * sin(tau * turns * t)
-         height * t - height / 2
-  ```
+</details>
 
-  Held as points, a helix is sixty rows of that expression with a different
-  number in each. A list of rows can say how many points it _has_, never how
-  many it _wants_ — so how finely a curve is drawn was the one quantity in a
-  parametric scene no variable could reach. It takes a slider now. The script
-  says what a person would have written, one `np.linspace` and one vectorised
-  expression a column, because the document says the same thing. `min` and `max`
-  are refused in a template: neither is elementwise over a sample, so there is
-  no vectorised spelling that means the same thing.
-
-- **…and both places you would build one ask for it.** Move By… and Rotate…
-  offer **Path — formula**, and Add Object… asks whether a polyline's vertices
-  are typed or sampled. Either way: how many points — a number or an expression,
-  which is the whole reason to reach for this — then one line per axis, as
-  formulas in `t` running 0 to 1 along the curve.
-
-- **A "Helical winding" example**, which is the case that needed all of it:
-  every other built-in scene is made of patterns, and a continuous winding
-  cannot be. The solenoid stacks separate loops; this is one wire, and what it
-  is is a formula.
-
-- **A polyline's vertices are typed a point to a line, in an editor.** Add
-  Object… asked for a flat run of numbers in one box — nine for the polyline's
-  default, forty-five for a real PCB trace — and reshaped them by counting in
-  threes, so a miscount by one silently shifted every vertex after it. The
-  Inspector had already concluded that a table of numbers on one line "is not an
-  editor, it is a wall"; creation now agrees. A wrong count is caught while the
-  editor is still open.
+- A "Helical winding" example.
+- A polyline's vertices are typed one point per line, in an editor that catches
+  a wrong count.
 
 ### Changed
 
-- **The document format is version 2.** A scene saved by this release is refused
-  by an older one, with a message saying so, rather than opened and quietly
-  emptied: a run of points stated as a formula means nothing to version 1, which
-  read the template as expressions over an undefined `t`, reported the load as
-  fine and dropped the object. Scenes saved by older releases open here as
-  before and are stamped 2 when saved.
-- **Add Object… shows the shapes it is offering.** The menu named ten classes in
-  words while the Scene tree drew each of them as a wireframe; picking a
-  cylinder segment out of a list of nouns and then seeing what you got is a
-  round trip nobody asked for. The menu now carries the same glyph the tree will
-  show the object as, from the same source, so the two cannot drift apart.
-- **…and says what each one is, instead of reciting its defaults.** Every entry
-  spent its one line of prose on the numbers it was about to prefill —
-  "polarization (0,0,1) T, diameter 1 m" — which the next screen says again, in
-  the box that asks for it. With the shape now drawn, that line is free to
-  answer the question the menu is actually for: a cylinder segment is "a wedge
-  of a ring — arc magnets, rotor and stator poles", a dipole is "a point source
-  — for a magnet too small or too far to model as a shape". The defaults are
-  unchanged and still prefilled.
-- **Every entry names its magpylib class, and can be found by it.** The old
-  details gave the class away by accident — "moment (0,0,100) A·m²" could only
-  be a Dipole — and dropping them would have left the menu with no machine name
-  at all. Each row now carries its class beside the label, and the filter
-  matches on it: "Current loop" is the friendlier name for `current.Circle`, but
-  typing `Circle` used to match nothing in a menu that offers it.
-- **Reading the scene from chat costs a tenth of what it did.** `#magpyObjects`
-  listed every copy a pattern had made — at n=60 the Halbach example was 124
-  entries, 118 of them generated copies that say, one by one, that they cannot
-  be edited. They are now counted on the object that made them (`"copies": 59`),
-  which is the same fact in one field: 3,880 tokens down to 356, and an extra
-  copy now costs nothing to read instead of a row. The Scene tree still lists
-  them one by one, because a ring of twelve should look like twelve.
-- **Field results are six significant figures, and do not repeat the question.**
-  A reading carried all 17 digits of the float holding it, and every response
-  handed back the points the caller had just sent. A 400-point map goes from
-  10,734 tokens to 4,413. Values that go back into the document — positions,
-  dimensions — keep every digit, because those are not readings.
+- The document format is version 2. Older releases refuse these scenes with a
+  message; older scenes open as before.
+- Add Object… shows each shape's icon, says what it is for and can be filtered
+  by magpylib class.
+- Reading the scene and the field from chat costs far fewer tokens.
 
 ### Fixed
 
-- **A moved path stays a move.** A four-line script — a cuboid and
-  `move(np.linspace(...), start=0)` — came back as a single line of three
-  hundred numbers, every pose of the animation baked into `position=` and the
-  move that made it gone. The document records transforms as the calls that were
-  made, which is the first of its own design rules and which orientation paths
-  already followed; position paths now do too. The script says
-  `cuboid1.move(np.linspace((0.0, 0.0, 0.0), (0.1, 0.1, 0.1), 100), start=0)`
-  again — written as the call that makes it wherever that reproduces the path
-  _exactly_, and read back the same way, so the round trip stays byte-identical
-  and a path that only looks evenly spaced is still written out in full.
-- **A path from Move By… or Rotate… starts where the object is.** A path of n
-  movements is n+1 poses and the first of them is the pose you began at; it was
-  being left out, so the animation never showed the starting position and the
-  path was one that no single call could describe. Including it costs one pose
-  and makes the export a plain
-  `np.linspace((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 21)`. Paths already saved
-  without their origin are still written compactly, as the same call without its
-  first point — they are exactly that, and re-deriving them instead would turn a
-  stored `0.55` into `0.5499999999999999`.
-- **A constructor parameter that is a run of points is written as the call that
-  makes it.** A sensor walking twenty-five positions exported as twenty-five
-  triples; the compact spelling had only ever been offered to transform paths,
-  though a parameter can be just as long. Only tables of points:
-  `dimension=(1, 1, 1)` is three numbers describing one box, and
-  `np.linspace(1.0, 1.0, 3)` reproduces it exactly while saying something absurd
-  about it.
-- **An exported script imports the maths its expressions use.** An expression
-  goes into the script verbatim, but nothing imported what it called — so a
-  scene using `sqrt`, `cos`, `pi` or `tau` anywhere exported a script that
-  raised `NameError` on its first line of geometry, including
-  `sqrt(2) * radius`, which is the expression help's own worked example.
-- **A path no longer begins on a repeated frame.** Once paths carried their own
-  first pose, magpylib's `start="auto"` appended it after the pose the object
-  was already at, so the animation held still for a frame at every join — 7
-  poses where 6 were meant. `auto` was the default and one keystroke away, and
-  escaping it meant picking "index…" and typing the `0` that should have been on
-  offer. The prompt now asks **Start over** or **Continue**, and is skipped
-  entirely for an object with no path, where they mean the same thing. `auto`
-  stays the engine's default: a path from a script has no leading pose to
-  collide with.
-- **A path from Move By… or Rotate… is spaced the way the call that writes it
-  spaces it.** Both wrote `(c * i) / steps`, where `np.linspace` divides first
-  and scales by the index. The two agree in the last bit only when the
-  displacement is a clean 1 — which the prompt's own default is, so every hand
-  test passed while 93% of real displacements silently lost their compact form
-  and exported as literal triples. Both of numpy's branches are mirrored now,
-  and the values it prints are pinned in a test: this is one language
-  implementing another's arithmetic, and nothing else would notice it drifting.
-- **Importing a script now says what running it flattened.** A loop of eight
-  current loops became eight separate objects with no mention that anything had
-  been lost, so the next edit changed one of eight where the script had one
-  thing to change. The importer collected these warnings from the first release
-  and never filled any in — the promise was in the README the whole time.
+- A moved path exports as the `move(np.linspace(...))` call that made it.
+- A path from Move By… or Rotate… starts where the object is, without a repeated
+  first frame; the prompt asks Start over or Continue.
+- An exported script imports the maths (`sqrt`, `cos`, `pi`, `tau`) its
+  expressions use.
+- Importing a script says what running it flattened.
 
 ## [0.1.3]
 
 ### Fixed
 
-- **The Inspector showed numbers that were not the numbers.** Its rounding
-  helper matched an unescaped `.`, so it ate the last significant digit along
-  with the trailing zeros: 2.5 read as "2.", 3.25 as "3.2", a 5 mm dimension as
-  "0.00". Editing one component of a position committed the other two as
-  displayed, which turned that into real geometry loss — a vector now sends each
-  component's document value unless you typed in that box, so untouched ones
-  round-trip exactly, full precision included.
-- **A pattern step's expressions no longer claim to be "currently NaN".** The
-  step form has no resolved value for `=360 / n` and was reading the expression
-  itself as a number; it now says so, and shows the real value where the engine
-  reports one.
-- **An engine that dies takes the scene with it, and now brings it back.** The
-  replacement process used to start empty — and the first edit after that wrote
-  the empty scene over the crash backup, which was the only copy of anything
-  unsaved. A restarted engine is handed the backup before anything else can
-  speak to it, and the backup is frozen in the meantime.
-- **Installing the engine no longer freezes VS Code.** `uv venv`,
-  `python -m venv` and `pip install` ran synchronously on the extension host,
-  which is one thread shared by every extension in the window, so the whole
-  editor stopped for the length of the install — the first minute a new user
-  spends here. Finding an interpreter was synchronous for the same reason and is
-  not any more.
-- **The 3D and Field panels come back after a window reload**, like the scene
-  and the script tab already did.
-- **The Field view lists a sensor's measuring grid as soon as it opens**, rather
-  than after the next unrelated edit, and **Sweep a Variable…** no longer races
-  the panel it just opened.
+- The Inspector showed rounded numbers (2.5 as "2.") and could save them back.
+- A pattern step's expressions no longer read "currently NaN".
+- A restarted engine brings the scene back instead of starting empty.
+- Installing the engine no longer freezes VS Code.
+- The 3D and Field panels come back after a window reload.
+- The Field view lists a sensor's grid as soon as it opens.
 - Changing `magpylib-studio.pythonPath` restarts the engine on the new
-  interpreter — carrying the scene across — instead of doing nothing until the
-  window is reloaded.
+  interpreter.
 
 ### Changed
 
-- **Install the Engine names the interpreter it is about to change.** When the
-  Python extension has one selected it may be a system Python, and installing
-  into it is a different act from making a `.venv`; the prompt says which one it
-  found and offers a `.venv` instead.
+- Install the Engine names the interpreter it will change, and offers a `.venv`
+  instead.
 
 ## [0.1.2]
 
 ### Added
 
-- **A variable can be a choice, not only a quantity.** Bounds gain `options`, so
-  a variable whose value is a name — a rotation axis, say — offers a dropdown
-  the way a bounded number offers a slider, enforced wherever the value came
-  from. Creating a variable asks what kind it is up front, since that decides
-  the remaining questions, and a whole-number variable stays one even when the
-  range is skipped. The Halbach example carries `tilt` and `tilt_axis` to show
-  it, defaulting to zero so the scene looks the same until you drag it.
+- A variable can be a choice: `options` give a dropdown, as bounds give a
+  slider.
 
 ### Fixed
 
-- **A pattern's copies join their group in one call.** `Collection.add` rebuilds
-  its source and sensor lists on every call, so adding copies one at a time was
-  quadratic — and a pattern's count is a slider, so that ran on every drag. A
-  Halbach rebuild at n=500 goes from 147 ms to 95 ms, and the quadratic term is
-  gone; a 6000-magnet exported script runs in 0.6 s instead of 2.5 s. Scripts
-  written the old way still parse.
-- **Reopening a scene no longer asks about unsaved changes.** It restores them
-  the way VS Code's own hot exit restores unsaved editors — in the tree, marked
-  unsaved, named in the view title — instead of asking a question that
-  dismissing never answered, so it asked again on every window start. Reopening
-  also no longer forces the 3D panel open.
-- A name-valued variable rendered as an empty box: the variables panel called
-  anything string-typed an expression and sliced off its first character. Only a
-  leading `=` means an expression now. The same variable could take the whole
-  panel down through `short()`, and numeric bounds meeting a name surfaced a raw
-  `TypeError` rather than saying what was wrong.
+- Large patterns rebuild faster while you drag.
+- Reopening a scene restores unsaved changes without asking every time.
+- A variable holding a name shows it instead of an empty box.
 
 ## [0.1.1]
 
 ### Added
 
-- **A getting-started walkthrough** opens once on first activation ever (per
-  install, not per workspace): Open Studio, Load an Example, Add an Object, edit
-  from Copilot Chat, see the Field view, save — each step linking the real
-  command.
-- **"No Python interpreter found" is now a one-click fix.** The error offers
-  **Install the Engine**, which tries, in order: the interpreter already
-  selected via the Python extension (if it meets the `>=3.11` floor), `uv` if
-  installed (fetches a matching Python on demand, regardless of what's already
-  on PATH), or a login-shell-resolved `python3`/`python`/`py` as a last resort —
-  with a clear, OS-aware message when nothing suitable is found, instead of
-  forwarding pip's cryptic "no matching distribution" text.
-
-### Engine / publishing
-
-- The engine (`magpylib-studio`) is on PyPI: `pip install magpylib-studio`.
-- Tag-driven CI now actually publishes both artifacts — a `.vsix` GitHub Release
-  and a PyPI release — from the same `v*` tag.
+- A getting-started walkthrough opens on first install.
+- "No Python interpreter found" offers **Install the Engine**, which finds or
+  fetches a suitable Python.
+- The engine is on PyPI: `pip install magpylib-studio`.
 
 ## [0.1.0]
 
 ### Added
 
-- **Scenes are files.** Save and open `.magpy.json` scenes: `Cmd/Ctrl+S` with
-  the Scene view focused, the file name and a `•` for unsaved changes in the
-  view title, _Open Scene_ on a `.magpy.json` in the explorer, and a prompt
-  before anything that would discard unsaved work. **Export as Python Script…**
-  is separate, because a script carries no slider bounds and no hidden flags.
-- **The format has a version and a schema.** A saved scene says which format it
-  is and what wrote it; one from a newer studio is refused rather than read
-  half-way, one from an older studio is migrated, and fields this version does
-  not recognise are kept rather than dropped. Editing a `.magpy.json` by hand
-  gets completion and validation from a published JSON Schema.
-- **A reload no longer loses the scene.** The scene lives in a subprocess that
-  dies with the window; it is now backed up after every edit, and the workspace
-  reopens the file it was editing — offering the unsaved changes if there were
-  any.
-- **Event-based document.** The scene is an ordered log of events — creates,
-  removals, reparents, transforms and patterns — and the object tree is a
-  projection of it. Past steps can be edited and everything after them
-  re-applies; a scene can be built up to any step (_Build Up To Here_) and edits
-  made there are inserted at that point.
-- **Variables and expressions.** Any number in the document can be written as
-  `=gap * 2` over the scene's variables, with bounds, sliders, whole-number
-  variables, and a sweep that re-folds the scene per value.
-- **Patterns**: circular, linear (twice = a grid) and mirror, each one step
-  standing for N copies.
-- **Two-way script tab.** The scene exports as runnable magpylib and saving the
-  tab rebuilds the scene from what you wrote — parsed when the shape matches (a
-  byte-identical round trip), executed otherwise, with what it flattened
-  reported.
-- Field view over B, H, J or M, reading a sensor's own pixel grid.
-- Six example scenes, each leaning on a different feature.
+- Scenes are `.magpy.json` files: save, open, an unsaved mark, and a prompt
+  before anything discards work. **Export as Python Script…** writes a script.
+- The format has a version and a JSON Schema for editing by hand.
+- The scene is backed up after every edit and reopened after a reload.
+- The scene is a list of steps: edit a past step, or build up to any step and
+  add from there.
+- Variables and expressions (`=gap * 2`), with bounds, sliders and sweeps.
+- Patterns: circular, linear (twice makes a grid) and mirror.
+- A script tab that exports the scene and reads it back.
+- A field view over B, H, J or M on a sensor's pixel grid.
+- Six example scenes.
 
 ### Fixed
 
-- The Inspector rendered blank: a `\n` inside a TypeScript template literal
-  became a real line break in the emitted webview script, so the script never
-  parsed. The webview code lives in `media/*.js` now, where the compiler and the
-  linter can see it.
-- "What can go in a value" opened onto an empty box — the host asked for the
-  expression help and the webview had no branch to answer.
-- A rotate step's axis showed `NaN`, because `"z"` was being read as a number.
-- Deleting a patterned magnet left its copies in the scene, invisible but still
-  contributing to every field.
-- The exported script did not run after a removal, and copying a patterned
-  object failed outright.
-- The script tab kept showing the previous window's scene after a reload.
+- The Inspector rendered blank.
+- "What can go in a value" opened onto an empty box.
+- A rotate step's axis showed `NaN`.
+- Deleting a patterned magnet left its copies in the field.
+- The exported script failed after a removal.
+- The script tab showed the previous window's scene after a reload.
