@@ -28,7 +28,7 @@
       const values = { ...state, editable: false };
       if (query.has("standalone")) values.standalone = true;
       if (query.has("empty")) values.tree = [];
-      if (query.has("never")) values.editable = null; // SceneWidget(..., editable=None)
+      if (query.has("never")) values.editable = null; // SceneWidget(..., editable="never")
 
       const saved = []; // what the view saved `editable` as, each time
       const listeners = {};

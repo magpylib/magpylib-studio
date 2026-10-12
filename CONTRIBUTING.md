@@ -87,6 +87,23 @@ When a view bug passes the harness pages, reproduce it in headless Chrome
 against the real page before theorising; the first-fit zoom bug was found that
 way.
 
+**What the test runner cannot do, scripted** (macOS): `npm run check:window`
+(after `npm run compile`) installs the studio into a VS Code of its own, beside
+a driver, and checks that two scenes with unsaved edits come back from a window
+reload and an untouched example comes back clean and filled, that an edit made a
+few seconds before VS Code is killed comes back on the next start, and what one
+scene tab and eight take in memory. It opens windows on the screen for two or
+three minutes, and leaves its profiles in a `mwc-…` folder in the system temp
+folder.
+
+**By hand, the scenes**, after a change to the tabs, the side bar or the undo
+keys -- the two the script cannot do:
+
+- Cmd/Ctrl+Z in a box of the Variables view or the Inspector, with a scene tab
+  in front, undoes the typing and not the scene;
+- **Developer: Restart Extension Host** with a scene open: the tab comes back
+  working, not blank.
+
 ## Working notes
 
 - **The main checkout is shared.** Other sessions work in it; check `git status`

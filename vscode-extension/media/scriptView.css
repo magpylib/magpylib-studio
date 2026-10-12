@@ -170,3 +170,21 @@ body[data-kind="widget"] #overlay {
   direction: rtl; /* a long path truncates at the front, keeping the name */
   text-align: left;
 }
+
+/* The logo for the theme: on a dark one, the version without the white
+   outline, which shows there as a halo. */
+#promote img.on-dark {
+  display: none;
+}
+body.vscode-dark #promote img.on-light,
+body.vscode-high-contrast:not(.vscode-high-contrast-light)
+  #promote
+  img.on-light {
+  display: none;
+}
+body.vscode-dark #promote img.on-dark,
+body.vscode-high-contrast:not(.vscode-high-contrast-light)
+  #promote
+  img.on-dark {
+  display: inline;
+}

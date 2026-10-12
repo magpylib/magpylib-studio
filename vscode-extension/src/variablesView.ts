@@ -79,24 +79,31 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   static readonly viewId = 'magpylib-studio.variablesView';
 
   private view: vscode.WebviewView | undefined;
+  /** The scene the view shows, beside its title, and its key. */
+  private scene: string | undefined;
+  private sceneKey: string | undefined;
   private ready = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
+    /** `scene` is the key of the scene the page was drawn for, which the
+     *  request goes to; the callbacks after it are told it too. */
     private readonly request: (
       method: string,
-      params?: Record<string, unknown>,
+      params: Record<string, unknown> | undefined,
+      scene: string | undefined,
     ) => Promise<unknown>,
-    private readonly onAction: (action: string, name: string) => void,
-    private readonly onMutation: () => void,
+    private readonly onAction: (action: string, name: string, scene: string | undefined) => void,
+    private readonly onMutation: (scene: string | undefined) => void,
     /** A value the pointer is still on. Separate from `onMutation` because a
      *  gesture in progress wants the views that show it live and nothing
      *  else: the document is not settled until the thumb is released. */
-    private readonly onPreview: () => void,
+    private readonly onPreview: (scene: string | undefined) => void,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
+    webviewView.description = this.scene;
     this.ready = false;
     webviewView.webview.options = {
       enableScripts: true,
@@ -105,25 +112,26 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.html(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
-      if (tookTextFocus(message)) {
+      if (tookTextFocus(message, webviewView.webview)) {
         return;
       }
       if (message.type === 'ready') {
         this.ready = true;
+        webviewView.webview.postMessage({ type: 'scene', key: this.sceneKey ?? null });
         this.refresh();
         webviewView.webview.postMessage({ type: 'help' });
         return;
       }
       if (message.type === 'action') {
-        this.onAction(message.action, message.name);
+        this.onAction(message.action, message.name, message.scene ?? undefined);
         return;
       }
       if (message.type !== 'rpcRequest') {
         return;
       }
-      const { reqId, method, params, preview } = message;
+      const { reqId, method, params, preview, scene } = message;
       try {
-        const result = await this.request(method, params);
+        const result = await this.request(method, params, scene ?? undefined);
         // Answering first is what paces a drag: the panel holds the next
         // value until this one is back, so a scene that is slow to rebuild
         // gets asked for fewer of them rather than falling further behind.
@@ -137,9 +145,9 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
           // which is the whole point, and none of it is on this panel. What
           // differs is how much of the studio is worth bringing with it.
           if (preview) {
-            this.onPreview();
+            this.onPreview(scene ?? undefined);
           } else {
-            this.onMutation();
+            this.onMutation(scene ?? undefined);
           }
         }
       } catch (err) {
@@ -188,5 +196,18 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   <script type="module" nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
+  }
+
+  /** The scene the view shows: named beside its title, and told to the page,
+   *  whose requests then name it. */
+  show(scene: { key: string; name: string } | undefined): void {
+    this.scene = scene?.name;
+    this.sceneKey = scene?.key;
+    if (this.view) {
+      this.view.description = scene?.name;
+      if (this.ready) {
+        this.view.webview.postMessage({ type: 'scene', key: scene?.key ?? null });
+      }
+    }
   }
 }

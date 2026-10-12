@@ -59,6 +59,7 @@ import functools
 import inspect
 import math
 import numbers
+import sys
 import typing
 import warnings
 from contextvars import ContextVar
@@ -338,7 +339,7 @@ class SceneFunction:
         document = build.Scene(
             values=values, model_unit=self.model_unit, field_unit=self.field_unit
         )
-        recorder = _Recorder(document)
+        recorder = _Recorder(document, self._fn)
         handles = {
             spec["name"]: document.variable(
                 spec["name"],
@@ -520,7 +521,19 @@ class _Recorder:
     time. The objects are real magpylib objects, built from the resolved
     arguments; the document keeps the arguments as written."""
 
-    def __init__(self, document):
+    def __init__(self, document, fn=None):
+        #: The scene function's code, to find its frame by (`watch`).
+        self.code = getattr(inspect.unwrap(fn), "__code__", None) if fn else None
+        #: Its frame, once found: kept, so its names can be read after it
+        #: has returned.
+        self.frame = None
+        #: Each of its names, and the objects it has been seen holding.
+        self.held = {}
+        #: Objects `name()` gave an id outright.
+        self.by_hand = set()
+        #: The objects made, in order, each with what its label (or class)
+        #: would make its id: an unnamed one's id is settled at the end.
+        self.made = []
         self.document = document
         self.session = document._session
         self.objects = {}  # id(magpylib object) -> builder Object
@@ -561,12 +574,18 @@ class _Recorder:
     def register(self, obj, type_, params, style_kwargs, style):
         """A new object: its create step, at the scene's root for now. The
         style is kept as the document keeps it, by dotted path, whether it
-        was given nested or as `style_label`-shaped keywords."""
+        was given nested or as `style_label`-shaped keywords. Its id is its
+        label, else its class, until the function's names say otherwise
+        (`name_by_variables`)."""
+        self.watch()  # every object is made here, while the function runs
         style = {
             **_flat_style(_value(style or {})),
             **_flat_style({k[len("style_") :]: v for k, v in style_kwargs.items()}),
         }
         object_id, style = self.document._named(None, type_, style, {})
+        self.made.append(
+            (id(obj), style.get("label") or type_.rsplit(".", 1)[-1].lower())
+        )
         if type_ == "Collection":
             recorded = build.Collection(self.document, object_id, style, ())
         else:
@@ -581,6 +600,7 @@ class _Recorder:
         return recorded
 
     def rename(self, obj, object_id):
+        self.by_hand.add(id(obj))
         recorded = self.known(obj)
         if object_id == recorded.id:
             return
@@ -646,6 +666,7 @@ class _Recorder:
             )
 
     def on_event(self, event):
+        self.watch()
         self.flush_styles()
         getattr(self, f"_on_{event.kind}")(event)
 
@@ -873,8 +894,83 @@ class _Recorder:
                     self.call(None, "reset_style", object_id, path)
             self.seen[object_id] = now
 
+    # -- names, read from the running function
+
+    def watch(self):
+        """Note which of the scene function's names hold which objects, now.
+
+        Read off its frame as it runs -- found the first time something is
+        recorded, and kept, so that what its names hold at the end can be
+        read once it has returned. Nothing is parsed: these are the names the
+        function has, holding what they hold."""
+        if self.code is None:
+            return
+        if self.frame is None:
+            frame = sys._getframe(1)
+            while frame is not None and frame.f_code is not self.code:
+                frame = frame.f_back
+            if frame is None:
+                return
+            self.frame = frame
+        for name, value in dict(self.frame.f_locals).items():
+            if id(value) in self.objects and not name.startswith("_"):
+                held = self.held.setdefault(name, [])
+                if id(value) not in held:
+                    held.append(id(value))
+
+    def name_by_variables(self):
+        """Give each object the name the function knows it by, as its id:
+        `r1 = magpy.magnet.Cuboid(..., style_label="Magnet 1")` is `r1`, its
+        label still what it shows. A name that held more than one object --
+        in a loop, or assigned twice -- names none of them, and an object
+        without a name of its own takes its label (else its class) for its
+        id, after the names have theirs; an id `name()` gave stays. The first
+        name an object was given wins over a second one for it."""
+        from magpylib_studio import importer
+
+        keep = {
+            key: recorded.id
+            for key, recorded in self.objects.items()
+            if key in self.by_hand
+        }
+        taken = set(keep.values())
+        named = {}
+        for name, held in self.held.items():
+            key = held[0] if len(held) == 1 else None
+            if key is None or key in keep or key in named or name in taken:
+                continue
+            named[key] = name
+            taken.add(name)
+        final = dict(keep)
+        final.update(named)
+        for key, base in self.made:
+            if key not in final:
+                final[key] = importer._unique_id(base, taken)
+        # copies nothing names keep what the copy gave them
+        for key, recorded in self.objects.items():
+            final.setdefault(key, recorded.id)
+        renames = {
+            self.objects[key].id: new
+            for key, new in final.items()
+            if self.objects[key].id != new
+        }
+        if not renames:
+            return
+        with hook.nested():
+            result = self.session._rename_ids(renames)
+        if not result["ok"]:
+            raise BuildError(result["error"])
+        for recorded in self.objects.values():
+            recorded.id = renames.get(recorded.id, recorded.id)
+        self.document._ids = {renames.get(i, i) for i in self.document._ids}
+        self.live = {renames.get(i, i): obj for i, obj in self.live.items()}
+        self.seen = {renames.get(i, i): style for i, style in self.seen.items()}
+        self.moved_by_variables = {renames.get(i, i) for i in self.moved_by_variables}
+
     def finish(self):
+        self.watch()
         self.flush_styles()
+        self.name_by_variables()
 
 
 def _descendants(obj):
@@ -906,9 +1002,10 @@ def derived(name, formula, *, unit=None):
 
 
 def name(obj, object_id):
-    """Give an object the id `object_id` in the document, where its label (or
-    its class) would give another. Rarely needed by hand: the script tab
-    writes it where a scene's ids are not what its labels give."""
+    """Give an object the id `object_id` in the document, where neither the
+    variable it is assigned to nor its label gives it. Rarely needed: an
+    object is named by the variable that holds it, and the script tab writes
+    it only where it cannot write that variable."""
     recorder = _BUILDING.get()
     if recorder is not None:
         recorder.rename(obj, object_id)

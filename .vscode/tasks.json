@@ -14,6 +14,40 @@
       "detail": "tsc -p ./ && node harness/check-webview-scripts.js"
     },
     {
+      // Empties the profile "Run Extension (fresh)" opens in; see the script.
+      "label": "fresh host profile",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/vscode-extension/harness/fresh-host.js",
+        "${userHome}/.cache/magpylib-studio/fresh-host"
+      ],
+      "problemMatcher": []
+    },
+    {
+      // Empties the machine "Run Extension (fresh machine, no Python)" opens in.
+      "label": "fresh machine",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/vscode-extension/harness/fresh-host.js",
+        "${userHome}/.cache/magpylib-studio/fresh-machine"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: compile, fresh machine",
+      "dependsOn": ["npm: compile", "fresh machine"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
+      "label": "npm: compile, fresh host profile",
+      "dependsOn": ["npm: compile", "fresh host profile"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    },
+    {
       "type": "npm",
       "script": "watch",
       "path": "vscode-extension",

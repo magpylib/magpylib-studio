@@ -154,9 +154,10 @@ keywords are magpylib's (`polarization`, `position`, `style_label`).
 
 ### `name(obj, object_id)`
 
-Give an object the id `object_id` in the document, where its label (or
-its class) would give another. Rarely needed by hand: the script tab
-writes it where a scene's ids are not what its labels give.
+Give an object the id `object_id` in the document, where neither the
+variable it is assigned to nor its label gives it. Rarely needed: an
+object is named by the variable that holds it, and the script tab writes
+it only where it cannot write that variable.
 
 ### `TriangularMesh.from_file(path, *, scale=None, sha256=None, **kwargs)`
 
@@ -184,7 +185,7 @@ sphere, 2/2 a diamond; `around` and `across` how many samples.
 allow-list's own names, and all a scene can hold. Over a variable,
 numpy's `np.sin`, `np.cos`, `np.tan`, `np.arcsin`, `np.arccos`, `np.arctan`, `np.arctan2`, `np.sqrt`, `np.exp`, `np.log`, `np.hypot`, `np.radians`, `np.deg2rad`, `np.degrees`, `np.rad2deg`, `np.absolute`, `np.minimum`, `np.maximum` write these expressions, as does arithmetic, and
 the builtins `abs` and `round`; any other numpy function refuses. The
-constants as handles are `from magpylib_studio.recording import pi, tau, e`.
+constants as handles are `from magpylib_studio import pi, tau, e`.
 
 ## The session
 
@@ -289,9 +290,10 @@ The built-in scenes. Each leans on a different feature, which is
 the point of having more than one: an example is the shortest
 documentation there is.
 
-### `session.load_example(name='halbach')`
+### `session.load_example(name='halbach', base_dir=None)`
 
-Load one of the built-in scenes; see list_examples().
+Load one of the built-in scenes; see list_examples(). `base_dir` is
+the folder a mesh added later is looked for in, as for load_scene.
 
 ### `session.to_builder_script()`
 

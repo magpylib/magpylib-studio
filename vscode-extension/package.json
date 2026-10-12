@@ -22,7 +22,7 @@
     "url": "https://github.com/magpylib/magpylib-studio/issues"
   },
   "engines": {
-    "vscode": "^1.95.0"
+    "vscode": "^1.109.0"
   },
   "categories": [
     "Visualization"
@@ -45,76 +45,142 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "magpylibStudio.scene",
+        "displayName": "Magpylib Studio",
+        "selector": [
+          {
+            "filenamePattern": "*.magpy.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "magpylib-studio.toggleDrawScriptsHere",
-        "title": "Magpylib Studio: Draw Scripts in a Panel"
+        "title": "Draw Scripts in a Panel",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.openStudio",
-        "title": "Magpylib Studio: Open Scene View",
-        "icon": "$(open-preview)"
+        "title": "Open Scene View",
+        "icon": "$(open-preview)",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.showScene",
+        "title": "Show Scene",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.restartEngine",
+        "title": "Restart Engine",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.refreshScene",
-        "title": "Magpylib Studio: Refresh Scene",
-        "icon": "$(refresh)"
+        "title": "Refresh Scene",
+        "icon": "$(refresh)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.selectObject",
-        "title": "Magpylib Studio: Select Object in Studio"
+        "title": "Select Object in Studio",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.loadExample",
-        "title": "Magpylib Studio: Load Example Scene..."
+        "title": "Load Example Scene...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.openFieldView",
-        "title": "Magpylib Studio: Open Field View",
-        "icon": "$(graph-line)"
+        "title": "Open Field View",
+        "icon": "$(graph-line)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.viewScript",
-        "title": "Magpylib Studio: Edit Python Script",
-        "icon": "$(code)"
+        "title": "Edit Python Script",
+        "icon": "$(code)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.saveScene",
-        "title": "Magpylib Studio: Save Scene",
-        "icon": "$(save)"
+        "title": "Save Scene",
+        "icon": "$(save)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.saveSceneAs",
-        "title": "Magpylib Studio: Save Scene As..."
+        "title": "Save Scene As...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.loadScene",
-        "title": "Magpylib Studio: Open Scene..."
+        "title": "Open Scene...",
+        "category": "Magpylib Studio",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "magpylib-studio.newScene",
-        "title": "Magpylib Studio: New Scene"
+        "title": "New Scene",
+        "category": "Magpylib Studio",
+        "icon": "$(new-file)"
       },
       {
         "command": "magpylib-studio.closeScene",
-        "title": "Magpylib Studio: Close Scene",
-        "icon": "$(close)"
+        "title": "Close Scene",
+        "icon": "$(close)",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.closeAllScenes",
+        "title": "Close All Scenes",
+        "category": "Magpylib Studio",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "magpylib-studio.revealSceneInExplorer",
+        "title": "Reveal in Explorer View",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.revealSceneInOS",
+        "title": "Reveal in Finder",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.revealSceneInFileManager",
+        "title": "Open Containing Folder",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.copyScenePath",
+        "title": "Copy Path",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.revertScene",
-        "title": "Magpylib Studio: Revert Scene to Saved"
+        "title": "Revert Scene to Saved",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.exportScript",
-        "title": "Magpylib Studio: Export as Python Script..."
+        "title": "Export as Python Script...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.exportBuilderScript",
-        "title": "Magpylib Studio: Export as Scene Script..."
+        "title": "Export as Scene Script...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.importScript",
-        "title": "Magpylib Studio: Import Python Script..."
+        "title": "Import Python Script...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.openScriptInStudio",
@@ -122,17 +188,30 @@
       },
       {
         "command": "magpylib-studio.switchScene",
-        "title": "Magpylib Studio: Switch Imported Scene..."
+        "title": "Switch Imported Scene...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.undo",
-        "title": "Magpylib Studio: Undo Scene Edit",
-        "icon": "$(discard)"
+        "title": "Undo Scene Edit",
+        "icon": "$(discard)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.redo",
-        "title": "Magpylib Studio: Redo Scene Edit",
-        "icon": "$(redo)"
+        "title": "Redo Scene Edit",
+        "icon": "$(redo)",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.undoTyping",
+        "title": "Undo Typing",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.redoTyping",
+        "title": "Redo Typing",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.removeObject",
@@ -148,7 +227,8 @@
       },
       {
         "command": "magpylib-studio.gotoHistory",
-        "title": "Magpylib Studio: Jump to Undo Step"
+        "title": "Jump to Undo Step",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.newCollection",
@@ -157,24 +237,29 @@
       },
       {
         "command": "magpylib-studio.addObject",
-        "title": "Magpylib Studio: Add Object...",
-        "icon": "$(add)"
+        "title": "Add Object...",
+        "icon": "$(add)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.addMesh",
-        "title": "Magpylib Studio: Add Triangular Mesh..."
+        "title": "Add Triangular Mesh...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.importMesh",
-        "title": "Magpylib Studio: Import Mesh..."
+        "title": "Import Mesh...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.meshFromPoints",
-        "title": "Magpylib Studio: Mesh from Points..."
+        "title": "Mesh from Points...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.meshFromFormula",
-        "title": "Magpylib Studio: Mesh from a Formula..."
+        "title": "Mesh from a Formula...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.setPosition",
@@ -243,8 +328,29 @@
       },
       {
         "command": "magpylib-studio.sweep",
-        "title": "Magpylib Studio: Sweep a Variable...",
-        "icon": "$(graph-line)"
+        "title": "Sweep a Variable...",
+        "icon": "$(graph-line)",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.saveVariant",
+        "title": "Save as Variant...",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.saveOverVariant",
+        "title": "Save Over the Variant in Use",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.renameVariant",
+        "title": "Rename Variant...",
+        "category": "Magpylib Studio"
+      },
+      {
+        "command": "magpylib-studio.removeVariant",
+        "title": "Delete Variant...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.setVariableBounds",
@@ -252,16 +358,19 @@
       },
       {
         "command": "magpylib-studio.setUnits",
-        "title": "Magpylib Studio: Units...",
-        "icon": "$(symbol-ruler)"
+        "title": "Units...",
+        "icon": "$(symbol-ruler)",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.setLengthUnit",
-        "title": "Magpylib Studio: Length Unit..."
+        "title": "Length Unit...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.setFieldUnit",
-        "title": "Magpylib Studio: Field Unit..."
+        "title": "Field Unit...",
+        "category": "Magpylib Studio"
       },
       {
         "command": "magpylib-studio.selectOperation",
@@ -343,13 +452,25 @@
         "command": "magpylib-studio.undo",
         "key": "ctrl+z",
         "mac": "cmd+z",
-        "when": "(activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
+        "when": "(activeCustomEditorId == 'magpylibStudio.scene' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
       },
       {
         "command": "magpylib-studio.redo",
         "key": "ctrl+shift+z",
         "mac": "cmd+shift+z",
-        "when": "(activeWebviewPanelId == 'magpylibStudio' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
+        "when": "(activeCustomEditorId == 'magpylibStudio.scene' || activeWebviewPanelId == 'magpylibField') && !inputFocus && !magpylib-studio.textFocus"
+      },
+      {
+        "command": "magpylib-studio.undoTyping",
+        "key": "ctrl+z",
+        "mac": "cmd+z",
+        "when": "magpylib-studio.textFocus && !inputFocus && !editorTextFocus"
+      },
+      {
+        "command": "magpylib-studio.redoTyping",
+        "key": "ctrl+shift+z",
+        "mac": "cmd+shift+z",
+        "when": "magpylib-studio.textFocus && !inputFocus && !editorTextFocus"
       }
     ],
     "viewsContainers": {
@@ -364,8 +485,14 @@
     "views": {
       "magpylib-studio": [
         {
+          "id": "magpylib-studio.openScenesView",
+          "name": "Open Scenes",
+          "when": "magpylib-studio.scenesOpen",
+          "visibility": "hidden"
+        },
+        {
           "id": "magpylib-studio.sceneView",
-          "name": "Scene",
+          "name": "Objects",
           "contextualTitle": "magpylib Scene"
         },
         {
@@ -402,7 +529,8 @@
       },
       {
         "view": "magpylib-studio.sceneView",
-        "contents": "The scene is empty.\n[Add Object...](command:magpylib-studio.addObject)\nA magnet, current, sensor or collection.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA finished scene to drag, measure and take apart.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here."
+        "when": "!magpylib-studio.scenesOpen",
+        "contents": "No scene is open.\n[New Scene](command:magpylib-studio.newScene)\nAn empty scene, in a tab of its own.\n[Open Scene...](command:magpylib-studio.loadScene)\nA .magpy.json scene saved earlier.\n[Load Example Scene...](command:magpylib-studio.loadExample)\nA finished scene to drag, measure and take apart.\n[Import Python Script...](command:magpylib-studio.importScript)\nRun an existing magpylib script and edit its scene here.\n[Import Mesh...](command:magpylib-studio.importMesh)\nA magnet shaped like a CAD part, from an STL, OBJ or PLY, in a new scene."
       }
     ],
     "walkthroughs": [
@@ -507,16 +635,6 @@
       "view/title": [
         {
           "command": "magpylib-studio.undo",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "magpylib-studio.redo",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@2"
-        },
-        {
-          "command": "magpylib-studio.undo",
           "when": "view == magpylib-studio.historyView",
           "group": "navigation@1"
         },
@@ -524,86 +642,6 @@
           "command": "magpylib-studio.redo",
           "when": "view == magpylib-studio.historyView",
           "group": "navigation@2"
-        },
-        {
-          "command": "magpylib-studio.addObject",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@0"
-        },
-        {
-          "command": "magpylib-studio.refreshScene",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@3"
-        },
-        {
-          "command": "magpylib-studio.openStudio",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@4"
-        },
-        {
-          "command": "magpylib-studio.openFieldView",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@5"
-        },
-        {
-          "command": "magpylib-studio.viewScript",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@6"
-        },
-        {
-          "command": "magpylib-studio.newScene",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "1_file@1"
-        },
-        {
-          "command": "magpylib-studio.closeScene",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "navigation@8"
-        },
-        {
-          "command": "magpylib-studio.loadScene",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "1_file@2"
-        },
-        {
-          "command": "magpylib-studio.saveScene",
-          "when": "view == magpylib-studio.sceneView && magpylib-studio.sceneDirty",
-          "group": "navigation@7"
-        },
-        {
-          "command": "magpylib-studio.saveSceneAs",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "1_file@4"
-        },
-        {
-          "command": "magpylib-studio.revertScene",
-          "when": "view == magpylib-studio.sceneView && magpylib-studio.sceneFile",
-          "group": "1_file@5"
-        },
-        {
-          "command": "magpylib-studio.loadExample",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "2_scene@1"
-        },
-        {
-          "command": "magpylib-studio.importScript",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "2_scene@2"
-        },
-        {
-          "command": "magpylib-studio.exportScript",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "2_scene@3"
-        },
-        {
-          "command": "magpylib-studio.exportBuilderScript",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "2_scene@4"
-        },
-        {
-          "command": "magpylib-studio.newCollection",
-          "when": "view == magpylib-studio.sceneView",
-          "group": "2_scene@5"
         },
         {
           "command": "magpylib-studio.addVariable",
@@ -621,9 +659,144 @@
           "group": "navigation@3"
         },
         {
-          "command": "magpylib-studio.rollbackClear",
-          "when": "view == magpylib-studio.sceneView && magpylib-studio.rolledBack",
+          "command": "magpylib-studio.saveVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@1"
+        },
+        {
+          "command": "magpylib-studio.saveOverVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@2"
+        },
+        {
+          "command": "magpylib-studio.renameVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@3"
+        },
+        {
+          "command": "magpylib-studio.removeVariant",
+          "when": "view == magpylib-studio.variablesView",
+          "group": "1_variants@4"
+        },
+        {
+          "command": "magpylib-studio.newScene",
+          "when": "view == magpylib-studio.openScenesView",
           "group": "navigation@0"
+        },
+        {
+          "command": "magpylib-studio.loadScene",
+          "when": "view == magpylib-studio.openScenesView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "magpylib-studio.closeAllScenes",
+          "when": "view == magpylib-studio.openScenesView && magpylib-studio.scenesOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "magpylib-studio.loadExample",
+          "when": "view == magpylib-studio.openScenesView",
+          "group": "1_open@1"
+        },
+        {
+          "command": "magpylib-studio.importScript",
+          "when": "view == magpylib-studio.openScenesView",
+          "group": "1_open@2"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@0"
+        },
+        {
+          "command": "magpylib-studio.viewScript",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@1"
+        },
+        {
+          "command": "magpylib-studio.openFieldView",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "navigation@2"
+        },
+        {
+          "command": "magpylib-studio.pasteObject",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.canPaste",
+          "group": "1_edit@1"
+        },
+        {
+          "command": "magpylib-studio.newCollection",
+          "when": "view == magpylib-studio.sceneView && magpylib-studio.scenesOpen",
+          "group": "1_edit@2"
+        },
+        {
+          "command": "magpylib-studio.newScene",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
+          "group": "navigation@3"
+        },
+        {
+          "command": "magpylib-studio.loadScene",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
+          "group": "navigation@4"
+        },
+        {
+          "command": "magpylib-studio.loadExample",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
+          "group": "0_scenes@3"
+        },
+        {
+          "command": "magpylib-studio.importScript",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible",
+          "group": "0_scenes@4"
+        },
+        {
+          "command": "magpylib-studio.saveSceneAs",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
+          "group": "3_file@1"
+        },
+        {
+          "command": "magpylib-studio.revertScene",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
+          "group": "3_file@2"
+        },
+        {
+          "command": "magpylib-studio.exportScript",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
+          "group": "4_export@1"
+        },
+        {
+          "command": "magpylib-studio.exportBuilderScript",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
+          "group": "4_export@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInExplorer",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
+          "group": "5_reveal@1"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInOS",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile && isMac",
+          "group": "5_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInFileManager",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile && !isMac",
+          "group": "5_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.copyScenePath",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.sceneFile",
+          "group": "5_reveal@3"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.sceneView && !view.magpylib-studio.openScenesView.visible && magpylib-studio.scenesOpen",
+          "group": "6_close@1"
+        },
+        {
+          "command": "magpylib-studio.refreshScene",
+          "when": "view == magpylib-studio.sceneView",
+          "group": "2_view@1"
         }
       ],
       "explorer/context": [
@@ -649,6 +822,111 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "magpylib-studio.saveScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow.*Unsaved/",
+          "group": "inline@1"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "inline@2"
+        },
+        {
+          "command": "magpylib-studio.saveScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "1_file@1"
+        },
+        {
+          "command": "magpylib-studio.saveSceneAs",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "1_file@2"
+        },
+        {
+          "command": "magpylib-studio.revertScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "1_file@3"
+        },
+        {
+          "command": "magpylib-studio.exportScript",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "2_export@1"
+        },
+        {
+          "command": "magpylib-studio.exportBuilderScript",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "2_export@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInExplorer",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "3_reveal@1"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInOS",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/ && isMac",
+          "group": "3_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInFileManager",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/ && !isMac",
+          "group": "3_reveal@2"
+        },
+        {
+          "command": "magpylib-studio.copyScenePath",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRowFile/",
+          "group": "3_reveal@3"
+        },
+        {
+          "command": "magpylib-studio.closeScene",
+          "when": "view == magpylib-studio.openScenesView && viewItem =~ /^sceneRow/",
+          "group": "4_close@1"
+        },
+        {
+          "command": "magpylib-studio.rollbackClear",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead.*RolledBack/",
+          "group": "inline@0"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "inline@1"
+        },
+        {
+          "command": "magpylib-studio.addObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "0_add@1"
+        },
+        {
+          "command": "magpylib-studio.newCollection",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "0_add@2"
+        },
+        {
+          "command": "magpylib-studio.pasteObject",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/ && magpylib-studio.canPaste",
+          "group": "0_add@3"
+        },
+        {
+          "command": "magpylib-studio.viewScript",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "1_views@1"
+        },
+        {
+          "command": "magpylib-studio.openFieldView",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /^sceneHead/",
+          "group": "1_views@2"
+        },
+        {
+          "command": "magpylib-studio.rollbackClear",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /RolledBack/",
+          "group": "inline@0"
+        },
+        {
+          "command": "magpylib-studio.saveScene",
+          "when": "view == magpylib-studio.sceneView && viewItem =~ /Unsaved/",
+          "group": "inline@2"
+        },
         {
           "command": "magpylib-studio.toggleVisibility",
           "when": "view == magpylib-studio.sceneView && viewItem =~ /^magpy/",
@@ -851,6 +1129,34 @@
         {
           "command": "magpylib-studio.toggleVisibility",
           "when": "false"
+        },
+        {
+          "command": "magpylib-studio.undoTyping",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.redoTyping",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.showScene",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInOS",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.revealSceneInFileManager",
+          "when": "false"
+        },
+        {
+          "command": "magpylib-studio.copyScenePath",
+          "when": "false"
         }
       ]
     },
@@ -861,6 +1167,12 @@
           "type": "string",
           "default": "",
           "description": "Python interpreter used to run the magpylib-studio engine. Empty = auto-detect (.venv next to the workspace, then python3)."
+        },
+        "magpylib-studio.scriptTimeout": {
+          "type": "number",
+          "default": 300,
+          "minimum": 1,
+          "description": "How long a script may run, in seconds, when Open in Magpylib Studio or the script tab's save runs it, before it is stopped. It runs in a process of its own, so stopping it leaves every scene as it was."
         },
         "magpylib-studio.drawScriptsHere": {
           "type": "boolean",
@@ -885,6 +1197,7 @@
     "check:widget": "node harness/check-widget.js",
     "copy:widget": "node harness/copy-widget.js",
     "check:widget-browser": "node harness/check-widget-browser.mjs",
+    "check:window": "node harness/check-window-life.mjs",
     "check:version": "node harness/check-version.js",
     "inspect": "node harness/webview-harness.js inspector",
     "test": "vscode-test",

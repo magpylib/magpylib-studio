@@ -17,6 +17,7 @@ what is next is in [roadmap.md](roadmap.md)._
 | units                  | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                                           |
 | meshes                 | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                             |
 | import                 | `magpylib_studio/importer.py`                     | `load_script` (run a script, intercept `show()`), `document_from_objects`                                                                              |
+| scripts outside        | `magpylib_studio/runner.py`                       | a script run in a process of its own -- the script tab's save, Open in Studio -- handing back documents, the meshes carried                            |
 | transport              | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                              |
 | drawing                | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                            |
 | the 3D view's data     | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                                        |
@@ -184,6 +185,14 @@ which is what makes sliders live and `sweep` affordable.
   same variables; put elsewhere, its steps go at the end in their own order, and
   it is pinned to its source's world pose where the source's groups had moved
   it, in the same undo step.
+- Across scenes a copy is a scene of its own: `export_object` writes the
+  object's subtree with the variables its formulas name and what its groups did
+  to it as one rigid step on its top (a pattern's source inside a Collection
+  named after it); `import_fragment` merges that under a parent as one step,
+  keeping ids this log never used and renaming the rest, renaming a variable
+  whose name is taken (`radius` to `radius_2`, every formula following) unless
+  an earlier import from the same origin made that same variable, and rebasing
+  mesh paths to its own folder. Variants stay with their scene.
 - Variables: hard bounds and `integer` are enforced in the fold, so they hold
   however a value arrived; renaming rewrites expressions through the AST;
   `sweep` re-folds once per value and records nothing.
@@ -333,20 +342,60 @@ in the browser, saying where.
 
 `src/extension.ts` spawns `python -m magpylib_studio` (resolution: the
 `magpylib-studio.pythonPath` setting, then `.venv` in the workspace or the repo,
-then `python3`; **Install the Engine** sets one up) and holds one session, one
-panel and one scene file. The sidebar: the Scene tree (objects nested as
-grouped, with each object's steps under it, drag and drop to reparent, rename,
-copy, cut, paste, delete, hide), the Inspector (a webview whose widgets are
+then `python3`; **Install the Engine** sets one up) and holds one engine with a
+session per open scene.
+
+**A scene is a tab.** `.magpy.json` opens in a custom editor
+(`magpylibStudio.scene`, `src/scenes.ts`): its document is the scene's object in
+the extension -- the file, the engine session (a random name, a new one when an
+engine restarts), the panels showing it, the selection, the script tab's state,
+and the last document it settled on, taken a second after each edit. VS Code's
+Save, Save As, Revert, hot exit and unsaved dot are the scene's; undo stays the
+studio's, so the dot is told once per edit (`CustomDocumentContentChangeEvent`)
+and cleared only by a save or a revert. Save As and a rename or a move in the
+Explorer hand the session to the new file's document -- its undo, its unsaved
+changes, its mesh paths rebased -- since VS Code reopens the new name from the
+file. Each scene's file is watched: a change made elsewhere comes in as one undo
+step named "changed on disk", a file that does not read is not loaded and its
+row says so, and a save checks the file first. Each scene keeps a recovery copy
+in extension storage, because VS Code brings unsaved work back after a crash
+only from the editor state it saves about once a minute; on the next start a
+copy newer than what its tab loaded is offered back. An engine that dies is
+given every scene back, one at a time, the one going back named on disk so that
+a scene whose restore stops it too is kept out the next time, marked lost and
+never saved. Scene tabs an extension-host restart leaves without a document are
+reopened.
+
+**The scene in front** is the one the side bar shows and the commands act on:
+the scene tab last used or the row last clicked, which stays in front while the
+focus is in the side bar or another editor. A command acts on the scene it
+started in through every question it asks (an `AsyncLocalStorage` holds it); a
+side view names the scene it was drawn for in every request.
+
+The sidebar, as Source Control's Repositories and Changes: Open Scenes, hidden
+until a second scene opens and then the person's to show or hide from the views
+menu (a line per open scene, its file's commands on it -- Save, Close, Save As,
+Revert, Export, Reveal; picking one, or several with Cmd-click, picks what
+Objects shows; while it is hidden those commands are in Objects' title bar
+instead), Objects (the scenes picked, each under its own heading, or one's
+objects at the top, nested as grouped with each object's steps under them; drag
+and drop to reparent within a scene and to copy into another, rename, copy, cut,
+paste -- across scenes a copy, a Cut moving it, one undo where it landed putting
+it back in both -- delete, hide), the Inspector (a webview whose widgets are
 built from the style schema; properties and pose take expressions, shown in the
 scene's units), the Variables view (a webview, because a tree row cannot hold a
 slider: the package's `variables.mjs`, the widget's own panel, with its calls
-routed through the extension host; the Inspector is `inspector.mjs` the same
-way, in full), the Undo view, and the Field panel on demand. The script tab is a
-real file in extension storage holding `to_builder_script()`, regenerated on
-every edit unless it is dirty or holds refused text, and restored across a
-window reload against the scene the engine has _now_. Scenes are files: save,
-Save As with mesh paths rebased, revert, a crash backup, reopen on activation;
-only `broadcastMutation()` marks the scene unsaved, redrawing does not.
+routed through the extension host, and the variants kept, renamed and deleted
+from its title bar; the Inspector is `inspector.mjs` the same way, in full), the
+Undo view, and the Field panel on demand, which belongs to the scene it was
+opened for. Each scene has its script tab: a real file in extension storage,
+named after the scene in a folder keyed by where the scene is, holding
+`to_builder_script()`, regenerated on every edit unless it is dirty or holds
+refused text, applied to its own scene on a deliberate save. Only
+`broadcastMutation()` marks a scene unsaved, redrawing does not. Cmd/Ctrl+Z in a
+box of a webview undoes the typing: the webviews say when a box has the focus
+(`magpylib-studio.textFocus`), and in a scene's tab, which VS Code's own undo
+never reaches, the host asks the page to undo it.
 
 Webview JavaScript lives in `media/*.js|mjs` under a nonce CSP, never inside
 TypeScript template literals; `harness/` checks that, the message contract, the
@@ -377,10 +426,30 @@ line — no ports, no framework.
 <- {"id": 2, "error": {"type": "KeyError", "message": "..."}}
 ```
 
+**One engine, a session per scene.** `open_session(session, scene?, path?)`
+opens a session under a name the host chooses and loads it in the same call;
+from then on a request names its session beside the method, and the answer names
+it back. `close_session` drops one. A name is used once, closed ones included,
+so a stale one can only miss. A request that names no session goes to a session
+of its own only on a connection that has never opened one by name -- the
+one-scene host, the "Try it" below; after an `open_session` it is refused
+(`SessionError`), so a call that forgot its scene fails rather than reading an
+empty one. `version` says the package's version, the protocol number
+(`rpc.PROTOCOL`, 2 since sessions) and the newest document version read. Every
+session resolves meshes through one cache per process, keyed by what the source
+read, so a part in two scenes is reoriented once.
+
+```
+-> {"id": 3, "method": "open_session", "params": {"session": "4f2a9c", "path": "ring.magpy.json"}}
+-> {"id": 4, "session": "4f2a9c", "method": "undo"}
+<- {"id": 4, "session": "4f2a9c", "result": {...}}
+```
+
 | group     | methods                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| engine    | `open_session` · `close_session` · `version`                                                                                                                                                                                                                                                                                                                                                   |
 | inspect   | `list_objects` · `object_tree` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                                                                                                                                                                                                               |
-| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                                                                                                                                                                                                                      |
+| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible` · `export_object` · `import_fragment` (across scenes)                                                                                                                                                                                                                                                |
 | edit      | `apply_edit` (style) · `set_param` · `reset_style` · `apply_edits` / `apply_calls` (what a view's drag sends) · `begin_interaction` · `end_interaction`                                                                                                                                                                                                                                        |
 | transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                                                                                                                                                                                                                          |
 | patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                                                                                                                                                                                                                          |

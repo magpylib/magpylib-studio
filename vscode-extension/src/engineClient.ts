@@ -25,7 +25,10 @@ export class EngineError extends Error {
 export class EngineClient {
   private proc: ChildProcessWithoutNullStreams;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pending = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void; method: string; sent: number }
+  >();
   private stdoutRemainder = '';
   private exited = false;
   private killed = false;
@@ -81,16 +84,31 @@ export class EngineClient {
     return this.killed;
   }
 
-  request<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+  /** `session` names the scene the request is for; without it the request
+   *  goes to the engine's one unnamed scene, which it refuses once any scene
+   *  has been opened by name. */
+  request<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    session?: string,
+  ): Promise<T> {
     if (this.exited) {
       return Promise.reject(new Error('engine is not running'));
     }
     const id = this.nextId++;
     const promise = new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.pending.set(id, {
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        method,
+        sent: Date.now(),
+      });
     });
     try {
-      this.proc.stdin.write(JSON.stringify({ id, method, params: params ?? {} }) + '\n');
+      const message = session === undefined
+        ? { id, method, params: params ?? {} }
+        : { id, session, method, params: params ?? {} };
+      this.proc.stdin.write(JSON.stringify(message) + '\n');
     } catch (err) {
       this.pending.delete(id);
       return Promise.reject(
@@ -98,6 +116,17 @@ export class EngineClient {
       );
     }
     return promise;
+  }
+
+  /** The request longest without an answer, and for how long, in seconds:
+   *  the engine answers in order, so it is the one it is working on. */
+  get oldestWait(): { id: number; method: string; seconds: number } | undefined {
+    const [first] = this.pending.entries();
+    if (!first) {
+      return undefined;
+    }
+    const [id, { method, sent }] = first;
+    return { id, method, seconds: (Date.now() - sent) / 1000 };
   }
 
   dispose(): void {

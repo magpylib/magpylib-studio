@@ -872,9 +872,13 @@ set of real scripts there is.
   object moves its create inside the group, as if made there; on one with steps
   it is a reparent, with a warning. `obj.parent = group` is a reparent outright,
   keeping the pose, as the tree's drag does. Arguments are kept in the order
-  written. Ids come from the label, else the class; `name(obj, id)` says an id
-  the label does not give, and the writer emits it only where the document's id
-  differs.
+  written. An id is the variable the object is assigned to, where that name held
+  no other object while the function ran -- read off the running function's
+  frame, never parsed from its source; else the label, else the class, settled
+  once the function has returned. `name(obj, id)` still says one outright, and
+  the writer emits it only where the name it writes cannot be the id -- since
+  2026-10-12; before, ids came from labels and every built-in example's script
+  named each object by hand.
 - **Style is read between calls**, as magpylib keeps what an object was given
   before its style is ever made, and written as edits by dotted path; the
   recorder never creates a style, since `copy()` labels a copy differently once
@@ -901,6 +905,16 @@ set of real scripts there is.
   plan's §4).
 - A grouped-metadata sugar in bare annotation position: an invalid type form to
   pyright and Pylance.
+- `name(obj, id)` in generated scripts (2026-10-12): the variable an object is
+  assigned to already names it, so it is the id, read off the running function;
+  `name()` stays for an id no variable gives.
+- Dropping `derived` for a plain `stagger = 360 / (2 * n)` (decided 2026-10-12,
+  kept): unlike `name()`, it says what Python cannot -- that the formula is a
+  variable of the scene, listed in the panel and named in every formula that
+  uses it, and its unit. Without it, `stagger / 2` would carry the formula's
+  text, already pasted in by the time anything records it, and the unit would be
+  a guess from the first use. Its double name is the `x = Symbol('x')` idiom. It
+  stands with the pattern words, which also say what plain magpylib cannot.
 
 ### Measured
 
@@ -940,8 +954,9 @@ drag.
   handles out.** `editable` is whether they are out: `editable=True` from the
   start, the pencil later, `view.editable = True` from code. The view sets the
   trait itself and saves it, so in marimo the cells that read the view re-run as
-  they do for a selection. `editable=None` is a view for looking only, a figure
-  handed to someone else: no pencil, and the trait refuses to turn on.
+  they do for a selection. `editable="never"` (first spelt `None`, still read
+  so) is a view for looking only, a figure handed to someone else: no pencil,
+  and the trait refuses to turn on.
 - **A scene written in code, or a path, is shown as its own session.** Nothing
   is copied: the document is the one source, so its field, its file and its code
   read the same session the view draws, a drag is a step in that scene, and a

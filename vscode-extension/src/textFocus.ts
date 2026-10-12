@@ -7,8 +7,11 @@ import * as vscode from 'vscode';
 export const TEXT_FOCUS = 'magpylib-studio.textFocus';
 
 let current = false;
+/** The webview whose box has the focus, while one has. */
+let holder: vscode.Webview | undefined;
 
-export function setTextFocus(focused: boolean): void {
+export function setTextFocus(focused: boolean, webview?: vscode.Webview): void {
+  holder = focused ? webview : undefined;
   if (focused === current) {
     return;
   }
@@ -17,10 +20,20 @@ export function setTextFocus(focused: boolean): void {
 }
 
 /** Take a webview's `textFocus` message; false for any other message. */
-export function tookTextFocus(message: { type?: unknown; focused?: unknown }): boolean {
+export function tookTextFocus(
+  message: { type?: unknown; focused?: unknown },
+  webview?: vscode.Webview,
+): boolean {
   if (message.type !== 'textFocus') {
     return false;
   }
-  setTextFocus(message.focused === true);
+  setTextFocus(message.focused === true, webview);
   return true;
+}
+
+/** Undo or redo the typing in the box with the focus. In a scene's tab VS
+ *  Code's own undo goes to the custom editor and never reaches the box
+ *  (plans/several-scenes.md §8), so the box's page runs the browser's. */
+export function undoTyping(command: 'undo' | 'redo'): void {
+  void holder?.postMessage({ type: 'typing', command });
 }

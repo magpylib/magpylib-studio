@@ -1,0 +1,13 @@
+{
+  "name": "window-check-driver",
+  "publisher": "magpylib",
+  "version": "0.0.1",
+  "description": "Drives the studio through a reload, a crash and eight tabs, for harness/check-window-life.mjs. Never shipped.",
+  "engines": {
+    "vscode": "^1.109.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./driver.js"
+}

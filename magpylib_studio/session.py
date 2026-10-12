@@ -1406,6 +1406,20 @@ def _walk_specs(specs):
 #: reference with the five megabytes it happened to resolve to.
 DOC_VERSION = 3
 
+#: In a script's own process (`runner`), the engine's resolved meshes, which
+#: every session made there resolves through; None in the engine.
+SHARED_MESH_CACHE: dict | None = None
+
+#: How long a script may run before it is stopped, in seconds, unless the
+#: caller says (`timeout`): one that never returns would hold every scene's
+#: requests behind it.
+SCRIPT_SECONDS = 300
+
+#: What the script's process puts before its answer, on a line of its own:
+#: whatever else reached its stdout -- a C library's output, a print without
+#: its newline -- is not taken for it.
+RUNNER_ANSWER = "magpylib-studio-runner: "
+
 try:
     __version__ = _package_version("magpylib-studio")
 except PackageNotFoundError:  # a source tree that was never installed
@@ -2225,6 +2239,29 @@ def _rebase_doc(doc, previous, current):
     return moved
 
 
+def _last_turn(obj):
+    """An object's orientation at the end of its path, or its only one."""
+    turn = obj.orientation
+    return turn if turn.single else turn[-1]
+
+
+def _dependency_order(variables):
+    """The names of `variables` with each after the ones its formula names."""
+    order, seen = [], set()
+
+    def visit(name, path=()):
+        if name in seen or name not in variables or name in path:
+            return
+        for used in expressions.referenced_names(variables[name]):
+            visit(used, (*path, name))
+        seen.add(name)
+        order.append(name)
+
+    for name in variables:
+        visit(name)
+    return order
+
+
 def _same_pose(obj, position, orientation):
     """Whether magpylib object `obj` stands at `position` turned by
     `orientation`, path and all."""
@@ -2377,7 +2414,7 @@ def _drop_from_variants(doc, name):
 class MagpylibStudioSession:
     """A live magpylib scene plus the document it was built from."""
 
-    def __init__(self, scene: dict | None = None):
+    def __init__(self, scene: dict | None = None, mesh_cache: dict | None = None):
         # start empty; older documents carry their ops per object, not as a log
         self.doc = _canonical(
             _migrate_events(scene if scene is not None else {"objects": []})
@@ -2423,8 +2460,11 @@ class MagpylibStudioSession:
         #: what it read (see meshes._cache_key). This is not an optimisation
         #: to be dropped when it gets awkward: reorienting a 20k-face mesh
         #: takes 16 s and a rebuild happens on every slider drag, so without
-        #: it a scene with one CAD part in it cannot be edited at all.
-        self._mesh_cache: dict = {}
+        #: it a scene with one CAD part in it cannot be edited at all. An
+        #: engine serving several scenes hands each the same one.
+        if mesh_cache is None:
+            mesh_cache = {} if SHARED_MESH_CACHE is None else SHARED_MESH_CACHE
+        self._mesh_cache: dict = mesh_cache
         #: object id -> what the checks found, filled while building. Kept
         #: beside the objects rather than on them because the built object
         #: has its checks skipped: it is the cache that knows.
@@ -2432,6 +2472,9 @@ class MagpylibStudioSession:
         #: Where a relative mesh path is relative *to* — the directory of the
         #: document, which only the host knows, so it says (see load_scene).
         self._base_dir: str | None = None
+        #: (origin, variable) -> the variable an import from that origin made
+        #: here, for the next import of the same to share (`import_fragment`).
+        self._twins: dict = {}
         self._build()
 
     def _record_state(self, label, doc_before):
@@ -4642,6 +4685,276 @@ class MagpylibStudioSession:
             result["id"] = new_id
         return result
 
+    def export_object(self, object_id):
+        """An object as a scene of its own, to paste into another scene.
+
+        The live life of its subtree -- each object's create and the steps
+        after it, in the log's order -- with the variables it uses through
+        every formula and their limits, and what its groups did to it as one
+        rigid step at the end, so the copy stands where the object stands. A
+        step that would point outside it (a reparent onto a group not copied)
+        is left out, and so is an expression set aside under a pinned value.
+        A pattern's source comes inside a Collection named after it: a
+        pattern needs a group to put its copies in.
+
+        The answer's `scene` loads alone through `load_scene`, and `base_dir`
+        is the folder its mesh paths are relative to; `import_fragment` takes
+        both. A pattern's copy cannot be exported, as it cannot be copied.
+        """
+        try:
+            src = self._spec(object_id)
+        except KeyError as e:
+            return {"ok": False, "error": e.args[0]}
+        ids = {object_id} | {s["id"] for s in _walk_specs(src.get("children") or [])}
+        events = []
+        for event in self.doc.get("events") or []:
+            if event.get("target") not in ids:
+                continue
+            if event.get("op") == "reparent" and event.get("parent") not in ids:
+                continue
+            out = json.loads(json.dumps({k: v for k, v in event.items() if k != "id"}))
+            if out.get("op") == "create":
+                if out.get("parent") not in ids:
+                    out.pop("parent", None)
+                out.pop("overridden", None)
+            if "children" in out:
+                out["children"] = [c for c in out["children"] if c in ids]
+            events.append(out)
+        top = object_id
+        if any(
+            e.get("op") in _PATTERN_OPS and e["target"] == object_id for e in events
+        ):
+            top = f"{object_id}_group"
+            while top in ids:
+                top += "_"
+            label = self._objs[object_id].style.label or object_id
+            for event in events:
+                if event.get("op") == "create" and event["target"] == object_id:
+                    event["parent"] = top
+            events.insert(
+                0,
+                {
+                    "op": "create",
+                    "target": top,
+                    "type": "Collection",
+                    "style": {"label": label},
+                },
+            )
+
+        # the variables it names, and those their formulas name, in order
+        defined = self.doc.get("variables") or {}
+        wanted, queue = set(), list(expressions.referenced_names(events))
+        while queue:
+            name = queue.pop()
+            if name in defined and name not in wanted:
+                wanted.add(name)
+                queue.extend(expressions.referenced_names(defined[name]))
+        bounds = self.doc.get("variable_bounds") or {}
+        scene = {
+            "version": DOC_VERSION,
+            "variables": {n: v for n, v in defined.items() if n in wanted},
+            "variable_bounds": {n: b for n, b in bounds.items() if n in wanted},
+            "events": [{"id": f"e{i}", **e} for i, e in enumerate(events, 1)],
+        }
+        alone = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        loaded = alone.load_scene(scene, self._base_dir)
+        if not loaded["ok"]:
+            return loaded
+
+        # what its groups did to it, as one rigid step on the copy's top
+        here, there = self._objs[object_id], alone._objs[object_id]
+        turn = _last_turn(here) * _last_turn(there).inv()
+        shift = np.atleast_2d(here.position)[-1] - turn.apply(
+            np.atleast_2d(there.position)[-1]
+        )
+        steps = []
+        if turn.magnitude() > 1e-12:
+            steps.append(
+                {
+                    "op": "rotate_from_rotvec",
+                    "rotvec": np.round(turn.as_rotvec(degrees=True), 9).tolist(),
+                    "anchor": 0,
+                }
+            )
+        if np.linalg.norm(shift) > 1e-12:
+            steps.append({"op": "move", "displacement": np.round(shift, 12).tolist()})
+        if steps:
+            moved = alone._mutate_doc(
+                lambda doc: [alone._append({"target": top, **step}) for step in steps],
+                "place",
+            )
+            if not moved["ok"]:
+                return moved
+        return {
+            "ok": True,
+            "scene": json.loads(json.dumps(alone.doc)),
+            "base_dir": self._base_dir,
+            "id": top,
+        }
+
+    def import_fragment(self, fragment, parent=None, base_dir=None, origin=None):
+        """Merge `fragment` -- a scene, as `export_object` writes one -- into
+        this one under `parent` (a Collection's id, or the root), as one step
+        to undo: `import_fragments` with one."""
+        return self.import_fragments(
+            [{"scene": fragment, "base_dir": base_dir}], parent, origin
+        )
+
+    def import_fragments(self, fragments, parent=None, origin=None):
+        """Merge several copies -- `{"scene", "base_dir"}` each, as
+        `export_object` writes them -- under `parent` (a Collection's id, or
+        the root), as one step to undo and one rebuild: what a drop of
+        several objects is.
+
+        Their objects keep their ids where this scene's log has never used
+        them and take new ones where it has. Their variables are their own,
+        never this scene's: one whose name is taken here comes in renamed --
+        `radius` as `radius_2` -- every formula naming it rewritten, unless an
+        earlier import from the same `origin` made that very variable here
+        (the same definition and limits), which it then shares rather than
+        making a third; two copies in one call from one scene share theirs
+        so. Mesh paths written from a copy's `base_dir` are rewritten to name
+        the same files from this scene's folder. Variants stay behind.
+
+        The answer names the objects put at `parent` (`ids`) and the
+        variables renamed (`renamed`, old to new).
+        """
+        if parent is not None:
+            try:
+                if self._spec(parent)["type"] != "Collection":
+                    return {
+                        "ok": False,
+                        "error": f"parent {parent!r} is not a Collection",
+                    }
+            except KeyError:
+                return {"ok": False, "error": f"unknown object id {parent!r}"}
+        plan = {"ids": set(), "variables": {}, "bounds": {}, "twins": {}}
+        events, pasted, renamed = [], [], {}
+        for item in fragments:
+            made = self._fragment_events(
+                item.get("scene"), item.get("base_dir"), parent, origin, plan
+            )
+            if not made["ok"]:
+                return made
+            events += made["events"]
+            pasted += made["ids"]
+            renamed.update(made["renamed"])
+
+        def merge(doc):
+            doc["variables"] = {**(doc.get("variables") or {}), **plan["variables"]}
+            if plan["bounds"]:
+                doc["variable_bounds"] = {
+                    **(doc.get("variable_bounds") or {}),
+                    **plan["bounds"],
+                }
+            for event in events:
+                self._append(event)
+
+        result = self._mutate_doc(merge, f"paste {', '.join(pasted)}")
+        if not result["ok"]:
+            return result
+        self._twins.update(plan["twins"])
+        return {**result, "ids": pasted, "renamed": renamed}
+
+    def _fragment_events(self, fragment, base_dir, parent, origin, plan):
+        """One copy's steps as this scene will hold them, its ids and its
+        variables renamed against this scene and against what `plan` -- the
+        copies before it in the same call -- has added already."""
+        alone = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        loaded = alone.load_scene(fragment, base_dir)
+        if not loaded["ok"]:
+            return loaded
+        frag = alone.doc
+        tops = [spec["id"] for spec in frag.get("objects") or []]
+
+        # ids: kept where this log never used them, else new
+        used = (
+            {s["id"] for s, _ in self._iter_specs()}
+            | _ids_in_log(self.doc.get("events") or [])
+            | plan["ids"]
+        )
+        theirs = sorted(_ids_in_log(frag.get("events") or []))
+        ids = {i: i for i in theirs if i not in used}
+        for old in theirs:
+            if old not in ids:
+                ids[old] = self._unique_id(
+                    old, taken={*ids.values(), *theirs, *plan["ids"]}
+                )
+        plan["ids"].update(ids.values())
+
+        # variables: their own, renamed where the name is taken here
+        mine = {**(self.doc.get("variables") or {}), **plan["variables"]}
+        my_bounds = {**(self.doc.get("variable_bounds") or {}), **plan["bounds"]}
+        their_vars = frag.get("variables") or {}
+        their_bounds = frag.get("variable_bounds") or {}
+        renames, added = {}, {}
+
+        def renaming(value):
+            for old, new in renames.items():
+                value = expressions.renamed(value, old, new)
+            return value
+
+        def fresh(name):
+            stem = re.sub(r"_\d+$", "", name) or name
+            n = 2
+            while (
+                any(f"{stem}_{n}" in names for names in (mine, added, their_vars))
+                or f"{stem}_{n}" in renames.values()
+            ):
+                n += 1
+            return f"{stem}_{n}"
+
+        for name in _dependency_order(their_vars):
+            definition = renaming(their_vars[name])
+            limits = their_bounds.get(name)
+            twin = None
+            if origin is not None:
+                twin = plan["twins"].get((origin, name)) or self._twins.get(
+                    (origin, name)
+                )
+            if (
+                twin is not None
+                and twin in mine
+                and mine[twin] == definition
+                and my_bounds.get(twin) == limits
+            ):
+                if twin != name:
+                    renames[name] = twin
+                continue
+            final = name if name not in mine and name not in added else fresh(name)
+            if final != name:
+                renames[name] = final
+            added[final] = definition
+            plan["variables"][final] = definition
+            if limits is not None:
+                plan["bounds"][final] = limits
+            if origin is not None:
+                plan["twins"][(origin, name)] = final
+
+        events = []
+        for event in frag.get("events") or []:
+            out = renaming(
+                json.loads(json.dumps({k: v for k, v in event.items() if k != "id"}))
+            )
+            out["target"] = ids[out["target"]]
+            if out.get("parent") is not None:
+                out["parent"] = ids[out["parent"]]
+            if out.get("children"):
+                out["children"] = [ids[c] for c in out["children"]]
+            if out.get("op") in ("create", "reparent") and out.get("parent") is None:
+                # at their root, so at the paste's
+                out.pop("parent", None)
+                if parent is not None:
+                    out["parent"] = parent
+            events.append(out)
+        _rebase_doc({"events": events}, base_dir, self._base_dir)
+        return {
+            "ok": True,
+            "events": events,
+            "ids": [ids[i] for i in tops],
+            "renamed": renames,
+        }
+
     def begin_interaction(self):
         """Group the edits that follow into one undo step, until
         `end_interaction`.
@@ -4907,6 +5220,25 @@ class MagpylibStudioSession:
         result = self._mutate_doc(mutate, f"adopt {object_id}")
         return {**result, "fresh": True} if result["ok"] else result
 
+    def _rename_ids(self, renames):
+        """Give objects other ids, every step that names them following: the
+        names a scene function knows its objects by, once it has run
+        (`recording`). Not a change to the scene, but recorded as one, before
+        a build forgets its history."""
+
+        def follow(object_id):
+            return renames.get(object_id, object_id)
+
+        def mutate(doc):
+            for event in doc.get("events") or []:
+                event["target"] = follow(event["target"])
+                if event.get("parent") is not None:
+                    event["parent"] = follow(event["parent"])
+                if event.get("children"):
+                    event["children"] = [follow(c) for c in event["children"]]
+
+        return self._mutate_doc(mutate, "name")
+
     def _rename_fresh(self, object_id, new_id):
         """Give an object another id, while nothing but its own create (and
         its children's) names it: `scene.name`. Later, an id is what every
@@ -5040,6 +5372,13 @@ class MagpylibStudioSession:
             self.forget_history()
         return result
 
+    def replace_scene(self, scene, base_dir=None, label="replace scene"):
+        """Replace the document with `scene` as one step to undo, named
+        `label`: a Revert to the file, or the file changed on disk, where what
+        the scene held is one undo away rather than gone. `load_scene` is for
+        opening, which starts the history instead."""
+        return self._replace(scene, base_dir, label)
+
     def _replace(self, scene, base_dir, label):
         """Replace the whole document with `scene`, as one step labelled
         `label` to undo.
@@ -5123,74 +5462,88 @@ class MagpylibStudioSession:
             self._base_dir = previous_base
         return result
 
-    def load_script(self, path, scene=0):
+    def load_script(self, path, scene=0, timeout=None):
         """Import an existing magpylib script by EXECUTING it (same trust as
-        the user running it). Every show() call the script makes is captured
-        as a scene candidate (that is what its author considered "the
-        scene"), plus an "all script objects" fallback when it differs.
-        Loads candidate `scene` (default: the first show() call); the rest
-        stay cached for load_captured(). Parametric structure flattens."""
-        from magpylib_studio import build, importer
+        the user running it), in a process of its own (`runner`). Every
+        show() call the script makes is captured as a scene candidate (that
+        is what its author considered "the scene"), plus an "all script
+        objects" fallback when it differs. Loads candidate `scene` (default:
+        the first show() call); the rest stay cached for load_captured().
+        Parametric structure flattens."""
+        result = self._run_script("import", path, None, timeout)
+        if not result["ok"]:
+            return result
+        self._captured_scenes = result["candidates"]
+        return self.load_captured(scene)
 
-        candidates = []
-        # Where the script is, a relative mesh path in it is: an exported
-        # builder script sits beside its scene and the parts the scene names.
-        # Not the engine's working directory, which is wherever the editor
-        # happened to start it.
+    def _run_script(self, mode, path, base_dir, timeout=None):
+        """Run a script in a process of its own (`runner`), in its folder,
+        with this interpreter, and take what it hands back: a script that
+        loops for ever, ends its process or changes magpylib's defaults
+        takes that process with it, not the engine and every scene it
+        holds. The meshes resolved here go with it and come back with what
+        it resolved, so a part is checked once."""
+        import pickle
+        import subprocess
+        import sys
+        import tempfile
+
         folder = os.path.dirname(os.path.abspath(path))
-        try:
-            with build.resolving_against(folder):
-                namespace, captured, code = importer.run_script(path)
-                # A script that defined a scene function made a document, not
-                # objects to guess one from: that is the scene, whole --
-                # variables, formulas and patterns -- and nothing has to be
-                # said about what running it lost, because nothing was.
-                built = build.scenes_in(namespace)
-            if built:
-                self._captured_scenes = [
-                    {
-                        "label": f"{name} (the scene the script built)",
-                        "doc": written.to_dict(),
-                        "warnings": [],
-                        "base_dir": folder,
-                    }
-                    for name, written in built
-                ]
-                return self.load_captured(scene)
-            for i, objects in enumerate(captured):
-                try:
-                    doc, warnings = importer.document_from_objects(objects, namespace)
-                except ValueError:
-                    continue
-                candidates.append(
-                    {
-                        "label": f"show() call {i + 1} ({len(doc['objects'])} top-level)",
-                        "doc": doc,
-                        "warnings": warnings,
-                    }
+        seconds = timeout or SCRIPT_SECONDS
+        with tempfile.TemporaryDirectory() as scratch:
+            carried = os.path.join(scratch, "meshes.pickle")
+            # What a file was read for: the costly checks. A hull or a
+            # superquadric is made again in milliseconds, and not carried.
+            with open(carried, "wb") as f:
+                pickle.dump(
+                    {k: v for k, v in self._mesh_cache.items() if k[0] == "file"}, f
                 )
             try:
-                doc, warnings = importer.document_from_namespace(namespace)
-                if all(c["doc"] != doc for c in candidates):
-                    candidates.append(
-                        {
-                            "label": f"all script objects ({len(doc['objects'])} top-level)",
-                            "doc": doc,
-                            "warnings": warnings,
-                        }
-                    )
-            except ValueError:
-                pass
-        except Exception as e:  # noqa: BLE001 - report script errors, don't crash
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        if not candidates:
-            return {"ok": False, "error": "script produced no magpylib objects"}
-        # Whichever scene is taken, the script's numbers are numbers in it.
-        lost = importer.variables_lost(namespace, code)
-        for candidate in candidates:
-            candidate["warnings"] = candidate["warnings"] + lost
-        self._captured_scenes = candidates
-        return self.load_captured(scene)
+                done = subprocess.run(  # noqa: S603 - this interpreter, our module
+                    [
+                        sys.executable,
+                        "-m",
+                        "magpylib_studio.runner",
+                        mode,
+                        str(path),
+                        base_dir or "",
+                        carried,
+                    ],
+                    cwd=base_dir or folder,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    timeout=seconds,
+                    check=False,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "ok": False,
+                    "error": f"the script was still running after {seconds} s, "
+                    "and was stopped",
+                }
+            answers = [
+                line[len(RUNNER_ANSWER) :]
+                for line in done.stdout.splitlines()
+                if line.startswith(RUNNER_ANSWER)
+            ]
+            try:
+                result = json.loads(answers[-1])
+            except (IndexError, json.JSONDecodeError):
+                return {
+                    "ok": False,
+                    "error": f"the script ended its process (exit code "
+                    f"{done.returncode}) before it handed back a scene",
+                }
+            try:
+                with open(carried, "rb") as f:
+                    resolved = pickle.load(f)  # noqa: S301 - written by our runner
+            except (OSError, pickle.UnpicklingError, EOFError):
+                resolved = {}
+        for key, value in resolved.items():
+            if key not in self._mesh_cache:
+                meshes._remember(self._mesh_cache, key, value)
+        return result
 
     def load_captured(self, scene=0):
         """Load one of the scene candidates cached by the last load_script."""
@@ -5212,7 +5565,7 @@ class MagpylibStudioSession:
                 result["warnings"] = entry["warnings"]
         return result
 
-    def apply_builder_script(self, path):
+    def apply_builder_script(self, path, timeout=None):
         """Replace the scene with the one a builder script builds: what saving
         the script tab does (`docs/roadmap.md` R1).
 
@@ -5247,7 +5600,7 @@ class MagpylibStudioSession:
         """
         from magpylib_studio import build
 
-        edited = self._builder_scene(path)
+        edited = self._builder_scene(path, timeout)
         if not edited["ok"]:
             return edited
         edited = edited["session"]
@@ -5294,50 +5647,19 @@ class MagpylibStudioSession:
             result["warnings"] = warnings
         return result
 
-    def _builder_scene(self, path):
+    def _builder_scene(self, path, timeout=None):
         """Run a builder script for the one scene it builds, as
-        {"ok": True, "session": ...}, or the refusal to report."""
-        from magpylib_studio import build, importer
-
-        try:
-            with build.resolving_against(self._base_dir):
-                namespace, captured, _ = importer.run_script(path)
-                built = build.scenes_in(namespace)
-        except Exception as e:  # noqa: BLE001 - report script errors, don't crash
-            return _script_failure(e, path)
-        if not built:
-            plain = captured or any(
-                not name.startswith("_") and importer._is_scene_object(value)
-                for name, value in namespace.items()
-            )
-            if plain:
-                return {
-                    "ok": False,
-                    "error": "this is plain magpylib, which would come back "
-                    "flattened: every variable a number and every pattern its "
-                    "copies. Saving applies builder code, a script that builds a "
-                    "Scene (from magpylib_studio.build import Scene). To bring "
-                    "plain magpylib in, save it as a file of its own and use "
-                    "Open in Magpylib Studio",
-                }
-            return {
-                "ok": False,
-                "error": "the script built no Scene "
-                "(from magpylib_studio.build import Scene; s = Scene())",
-            }
-        if len(built) > 1:
-            names = ", ".join(name for name, _ in built)
-            return {
-                "ok": False,
-                "error": f"the script built {len(built)} scenes ({names}), "
-                "and there is one scene to replace",
-            }
-        try:
-            # Objects nothing touched enter the scene here, so a refusal can
-            # come this late -- with no line to point at, having none.
-            return {"ok": True, "session": built[0][1].session}
-        except Exception as e:  # noqa: BLE001 - report it like any other refusal
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        {"ok": True, "session": ...}, or the refusal to report. It runs in a
+        process of its own (`runner`); the document it hands back is opened
+        here."""
+        result = self._run_script("builder", path, self._base_dir, timeout)
+        if not result["ok"]:
+            return result
+        edited = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        opened = edited.load_scene(result["doc"], self._base_dir)
+        if not opened["ok"]:
+            return opened
+        return {"ok": True, "session": edited}
 
     def list_examples(self):
         """The built-in scenes. Each leans on a different feature, which is
@@ -5350,15 +5672,16 @@ class MagpylibStudioSession:
             ]
         }
 
-    def load_example(self, name="halbach"):
-        """Load one of the built-in scenes; see list_examples()."""
+    def load_example(self, name="halbach", base_dir=None):
+        """Load one of the built-in scenes; see list_examples(). `base_dir` is
+        the folder a mesh added later is looked for in, as for load_scene."""
         if name not in EXAMPLES:
             return {
                 "ok": False,
                 "error": f"unknown example {name!r}; try one of {sorted(EXAMPLES)}",
             }
         _, _, build = EXAMPLES[name]
-        return self.load_scene(build())
+        return self.load_scene(build(), base_dir)
 
     def clear_scene(self):
         """Empty the document: every object, every step and every variable.

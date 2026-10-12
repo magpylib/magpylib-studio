@@ -22,6 +22,70 @@
       "preLaunchTask": "npm: compile"
     },
     {
+      // The studio alone: every other installed extension off. An F5 window
+      // treats each one as under development, and since 2026-10-05 its
+      // extension host has aborted natively about 1.3 s in, now and then,
+      // where the same build runs clean under `npm test` with no other
+      // extension loaded.
+      "name": "Run Extension (studio alone)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "${workspaceFolder}/sandbox",
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+        "--disable-extensions"
+      ],
+      "outFiles": ["${workspaceFolder}/vscode-extension/out/**/*.js"],
+      "preLaunchTask": "npm: compile"
+    },
+    {
+      // The studio alone, with nothing from before: no tabs, no unsaved
+      // scenes or recovery copies brought back, nothing the studio remembered
+      // about the workspace. It runs in a profile of its own, emptied before
+      // each launch, so VS Code's own settings and theme are not there either.
+      // Being a first run, it opens the studio's walkthrough.
+      "name": "Run Extension (fresh)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "${workspaceFolder}/sandbox",
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+        "--disable-extensions",
+        "--user-data-dir=${userHome}/.cache/magpylib-studio/fresh-host"
+      ],
+      "outFiles": ["${workspaceFolder}/vscode-extension/out/**/*.js"],
+      "preLaunchTask": "npm: compile, fresh host profile"
+    },
+    {
+      // A new user's first run, on a machine with no Python: none on the
+      // PATH, no uv or pip, no Python extension nor any other, VS Code's
+      // first-run profile, and an empty folder outside the repo, so the
+      // repo's .venv is not found either. Emptied before each launch. VS Code
+      // is kept from reading your shell's PATH, and the login shell the
+      // studio asks for python3 is a stand-in that does not read it either.
+      // Git and the other command-line tools are gone with it, as on a Mac
+      // without its developer tools.
+      "name": "Run Extension (fresh machine, no Python)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "${userHome}/.cache/magpylib-studio/fresh-machine/project",
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+        "--user-data-dir=${userHome}/.cache/magpylib-studio/fresh-machine/profile",
+        "--extensions-dir=${userHome}/.cache/magpylib-studio/fresh-machine/extensions",
+        "--force-disable-user-env"
+      ],
+      "env": {
+        "PATH": "/bin:/usr/sbin:/sbin",
+        "SHELL": "${userHome}/.cache/magpylib-studio/fresh-machine/shell"
+      },
+      "outFiles": ["${workspaceFolder}/vscode-extension/out/**/*.js"],
+      "preLaunchTask": "npm: compile, fresh machine"
+    },
+    {
       // Same host, without rebuilding first — for when tsc is already
       // watching and you just want the window back.
       "name": "Run Extension (no build)",

@@ -67,6 +67,10 @@ _WORDS = (
     "SceneFunction",
 )
 
+#: An expression's constants, kept as names in what a scene records: `pi`
+#: where `np.pi` would arrive as its digits. Imported by name, never by `*`.
+_CONSTANTS = ("pi", "tau", "e")
+
 __all__ = ["MagpylibStudioSession", "guide", *_WORDS]
 
 
@@ -101,7 +105,7 @@ def __getattr__(name):
         import importlib
 
         return importlib.import_module(f"{__name__}.{name}")
-    if name == "recording" or name in _WORDS:
+    if name == "recording" or name in _WORDS or name in _CONSTANTS:
         import importlib
 
         module = importlib.import_module(f"{__name__}.recording")

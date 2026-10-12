@@ -9,7 +9,7 @@ import numpy as np
 
 from evals import kit
 from evals.tasks import _scenes
-from magpylib_studio import Count, Length, duplicate_around, name, scene
+from magpylib_studio import Count, Length, duplicate_around, scene
 
 TITLE = "A plain magpylib ring turned into a scene with sliders"
 KIND = "studio"
@@ -109,14 +109,12 @@ def reference(work, condition):
         n: Annotated[int, Count(4, 24)] = 8,
         radius: Annotated[float, Length(0.015, 0.04)] = 0.02,
     ):
-        group = name(magpy.Collection(), "ring")
-        magnet = name(
-            magpy.magnet.Cuboid(
-                dimension=(0.006, 0.006, 0.006),
-                polarization=(0, 0, 1.0),
-                position=(radius, 0, 0),
-            ),
-            "magnet",
+        group = magpy.Collection(style_label="ring")
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.006, 0.006, 0.006),
+            polarization=(0, 0, 1.0),
+            position=(radius, 0, 0),
+            style_label="magnet",
         )
         group.add(magnet)
         duplicate_around(magnet, count=n, axis="z")

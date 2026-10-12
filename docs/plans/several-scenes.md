@@ -13,9 +13,12 @@ R9, taken up ahead of R7. Decided with Alex that day:
   not;
 - the order of §7: a prototype first, the tabs and the tree as one release;
 - variants come in this step: built (#32), recorded in
-  [0026](../decisions.md#0026-variants-are-named-value-sets-inside-a-scene).
+  [0026](../decisions.md#0026-variants-are-named-value-sets-inside-a-scene);
+- the studio keeps a recovery copy of each open scene, since VS Code's own
+  restore after a crash misses recent edits (§4).
 
-The rest is not built.
+The prototype of §7 step 0 ran the same day on VS Code 1.109, 1.131 and 1.141;
+§8 is what it found. The rest is not built.
 
 ---
 
@@ -136,8 +139,14 @@ moves the scene's revision. A replacement -- opening, a revert, a file changed
 on disk, a crash restore -- fires nothing. A save notes the revision before it
 writes; if an edit moved it meanwhile, the event fires again once the save has
 returned, since VS Code clears the dot when the save resolves. A scene loaded
-into an untitled tab -- an example, an import, a script's drawing -- starts
-dirty, so it is backed up and asked about; an empty New Scene starts clean.
+into an untitled tab -- an import, a script's drawing -- starts dirty, so it is
+backed up and asked about; an empty New Scene starts clean, and so does an
+example: the session opens on it (`open_session(example=...)`), so there is
+nothing to undo, and its preview tab is the next example's to take. VS Code
+keeps no backup of a clean tab, so the example each untouched tab holds is kept
+in workspace state by the tab's untitled name and loaded again when the tab
+comes back; the first edit pins the tab, which VS Code does for a dirty one, and
+forgets the name.
 
 | VS Code calls                                                 | the provider                                                                                                                                                                                                                      |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -148,13 +157,19 @@ dirty, so it is backed up and asked about; an empty New Scene starts clean.
 | `revertCustomDocument`                                        | replaces the scene with the file's, as one undo step                                                                                                                                                                              |
 | `backupCustomDocument(destination)`                           | writes the last settled document                                                                                                                                                                                                  |
 
-**Save As hands the session over.** VS Code replaces the editor with one for the
-new file, a new document. `openCustomDocument(destination)` adopts the session
-recorded for it instead of loading -- its undo, its selection, its camera -- and
-rebases its mesh paths, in the undo snapshots too; the old document's dispose
-does not close a session it handed on. A rename or a move in the Explorer is the
-same, through `onWillRenameFiles`. An untitled scene's first save is a Save As.
-Save As onto a scene open in another tab is refused.
+**Save As hands the session over.** VS Code disposes the old document, then
+opens one for the new file with a new panel, its tab clean (§8).
+`openCustomDocument(destination)` adopts the session recorded for it instead of
+loading -- its undo, its selection, its camera -- and rebases its mesh paths, in
+the undo snapshots too. The old document's dispose does not close a session it
+handed on; one that no document adopts within ten seconds, saved under a name
+the studio does not open, closes. A rename or a move in the Explorer is the
+same, through `onWillRenameFiles`, with one step more: VS Code drops the old
+tab's unsaved edits and opens the new one clean, so a session that arrives with
+unsaved edits fires its change event again for the dot. An untitled scene's
+first save is a Save As. New Scene opens an `untitled:` URI with a path in the
+workspace folder, where the save dialog then starts; without a path it starts at
+the root of the disk. Save As onto a scene open in another tab is refused.
 
 **A file changed on disk** comes in as one undo step labelled "changed on disk",
 whether the tab has unsaved edits or not (decided): what it had is one undo
@@ -189,6 +204,26 @@ time, with a marker on disk naming the one restoring, so a scene whose restore
 kills the engine is skipped next time and marked lost. A crash loses every tab's
 undo history; the notice says so.
 
+**A recovery copy of each scene** (decided 2026-10-11). After a crash of VS Code
+itself, VS Code brings a scene's unsaved edits back only from the editor state
+it saves about once a minute: edits made since come back as a clean tab, and a
+scene opened since not at all, though its backup is on disk (§8). So each open
+scene keeps its last settled document in extension storage, written a second
+after an edit as `backup.magpy.json` is now, and removed on save, revert and
+close. A document that opens without a backup while a newer copy of it waits
+offers it back -- "Unsaved changes to ring.magpy.json from 14:02: Restore,
+Discard" -- and the copies no tab claims are listed once the window has restored
+its tabs.
+
+**An extension-host restart** -- Restart Extension Host, or an extension's
+update -- meets VS Code's own veto while any scene tab is open: the first asks
+"Please confirm restart of extensions", the second is refused. After Restart
+Anyway, VS Code hands no scene tab to the new extension host, and the engine has
+gone with the old one (§8). On activation the studio closes and reopens each
+scene tab VS Code has not handed over within a few seconds, from its recovery
+copy when that is newer; whether a dead tab marked unsaved closes without asking
+is step 3's to try.
+
 ## 5. The extension: every open scene in the tree
 
 **One object per open scene**, the custom document, holds what is module-level
@@ -201,13 +236,14 @@ objects under it, as Unity's Hierarchy shows the scenes it has loaded. Its
 scenes come from the tabs (`window.tabGroups`, inputs of this view type), not
 from the documents: after a reload VS Code loads a tab's document only when it
 is shown, so a scene behind another tab is listed as unloaded and loads in its
-own group when it is expanded or dropped on. A scene opened from a file is
-pinned, so a single click on a second scene in the Explorer does not close the
-first; Load Example opens as a preview, replaced by the next until something is
-done in it. Rows are keyed by scene -- objects, steps and removed objects; a
-step row is `op-e1` today, which two scenes would share. Scenes are listed in
-the order they opened; two of the same name show their folder. An edit refreshes
-its scene's node and nothing else.
+own group when it is expanded or dropped on. A diff's tab is not a scene: on
+1.109 a scene's diff is a tab whose input the API cannot read, and from 1.131 a
+text diff. A scene opened from a file is pinned, so a single click on a second
+scene in the Explorer does not close the first; Load Example opens as a preview,
+replaced by the next until something is done in it. Rows are keyed by scene --
+objects, steps and removed objects; a step row is `op-e1` today, which two
+scenes would share. Scenes are listed in the order they opened; two of the same
+name show their folder. An edit refreshes its scene's node and nothing else.
 
 **The scene in front is the extension's own state**, set by any act on a scene:
 focusing its tab, selecting its node, a menu command on its row, a drop or a
@@ -226,7 +262,14 @@ selects it.
   `!inputFocus` so a search box keeps its own. Save and Save As keep studio
   bindings while the focus is in the side bar, acting on the scene in front
   through `workspace.save(uri)` and `workspace.saveAs(uri)`; in an editor, VS
-  Code's act on that editor, which the click put in front.
+  Code's act on that editor, which the click put in front. VS Code cannot see a
+  text box inside the view (§8): each of the studio's webviews says when one of
+  its boxes has the focus, and the undo keys stand aside on
+  `magpylib-studio.textFocus`, as they have since the fix that left the panel
+  undoing the scene from a value field (media/textFocus.mjs). In a custom editor
+  that is not enough: VS Code's undo then goes to the custom editor's, never to
+  the box (§8), so while a box has the focus the studio's key asks the view to
+  undo the box itself.
 - **A scene's node carries its commands**: Add Object, New Collection, Save,
   Close, View Script and Field View, on hover and in its menu. The title bar
   keeps New Scene, Open Scene, Load Example, Collapse All, Undo and Redo. Revert
@@ -299,6 +342,19 @@ through the same exporter.
   (`import_fragment`), not a gesture: the widget is the view of one scene
   ([0022](../decisions.md#0022-what-the-widget-is-and-is-not)).
 
+Built 2026-10-12 as above, except:
+
+- **A copy within a scene keeps `copy_object`**: beside its source it stays in
+  the same groups and on the same variables, which an exported copy, with
+  variables of its own, would not.
+- **A pattern's source copied across comes in its own Collection wherever it
+  lands**, not only at a root: the copy is a scene that loads alone, and a
+  pattern at its root would not.
+- **The twin a paste shares is remembered by the session** that made it, keyed
+  by the scene copied from; after a reload the next paste makes a new one.
+- **The clipboard is the window's.** Pasting into another window, through the
+  system clipboard, is left for when someone asks.
+
 ## 6. Variants
 
 Built (#32): architecture.md says how they work,
@@ -313,33 +369,37 @@ the roadmap's.
 
 Decided 2026-10-11. Each step lands with its changelog and architecture.md.
 
-0. **A prototype, thrown away** (1–2 days): a minimal custom editor on VS Code
-   1.109 and on stable, checking before anything builds on it: Save As and an
-   untitled first save handing a session over; a dirty scene renamed in the
-   Explorer; two dirty untitled scenes through a reload; auto-save against an
-   outside write; a Source Control diff and a merge; keys with the focus in the
-   view, the side bar and an input box; a split; eight tabs' memory and WebGL
-   contexts, with a hidden tab's renderer released as the widget's pool does; an
-   extension-host restart with a scene open.
-1. **The engine's sessions** (about ½ day): `serve`'s table, `open_session` that
-   loads, `close_session`, `version`, random names, refusal without a session
-   after an open, one mesh cache per process. Three engine fixes it rests on are
-   made already, with this plan's revision: a copy's pose, an id reused after a
-   removal, Save As then undo breaking mesh paths.
+0. **A prototype, thrown away** -- done 2026-10-11, on VS Code 1.109, 1.131 and
+   1.141; §8 is what it found. Scripted: Save As and an untitled first save, a
+   dirty rename, reload, quit and crashes with unsaved scenes, auto-save against
+   an outside write, Source Control diffs and merges, a split, twenty WebGL
+   tabs. By hand: keys in the view and in a text box, and an extension-host
+   restart with an unsaved scene.
+1. **The engine's sessions** -- done 2026-10-11 (about ½ day): `serve`'s table,
+   `open_session` that loads, `close_session`, `version`, random names, refusal
+   without a session after an open, one mesh cache per process. Three engine
+   fixes it rests on are made already, with this plan's revision: a copy's pose,
+   an id reused after a removal, Save As then undo breaking mesh paths.
 2. **Every view and request carries its scene** (1–2 days): a handle
    `{engine, session}` through the extension's forty-odd call sites and the side
    bar's views, each drawn for one session. Still one scene, the suite green,
    and nothing moved that step 3 deletes.
-3. **Tabs, the tree of every open scene, and crash safety, as one release** (4–6
-   days): the custom editor, its document as the per-scene object, the scene in
-   front, the watcher, Save As's hand-over, the upgrade, the variants' side bar
-   actions. The first slice anyone sees, and the riskiest, which step 0
-   de-risks.
-4. **Copying across scenes** (about 2 days), engine and interface together: the
-   exporter, the import, paste and drag, the clipboard; a copy within a scene
-   through the same exporter.
-5. **Scripts outside the engine** (about 1 day), before any R3 step 2 work: the
-   child process, the watchdog, Restart Engine.
+3. **Tabs, the tree of every open scene, and crash safety, as one release** --
+   built 2026-10-12; a reload, a crash and eight tabs checked by
+   `npm run check:window` the same day (5–7 days): the custom editor, its
+   document as the per-scene object, the scene in front, the watcher, Save As's
+   hand-over, the recovery copy, a box's own undo in the view, the upgrade, the
+   variants' side bar actions. The first slice anyone sees, and the riskiest,
+   which step 0 de-risks.
+4. **Copying across scenes** -- built 2026-10-12 (about 2 days), engine and
+   interface together: the exporter, the import, paste and drag, the clipboard;
+   a copy within a scene stays `copy_object` (§5.1).
+5. **Scripts outside the engine** -- built 2026-10-12 (about 1 day), before any
+   R3 step 2 work: the child process (`runner.py`, stopped after
+   `scriptTimeout`, 300 s, ended with the engine, the engine's resolved meshes
+   carried there and back), the watchdog (a request unanswered for 30 s is said,
+   with Restart Engine), and Restart Engine. A script run costs 0.35 s more, the
+   process starting and importing magpylib.
 
 **Done when**, each clause a check:
 
@@ -350,35 +410,74 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
 - `npm test`: two scene tabs in the tree; a drag from one node onto the other;
   the engine killed with two dirty scenes, both back; a script tab each; Save As
   keeping the undo history;
-- by hand, in CONTRIBUTING's list: a reload with two unsaved scenes; eight tabs'
-  memory.
+- by hand, in CONTRIBUTING's list: a reload with two unsaved scenes; VS Code
+  killed a few seconds after an edit, the copy offered back; Cmd+Z in a value
+  field; eight tabs' memory. Scripted since, but for Cmd+Z and an extension-host
+  restart (`npm run check:window`): the reload and the crash pass, and a scene
+  tab takes 20 to 35 MB more, all of it in the views, the engine's share flat.
 
 Then this plan goes: its decisions become records, and what it built is in
 architecture.md.
 
-## 8. What VS Code does, as the review found it
+## 8. What VS Code does, as the prototype found it
 
-Read from VS Code's source (1.95 and main) and its typings, not assumed:
+A throwaway custom editor, left in `sandbox/` and not kept, logged every call VS
+Code made on 1.109 and 1.141, under the test runner and in windows it launched,
+reloaded, quit and killed; 1.131 for diffs and merges. The versions behave alike
+except where a point says.
 
-- Save As, an untitled scene's first save and a rename in the Explorer replace
-  the editor with one for the new file: a new document (typings, "the current
-  editor is be replaced by an non-dirty editor for the newly saved file").
-- A content-change event marks a custom document dirty until a save or a revert
-  resolves; the dot clears when the save resolves, whatever arrived meanwhile;
-  revert clears it at once.
-- Auto-save saves custom documents and never backs them up; VS Code neither
-  reloads a custom document whose file changed nor checks the file before a
-  save.
-- After a reload, a custom tab's document is opened only when the tab is shown,
-  or when it is dirty with a backup.
-- Before 1.133 a default custom editor also opens diffs and merges
-  (microsoft/vscode#292379); the diff's modified side reuses the open document.
-- With `supportsMultipleEditorsPerDocument: false`, opening the scene again
-  moves its tab rather than revealing it in place; revealing a tab without focus
-  does not activate its group.
-- `retainContextWhenHidden` reaches a custom editor only at registration; a
-  rejected `openCustomDocument` shows VS Code's own failure page; Revert asks
-  nothing and does not wait for the provider.
+- **Save As and an untitled scene's first save**: `saveCustomDocumentAs`, then
+  the old panel and document disposed, then the destination opened from the file
+  with a new panel, its tab clean. An untitled document without a path makes the
+  save dialog start at the root of the disk.
+- **A rename in the Explorer** (a `WorkspaceEdit`, as the Explorer makes it)
+  discards the old tab's backup and unsaved edits, and opens the new name from
+  the file, clean.
+- **The dot**: a content-change event sets it; it clears when a save resolves,
+  whatever arrived meanwhile, and at once on Revert, whose promise resolved
+  within 4 ms while the provider took 300.
+- **Auto-save** calls `saveCustomDocument` and never backs up. **A file written
+  outside** reaches the provider not at all: no reload, and a save then writes
+  over it unchecked.
+- **Reload and quit** bring every tab back with its dot. A document opens only
+  when its tab is shown, a dirty one from its backup, an untitled one too.
+- **A crash of VS Code** (kill -9, an ordinary window): tabs come back as VS
+  Code last saved its editor state, about once a minute. Edits made since come
+  back as a clean tab opened from the file; a scene opened since does not come
+  back, though its backup is on disk; on 1.109 a tab came back marked unsaved,
+  opened empty. A window for extension development keeps no backups at all.
+- **Diffs**: 1.109 opens the studio on both sides. A Source Control diff's left
+  side is a `git:` URI that `workspace.fs` reads; a scene already open is
+  reused, with a second panel; the diff's tab has no input the API can read. By
+  1.131 a diff is text: `priority` takes `{ textEditor, diffEditor }`, and a
+  diff stays text unless `diffEditor` opts in (microsoft/vscode#292379; the
+  versions between were not tried).
+- **Merges**: on 1.109 a conflicted scene opens nothing from Source Control's
+  merge command, and says nothing; by 1.131 the text merge editor opens.
+- **One editor per document** (`supportsMultipleEditorsPerDocument: false`):
+  opening the scene into another group moves its tab there, the same panel, not
+  resolved again; Split Editor opens an empty group beside it; revealing a tab
+  without focus does not activate its group.
+- **A rejected `openCustomDocument`** leaves its tab on VS Code's failure page.
+- **An extension-host restart** is vetoed by every open scene, saved or not.
+  Restart Extension Host asks "Please confirm restart of extensions"; an
+  automatic restart, after an extension install, is refused (VS Code's source).
+  After Restart Anyway the tabs stay, the unsaved one still marked, but VS Code
+  hands none of them to the new extension host: no open, no backup, nothing when
+  the window closes.
+- **Keys in the view** reach the extension's bindings with the focus on the
+  canvas, and with the focus in a text box inside the view too: `inputFocus`
+  stays false there. Backspace then ran the binding and deleted a character as
+  well; Cmd+Z, Cmd+C and Cmd+V ran the binding, and the box did nothing, VS
+  Code's webview host having stopped its own handling. With no binding of the
+  studio's, VS Code's own undo would not reach the box either: for a custom
+  editor it goes to the custom editor's undo, ahead of the webview's (VS Code's
+  source: priority 105 against 100), whenever one is the active editor.
+- **Twenty tabs**, each holding a WebGL2 context, a 4 MB texture and a 4 MB
+  buffer, with `retainContextWhenHidden` (given at registration, the only place
+  a custom editor takes it): no context lost, all in the window's two or three
+  renderer processes, 6 to 8 MB more per tab. The real view's cost is step 3's
+  to measure.
 
 ## 9. Rejected
 
@@ -404,8 +503,8 @@ Read from VS Code's source (1.95 and main) and its typings, not assumed:
 - **Asking before taking a file changed on disk** (decided 2026-10-11): an
   agent's session would be a dialog per write, where one undo keeps the person's
   edits.
-- **A floor of 1.95, or of 1.133** (decided 2026-10-11): below 1.109 Save As
-  leaves the old tab dirty; 1.133, which keeps diffs as text, is too recent for
+- **A floor of 1.95, or of 1.131** (decided 2026-10-11): below 1.109 Save As
+  leaves the old tab dirty; 1.131, which keeps diffs as text, is too recent for
   the editors built on VS Code.
 - **Moving the closure's state into a per-scene object first**, the old step 3:
   it moved code the custom editor then deletes.

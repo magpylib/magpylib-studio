@@ -186,6 +186,17 @@ window.addEventListener("message", (event) => {
     refreshField();
   } else if (message.type === "refresh") {
     reloadPaced();
+  } else if (message.type === "newScene") {
+    // the panel now belongs to another scene: a sweep made for the first,
+    // and its sensors, are not this one's
+    sweep = null;
+    sweepRangeEl.textContent = "";
+    if (modeEl.value === "sweep") modeEl.value = "path";
+    loadSources()
+      .then(refreshField)
+      .catch((err) => {
+        statusEl.textContent = String(err);
+      });
   }
 });
 

@@ -42,9 +42,11 @@ the scene cannot take fails at its line and says why.
   formula) and `grid(half, count)` (a square of them, a sensor's pixels), `hide`
   and `unhide`, `remove`, `TriangularMesh.from_file(path, scale=...)`,
   `.from_hull(points)` and `.from_superquadric(size, roundness)` (a mesh by its
-  source), and `place` for an orientation stated outright. An object's id is its
-  `style_label` with spaces as underscores, else its class; the script tab
-  writes `name(obj, id)` only where a saved scene's id differs from its label.
+  source), and `place` for an orientation stated outright. An object's id is the
+  variable it is assigned to (`r1 = magpy.magnet.Cuboid(...)` is `r1`), where
+  that name held no other object while the function ran (a name reused in a loop
+  names none); else its `style_label` with spaces as underscores, else its
+  class. Its label stays what the tree shows.
 - Called plainly, `ring(n=12)` returns magpylib objects at those values: a real
   field from `getB`, no studio involved. `ring.build()` is the document;
   `ring.build().save("ring.magpy.json")` writes it.
