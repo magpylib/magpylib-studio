@@ -1246,15 +1246,29 @@ suite('magpylib-studio', () => {
 
     // Undo is each scene's own: in the halbach it finds nothing of the
     // coil's to take back, and in the coil it takes back the coil's edit.
+    // Each scene is read off its own rows, from its own session: the shared
+    // scene.json has been seen, in CI only, to hold something else for a
+    // moment after the undo, its cause not found (#38).
+    const held = async (uri: vscode.Uri) => {
+      const found = new Set<string>();
+      const walk = async (node: SceneNode) => {
+        for (const child of await tree.getChildren(node)) {
+          // a removed object's dimmed row, kept for its history, is not held
+          if (isObject(child) && !child.absent) {
+            found.add(child.id);
+            await walk(child);
+          }
+        }
+      };
+      await walk(named(uri));
+      return found;
+    };
     await vscode.commands.executeCommand('magpylib-studio.undo');
     await pause(300);
-    assert.ok(
-      ids((await scene()).objects).has('halbach'),
-      'an undo in the halbach changed the halbach',
-    );
+    assert.ok((await held(halbach)).has('halbach'), 'an undo in the halbach changed the halbach');
+    assert.ok(!(await held(coil)).has('turn'), "the halbach's undo reached the coil");
     await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
     await sceneWhere(holding('coil'), 'the coil in front again');
-    assert.ok(!ids((await scene()).objects).has('turn'), "the halbach's undo reached the coil");
     await vscode.commands.executeCommand('magpylib-studio.undo');
     await sceneWhere(holding('turn'), "the coil's undo to bring its turn back");
 
