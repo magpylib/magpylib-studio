@@ -5,6 +5,8 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.5.0]
+
 ### Added
 
 <details>
@@ -332,6 +334,17 @@ a scene function. Plain magpylib comes in through **Open in Magpylib Studio**.
 </details>
 
 ### Fixed
+
+<details>
+<summary>A scene file can only name the classes a scene holds</summary>
+
+Opening a scene turned each object's `type` into a callable by walking
+magpylib's attributes, so a crafted `.magpy.json` could name, and have the
+studio call, any function reachable from magpylib. Types now come from a fixed
+list of the classes a scene supports; any other is refused before anything is
+called, and the rest of the scene opens (#34).
+
+</details>
 
 <details>
 <summary>Cmd/Ctrl+Z in a text box undoes the typing</summary>
