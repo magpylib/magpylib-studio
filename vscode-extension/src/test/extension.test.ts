@@ -11,6 +11,7 @@ import {
   incrementRamp,
   meaning,
   findRecoveryForTest,
+  historyForTest,
   openScenesForTest,
   openScenesShownForTest,
   sceneFileState,
@@ -1246,6 +1247,7 @@ suite('magpylib-studio', () => {
 
     // Undo is each scene's own: in the halbach it finds nothing of the
     // coil's to take back, and in the coil it takes back the coil's edit.
+    console.log(`[front] the test: the halbach's history ${JSON.stringify(await historyForTest())}`);
     console.log('[front] the test: undo in the halbach, now');
     await vscode.commands.executeCommand('magpylib-studio.undo');
     await pause(300);
