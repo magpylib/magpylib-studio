@@ -2091,12 +2091,50 @@ def _uncreated(events):
     return None
 
 
+#: Every class a document may name, by the name it names it by. A document
+#: is data: a `type` reaches one of these and nothing else -- not a
+#: function, a module or whatever magpylib imports (#34). The schema's
+#: `objectType` lists the same names.
+OBJECT_TYPES = (
+    "magnet.Cuboid",
+    "magnet.Cylinder",
+    "magnet.CylinderSegment",
+    "magnet.Sphere",
+    "magnet.Tetrahedron",
+    "magnet.TriangularMesh",
+    "current.Circle",
+    "current.Polyline",
+    "current.TriangleSheet",
+    "current.TriangleStrip",
+    "misc.CustomSource",
+    "misc.Dipole",
+    "misc.Triangle",
+    "Sensor",
+    "Collection",
+)
+
+
+def _object_classes():
+    """Each name of `OBJECT_TYPES` that this magpylib has, to its class."""
+    table = {}
+    for name in OBJECT_TYPES:
+        module, _, cls = name.rpartition(".")
+        found = getattr(getattr(magpy, module) if module else magpy, cls, None)
+        if isinstance(found, type):
+            table[name] = found
+    return table
+
+
+_CLASSES = _object_classes()
+
+
 def _resolve_type(type_str):
-    """'magnet.Cuboid' -> magpylib.magnet.Cuboid."""
-    obj = magpy
-    for part in type_str.split("."):
-        obj = getattr(obj, part)
-    return obj
+    """'magnet.Cuboid' -> magpylib.magnet.Cuboid, from a fixed table; any
+    other name is refused before anything is called."""
+    cls = _CLASSES.get(type_str) if isinstance(type_str, str) else None
+    if cls is None:
+        raise ValueError(f"unknown object type {type_str!r}")
+    return cls
 
 
 def _nest(flat):
@@ -5108,6 +5146,11 @@ class MagpylibStudioSession:
             return {"ok": True}
         if len(calls) == 1:
             (call,) = calls
+            if call["method"] not in _BATCHABLE:
+                return {
+                    "ok": False,
+                    "error": f"method {call['method']!r} not batchable",
+                }
             return getattr(self, call["method"])(**call["params"])
         before = json.loads(json.dumps(self.doc))
         failed = None
