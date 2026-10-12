@@ -1410,9 +1410,15 @@ DOC_VERSION = 3
 #: every session made there resolves through; None in the engine.
 SHARED_MESH_CACHE: dict | None = None
 
-#: How long a script may run before it is stopped, in seconds: one that never
-#: returns would hold every scene's requests behind it.
-SCRIPT_SECONDS = 120
+#: How long a script may run before it is stopped, in seconds, unless the
+#: caller says (`timeout`): one that never returns would hold every scene's
+#: requests behind it.
+SCRIPT_SECONDS = 300
+
+#: What the script's process puts before its answer, on a line of its own:
+#: whatever else reached its stdout -- a C library's output, a print without
+#: its newline -- is not taken for it.
+RUNNER_ANSWER = "magpylib-studio-runner: "
 
 try:
     __version__ = _package_version("magpylib-studio")
@@ -4789,19 +4795,29 @@ class MagpylibStudioSession:
     def import_fragment(self, fragment, parent=None, base_dir=None, origin=None):
         """Merge `fragment` -- a scene, as `export_object` writes one -- into
         this one under `parent` (a Collection's id, or the root), as one step
-        to undo.
+        to undo: `import_fragments` with one."""
+        return self.import_fragments(
+            [{"scene": fragment, "base_dir": base_dir}], parent, origin
+        )
 
-        Its objects keep their ids where this scene's log has never used them
-        and take new ones where it has. Its variables are its own, never this
-        scene's: one whose name is taken here comes in renamed -- `radius` as
-        `radius_2` -- every formula naming it rewritten, unless an earlier
-        import from the same `origin` made that very variable here (the same
-        definition and limits), which it then shares rather than making a
-        third. Mesh paths written from `base_dir` are rewritten to name the
-        same files from this scene's folder. Its variants stay behind.
+    def import_fragments(self, fragments, parent=None, origin=None):
+        """Merge several copies -- `{"scene", "base_dir"}` each, as
+        `export_object` writes them -- under `parent` (a Collection's id, or
+        the root), as one step to undo and one rebuild: what a drop of
+        several objects is.
 
-        The answer names the objects it put at `parent` (`ids`) and the
-        variables it renamed (`renamed`, old to new).
+        Their objects keep their ids where this scene's log has never used
+        them and take new ones where it has. Their variables are their own,
+        never this scene's: one whose name is taken here comes in renamed --
+        `radius` as `radius_2` -- every formula naming it rewritten, unless an
+        earlier import from the same `origin` made that very variable here
+        (the same definition and limits), which it then shares rather than
+        making a third; two copies in one call from one scene share theirs
+        so. Mesh paths written from a copy's `base_dir` are rewritten to name
+        the same files from this scene's folder. Variants stay behind.
+
+        The answer names the objects put at `parent` (`ids`) and the
+        variables renamed (`renamed`, old to new).
         """
         if parent is not None:
             try:
@@ -4812,6 +4828,38 @@ class MagpylibStudioSession:
                     }
             except KeyError:
                 return {"ok": False, "error": f"unknown object id {parent!r}"}
+        plan = {"ids": set(), "variables": {}, "bounds": {}, "twins": {}}
+        events, pasted, renamed = [], [], {}
+        for item in fragments:
+            made = self._fragment_events(
+                item.get("scene"), item.get("base_dir"), parent, origin, plan
+            )
+            if not made["ok"]:
+                return made
+            events += made["events"]
+            pasted += made["ids"]
+            renamed.update(made["renamed"])
+
+        def merge(doc):
+            doc["variables"] = {**(doc.get("variables") or {}), **plan["variables"]}
+            if plan["bounds"]:
+                doc["variable_bounds"] = {
+                    **(doc.get("variable_bounds") or {}),
+                    **plan["bounds"],
+                }
+            for event in events:
+                self._append(event)
+
+        result = self._mutate_doc(merge, f"paste {', '.join(pasted)}")
+        if not result["ok"]:
+            return result
+        self._twins.update(plan["twins"])
+        return {**result, "ids": pasted, "renamed": renamed}
+
+    def _fragment_events(self, fragment, base_dir, parent, origin, plan):
+        """One copy's steps as this scene will hold them, its ids and its
+        variables renamed against this scene and against what `plan` -- the
+        copies before it in the same call -- has added already."""
         alone = MagpylibStudioSession(mesh_cache=self._mesh_cache)
         loaded = alone.load_scene(fragment, base_dir)
         if not loaded["ok"]:
@@ -4820,21 +4868,26 @@ class MagpylibStudioSession:
         tops = [spec["id"] for spec in frag.get("objects") or []]
 
         # ids: kept where this log never used them, else new
-        used = {s["id"] for s, _ in self._iter_specs()} | _ids_in_log(
-            self.doc.get("events") or []
+        used = (
+            {s["id"] for s, _ in self._iter_specs()}
+            | _ids_in_log(self.doc.get("events") or [])
+            | plan["ids"]
         )
         theirs = sorted(_ids_in_log(frag.get("events") or []))
         ids = {i: i for i in theirs if i not in used}
         for old in theirs:
             if old not in ids:
-                ids[old] = self._unique_id(old, taken={*ids.values(), *theirs})
+                ids[old] = self._unique_id(
+                    old, taken={*ids.values(), *theirs, *plan["ids"]}
+                )
+        plan["ids"].update(ids.values())
 
         # variables: their own, renamed where the name is taken here
-        mine = self.doc.get("variables") or {}
-        my_bounds = self.doc.get("variable_bounds") or {}
+        mine = {**(self.doc.get("variables") or {}), **plan["variables"]}
+        my_bounds = {**(self.doc.get("variable_bounds") or {}), **plan["bounds"]}
         their_vars = frag.get("variables") or {}
         their_bounds = frag.get("variable_bounds") or {}
-        renames, added, added_bounds, twins = {}, {}, {}, {}
+        renames, added = {}, {}
 
         def renaming(value):
             for old, new in renames.items():
@@ -4854,7 +4907,11 @@ class MagpylibStudioSession:
         for name in _dependency_order(their_vars):
             definition = renaming(their_vars[name])
             limits = their_bounds.get(name)
-            twin = self._twins.get((origin, name)) if origin is not None else None
+            twin = None
+            if origin is not None:
+                twin = plan["twins"].get((origin, name)) or self._twins.get(
+                    (origin, name)
+                )
             if (
                 twin is not None
                 and twin in mine
@@ -4868,10 +4925,11 @@ class MagpylibStudioSession:
             if final != name:
                 renames[name] = final
             added[final] = definition
+            plan["variables"][final] = definition
             if limits is not None:
-                added_bounds[final] = limits
+                plan["bounds"][final] = limits
             if origin is not None:
-                twins[(origin, name)] = final
+                plan["twins"][(origin, name)] = final
 
         events = []
         for event in frag.get("events") or []:
@@ -4890,23 +4948,12 @@ class MagpylibStudioSession:
                     out["parent"] = parent
             events.append(out)
         _rebase_doc({"events": events}, base_dir, self._base_dir)
-
-        def merge(doc):
-            doc["variables"] = {**(doc.get("variables") or {}), **added}
-            if added_bounds:
-                doc["variable_bounds"] = {
-                    **(doc.get("variable_bounds") or {}),
-                    **added_bounds,
-                }
-            for event in events:
-                self._append(event)
-
-        pasted = [ids[i] for i in tops]
-        result = self._mutate_doc(merge, f"paste {', '.join(pasted)}")
-        if not result["ok"]:
-            return result
-        self._twins.update(twins)
-        return {**result, "ids": pasted, "renamed": renames}
+        return {
+            "ok": True,
+            "events": events,
+            "ids": [ids[i] for i in tops],
+            "renamed": renames,
+        }
 
     def begin_interaction(self):
         """Group the edits that follow into one undo step, until
@@ -5415,7 +5462,7 @@ class MagpylibStudioSession:
             self._base_dir = previous_base
         return result
 
-    def load_script(self, path, scene=0):
+    def load_script(self, path, scene=0, timeout=None):
         """Import an existing magpylib script by EXECUTING it (same trust as
         the user running it), in a process of its own (`runner`). Every
         show() call the script makes is captured as a scene candidate (that
@@ -5423,13 +5470,13 @@ class MagpylibStudioSession:
         objects" fallback when it differs. Loads candidate `scene` (default:
         the first show() call); the rest stay cached for load_captured().
         Parametric structure flattens."""
-        result = self._run_script("import", path, None)
+        result = self._run_script("import", path, None, timeout)
         if not result["ok"]:
             return result
         self._captured_scenes = result["candidates"]
         return self.load_captured(scene)
 
-    def _run_script(self, mode, path, base_dir):
+    def _run_script(self, mode, path, base_dir, timeout=None):
         """Run a script in a process of its own (`runner`), in its folder,
         with this interpreter, and take what it hands back: a script that
         loops for ever, ends its process or changes magpylib's defaults
@@ -5442,10 +5489,15 @@ class MagpylibStudioSession:
         import tempfile
 
         folder = os.path.dirname(os.path.abspath(path))
+        seconds = timeout or SCRIPT_SECONDS
         with tempfile.TemporaryDirectory() as scratch:
             carried = os.path.join(scratch, "meshes.pickle")
+            # What a file was read for: the costly checks. A hull or a
+            # superquadric is made again in milliseconds, and not carried.
             with open(carried, "wb") as f:
-                pickle.dump(dict(self._mesh_cache), f)
+                pickle.dump(
+                    {k: v for k, v in self._mesh_cache.items() if k[0] == "file"}, f
+                )
             try:
                 done = subprocess.run(  # noqa: S603 - this interpreter, our module
                     [
@@ -5460,19 +5512,23 @@ class MagpylibStudioSession:
                     cwd=base_dir or folder,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
-                    timeout=SCRIPT_SECONDS,
+                    timeout=seconds,
                     check=False,
                     text=True,
                 )
             except subprocess.TimeoutExpired:
                 return {
                     "ok": False,
-                    "error": f"the script was still running after {SCRIPT_SECONDS} s, "
+                    "error": f"the script was still running after {seconds} s, "
                     "and was stopped",
                 }
-            lines = done.stdout.strip().splitlines()
+            answers = [
+                line[len(RUNNER_ANSWER) :]
+                for line in done.stdout.splitlines()
+                if line.startswith(RUNNER_ANSWER)
+            ]
             try:
-                result = json.loads(lines[-1])
+                result = json.loads(answers[-1])
             except (IndexError, json.JSONDecodeError):
                 return {
                     "ok": False,
@@ -5509,7 +5565,7 @@ class MagpylibStudioSession:
                 result["warnings"] = entry["warnings"]
         return result
 
-    def apply_builder_script(self, path):
+    def apply_builder_script(self, path, timeout=None):
         """Replace the scene with the one a builder script builds: what saving
         the script tab does (`docs/roadmap.md` R1).
 
@@ -5544,7 +5600,7 @@ class MagpylibStudioSession:
         """
         from magpylib_studio import build
 
-        edited = self._builder_scene(path)
+        edited = self._builder_scene(path, timeout)
         if not edited["ok"]:
             return edited
         edited = edited["session"]
@@ -5591,12 +5647,12 @@ class MagpylibStudioSession:
             result["warnings"] = warnings
         return result
 
-    def _builder_scene(self, path):
+    def _builder_scene(self, path, timeout=None):
         """Run a builder script for the one scene it builds, as
         {"ok": True, "session": ...}, or the refusal to report. It runs in a
         process of its own (`runner`); the document it hands back is opened
         here."""
-        result = self._run_script("builder", path, self._base_dir)
+        result = self._run_script("builder", path, self._base_dir, timeout)
         if not result["ok"]:
             return result
         edited = MagpylibStudioSession(mesh_cache=self._mesh_cache)

@@ -30,6 +30,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(EXT, "package.json"), "utf8"));
 const PYTHON = path.join(REPO, ".venv", "bin", "python");
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+if (process.platform !== "darwin") {
+  // ps, pkill and the downloaded VS Code's layout are macOS's here
+  console.error("check-window-life: macOS only, for now");
+  process.exit(2);
+}
+
 const asked = process.argv.slice(2);
 const checks = asked.length ? asked : ["reload", "crash", "memory"];
 
@@ -278,12 +284,17 @@ if (checks.includes("memory")) {
           `${kind} ${Math.round((marks.eight.kinds[kind] ?? 0) - (marks.one.kinds[kind] ?? 0))}`,
       )
       .join(", ");
+    // the views' share is the tabs'; the rest of VS Code moves on its own
+    const views =
+      (marks.eight.kinds["windows and views"] ?? 0) -
+      (marks.one.kinds["windows and views"] ?? 0);
     verdicts.push({
       check: "memory: one scene tab, then eight",
       pass: true,
       detail:
-        `${Math.round(one)} MB with one, ${Math.round(eight)} MB with ${marks.eight.tabs}: ` +
-        `${Math.round((eight - one) / 7)} MB a tab more (${by} MB)`,
+        `${Math.round(views / (marks.eight.tabs - 1))} MB a tab more in the views; ` +
+        `${Math.round(one)} MB in all with one, ${Math.round(eight)} MB with ` +
+        `${marks.eight.tabs} (${by} MB)`,
     });
   } else {
     verdicts.push({

@@ -89,3 +89,21 @@ def test_a_part_a_script_reads_is_checked_once(tmp_path, cube_stl):  # noqa: F81
     assert len(session._mesh_cache) == 1
     key = next(iter(session._mesh_cache))
     assert key[0] == "file" and key[1].endswith("cube.stl")
+
+
+def test_a_script_given_less_time_is_stopped_sooner(tmp_path):
+    session = opened()
+    result = session.load_script(script(tmp_path, "while True:\n    pass\n"), timeout=1)
+    assert result["ok"] is False
+    assert "still running after 1 s" in result["error"]
+
+
+def test_what_reaches_stdout_besides_the_answer_is_not_taken_for_it(tmp_path):
+    """Output a C library writes past Python's print, without a newline."""
+    text = (
+        "import os\n"
+        "import magpylib as magpy\n"
+        "os.write(1, b'noise without a newline')\n"
+        "magpy.show(magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 1)))\n"
+    )
+    assert opened().load_script(script(tmp_path, text))["ok"]

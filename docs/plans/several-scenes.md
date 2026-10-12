@@ -395,7 +395,7 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    interface together: the exporter, the import, paste and drag, the clipboard;
    a copy within a scene stays `copy_object` (§5.1).
 5. **Scripts outside the engine** -- built 2026-10-12 (about 1 day), before any
-   R3 step 2 work: the child process (`runner.py`, stopped after 120 s, ended
+   R3 step 2 work: the child process (`runner.py`, stopped after `scriptTimeout`, 300 s, ended
    with the engine, the engine's resolved meshes carried there and back), the
    watchdog (a request unanswered for 30 s is said, with Restart Engine), and
    Restart Engine. A script run costs 0.35 s more, the process starting and
@@ -414,7 +414,7 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
   killed a few seconds after an edit, the copy offered back; Cmd+Z in a value
   field; eight tabs' memory. Scripted since, but for Cmd+Z and an
   extension-host restart (`npm run check:window`): the reload and the crash
-  pass, and a scene tab takes 25 to 35 MB more, all of it in the views, the
+  pass, and a scene tab takes 20 to 35 MB more, all of it in the views, the
   engine's share flat.
 
 Then this plan goes: its decisions become records, and what it built is in

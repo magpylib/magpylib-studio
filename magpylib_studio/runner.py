@@ -7,7 +7,8 @@ The engine serves every open scene from one process, and a script is code
 anyone wrote: one that loops for ever, calls `os._exit` or sets
 `magpy.defaults` would take every scene with it. Here it takes this process,
 which the engine started for it and reads one line of JSON from, the last
-on stdout; what the script prints goes to stderr. MESHES is a file of the
+on stdout marked as `session.RUNNER_ANSWER`; what the script prints goes
+to stderr. MESHES is a file of the
 engine's resolved meshes, read before the script runs and written back after,
 so that a part is checked once and not on every save. The process ends with
 the engine: a script still running when the engine goes is not left behind.
@@ -168,7 +169,8 @@ def main(argv):
     if meshes:
         with open(meshes, "wb") as f:
             pickle.dump(cache, f)
-    answer.write(json.dumps(result) + "\n")
+    # on a line of its own, marked: what else reached stdout is not it
+    answer.write(f"\n{session.RUNNER_ANSWER}{json.dumps(result)}\n")
     answer.flush()
 
 

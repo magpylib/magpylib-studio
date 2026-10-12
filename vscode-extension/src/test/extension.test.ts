@@ -1357,6 +1357,23 @@ suite('magpylib-studio', () => {
     assert.strictEqual(frontScene(), doc(coil));
     assert.strictEqual(tab(halbach)?.isDirty, false, 'a drag across moved the magnet');
 
+    // Two dragged together are one step: one undo takes both back.
+    const beforeDrop = ids((await scene()).objects);
+    const both = new vscode.DataTransfer();
+    tree.handleDrag(
+      [(await row(heading(halbach), 'ring1'))!, (await row(heading(halbach), 'sensor'))!],
+      both,
+    );
+    await tree.handleDrop(heading(coil), both);
+    await sceneWhere(holding('ring1'), 'the ring and the sensor copied into the coil');
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    const undone = await sceneWhere(without('ring1'), 'one undo to take the drop back');
+    assert.deepStrictEqual(
+      [...ids(undone.objects)].sort(),
+      [...beforeDrop].sort(),
+      'one undo did not take back exactly the drop',
+    );
+
     // Cut in one scene and pasted in the other moves it; one undo where it
     // landed puts it back where it was.
     bringToFront(doc(halbach));

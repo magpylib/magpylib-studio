@@ -50,6 +50,7 @@ _PUBLIC = {
     "copy_object",
     "export_object",
     "import_fragment",
+    "import_fragments",
     "set_visible",
     "begin_interaction",
     "end_interaction",

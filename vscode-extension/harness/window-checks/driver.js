@@ -139,8 +139,22 @@ const phases = {
       () => tabOf(file)?.isDirty && tabOf(example)?.isDirty,
       "both tabs unsaved",
     );
+    // and an example left untouched: clean, so no backup, filled again
+    await vscode.commands.executeCommand("magpylib-studio.loadExample", "pair");
+    await until(
+      async () => ids((await front()).objects).has("pair"),
+      "the pair example",
+    );
+    const untouched = sceneTabs().find((tab) =>
+      tab.input.uri.path.endsWith("/pair.magpy.json"),
+    ).input.uri;
     await pause(3000); // VS Code backs up shortly after an edit
-    writeState({ ...state, phase: "reload-2", example: example.toString() });
+    writeState({
+      ...state,
+      phase: "reload-2",
+      example: example.toString(),
+      untouched: untouched.toString(),
+    });
     say({ step: "reloading with two unsaved scenes" });
     // cancelled as the window goes, which is the reload happening
     await vscode.commands.executeCommand("workbench.action.reloadWindow").then(
@@ -149,11 +163,12 @@ const phases = {
     );
   },
 
-  /** Both back, unsaved, holding their edits. */
+  /** Both back, unsaved, holding their edits; the untouched example clean,
+   *  holding its example. */
   async "reload-2"(state) {
     const file = vscode.Uri.file(state.files.halbach);
     const example = vscode.Uri.parse(state.example);
-    await until(() => sceneTabs().length >= 2, "the two scene tabs back");
+    await until(() => sceneTabs().length >= 3, "the three scene tabs back");
     const back = [
       [file, "halbach", "r2"],
       [example, "coil", "turn"],
@@ -168,6 +183,14 @@ const phases = {
         detail: `tab ${dirty ? "unsaved" : "clean"}, ${holds.has(removed) ? `${removed} back` : `${removed} still removed`}`,
       });
     }
+    const untouched = vscode.Uri.parse(state.untouched);
+    const clean = tabOf(untouched) && !tabOf(untouched).isDirty;
+    await open(untouched, "pair");
+    say({
+      check: "reload: an untouched example",
+      pass: Boolean(clean),
+      detail: `${clean ? "clean" : "marked unsaved"}, holding its example again`,
+    });
     writeState({ ...state, phase: "done" });
     await vscode.commands.executeCommand("workbench.action.quit");
   },

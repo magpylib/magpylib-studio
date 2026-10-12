@@ -48,7 +48,7 @@ Unsaved changes VS Code did not bring back after a crash are offered back. If
 the engine stops, every scene comes back as it was a second after its last edit.
 A script -- the script tab's save, Open in Magpylib Studio -- runs in a process
 of its own, so one that never returns or ends its process takes only that with
-it; it is stopped after 120 s. When the engine has not answered for 30 s, the
+it; it is stopped after five minutes (`magpylib-studio.scriptTimeout`). When the engine has not answered for 30 s, the
 studio says so and offers **Restart Engine**, which is also in the Command
 Palette.
 

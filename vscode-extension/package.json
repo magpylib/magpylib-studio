@@ -1168,6 +1168,12 @@
           "default": "",
           "description": "Python interpreter used to run the magpylib-studio engine. Empty = auto-detect (.venv next to the workspace, then python3)."
         },
+        "magpylib-studio.scriptTimeout": {
+          "type": "number",
+          "default": 300,
+          "minimum": 1,
+          "description": "How long a script may run, in seconds, when Open in Magpylib Studio or the script tab's save runs it, before it is stopped. It runs in a process of its own, so stopping it leaves every scene as it was."
+        },
         "magpylib-studio.drawScriptsHere": {
           "type": "boolean",
           "default": true,

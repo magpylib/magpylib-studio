@@ -192,3 +192,26 @@ def test_what_cannot_be_copied_says_so():
     assert target.import_fragment(out["scene"], "m")["ok"] is False
     assert target.import_fragment(out["scene"], "nope")["ok"] is False
     assert target.import_fragment({"no": 1})["ok"] is False
+
+
+def test_several_copies_are_one_step_and_share_their_variables():
+    """A drop of several objects: one step to undo, and what the first copy
+    renamed the second shares, as both came from the one scene."""
+    source = MagpylibStudioSession()
+    source.load_example("halbach")
+    copies = [source.export_object(object_id) for object_id in ("r1", "r2")]
+    target = MagpylibStudioSession()
+    target.load_example("halbach")
+    steps = len(target.get_history()["undo"])
+    result = target.import_fragments(
+        [{"scene": c["scene"], "base_dir": c["base_dir"]} for c in copies],
+        origin="halbach",
+    )
+    assert result["ok"], result
+    assert len(result["ids"]) == 2
+    assert result["renamed"] == {"n": "n_2", "radius": "radius_2", "gap": "gap_2"}
+    variables = target.to_dict()["variables"]
+    assert "n_3" not in variables and "radius_3" not in variables
+    assert len(target.get_history()["undo"]) == steps + 1
+    assert target.undo()["ok"]
+    assert "n_2" not in target.to_dict()["variables"]

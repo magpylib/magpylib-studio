@@ -1342,6 +1342,16 @@ async function resolvePythonCommand(): Promise<string[]> {
 /** How long a request goes unanswered before the watchdog says so. */
 const WATCHDOG_SECONDS = 30;
 
+/** A script's run, which stops itself after `scriptTimeout`: not the
+ *  watchdog's to call stuck. */
+const SCRIPT_RUNS = new Set(['load_script', 'apply_builder_script']);
+
+/** How long a script may run, in seconds, as the setting says. */
+function scriptSeconds(): number {
+  const seconds = vscode.workspace.getConfiguration('magpylib-studio').get<number>('scriptTimeout');
+  return seconds && seconds > 0 ? seconds : 300;
+}
+
 /** Kept in sync with pyproject.toml's `requires-python`. A found interpreter
  *  that does not meet this is not a maybe — pip will refuse it with a
  *  message ("no matching distribution") that reads like a network failure,
@@ -2739,17 +2749,14 @@ export function activate(context: vscode.ExtensionContext): void {
    *  hidden is the person's, from the views menu. It is shown where the
    *  studio's side bar is, never by taking the side bar from another view:
    *  `due` until that side bar is in sight. */
-  let scenesBefore = 0;
+  const OPEN_SCENES_SHOWN = 'magpylib-studio.openScenesShown';
   let openScenesDue = false;
   const showScenesOpen = () => {
     const count = sceneRoots().length;
     void vscode.commands.executeCommand('setContext', 'magpylib-studio.scenesOpen', count > 0);
-    if (count > 1 && scenesBefore < 2) {
-      openScenesDue = true;
-    } else if (count < 2) {
-      openScenesDue = false;
-    }
-    scenesBefore = count;
+    // once in a workspace: a reload with two scenes open, or a hide, is not
+    // a second scene opening, and what was chosen stays chosen
+    openScenesDue = count > 1 && !context.workspaceState.get(OPEN_SCENES_SHOWN);
     showOpenScenesIfDue();
   };
   const showOpenScenesIfDue = () => {
@@ -2758,6 +2765,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     openScenesDue = false;
+    void context.workspaceState.update(OPEN_SCENES_SHOWN, true);
     if (!openScenesView.visible) {
       void Promise.resolve(openScenesView.reveal(first, { select: false, focus: false })).catch(
         () => undefined,
@@ -3030,24 +3038,28 @@ export function activate(context: vscode.ExtensionContext): void {
   ): Promise<string[]> => {
     const made: string[] = [];
     const renamed: Record<string, string> = {};
+    if (!copies.length) {
+      return made;
+    }
+    // all of them in one call: one step to undo, one rebuild
     await inScene(into.key, async () => {
-      for (const copy of copies) {
-        const result = await engineFor(context, into).request<{
-          ok: boolean;
-          error?: string;
-          ids?: string[];
-          renamed?: Record<string, string>;
-        }>('import_fragment', { fragment: copy.scene, parent, base_dir: copy.base_dir, origin });
-        if (!result.ok) {
-          void vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
-          break;
-        }
-        made.push(...(result.ids ?? []));
-        Object.assign(renamed, result.renamed);
+      const result = await engineFor(context, into).request<{
+        ok: boolean;
+        error?: string;
+        ids?: string[];
+        renamed?: Record<string, string>;
+      }>('import_fragments', {
+        fragments: copies.map((copy) => ({ scene: copy.scene, base_dir: copy.base_dir })),
+        parent,
+        origin,
+      });
+      if (!result.ok) {
+        void vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
+        return;
       }
-      if (made.length) {
-        broadcastMutation();
-      }
+      made.push(...(result.ids ?? []));
+      Object.assign(renamed, result.renamed);
+      broadcastMutation();
     });
     if (made.length) {
       actOn(into);
@@ -3098,6 +3110,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       const result = (await (await getEngine(context)).request('load_script', {
         path: uri.fsPath,
+        timeout: scriptSeconds(),
       })) as { ok: boolean; error?: string; warnings?: string[]; scenes?: string[] };
       if (!result.ok) {
         vscode.window.showErrorMessage(`Magpylib Studio import failed: ${result.error}`);
@@ -4186,6 +4199,7 @@ export function activate(context: vscode.ExtensionContext): void {
     try {
       result = await (await getEngine(context)).request('apply_builder_script', {
         path: doc.uri.fsPath,
+        timeout: scriptSeconds(),
       });
     } catch (err) {
       result = { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4927,6 +4941,14 @@ export function activate(context: vscode.ExtensionContext): void {
     canSelectMany: true,
   });
   openScenesTreeView = openScenesView;
+  // shown by the person, from the views menu: theirs from then on
+  context.subscriptions.push(
+    openScenesView.onDidChangeVisibility((event) => {
+      if (event.visible) {
+        void context.workspaceState.update(OPEN_SCENES_SHOWN, true);
+      }
+    }),
+  );
   /** Objects says which scene it shows, or how many. */
   const describeObjects = () => {
     const shown = shownRoots();
@@ -6754,7 +6776,12 @@ export function activate(context: vscode.ExtensionContext): void {
   let waitedOn: number | undefined;
   const watchdog = setInterval(() => {
     const waiting = engine?.isRunning ? engine.oldestWait : undefined;
-    if (!waiting || waiting.seconds < WATCHDOG_SECONDS || waiting.id === waitedOn) {
+    if (
+      !waiting ||
+      waiting.seconds < WATCHDOG_SECONDS ||
+      waiting.id === waitedOn ||
+      SCRIPT_RUNS.has(waiting.method)
+    ) {
       return;
     }
     waitedOn = waiting.id;
