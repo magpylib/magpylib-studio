@@ -905,6 +905,17 @@ set of real scripts there is.
   plan's §4).
 - A grouped-metadata sugar in bare annotation position: an invalid type form to
   pyright and Pylance.
+- `name(obj, id)` in generated scripts (2026-10-12): the variable an object is
+  assigned to already names it, so it is the id, read off the running function;
+  `name()` stays for an id no variable gives.
+- Dropping `derived` for a plain `stagger = 360 / (2 * n)` (decided 2026-10-12,
+  kept): unlike `name()`, it says what Python cannot -- that the formula is a
+  variable of the scene, listed in the panel and named in every formula that
+  uses it, and its unit. Without it, `stagger / 2` would carry the formula's
+  text, already pasted in by the time anything records it, and the unit would
+  be a guess from the first use. Its double name is the `x = Symbol('x')`
+  idiom. It stands with the pattern words, which also say what plain magpylib
+  cannot.
 
 ### Measured
 
