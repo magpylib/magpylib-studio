@@ -1249,10 +1249,18 @@ async function findPython(
     .getConfiguration('magpylib-studio')
     .get<string>('pythonPath');
   const candidates: string[] = configured ? [configured] : [];
-  const venvs = (vscode.workspace.workspaceFolders ?? []).map((f) =>
-    path.join(f.uri.fsPath, '.venv'),
-  );
-  venvs.push(path.join(repoRoot(context), '.venv'));
+  const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+  const venvs = folders.map((folder) => path.join(folder, '.venv'));
+  // The repo's own, for a development window working in the repo: one opened
+  // on a folder elsewhere is a machine without it, as a user's is.
+  const root = repoRoot(context);
+  const inRepo = (folder: string) => {
+    const relative = path.relative(root, folder);
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+  if (folders.some(inRepo)) {
+    venvs.push(path.join(root, '.venv'));
+  }
   for (const venv of venvs) {
     for (const python of [
       path.join(venv, 'bin', 'python'),
