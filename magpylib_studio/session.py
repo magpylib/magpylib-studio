@@ -1406,6 +1406,14 @@ def _walk_specs(specs):
 #: reference with the five megabytes it happened to resolve to.
 DOC_VERSION = 3
 
+#: In a script's own process (`runner`), the engine's resolved meshes, which
+#: every session made there resolves through; None in the engine.
+SHARED_MESH_CACHE: dict | None = None
+
+#: How long a script may run before it is stopped, in seconds: one that never
+#: returns would hold every scene's requests behind it.
+SCRIPT_SECONDS = 120
+
 try:
     __version__ = _package_version("magpylib-studio")
 except PackageNotFoundError:  # a source tree that was never installed
@@ -2448,7 +2456,9 @@ class MagpylibStudioSession:
         #: takes 16 s and a rebuild happens on every slider drag, so without
         #: it a scene with one CAD part in it cannot be edited at all. An
         #: engine serving several scenes hands each the same one.
-        self._mesh_cache: dict = {} if mesh_cache is None else mesh_cache
+        if mesh_cache is None:
+            mesh_cache = {} if SHARED_MESH_CACHE is None else SHARED_MESH_CACHE
+        self._mesh_cache: dict = mesh_cache
         #: object id -> what the checks found, filled while building. Kept
         #: beside the objects rather than on them because the built object
         #: has its checks skipped: it is the cache that knows.
@@ -5407,72 +5417,77 @@ class MagpylibStudioSession:
 
     def load_script(self, path, scene=0):
         """Import an existing magpylib script by EXECUTING it (same trust as
-        the user running it). Every show() call the script makes is captured
-        as a scene candidate (that is what its author considered "the
-        scene"), plus an "all script objects" fallback when it differs.
-        Loads candidate `scene` (default: the first show() call); the rest
-        stay cached for load_captured(). Parametric structure flattens."""
-        from magpylib_studio import build, importer
-
-        candidates = []
-        # Where the script is, a relative mesh path in it is: an exported
-        # builder script sits beside its scene and the parts the scene names.
-        # Not the engine's working directory, which is wherever the editor
-        # happened to start it.
-        folder = os.path.dirname(os.path.abspath(path))
-        try:
-            with build.resolving_against(folder):
-                namespace, captured, code = importer.run_script(path)
-                # A script that defined a scene function made a document, not
-                # objects to guess one from: that is the scene, whole --
-                # variables, formulas and patterns -- and nothing has to be
-                # said about what running it lost, because nothing was.
-                built = build.scenes_in(namespace)
-            if built:
-                self._captured_scenes = [
-                    {
-                        "label": f"{name} (the scene the script built)",
-                        "doc": written.to_dict(),
-                        "warnings": [],
-                        "base_dir": folder,
-                    }
-                    for name, written in built
-                ]
-                return self.load_captured(scene)
-            for i, objects in enumerate(captured):
-                try:
-                    doc, warnings = importer.document_from_objects(objects, namespace)
-                except ValueError:
-                    continue
-                candidates.append(
-                    {
-                        "label": f"show() call {i + 1} ({len(doc['objects'])} top-level)",
-                        "doc": doc,
-                        "warnings": warnings,
-                    }
-                )
-            try:
-                doc, warnings = importer.document_from_namespace(namespace)
-                if all(c["doc"] != doc for c in candidates):
-                    candidates.append(
-                        {
-                            "label": f"all script objects ({len(doc['objects'])} top-level)",
-                            "doc": doc,
-                            "warnings": warnings,
-                        }
-                    )
-            except ValueError:
-                pass
-        except Exception as e:  # noqa: BLE001 - report script errors, don't crash
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-        if not candidates:
-            return {"ok": False, "error": "script produced no magpylib objects"}
-        # Whichever scene is taken, the script's numbers are numbers in it.
-        lost = importer.variables_lost(namespace, code)
-        for candidate in candidates:
-            candidate["warnings"] = candidate["warnings"] + lost
-        self._captured_scenes = candidates
+        the user running it), in a process of its own (`runner`). Every
+        show() call the script makes is captured as a scene candidate (that
+        is what its author considered "the scene"), plus an "all script
+        objects" fallback when it differs. Loads candidate `scene` (default:
+        the first show() call); the rest stay cached for load_captured().
+        Parametric structure flattens."""
+        result = self._run_script("import", path, None)
+        if not result["ok"]:
+            return result
+        self._captured_scenes = result["candidates"]
         return self.load_captured(scene)
+
+    def _run_script(self, mode, path, base_dir):
+        """Run a script in a process of its own (`runner`), in its folder,
+        with this interpreter, and take what it hands back: a script that
+        loops for ever, ends its process or changes magpylib's defaults
+        takes that process with it, not the engine and every scene it
+        holds. The meshes resolved here go with it and come back with what
+        it resolved, so a part is checked once."""
+        import pickle
+        import subprocess
+        import sys
+        import tempfile
+
+        folder = os.path.dirname(os.path.abspath(path))
+        with tempfile.TemporaryDirectory() as scratch:
+            carried = os.path.join(scratch, "meshes.pickle")
+            with open(carried, "wb") as f:
+                pickle.dump(dict(self._mesh_cache), f)
+            try:
+                done = subprocess.run(  # noqa: S603 - this interpreter, our module
+                    [
+                        sys.executable,
+                        "-m",
+                        "magpylib_studio.runner",
+                        mode,
+                        str(path),
+                        base_dir or "",
+                        carried,
+                    ],
+                    cwd=base_dir or folder,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    timeout=SCRIPT_SECONDS,
+                    check=False,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                return {
+                    "ok": False,
+                    "error": f"the script was still running after {SCRIPT_SECONDS} s, "
+                    "and was stopped",
+                }
+            lines = done.stdout.strip().splitlines()
+            try:
+                result = json.loads(lines[-1])
+            except (IndexError, json.JSONDecodeError):
+                return {
+                    "ok": False,
+                    "error": f"the script ended its process (exit code "
+                    f"{done.returncode}) before it handed back a scene",
+                }
+            try:
+                with open(carried, "rb") as f:
+                    resolved = pickle.load(f)  # noqa: S301 - written by our runner
+            except (OSError, pickle.UnpicklingError, EOFError):
+                resolved = {}
+        for key, value in resolved.items():
+            if key not in self._mesh_cache:
+                meshes._remember(self._mesh_cache, key, value)
+        return result
 
     def load_captured(self, scene=0):
         """Load one of the scene candidates cached by the last load_script."""
@@ -5578,48 +5593,17 @@ class MagpylibStudioSession:
 
     def _builder_scene(self, path):
         """Run a builder script for the one scene it builds, as
-        {"ok": True, "session": ...}, or the refusal to report."""
-        from magpylib_studio import build, importer
-
-        try:
-            with build.resolving_against(self._base_dir):
-                namespace, captured, _ = importer.run_script(path)
-                built = build.scenes_in(namespace)
-        except Exception as e:  # noqa: BLE001 - report script errors, don't crash
-            return _script_failure(e, path)
-        if not built:
-            plain = captured or any(
-                not name.startswith("_") and importer._is_scene_object(value)
-                for name, value in namespace.items()
-            )
-            if plain:
-                return {
-                    "ok": False,
-                    "error": "this is plain magpylib, which would come back "
-                    "flattened: every variable a number and every pattern its "
-                    "copies. Saving applies builder code, a script that builds a "
-                    "Scene (from magpylib_studio.build import Scene). To bring "
-                    "plain magpylib in, save it as a file of its own and use "
-                    "Open in Magpylib Studio",
-                }
-            return {
-                "ok": False,
-                "error": "the script built no Scene "
-                "(from magpylib_studio.build import Scene; s = Scene())",
-            }
-        if len(built) > 1:
-            names = ", ".join(name for name, _ in built)
-            return {
-                "ok": False,
-                "error": f"the script built {len(built)} scenes ({names}), "
-                "and there is one scene to replace",
-            }
-        try:
-            # Objects nothing touched enter the scene here, so a refusal can
-            # come this late -- with no line to point at, having none.
-            return {"ok": True, "session": built[0][1].session}
-        except Exception as e:  # noqa: BLE001 - report it like any other refusal
-            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        {"ok": True, "session": ...}, or the refusal to report. It runs in a
+        process of its own (`runner`); the document it hands back is opened
+        here."""
+        result = self._run_script("builder", path, self._base_dir)
+        if not result["ok"]:
+            return result
+        edited = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        opened = edited.load_scene(result["doc"], self._base_dir)
+        if not opened["ok"]:
+            return opened
+        return {"ok": True, "session": edited}
 
     def list_examples(self):
         """The built-in scenes. Each leans on a different feature, which is

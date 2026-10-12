@@ -1339,6 +1339,9 @@ async function resolvePythonCommand(): Promise<string[]> {
   return [resolved || 'python3'];
 }
 
+/** How long a request goes unanswered before the watchdog says so. */
+const WATCHDOG_SECONDS = 30;
+
 /** Kept in sync with pyproject.toml's `requires-python`. A found interpreter
  *  that does not meet this is not a maybe — pip will refuse it with a
  *  message ("no matching distribution") that reads like a network failure,
@@ -1741,11 +1744,15 @@ async function markStoppedRestore(): Promise<SceneDocument | undefined> {
 }
 
 /** Say what an engine restart did to the open scenes, once. */
-function tellRestart(context: vscode.ExtensionContext, lost: SceneDocument | undefined): void {
+function tellRestart(
+  context: vscode.ExtensionContext,
+  lost: SceneDocument | undefined,
+  asked = false,
+): void {
   const back = openScenes().filter((doc) => doc !== lost);
   if (back.length) {
     void vscode.window.showWarningMessage(
-      `Magpylib Studio: the engine stopped and was started again. ` +
+      `Magpylib Studio: the engine ${asked ? 'was restarted' : 'stopped and was started again'}. ` +
         `${back.map((doc) => doc.name).join(', ')} came back as each was a second ` +
         'after its last edit, without its undo history.',
     );
@@ -1821,6 +1828,9 @@ let refusedEngine: { python: string; reason: string } | undefined;
  *  the first running with nobody listening to it. */
 let startingEngine: Promise<EngineClient> | undefined;
 
+/** Set by Restart Engine, so the restart is told as one that was asked for. */
+let restartAsked = false;
+
 function getRawEngine(context: vscode.ExtensionContext): Promise<EngineClient> {
   if (engine?.isRunning) {
     return Promise.resolve(engine);
@@ -1829,6 +1839,8 @@ function getRawEngine(context: vscode.ExtensionContext): Promise<EngineClient> {
   // interpreter -- so it took every scene with it. Each is put back, one at a
   // time, save the one whose restore the last engine died on.
   const restarted = engine !== undefined;
+  const asked = restartAsked;
+  restartAsked = false;
   startingEngine ??= (async () => {
     const lost = restarted ? await markStoppedRestore() : undefined;
     const client = await startEngine(context);
@@ -1836,7 +1848,7 @@ function getRawEngine(context: vscode.ExtensionContext): Promise<EngineClient> {
       for (const doc of openScenes()) {
         void openSession(client, doc).catch(() => {});
       }
-      tellRestart(context, lost);
+      tellRestart(context, lost, asked);
     }
     return client;
   })().finally(() => {
@@ -5623,6 +5635,18 @@ export function activate(context: vscode.ExtensionContext): void {
         await mutateFromTree('remove_variant', { name }, { checkVariables: false });
       }
     }),
+    // A call that never comes back holds every scene's requests behind it.
+    // A new engine is given every scene as it was a second after its last
+    // edit, as after a crash.
+    registerCommand('magpylib-studio.restartEngine', async () => {
+      if (engine?.isRunning) {
+        engineOutput?.appendLine('[restarting the engine, as asked]');
+        restartAsked = true;
+        engine.dispose();
+      }
+      await getRawEngine(context).catch(() => undefined);
+      refreshSurfaces();
+    }),
     registerCommand('magpylib-studio.undo', () => undoRedo('undo')),
     registerCommand('magpylib-studio.redo', () => undoRedo('redo')),
     registerCommand('magpylib-studio.undoTyping', () => undoTyping('undo')),
@@ -6723,6 +6747,31 @@ export function activate(context: vscode.ExtensionContext): void {
   // after the window has brought its tabs back, and their scenes opened
   setTimeout(() => void offerLeftBehind(), 4000);
   setTimeout(reviveDeadTabs, 3000);
+
+  // The watchdog: a request the engine has not answered for a while is
+  // said, once, with the way out. Said, not acted on -- a long sweep or a
+  // large part's first check is work, not a hang, and only the person knows.
+  let waitedOn: number | undefined;
+  const watchdog = setInterval(() => {
+    const waiting = engine?.isRunning ? engine.oldestWait : undefined;
+    if (!waiting || waiting.seconds < WATCHDOG_SECONDS || waiting.id === waitedOn) {
+      return;
+    }
+    waitedOn = waiting.id;
+    void vscode.window
+      .showWarningMessage(
+        `Magpylib Studio: the engine has not answered "${waiting.method}" for ` +
+          `${Math.round(waiting.seconds)} s. It may still be working; if it is stuck, ` +
+          'restarting it brings every scene back as it was.',
+        'Restart Engine',
+      )
+      .then((choice) => {
+        if (choice) {
+          void vscode.commands.executeCommand('magpylib-studio.restartEngine');
+        }
+      });
+  }, 5000);
+  context.subscriptions.push({ dispose: () => clearInterval(watchdog) });
 
   // First activation on this machine, any workspace: open the walkthrough
   // once. Global rather than per-workspace state — a returning user opening

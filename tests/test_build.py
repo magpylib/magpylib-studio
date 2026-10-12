@@ -709,7 +709,7 @@ def test_what_no_call_can_say_is_named_not_dropped():
     rebuilt(session)  # and it still runs
 
 
-def test_a_scene_script_opens_in_the_studio_as_the_scene_it_built(tmp_path, capsys):
+def test_a_scene_script_opens_in_the_studio_as_the_scene_it_built(tmp_path, capfd):
     """Open in Magpylib Studio runs the script, and a script that defined a
     scene function is that scene: nothing to guess from objects, nothing
     lost, and nothing to warn about. What it prints is its own, on stderr --
@@ -732,7 +732,7 @@ def test_a_scene_script_opens_in_the_studio_as_the_scene_it_built(tmp_path, caps
     result = studio.load_script(str(path))
     assert result["ok"] is True
     assert "warnings" not in result
-    printed = capsys.readouterr()
+    printed = capfd.readouterr()
     assert "built it" in printed.err and "built it" not in printed.out
     namespace = {}
     exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102

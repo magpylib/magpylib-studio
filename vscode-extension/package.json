@@ -75,6 +75,11 @@
         "category": "Magpylib Studio"
       },
       {
+        "command": "magpylib-studio.restartEngine",
+        "title": "Restart Engine",
+        "category": "Magpylib Studio"
+      },
+      {
         "command": "magpylib-studio.refreshScene",
         "title": "Refresh Scene",
         "icon": "$(refresh)",

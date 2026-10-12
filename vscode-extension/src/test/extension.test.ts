@@ -1069,6 +1069,34 @@ suite('magpylib-studio', () => {
     );
   });
 
+  test('Restart Engine gives every scene back as it was', async function () {
+    this.timeout(60000);
+    // The way out of a call that never comes back: a new engine, given each
+    // scene as it last settled, and said as a restart that was asked for.
+    const file = tempScene('restart.magpy.json');
+    await writeJson(file, await loadExample('coil', 'coil'));
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', file, DISCARD);
+    await sceneWhere(holding('turn'), 'the file to open');
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'turn', type: 'current.Circle', label: 'turn', parent: 'coil', visible: true,
+    });
+    const edited = await sceneWhere(without('turn'), 'the removal to land');
+    await fileWhere(
+      vscode.Uri.parse(sceneFileState().backup!),
+      (doc) => !ids(doc.objects as { id: string }[]).has('turn'),
+      'the edit to settle',
+    );
+    const told = answeringMessages('showWarningMessage', [/the engine was restarted/, undefined]);
+    try {
+      await vscode.commands.executeCommand('magpylib-studio.restartEngine');
+      await until(() => told.said.length > 0, 'the restart to be told');
+      await vscode.commands.executeCommand('magpylib-studio.saveScene');
+      assert.deepStrictEqual(await readJson(file), edited, 'the scene did not come back');
+    } finally {
+      told.restore();
+    }
+  });
+
   test('an engine that dies comes back holding the same scene', async function () {
     this.timeout(60000);
     // The subprocess owning every scene can go away without the window going

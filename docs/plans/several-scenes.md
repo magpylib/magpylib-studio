@@ -394,8 +394,12 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
 4. **Copying across scenes** -- built 2026-10-12 (about 2 days), engine and
    interface together: the exporter, the import, paste and drag, the clipboard;
    a copy within a scene stays `copy_object` (§5.1).
-5. **Scripts outside the engine** (about 1 day), before any R3 step 2 work: the
-   child process, the watchdog, Restart Engine.
+5. **Scripts outside the engine** -- built 2026-10-12 (about 1 day), before any
+   R3 step 2 work: the child process (`runner.py`, stopped after 120 s, ended
+   with the engine, the engine's resolved meshes carried there and back), the
+   watchdog (a request unanswered for 30 s is said, with Restart Engine), and
+   Restart Engine. A script run costs 0.35 s more, the process starting and
+   importing magpylib.
 
 **Done when**, each clause a check:
 
