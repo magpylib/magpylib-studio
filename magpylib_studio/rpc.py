@@ -158,10 +158,11 @@ class Engine:
         self._sessions: dict[str, MagpylibStudioSession] = {}
         self._named: set[str] = set()
 
-    def open_session(self, session, scene=None, path=None, base_dir=None):
+    def open_session(self, session, scene=None, path=None, base_dir=None, example=None):
         """Open a session named `session` and load it in the same call: from
-        `scene`, a document, or `path`, a file holding one (and the folder its
-        relative mesh paths are relative to). Neither opens an empty scene,
+        `scene`, a document, `path`, a file holding one (and the folder its
+        relative mesh paths are relative to), or `example`, the name of a
+        built-in scene. None of them opens an empty scene; either way it is
         in `base_dir` when given.
         A load that fails opens nothing and says why, as `load_scene` does.
         """
@@ -171,12 +172,15 @@ class Engine:
             raise ValueError(f"session {session!r} is open already")
         if session in self._named:
             raise ValueError(f"session {session!r} was closed; a name is used once")
-        if scene is not None and path is not None:
-            raise ValueError("open a session from a scene or from a path, not both")
+        if sum(given is not None for given in (scene, path, example)) > 1:
+            raise ValueError("open a session from a scene, a path or an example: one")
         opened = MagpylibStudioSession(mesh_cache=self._meshes)
         result = {"ok": True}
-        if scene is not None or path is not None:
-            result = opened.load_scene(path if scene is None else scene, base_dir)
+        if scene is not None or path is not None or example is not None:
+            if example is not None:
+                result = opened.load_example(example, base_dir)
+            else:
+                result = opened.load_scene(path if scene is None else scene, base_dir)
             if not result["ok"]:
                 return result
         elif base_dir is not None:

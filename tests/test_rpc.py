@@ -203,3 +203,24 @@ def test_a_replacement_is_named_in_the_history():
     other.add_object(**cube("b"))
     assert session.replace_scene(other.to_dict(), label="changed on disk")["ok"]
     assert session.get_history()["entries"][-1]["label"] == "changed on disk"
+
+
+def test_a_session_opens_on_an_example(tmp_path):
+    """Opened on a built-in scene, with nothing to undo back past: an example
+    is where a scene begins, and an unknown one opens nothing."""
+    answers = ask(
+        {
+            "method": "open_session",
+            "params": {"session": "e", "example": "pair", "base_dir": str(tmp_path)},
+        },
+        {"session": "e", "method": "list_objects"},
+        {"session": "e", "method": "undo"},
+        {"method": "open_session", "params": {"session": "n", "example": "nope"}},
+        {"method": "open_session", "params": {"session": "m", "example": "pair", "scene": {}}},
+    )
+    assert answers[0]["result"]["ok"]
+    assert len(answers[1]["result"]) > 0
+    assert answers[2]["result"]["ok"] is False
+    assert answers[3]["result"]["ok"] is False
+    assert "unknown example" in answers[3]["result"]["error"]
+    assert answers[4]["error"]["type"] == "ValueError"

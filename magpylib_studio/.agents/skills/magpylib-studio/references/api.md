@@ -289,9 +289,10 @@ The built-in scenes. Each leans on a different feature, which is
 the point of having more than one: an example is the shortest
 documentation there is.
 
-### `session.load_example(name='halbach')`
+### `session.load_example(name='halbach', base_dir=None)`
 
-Load one of the built-in scenes; see list_examples().
+Load one of the built-in scenes; see list_examples(). `base_dir` is
+the folder a mesh added later is looked for in, as for load_scene.
 
 ### `session.to_builder_script()`
 

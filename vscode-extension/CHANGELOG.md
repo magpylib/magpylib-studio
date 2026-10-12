@@ -212,8 +212,9 @@ All notable changes to the Magpylib Studio extension.
 - **Variants from the side bar**: Save as Variant, Save Over the Variant in Use,
   Rename and Delete, in the Variables view's menu.
 - **One engine, several scenes.** The engine serves a session per scene, each
-  under a name the host gives it (`open_session`, `close_session`), and says
-  what it speaks (`version`, protocol 2). A request that names no session still
+  under a name the host gives it (`open_session`, `close_session`), opened on
+  a document, a file or an example, and says what it speaks (`version`,
+  protocol 2). A request that names no session still
   goes to the one scene a host drives, as before. `replace_scene` replaces a
   scene as one step to undo. The extension asks first, and refuses an engine
   from before several scenes -- which would serve every tab from one scene -- or
@@ -226,8 +227,10 @@ All notable changes to the Magpylib Studio extension.
   save left the old tab marked unsaved.
 - **A scene is VS Code's own document.** Save, Save As and Revert are VS Code's,
   and so is the question on closing a tab with unsaved changes. An example opens
-  unsaved, so that it is backed up and asked about. The one scene an older
-  version remembered opens once as a tab; its 3D panel closes.
+  in a preview tab named after it, with nothing unsaved and nothing to undo:
+  the next example takes its place without asking, its first edit keeps it and
+  marks it unsaved, and untouched it comes back after a reload. The one scene
+  an older version remembered opens once as a tab; its 3D panel closes.
 - **Opening a scene starts the undo history.** A file, a script or an example
   loaded is where the scene begins, not an edit of what was open, so the first
   undo after it takes back the first edit and never the whole scene. The script

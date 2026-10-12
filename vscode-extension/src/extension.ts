@@ -1652,9 +1652,11 @@ async function restoreSession(client: EngineClient, doc: SceneDocument): Promise
 async function loadSession(client: EngineClient, doc: SceneDocument, again: boolean) {
   // A lost scene opens empty: putting it back stopped the engine before.
   const scene = doc.lost ? undefined : doc.lastDocument;
+  const example = doc.lost || scene !== undefined ? undefined : doc.example;
   const result = await client.request<{ ok: boolean; error?: string }>('open_session', {
     session: doc.session,
     ...(scene !== undefined ? { scene } : {}),
+    ...(example !== undefined ? { example } : {}),
     base_dir: doc.baseDir ?? null,
   });
   if (!result.ok) {
@@ -1663,6 +1665,7 @@ async function loadSession(client: EngineClient, doc: SceneDocument, again: bool
     // the file it could not read.
     doc.problem = result.error ?? 'unreadable';
     doc.lastDocument = undefined;
+    doc.example = undefined;
     await client.request('open_session', { session: doc.session, base_dir: doc.baseDir ?? null });
     void vscode.window.showErrorMessage(
       `Magpylib Studio: could not open ${doc.name} -- ${doc.problem}. ` +
@@ -2510,7 +2513,10 @@ function refreshSurfaces(): void {
   if (refreshTimer !== undefined) {
     return; // a pass is already due inside the window; this edit rides on it
   }
-  refreshTimer = setTimeout(() => {
+  // For the scene in front, whichever command scheduled it: a timer keeps
+  // the context it was set in, and a command's scene riding on it would be
+  // drawn in front of the one there now.
+  refreshTimer = commandScene.exit(() => setTimeout(() => {
     refreshTimer = undefined;
     postToFrontScene({ type: 'refresh' });
     refreshField(frontScene());
@@ -2523,7 +2529,7 @@ function refreshSurfaces(): void {
     inspector?.refresh();
     refreshScript?.();
     sceneDocEmitter?.fire(SCENE_JSON_URI);
-  }, REFRESH_WINDOW_MS);
+  }, REFRESH_WINDOW_MS));
 }
 
 /** An edit happened somewhere (inspector, tree action, panel, script tab):
@@ -2541,6 +2547,8 @@ function broadcastMutation(): void {
     if (!doc.dirty) {
       doc.dirty = true;
       showSceneFile();
+      // edited, so backed up: VS Code brings it back from now on
+      rememberExample(doc.uri, undefined);
     }
     sceneEdited.fire({ document: doc });
     if (activeContext) {
@@ -2561,6 +2569,29 @@ function broadcastMutation(): void {
 
 /** Set at activation, for the module-level functions that need it. */
 let activeContext: vscode.ExtensionContext | undefined;
+
+/** The example each untouched example tab holds, by its untitled name. Such a
+ *  tab is clean, so VS Code keeps no backup of it and a reload brings it back
+ *  empty: it is filled again from here. */
+const EXAMPLE_TABS = 'magpylib-studio.exampleTabs';
+
+function rememberedExample(uri: vscode.Uri): string | undefined {
+  return activeContext?.workspaceState.get<Record<string, string>>(EXAMPLE_TABS, {})[uri.toString()];
+}
+
+/** Remember `uri` as holding `example`, or forget it, when undefined. */
+function rememberExample(uri: vscode.Uri, example: string | undefined): void {
+  const tabs = { ...activeContext?.workspaceState.get<Record<string, string>>(EXAMPLE_TABS, {}) };
+  if (tabs[uri.toString()] === example) {
+    return;
+  }
+  if (example === undefined) {
+    delete tabs[uri.toString()];
+  } else {
+    tabs[uri.toString()] = example;
+  }
+  void activeContext?.workspaceState.update(EXAMPLE_TABS, tabs);
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   activeContext = context;
@@ -3775,8 +3806,9 @@ export function activate(context: vscode.ExtensionContext): void {
   sceneDocEmitter = new vscode.EventEmitter<vscode.Uri>();
   const sceneDocProvider: vscode.TextDocumentContentProvider = {
     onDidChange: sceneDocEmitter.event,
+    // the scene in front: VS Code asks inside whatever fired the change
     provideTextDocumentContent: async () =>
-      JSON.stringify(await (await getEngine(context)).request('to_dict'), null, 2),
+      JSON.stringify(await engineFor(context, frontScene() ?? scratch).request('to_dict'), null, 2),
   };
 
   // Fixed at activation rather than when the tab is first opened. VS Code
@@ -4082,10 +4114,10 @@ export function activate(context: vscode.ExtensionContext): void {
   /** Open `uri` in its tab, or bring its tab forward, and put it in front.
    *  Where the scene in front is, rather than wherever the focus happens to
    *  be: the script tab beside the scenes stays in sight. */
-  const openSceneTab = async (uri: vscode.Uri): Promise<SceneDocument | undefined> => {
+  const openSceneTab = async (uri: vscode.Uri, preview = false): Promise<SceneDocument | undefined> => {
     const [beside] = frontScene()?.panels ?? [];
     await vscode.commands.executeCommand('vscode.openWith', uri, SCENE_VIEW_TYPE, {
-      preview: false,
+      preview,
       viewColumn: beside?.viewColumn ?? vscode.ViewColumn.One,
     });
     const doc = await sceneOpened(uri);
@@ -4095,23 +4127,43 @@ export function activate(context: vscode.ExtensionContext): void {
     return doc;
   };
 
-  /** A new untitled scene in a tab of its own, in front. It is named in the
+  /** A name for a new untitled scene, free among the open scenes and the
+   *  files: `Untitled-1`, or an example's own name. It is named in the
    *  workspace folder, where its first save then starts rather than at the
    *  root of the disk (plans/several-scenes.md §8). */
-  const newSceneTab = async (): Promise<SceneDocument | undefined> => {
+  const untitledScene = async (stem?: string): Promise<vscode.Uri> => {
     const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
     const taken = new Set(openScenes().map((doc) => doc.name));
-    let uri: vscode.Uri;
     for (let n = 1; ; n++) {
-      const name = `Untitled-${n}${SCENE_EXTENSION}`;
-      uri = folder
+      const name = `${stem && n === 1 ? stem : `${stem ?? 'Untitled'}-${n}`}${SCENE_EXTENSION}`;
+      const uri = folder
         ? vscode.Uri.joinPath(folder, name).with({ scheme: 'untitled' })
         : vscode.Uri.parse(`untitled:${name}`);
       if (!taken.has(name) && !(folder && (await exists(vscode.Uri.joinPath(folder, name))))) {
-        break;
+        return uri;
       }
     }
+  };
+
+  /** A new untitled scene in a tab of its own, in front. */
+  const newSceneTab = async (): Promise<SceneDocument | undefined> => {
+    const uri = await untitledScene();
+    rememberExample(uri, undefined); // a tab of that name long closed held one
     return openSceneTab(uri);
+  };
+
+  /** An example in a preview tab, in front: clean, so the next example takes
+   *  its place without asking, and pinned by its first edit, which VS Code
+   *  does for a tab that has unsaved changes. The same example, untouched,
+   *  is brought forward rather than opened twice. */
+  const exampleTab = async (example: string): Promise<SceneDocument | undefined> => {
+    const open = openScenes().find((doc) => doc.example === example && !doc.dirty && doc.untitled);
+    if (open) {
+      return openSceneTab(open.uri, true);
+    }
+    const uri = await untitledScene(example);
+    rememberExample(uri, example);
+    return openSceneTab(uri, true);
   };
 
   /** What VS Code is about to open for Save As's destination: the session of
@@ -4182,6 +4234,14 @@ export function activate(context: vscode.ExtensionContext): void {
     dropRecovery(doc);
     if (!doc.handedOver) {
       closeSession(doc);
+    }
+    // Closed, unless its tab is still there: a window shutting down keeps it,
+    // and fills it again on the next start.
+    const kept = vscode.window.tabGroups.all
+      .flatMap((group) => group.tabs)
+      .some((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === doc.uri.toString());
+    if (doc.example && !kept) {
+      rememberExample(doc.uri, undefined);
     }
   };
 
@@ -4553,6 +4613,9 @@ export function activate(context: vscode.ExtensionContext): void {
         } else if (uri.scheme !== 'untitled') {
           bytes = await vscode.workspace.fs.readFile(uri);
           doc.diskText = Buffer.from(bytes).toString('utf8');
+        } else {
+          // an example, just picked or untouched since: clean, so no backup
+          doc.example = rememberedExample(uri);
         }
         if (doc.diskText === undefined && uri.scheme === 'file') {
           // restored from a backup: the file is what its edits were made on
@@ -5406,12 +5469,9 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           chosen = pick.e.name;
         }
-        // In a tab of its own, and unsaved from the start: an untitled tab
-        // that is not marked is neither backed up nor asked about, and would
-        // come back from a reload empty (plans/several-scenes.md §4).
-        if ((await newSceneTab()) && (await mutateFromTree('load_example', { name: chosen }))) {
-          followNewScene();
-        }
+        // In a tab of its own, opened on the example: nothing to undo, and
+        // nothing unsaved until it is edited.
+        followNewScene(await exampleTab(chosen));
       },
     ),
     registerCommand('magpylib-studio.selectObject', (objectId: string, node?: SceneObject) => {

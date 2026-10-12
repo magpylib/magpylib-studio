@@ -924,12 +924,10 @@ suite('magpylib-studio', () => {
   test('the scene knows its file, and says so when it drifts from it', async function () {
     this.timeout(60000);
     await loadExample('halbach', 'halbach');
-    // An example opens in an untitled tab of its own, unsaved from the start:
-    // an untitled tab that is not marked is neither backed up nor asked about
-    // on closing, and would come back from a reload empty. No file, so Save
-    // asks where.
+    // An example opens in an untitled tab of its own, with nothing unsaved:
+    // no file, so Save asks where.
     assert.strictEqual(sceneFileState().file, undefined);
-    assert.strictEqual(sceneFileState().dirty, true, 'an example in its tab is not marked');
+    assert.strictEqual(sceneFileState().dirty, false, 'an untouched example is marked unsaved');
 
     const file = tempScene('state.magpy.json');
     await writeJson(file, await scene());
@@ -962,12 +960,64 @@ suite('magpylib-studio', () => {
     assert.strictEqual(sceneFileState().dirty, false, 'a refresh claimed an edit');
   });
 
+  test('an example opens clean, in a preview tab the next one takes', async function () {
+    this.timeout(60000);
+    const tabOf = (uri: vscode.Uri) =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === uri.toString());
+    await loadExample('coil', 'coil');
+    const coil = frontScene()!.uri;
+    assert.ok(coil.path.endsWith('.magpy.json') && coil.path.includes('coil'), `the example's tab is named ${coil.path}`);
+    assert.ok(tabOf(coil)?.isPreview, 'the example is not in a preview tab');
+    // The next example takes its place, and asks nothing: it was untouched.
+    await vscode.commands.executeCommand('magpylib-studio.loadExample', 'halbach', DISCARD);
+    await sceneWhere(holding('halbach'), 'the next example to load');
+    const halbach = frontScene()!.uri;
+    await until(() => !tabOf(coil), 'the untouched example to make way');
+    assert.ok(tabOf(halbach)?.isPreview, 'the next example is not in a preview tab');
+
+    // An example is where a scene begins: nothing to undo, nothing unsaved.
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    await pause(300); // asserting that nothing happens
+    assert.strictEqual(sceneFileState().dirty, false, 'undo found a step before the example');
+    await sceneWhere(holding('halbach'), 'the example still there');
+
+    // Untouched, it has no document of its own: a restarted engine is given
+    // the example again.
+    const told = answeringMessages('showWarningMessage', [/engine stopped and was started again/, undefined]);
+    try {
+      stopEngineForTest();
+      await vscode.commands.executeCommand('magpylib-studio.refreshScene');
+      await until(() => told.said.length > 0, 'the restart to be told');
+      await frontScene()!.opening;
+      const tree = sceneTreeForTest();
+      assert.ok((await tree.getChildren()).map(idOf).includes('halbach'), 'the example did not come back');
+    } finally {
+      told.restore();
+    }
+
+    // The first edit pins it and marks it unsaved: from there it is backed
+    // up like any scene.
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'r2', type: 'magnet.Cuboid', label: 'Magnet 2', parent: 'ring2', visible: true,
+    });
+    await sceneWhere(without('r2'), 'the edit to land');
+    assert.strictEqual(sceneFileState().dirty, true, 'the edit went unnoticed');
+    await until(() => tabOf(halbach)?.isPreview === false, 'the edited example to be pinned');
+  });
+
   test('unsaved work is backed up where a reload can find it', async function () {
     this.timeout(60000);
     // The scene lives in a subprocess that dies with the window, so this file
     // is the only copy of anything unsaved. The reload that reads it back is a
     // manual check; that it is written, and correct, is not.
     await loadExample('coil', 'coil');
+    // an untouched example has nothing unsaved: an edit, to have something
+    await vscode.commands.executeCommand('magpylib-studio.removeObject', {
+      id: 'turn', type: 'current.Circle', label: 'turn', parent: 'coil', visible: true,
+    });
+    await sceneWhere(without('turn'), 'the edit to land');
     const backup = sceneFileState().backup;
     assert.ok(backup, 'no backup location');
 
@@ -976,7 +1026,10 @@ suite('magpylib-studio', () => {
     // wait that is also the check can only ever time out when it fails.
     const saved = await fileWhere(
       vscode.Uri.parse(backup),
-      (doc) => ids(doc.objects as { id: string }[]).has('coil'),
+      (doc) => {
+        const held = ids(doc.objects as { id: string }[]);
+        return held.has('coil') && !held.has('turn');
+      },
       'the backup to be written',
     );
     assert.deepStrictEqual(saved, await scene(), 'the backup is not the scene');

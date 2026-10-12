@@ -52,6 +52,10 @@ export class SceneDocument implements vscode.CustomDocument {
   /** Putting it back into a restarted engine stopped that engine too: it is
    *  kept out, shown empty and never saved, until Try Again. */
   lost = false;
+  /** The built-in scene it opened on, if it did: what it opens on again --
+   *  in a restarted engine, after a reload -- while it has no document of its
+   *  own. An untouched example is clean, so VS Code keeps no backup of it. */
+  example: string | undefined;
   /** Its script tab: the scene as a function, applied on a deliberate save. */
   readonly script: ScriptTabState = { held: false };
   /** Names this scene's recovery copy, kept apart from its session's name,

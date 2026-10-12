@@ -5358,15 +5358,16 @@ class MagpylibStudioSession:
             ]
         }
 
-    def load_example(self, name="halbach"):
-        """Load one of the built-in scenes; see list_examples()."""
+    def load_example(self, name="halbach", base_dir=None):
+        """Load one of the built-in scenes; see list_examples(). `base_dir` is
+        the folder a mesh added later is looked for in, as for load_scene."""
         if name not in EXAMPLES:
             return {
                 "ok": False,
                 "error": f"unknown example {name!r}; try one of {sorted(EXAMPLES)}",
             }
         _, _, build = EXAMPLES[name]
-        return self.load_scene(build())
+        return self.load_scene(build(), base_dir)
 
     def clear_scene(self):
         """Empty the document: every object, every step and every variable.

@@ -139,8 +139,14 @@ moves the scene's revision. A replacement -- opening, a revert, a file changed
 on disk, a crash restore -- fires nothing. A save notes the revision before it
 writes; if an edit moved it meanwhile, the event fires again once the save has
 returned, since VS Code clears the dot when the save resolves. A scene loaded
-into an untitled tab -- an example, an import, a script's drawing -- starts
-dirty, so it is backed up and asked about; an empty New Scene starts clean.
+into an untitled tab -- an import, a script's drawing -- starts dirty, so it is
+backed up and asked about; an empty New Scene starts clean, and so does an
+example: the session opens on it (`open_session(example=...)`), so there is
+nothing to undo, and its preview tab is the next example's to take. VS Code
+keeps no backup of a clean tab, so the example each untouched tab holds is kept
+in workspace state by the tab's untitled name and loaded again when the tab
+comes back; the first edit pins the tab, which VS Code does for a dirty one,
+and forgets the name.
 
 | VS Code calls                                                 | the provider                                                                                                                                                                                                                      |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
