@@ -5,7 +5,7 @@ designs visually — in VS Code, in a notebook, or in code. Name the numbers tha
 matter, drag a slider, and the whole design follows, with the field computed
 exactly in milliseconds.
 
-![The Halbach example in VS Code: the scene tree, the variables with their sliders, the 3D view and the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
+![The Halbach example in VS Code: the objects and the steps that built them, the variables with their sliders, the 3D view and the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
 
 _The Halbach example: two rings of ten magnets, each ring one magnet and one
 pattern. Drag `n` and both rings rebuild._

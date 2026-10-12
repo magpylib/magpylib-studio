@@ -65,6 +65,15 @@ through a fake kernel connection (`tools/check-package-alone.py`). Pushing a
 to PyPI and the extension to the Marketplace from the same tag, which is what
 lets **Install the Engine** set the engine up rather than tell you to.
 
+To release, bump `vscode-extension/package.json` and rename the `[Unreleased]`
+heading of `vscode-extension/CHANGELOG.md` in one commit, then push the `v*`
+tag. `npm run check:version` fails any build where the two disagree, and the
+release workflow checks the tag against both before it publishes anything. To
+put a build of your own into your everyday VS Code, run
+`npx @vscode/vsce package` in `vscode-extension/`: the file is named after the
+package and version (`magpylib-studio-vscode-<version>.vsix`), where a release
+asset is named after the tag.
+
 **By hand, the view**, after a change to the renderer, the widget or the studio
 panel (the parity checklist from
 [decision 0011](docs/decisions.md#0011-one-view)):

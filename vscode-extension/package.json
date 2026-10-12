@@ -1,7 +1,7 @@
 {
   "name": "magpylib-studio-vscode",
   "displayName": "Magpylib Studio",
-  "description": "VS Code extension shell for the magpylib-studio headless engine.",
+  "description": "Build and explore magpylib magnet designs: a 3D editor with variables, patterns and field plots.",
   "version": "0.5.0",
   "publisher": "magpylib",
   "license": "BSD-3-Clause",

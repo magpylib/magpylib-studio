@@ -1,275 +1,122 @@
-# Magpylib Studio VS Code Extension
+# Magpylib Studio
 
-VS Code shell for the headless `magpylib-studio` engine (the Python package in
-the repo root). It spawns `python -m magpylib_studio` and talks
-newline-delimited JSON-RPC over stdio.
+Build and explore [magpylib](https://github.com/magpylib/magpylib) magnet
+designs in VS Code. Place magnets, currents and sensors in a 3D view, name the
+numbers that matter, and drag a slider: the whole design follows, with the field
+computed exactly in milliseconds.
 
 <!-- Absolute, not relative. vsce rewrites relative image paths against the
      *repository* root it reads from package.json, and this extension lives in
      a subfolder of that repo — so `../docs/halbach.png` becomes a 404 on the
      Marketplace listing while looking right on GitHub. -->
 
-![The Halbach example open in VS Code: the scene tree listing each ring's construction steps and the copies a pattern made, the variables panel with sliders for n, radius, gap, stagger and tilt, the 3D view, and the script tab showing the same scene as parametric magpylib.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
+![The Halbach example in VS Code: the objects and the steps that built them, the variables with their sliders, the 3D view, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
 
-_The `halbach` example: twenty magnets from two `create` steps and two circular
-patterns. Dragging `n` rebuilds both rings; the script tab on the right is the
-same scene, and saving an edit to it rebuilds the scene from what you wrote._
+_The Halbach example: two rings of magnets, each ring one magnet and one
+pattern. Drag `n` and both rings rebuild._
 
-## What it provides
+## Get started
 
-- **A tab per scene** — a `.magpy.json` opens in the studio, a live three.js
-  scene you can work in; several open side by side, each with its own undo,
-  saved with VS Code's own Save. Click an object to select it, ⌘-click to add to
-  the selection, and drag the handles to move (W), turn (E), resize (R) or aim a
-  polarization (P) — along world or object axes, snapping to round steps with S.
-  Paths play, with a scrubber. Every drag is one step in the history and one
-  undo, and the field follows as you go. A **Chart** button swaps in the Plotly
-  figure, which is read only and has its own animation.
-- **Objects and Open Scenes** — the magpylib-logo icon in the activity bar opens
-  the objects of the scene in front, nested as they are grouped. When a second
-  scene opens, a list of them, one line each, shows above, as Source Control's
-  Repositories do (shown or hidden from then on in the side bar's views menu):
-  the objects shown are those of the one picked (Cmd-click picks several, each
-  under its own heading), one icon per type (magnets red, currents blue, sensors
-  green). Clicking an object opens the plot and loads it in the Inspector. With
-  no scene open the view offers **New Scene**, **Open Scene…** and **Load
-  Example Scene…**, which picks between six — a Halbach stack, a solenoid, a
-  mirrored pair, a magnet array, a parametric measuring plane and a turning
-  magnet with field arrows, each built from a couple of steps rather than a heap
-  of objects.
-- **The construction history is in that tree**, under the object it happened to:
-  expand a magnet and you get _created_, _orbit 36° about z_, and so on, before
-  whatever it contains. Steps are named for what they did; the call that did it
-  is the tooltip. Hover one for _Edit Step…_ (its values open in the Inspector,
-  expressions included), move it earlier or later — order is semantic — or
-  remove it. Editing an early step re-applies everything after it; anything that
-  no longer applies is flagged in place with the reason, rather than the edit
-  being refused.
-- **Build Up To Here** on a step folds only the history before it, so you can
-  watch the scene assemble — and anything you do while rolled back is _inserted
-  at that step_. The Scene title bar offers _Show The Whole Scene_ while it is
-  active.
-- **Variables view** — named values the scene is written in terms of. Each row
-  is a value box and, once it has bounds, a slider; dragging one moves
-  everything defined against it. A variable that is a _choice_ rather than a
-  quantity gets a dropdown instead — a rotation axis is `z`, which is a name, so
-  no range describes it and no slider can offer it. The halbach example ships
-  with one: `tilt_axis` picks which way `tilt` tips the whole stack.
-  Whole-number variables are refused fractional values outright, because a count
-  of 7.3 is meaningless rather than merely imprecise. Values may be expressions
-  over the other variables (`360 / n`), with the allowed operators, functions
-  and constants listed in the panel and checked as you type. `⋯` lists what a
-  variable is — its name, its limits, its kind — each entry showing what it
-  holds; renaming from there rewrites everything written in terms of it. A
-  variable can also say what it measures — length, angle, field, current. It is
-  shown in SI (`gap m` holds 0.015) and reads a unit when one is typed: `20 mm`
-  and `2 cm` mean what they say, and the box says what a value means as it is
-  typed (`1` for a field: `= 1 T`). **Units…** shows a scene's lengths in mm and
-  its fields in mT instead — in the Variables view, the Inspector, every box
-  that asks for one, the step labels and the field plots — where a bare number
-  then means mm or mT; the scene itself stays in metres and tesla. **Sweep a
-  Variable…** plots the field against one in the Field view, along its unit.
-- **Undo view** — the session's checkpoints, newest first: click any to jump the
-  scene there, backwards or forwards. This is _not_ the construction history
-  above; it is document snapshots, and it is gone on reload.
-- **Add Object…** — the `+` icon on the Scene view (or right-click a collection
-  to create inside it, or the empty-view welcome): pick a type (cuboid,
-  cylinder, segment, sphere, tetrahedron, current loop/polyline, dipole, sensor,
-  collection), then set each of its properties — prefilled with defaults and
-  labelled with units — and it opens selected in the Inspector.
-- **Editing in the tree** — Rename (`F2`, `Enter` on macOS), Copy / Cut / Paste
-  (`Cmd/Ctrl+C` / `X` / `V`) and Delete (`Delete`, `Cmd+Backspace`) while the
-  Scene view has focus, plus the same items on right-click. A copy follows
-  magpylib's own convention (`Cube` → `Cube_01` → `Cube_02`) and copies a
-  collection's whole subtree; pasting onto a collection puts the object inside
-  it. The eye icon on hover hides an object from the 3D view (dimmed in the
-  tree, like toggling a plotly trace) — hidden sources still count in field
-  calculations.
-- **Right-click → Transform** — Set Position…, Move By…, Rotate… (spin or orbit
-  the origin), Clear Path, Pixel Grid…, and **Pattern…**: one step standing for
-  N copies, _around an axis_ (a ring, a rotor, a Halbach array), _along a
-  direction_ (do it twice for a grid), or _mirrored_ — where the polarization
-  reflects as an axial vector should, which is the part that is easy to get
-  wrong by hand. Counts and steps may be variables, so the whole arrangement
-  stays one number to edit.
-- **Field maps** — the Field panel's _Plane map_ mode: a heatmap of |B| (or a
-  signed component) on the xy/xz/yz plane at any offset, with a log option
-  because field spans orders of magnitude. Colour follows the data's job — one
-  hue light→dark for magnitude, blue↔grey↔red anchored at zero for signed
-  components — and the axes are locked 1:1 so geometry is not distorted.
-  Right-click a Sensor → **Transform → Pixel Grid…** builds magpylib's own pixel
-  grid instead: the measurement plane is then a real object, visible in the 3D
-  view, tilting with the sensor and exported in the script.
-- **Pose** — the Inspector's `pose` section: the object's absolute position and
-  rotation vector, showing the expression a value was written as beside what it
-  currently comes to. Relative moves and rotations are not here; they record a
-  _step_, so they live on the tree's Transform menu.
-- **Saving and opening scenes** — a scene is a document: **Save** (`Cmd/Ctrl+S`
-  with the Scene view focused) writes it to a `.magpy.json` file, and the view
-  title shows which file it is and a `•` while it differs from what is on disk.
-  Double extension on purpose — the file stays JSON to git, to diffs and to
-  schema validation, while still being a name VS Code can associate, so
-  right-clicking one in the explorer offers _Open Scene_. The format carries its
-  own version number and keeps fields it does not recognise, so a scene written
-  by a later studio is refused with a clear message rather than opened half-way
-  and saved back over. **Export as Python Script…** is the other direction:
-  runnable magpylib anyone can use without the studio — but it carries no slider
-  bounds and no hidden flags, which is why it is an export and not a save.
-  Opening a scene, loading an example or importing a script asks first if there
-  is unsaved work.
-- **A reload does not lose the scene.** It lives in a subprocess that dies with
-  the window, so the studio writes a backup after every edit and comes back to
-  the scene you were editing next time the workspace opens — unsaved changes
-  included, and still marked unsaved. It does this without asking and without
-  opening anything, the way VS Code restores an unsaved editor: the scene is in
-  the tree when you look, and _New Scene_ discards it if you would rather start
-  over.
-- **The script tab is the scene as code you can edit** — _Edit Python Script_
-  shows the scene as a plain magpylib function under `@scene`, its parameters
-  the variables, and saving it applies it, as one undo step. Change `radius` and
-  save, and the scene's `radius` changes, with every variable and pattern
-  intact. A script that fails leaves the scene alone and stays in the tab for
-  you to fix; plain magpylib is refused, since running it would flatten the
-  scene — open that with _Open in Magpylib Studio_ instead. The rare scene the
-  tab cannot write exactly refuses edits from the tab, saying where, rather than
-  letting a save change what you did not edit; and if the scene changed after
-  the tab was written — a drag, an agent, an undo — a save asks before undoing
-  that. Auto-save does not apply the tab. It is a view of the current scene, not
-  a saved file: it is regenerated after a save, so a loop or a helper written
-  there comes back as the steps it made. For code to keep, use _Export as Scene
-  Script…_; _Export as Python Script…_ writes plain magpylib anyone can run.
-- **Properties** — the Inspector's `properties` section: the object's physics
-  parameters (polarization, dimension, diameter, current, moment, vertices,
-  pixels) as numeric widgets, with units in the tooltips; matrices like polyline
-  vertices are edited as JSON. Edits go through `set_param`, so transforms and
-  styles are preserved.
-- **Inspector view** — below the tree: schema-driven widgets generated from
-  `get_schema()` (enum → dropdown, `format: color` → color picker + text,
-  bounded number → slider, boolean → tri-state with "(default)"), prefilled with
-  resolved values. Explicitly set paths are bold with a ↺ reset button; a filter
-  box narrows the property list. Edits go through `apply_edit` / `reset_style`,
-  so magpylib validation errors show inline.
+1. Install the extension: search for **Magpylib Studio** in the Extensions view,
+   or run `code --install-extension magpylib.magpylib-studio-vscode`.
+2. Open a folder, click the magpylib icon in the Activity Bar, choose **Load
+   Example Scene…** and pick the Halbach stack.
+3. The first time, it offers to **Install the Engine**, the Python side of the
+   studio. Accept: it uses the Python interpreter you have selected, if it is
+   3.11 or newer and you agree, or creates a `.venv` in the folder.
 
-All three surfaces (plot, tree, inspector) refresh automatically after any edit,
-whatever its origin — inspector widget, tree context menu or script tab —
-debounced so bursts redraw once.
+Then try a few things:
 
-- **Coding agents** — the Python package carries an Agent Skill that teaches
-  them to write a scene as such a function, read its field and sweep a variable;
-  the result opens here with **Open in Magpylib Studio**. How to install it is
-  in the
-  [package's README](https://github.com/magpylib/magpylib-studio#let-a-coding-agent-write-it).
+- In **Variables**, drag `n`: twenty magnets rebuild from one number.
+- In **Objects**, expand a ring to see the steps that built it, and choose
+  **Edit Step…** on one to change it after the fact.
+- Run **Sweep a Variable…** on `gap` to plot the field against it.
+- Run **Edit Python Script** to see the scene as code, change a line and save.
 
-Every view shares one engine process ([src/engineClient.ts](src/engineClient.ts)
-— promise-based RPC client that owns the request-id space).
+## What you can do
 
-## Try it out
+- **Work in scenes.** A scene is a `.magpy.json` file that opens in its own tab.
+  Several can be open side by side, each with its own undo, and **Save** writes
+  them like any other file.
+- **Build in 3D.** Add magnets, currents, sensors, or a triangular mesh from a
+  file, from points or from a formula. Click an object to select it and drag its
+  handles to move, turn or resize it, or to aim its polarization.
+- **Make it parametric.** Name the numbers the scene is written in, such as
+  `radius`, `gap` or `n`. Each gets a slider, a value can be an expression like
+  `360 / n`, and a typed unit is understood (`15 mm`, `800 mT`). Save a set of
+  values as a variant to come back to it.
+- **Pattern, don't copy.** **Pattern…** repeats an object around an axis, along
+  a direction, or as a mirror image. It is one step, so changing the original
+  changes every copy.
+- **Change any step.** The Objects view lists the steps that built each object.
+  Edit one, move it earlier or later, or remove it, and everything after it is
+  applied again. **Build Up To Here** shows the scene as it was at that step.
+- **See the field.** The Field view shows it along a sensor's path, as a map
+  over a plane, or swept against a variable.
+- **Switch to code and back.** **Edit Python Script** shows the scene as a
+  magpylib function whose parameters are the variables, and saving the tab
+  applies your edits. **Export as Python Script…** writes plain magpylib that
+  anyone can run, and **Open in Magpylib Studio** opens the scene a script
+  builds.
+- **Keep your work.** The studio keeps a backup after every edit, so open scenes
+  come back after a reload, unsaved changes included.
+- **Work with a coding agent.** The Python package teaches coding agents to
+  write scenes, and the result opens here.
+  [How to set it up](https://github.com/magpylib/magpylib-studio#let-a-coding-agent-write-it).
 
-**1. Install the extension** — search **Magpylib Studio** in the Extensions
-view, or:
+## The views
 
-```sh
-code --install-extension magpylib.magpylib-studio-vscode
-```
+| View            | Shows                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| **Open Scenes** | The scenes open in this window, once there are two or more.                                    |
+| **Objects**     | The objects of the scene in front, grouped as in the scene, and the steps that built them.     |
+| **Inspector**   | The selected object's position, properties and style.                                          |
+| **Variables**   | The scene's variables, their sliders and units, and saved variants.                            |
+| **Undo**        | Every edit in this session. Click one to go back or forward to it.                             |
+| **Field**       | The field along a path, over a plane, or against a variable. Open it with **Open Field View**. |
 
-Or install the `.vsix` attached to the [latest release][releases], which is the
-same build — the asset is named for the tag, not for the package:
+## Keys
 
-```sh
-code --install-extension magpylib-studio-<tag>.vsix
-```
+In the 3D view:
 
-[releases]: https://github.com/magpylib/magpylib-studio/releases
+| Key                          | Does                                                   |
+| ---------------------------- | ------------------------------------------------------ |
+| W, E, R, P                   | Handles to move, turn, resize, or aim the polarization |
+| Q                            | Put the handles away                                   |
+| X, Y, Z / A                  | Hold a drag to one axis / free it again                |
+| L                            | Switch between world axes and the object's own         |
+| S                            | Snap to round steps                                    |
+| Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo, redo                                             |
 
-**2. Let it install the engine.** The extension is only the UI — it spawns
-`python -m magpylib_studio` — but that is not a step you do first. Open a folder
-and use the extension; when it cannot find an interpreter with the engine, it
-offers **Install the Engine**, which
+In the Objects view: Cmd/Ctrl+S saves, Cmd/Ctrl+C, X and V copy, cut and paste,
+F2 (Enter on macOS) renames, and Delete (Cmd+Backspace on macOS) removes.
 
-- offers the interpreter the Python extension already has selected, if it meets
-  the ≥ 3.11 floor — named in the prompt, and declinable, because that one may
-  be a system Python and "install the engine" is not consent to change it;
-  otherwise, or if you decline,
-- creates a `.venv` in the workspace, fetching a matching Python via [uv][uv]
-  when uv is installed and falling back to `python -m venv`; then
-- `pip install magpylib-studio` into it, and sets `magpylib-studio.pythonPath`
-  to it in workspace settings.
+## Settings
 
-To do it yourself instead, any interpreter ≥ 3.11 with the engine on it works —
-`pip install magpylib-studio`, then point `magpylib-studio.pythonPath` at it.
-Either way you get released magpylib, which is fully supported. The
-[property-tree branch][branch] is optional and adds path-valued physics
-properties (`current=[100, 200, 300]`):
+| Setting                           | Default         | What it does                                                                                              |
+| --------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `magpylib-studio.pythonPath`      | empty: find one | The Python interpreter that runs the engine.                                                              |
+| `magpylib-studio.scriptTimeout`   | 300 s           | How long a script may run when the studio runs it, before it is stopped.                                  |
+| `magpylib-studio.drawScriptsHere` | on              | `magpy.show()` in scripts run from this window's terminals draws in a studio panel instead of Matplotlib. |
 
-```sh
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@feat/improve-style"
-```
+## If something goes wrong
 
-[uv]: https://docs.astral.sh/uv/
+- The engine's messages are in the **Magpylib Studio Engine** output channel
+  (**View → Output**).
+- **Restart Engine** in the Command Palette starts the Python side again.
+- The engine is looked for in this order: the `magpylib-studio.pythonPath`
+  setting, a `.venv` in the workspace, then `python3` on the PATH. An
+  interpreter counts only if it can import `magpylib_studio`, which needs Python
+  3.11 or newer. To set it up yourself, run `pip install magpylib-studio` and
+  point the setting at that interpreter.
 
-**3. Open it.** Click the magpylib icon in the activity bar, press **Load
-Example Scene…** and take the Halbach stack. Then, in rough order of what the
-tool is for:
+## More
 
-- open **Variables** and drag `n` — twenty magnets rebuild from one number;
-- expand a ring in the tree to see the steps that built it, and _Edit Step…_ on
-  the orbit to change it after the fact;
-- **Sweep a Variable…** on `gap` to plot the field against it;
-- _Edit Python Script_ to see the whole thing as parametric magpylib, edit a
-  line, and save it back;
-- `Cmd/Ctrl+S` with the Scene view focused to save it as `scene.magpy.json`,
-  then reload the window — it comes back.
+- [Magpylib Studio](https://github.com/magpylib/magpylib-studio): the 3D view in
+  notebooks, writing scenes in code, and the coding-agent skill.
+- [Changelog](https://github.com/magpylib/magpylib-studio/blob/main/vscode-extension/CHANGELOG.md)
+- [Contributing](https://github.com/magpylib/magpylib-studio/blob/main/CONTRIBUTING.md):
+  building and debugging the extension.
+- [Issues](https://github.com/magpylib/magpylib-studio/issues)
 
-[branch]: https://github.com/magpylib/magpylib/tree/feat/improve-style
-
-## Working on it
-
-Nothing above needs a clone; this does. Take the repo, install the node
-dependencies, then open the **repo root** in VS Code and press `F5`:
-
-```sh
-git clone https://github.com/magpylib/magpylib-studio.git
-cd magpylib-studio/vscode-extension && npm install && cd ..
-code .          # the repo root, not vscode-extension/
-```
-
-`F5` compiles (tsc, eslint and three checks over the webviews, the contributions
-and the version) and opens one further window — the Extension Development Host,
-with the extension loaded and `sandbox/` as its workspace. Two windows total,
-which is as few as extension debugging goes. The launch config lives at the repo
-root deliberately: opening `vscode-extension/` as its own workspace works too,
-but then the Python engine is outside the window you are editing in.
-
-Other configs on the F5 menu: **Run Extension (no build)** for when
-`npm run watch` is already running, and **Extension Tests**. From a terminal the
-equivalents are `npm run compile`, `npm run watch` and `npm test` — the last
-downloads a VS Code build the first time and runs the suite in a real host.
-
-To install your build into your normal VS Code, package it — note that vsce
-names the file after the package and version, where a release asset is named
-after the tag:
-
-```sh
-npx @vscode/vsce package        # -> magpylib-studio-vscode-<version>.vsix
-```
-
-Releases are tag-driven: bump `package.json` and rename the changelog's
-`[Unreleased]` heading in one commit, then push a `v*` tag.
-`npm run check:version` keeps those two honest on every build, and the release
-workflow checks the tag against both before it publishes anything.
-
-## Python interpreter resolution
-
-1. `magpylib-studio.pythonPath` setting, if set;
-2. `.venv/bin/python` (or `Scripts\python.exe`) in a workspace folder, then in
-   the repo root next to this folder;
-3. `python3` on PATH.
-
-The probe checks each candidate can actually `import magpylib_studio`, so a
-workspace `.venv` without the engine cannot shadow a working interpreter.
-
-## Notes
-
-- plotly.js is bundled from `plotly.js-dist-min` (3.x, matching Python plotly
-  6.x) and loaded via a webview URI — no CDN, works offline, CSP-clean.
-- Engine stderr goes to the "Magpylib Studio Engine" output channel.
+BSD-3-Clause, like the other packages built on magpylib.
