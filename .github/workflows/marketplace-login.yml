@@ -1,0 +1,42 @@
+# Checks that release.yml can still publish to the Marketplace, without
+# publishing anything: signs in as the publisher's managed identity, the way
+# release.yml does, and asks the Marketplace whether it may publish for
+# magpylib. Runs on a pull request that touches that sign-in, and by hand.
+#
+# It also prints the identity's Marketplace ID: what the publisher's Members
+# page takes, which is neither the Azure client ID nor the object ID.
+name: Marketplace sign-in
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/marketplace-login.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    # A fork's pull request gets no Azure sign-in.
+    if:
+      github.event_name != 'pull_request' ||
+      !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    environment: marketplace
+    steps:
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: 022ba66b-5030-496e-af0f-864e452bc4e8
+          tenant-id: cf42a1c9-05bb-415e-a752-84a630d5f779
+          allow-no-subscriptions: true
+      - name: The identity's Marketplace ID
+        run:
+          az rest -u
+          https://app.vssps.visualstudio.com/_apis/profile/profiles/me
+          --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv
+      - name: May it publish for magpylib?
+        run: npx -y @vscode/vsce verify-pat --azure-credential magpylib
