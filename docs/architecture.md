@@ -184,6 +184,14 @@ which is what makes sliders live and `sweep` affordable.
   same variables; put elsewhere, its steps go at the end in their own order, and
   it is pinned to its source's world pose where the source's groups had moved
   it, in the same undo step.
+- Across scenes a copy is a scene of its own: `export_object` writes the
+  object's subtree with the variables its formulas name and what its groups did
+  to it as one rigid step on its top (a pattern's source inside a Collection
+  named after it); `import_fragment` merges that under a parent as one step,
+  keeping ids this log never used and renaming the rest, renaming a variable
+  whose name is taken (`radius` to `radius_2`, every formula following) unless
+  an earlier import from the same origin made that same variable, and rebasing
+  mesh paths to its own folder. Variants stay with their scene.
 - Variables: hard bounds and `integer` are enforced in the fold, so they hold
   however a value arrived; renaming rewrites expressions through the AST;
   `sweep` re-folds once per value and records nothing.
@@ -368,7 +376,9 @@ per open scene, its file's commands on it -- Save, Close, Save As, Revert,
 Export, Reveal; picking one, or several with Cmd-click, picks what Objects
 shows), Objects (the scenes picked, each under its own heading, or one's objects
 at the top, nested as grouped with each object's steps under them; drag and drop
-to reparent within a scene, rename, copy, cut, paste, delete, hide), the
+to reparent within a scene and to copy into another, rename, copy, cut, paste --
+across scenes a copy, a Cut moving it, one undo where it landed putting it back
+in both -- delete, hide), the
 Inspector (a webview whose widgets are built from the style schema; properties
 and pose take expressions, shown in the scene's units), the Variables view (a
 webview, because a tree row cannot hold a slider: the package's `variables.mjs`,
@@ -436,7 +446,7 @@ read, so a part in two scenes is reoriented once.
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | engine    | `open_session` · `close_session` · `version`                                                                                                                                                                                                                                                                                                                                                   |
 | inspect   | `list_objects` · `object_tree` · `get_schema` · `get_values` (style) · `get_params` (physics) · `get_transform` · `get_history` · `inspect_mesh`                                                                                                                                                                                                                                               |
-| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible`                                                                                                                                                                                                                                                                                                      |
+| structure | `add_object` · `remove_object` · `copy_object` · `move_object` (reparent) · `set_visible` · `export_object` · `import_fragment` (across scenes)                                                                                                                                                                                                                                                |
 | edit      | `apply_edit` (style) · `set_param` · `reset_style` · `apply_edits` / `apply_calls` (what a view's drag sends) · `begin_interaction` · `end_interaction`                                                                                                                                                                                                                                        |
 | transform | `move` · `rotate` · `set_transform` · `clear_path` · `set_pixel_grid`                                                                                                                                                                                                                                                                                                                          |
 | patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                                                                                                                                                                                                                          |

@@ -216,7 +216,10 @@ def test_a_session_opens_on_an_example(tmp_path):
         {"session": "e", "method": "list_objects"},
         {"session": "e", "method": "undo"},
         {"method": "open_session", "params": {"session": "n", "example": "nope"}},
-        {"method": "open_session", "params": {"session": "m", "example": "pair", "scene": {}}},
+        {
+            "method": "open_session",
+            "params": {"session": "m", "example": "pair", "scene": {}},
+        },
     )
     assert answers[0]["result"]["ok"]
     assert len(answers[1]["result"]) > 0
@@ -224,3 +227,33 @@ def test_a_session_opens_on_an_example(tmp_path):
     assert answers[3]["result"]["ok"] is False
     assert "unknown example" in answers[3]["result"]["error"]
     assert answers[4]["error"]["type"] == "ValueError"
+
+
+def test_a_copy_goes_from_one_session_to_another():
+    """The host carries the copy: exported from one scene, imported into the
+    other, its variables renamed there."""
+    engine = Engine()
+    engine.open_session("a", example="halbach")
+    engine.open_session("b", example="halbach")
+    out = engine.handle(
+        {
+            "id": 1,
+            "session": "a",
+            "method": "export_object",
+            "params": {"object_id": "r2"},
+        }
+    )["result"]
+    pasted = engine.handle(
+        {
+            "id": 2,
+            "session": "b",
+            "method": "import_fragment",
+            "params": {"fragment": out["scene"], "base_dir": out["base_dir"]},
+        }
+    )["result"]
+    assert pasted["ok"] and pasted["renamed"] == {
+        "n": "n_2",
+        "radius": "radius_2",
+        "gap": "gap_2",
+    }
+    assert engine._sessions["b"]._objs["r2_1"]  # its id was taken in b

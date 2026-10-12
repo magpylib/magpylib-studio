@@ -48,6 +48,8 @@ _PUBLIC = {
     "remove_object",
     "move_object",
     "copy_object",
+    "export_object",
+    "import_fragment",
     "set_visible",
     "begin_interaction",
     "end_interaction",

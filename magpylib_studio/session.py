@@ -2225,6 +2225,29 @@ def _rebase_doc(doc, previous, current):
     return moved
 
 
+def _last_turn(obj):
+    """An object's orientation at the end of its path, or its only one."""
+    turn = obj.orientation
+    return turn if turn.single else turn[-1]
+
+
+def _dependency_order(variables):
+    """The names of `variables` with each after the ones its formula names."""
+    order, seen = [], set()
+
+    def visit(name, path=()):
+        if name in seen or name not in variables or name in path:
+            return
+        for used in expressions.referenced_names(variables[name]):
+            visit(used, (*path, name))
+        seen.add(name)
+        order.append(name)
+
+    for name in variables:
+        visit(name)
+    return order
+
+
 def _same_pose(obj, position, orientation):
     """Whether magpylib object `obj` stands at `position` turned by
     `orientation`, path and all."""
@@ -2433,6 +2456,9 @@ class MagpylibStudioSession:
         #: Where a relative mesh path is relative *to* — the directory of the
         #: document, which only the host knows, so it says (see load_scene).
         self._base_dir: str | None = None
+        #: (origin, variable) -> the variable an import from that origin made
+        #: here, for the next import of the same to share (`import_fragment`).
+        self._twins: dict = {}
         self._build()
 
     def _record_state(self, label, doc_before):
@@ -4642,6 +4668,235 @@ class MagpylibStudioSession:
             self._record_state(f"copy {object_id}", before)
             result["id"] = new_id
         return result
+
+    def export_object(self, object_id):
+        """An object as a scene of its own, to paste into another scene.
+
+        The live life of its subtree -- each object's create and the steps
+        after it, in the log's order -- with the variables it uses through
+        every formula and their limits, and what its groups did to it as one
+        rigid step at the end, so the copy stands where the object stands. A
+        step that would point outside it (a reparent onto a group not copied)
+        is left out, and so is an expression set aside under a pinned value.
+        A pattern's source comes inside a Collection named after it: a
+        pattern needs a group to put its copies in.
+
+        The answer's `scene` loads alone through `load_scene`, and `base_dir`
+        is the folder its mesh paths are relative to; `import_fragment` takes
+        both. A pattern's copy cannot be exported, as it cannot be copied.
+        """
+        try:
+            src = self._spec(object_id)
+        except KeyError as e:
+            return {"ok": False, "error": e.args[0]}
+        ids = {object_id} | {s["id"] for s in _walk_specs(src.get("children") or [])}
+        events = []
+        for event in self.doc.get("events") or []:
+            if event.get("target") not in ids:
+                continue
+            if event.get("op") == "reparent" and event.get("parent") not in ids:
+                continue
+            out = json.loads(json.dumps({k: v for k, v in event.items() if k != "id"}))
+            if out.get("op") == "create":
+                if out.get("parent") not in ids:
+                    out.pop("parent", None)
+                out.pop("overridden", None)
+            if "children" in out:
+                out["children"] = [c for c in out["children"] if c in ids]
+            events.append(out)
+        top = object_id
+        if any(
+            e.get("op") in _PATTERN_OPS and e["target"] == object_id for e in events
+        ):
+            top = f"{object_id}_group"
+            while top in ids:
+                top += "_"
+            label = self._objs[object_id].style.label or object_id
+            for event in events:
+                if event.get("op") == "create" and event["target"] == object_id:
+                    event["parent"] = top
+            events.insert(
+                0,
+                {
+                    "op": "create",
+                    "target": top,
+                    "type": "Collection",
+                    "style": {"label": label},
+                },
+            )
+
+        # the variables it names, and those their formulas name, in order
+        defined = self.doc.get("variables") or {}
+        wanted, queue = set(), list(expressions.referenced_names(events))
+        while queue:
+            name = queue.pop()
+            if name in defined and name not in wanted:
+                wanted.add(name)
+                queue.extend(expressions.referenced_names(defined[name]))
+        bounds = self.doc.get("variable_bounds") or {}
+        scene = {
+            "version": DOC_VERSION,
+            "variables": {n: v for n, v in defined.items() if n in wanted},
+            "variable_bounds": {n: b for n, b in bounds.items() if n in wanted},
+            "events": [{"id": f"e{i}", **e} for i, e in enumerate(events, 1)],
+        }
+        alone = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        loaded = alone.load_scene(scene, self._base_dir)
+        if not loaded["ok"]:
+            return loaded
+
+        # what its groups did to it, as one rigid step on the copy's top
+        here, there = self._objs[object_id], alone._objs[object_id]
+        turn = _last_turn(here) * _last_turn(there).inv()
+        shift = np.atleast_2d(here.position)[-1] - turn.apply(
+            np.atleast_2d(there.position)[-1]
+        )
+        steps = []
+        if turn.magnitude() > 1e-12:
+            steps.append(
+                {
+                    "op": "rotate_from_rotvec",
+                    "rotvec": np.round(turn.as_rotvec(degrees=True), 9).tolist(),
+                    "anchor": 0,
+                }
+            )
+        if np.linalg.norm(shift) > 1e-12:
+            steps.append({"op": "move", "displacement": np.round(shift, 12).tolist()})
+        if steps:
+            moved = alone._mutate_doc(
+                lambda doc: [alone._append({"target": top, **step}) for step in steps],
+                "place",
+            )
+            if not moved["ok"]:
+                return moved
+        return {
+            "ok": True,
+            "scene": json.loads(json.dumps(alone.doc)),
+            "base_dir": self._base_dir,
+            "id": top,
+        }
+
+    def import_fragment(self, fragment, parent=None, base_dir=None, origin=None):
+        """Merge `fragment` -- a scene, as `export_object` writes one -- into
+        this one under `parent` (a Collection's id, or the root), as one step
+        to undo.
+
+        Its objects keep their ids where this scene's log has never used them
+        and take new ones where it has. Its variables are its own, never this
+        scene's: one whose name is taken here comes in renamed -- `radius` as
+        `radius_2` -- every formula naming it rewritten, unless an earlier
+        import from the same `origin` made that very variable here (the same
+        definition and limits), which it then shares rather than making a
+        third. Mesh paths written from `base_dir` are rewritten to name the
+        same files from this scene's folder. Its variants stay behind.
+
+        The answer names the objects it put at `parent` (`ids`) and the
+        variables it renamed (`renamed`, old to new).
+        """
+        if parent is not None:
+            try:
+                if self._spec(parent)["type"] != "Collection":
+                    return {
+                        "ok": False,
+                        "error": f"parent {parent!r} is not a Collection",
+                    }
+            except KeyError:
+                return {"ok": False, "error": f"unknown object id {parent!r}"}
+        alone = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        loaded = alone.load_scene(fragment, base_dir)
+        if not loaded["ok"]:
+            return loaded
+        frag = alone.doc
+        tops = [spec["id"] for spec in frag.get("objects") or []]
+
+        # ids: kept where this log never used them, else new
+        used = {s["id"] for s, _ in self._iter_specs()} | _ids_in_log(
+            self.doc.get("events") or []
+        )
+        theirs = sorted(_ids_in_log(frag.get("events") or []))
+        ids = {i: i for i in theirs if i not in used}
+        for old in theirs:
+            if old not in ids:
+                ids[old] = self._unique_id(old, taken={*ids.values(), *theirs})
+
+        # variables: their own, renamed where the name is taken here
+        mine = self.doc.get("variables") or {}
+        my_bounds = self.doc.get("variable_bounds") or {}
+        their_vars = frag.get("variables") or {}
+        their_bounds = frag.get("variable_bounds") or {}
+        renames, added, added_bounds, twins = {}, {}, {}, {}
+
+        def renaming(value):
+            for old, new in renames.items():
+                value = expressions.renamed(value, old, new)
+            return value
+
+        def fresh(name):
+            stem = re.sub(r"_\d+$", "", name) or name
+            n = 2
+            while (
+                any(f"{stem}_{n}" in names for names in (mine, added, their_vars))
+                or f"{stem}_{n}" in renames.values()
+            ):
+                n += 1
+            return f"{stem}_{n}"
+
+        for name in _dependency_order(their_vars):
+            definition = renaming(their_vars[name])
+            limits = their_bounds.get(name)
+            twin = self._twins.get((origin, name)) if origin is not None else None
+            if (
+                twin is not None
+                and twin in mine
+                and mine[twin] == definition
+                and my_bounds.get(twin) == limits
+            ):
+                if twin != name:
+                    renames[name] = twin
+                continue
+            final = name if name not in mine and name not in added else fresh(name)
+            if final != name:
+                renames[name] = final
+            added[final] = definition
+            if limits is not None:
+                added_bounds[final] = limits
+            if origin is not None:
+                twins[(origin, name)] = final
+
+        events = []
+        for event in frag.get("events") or []:
+            out = renaming(
+                json.loads(json.dumps({k: v for k, v in event.items() if k != "id"}))
+            )
+            out["target"] = ids[out["target"]]
+            if out.get("parent") is not None:
+                out["parent"] = ids[out["parent"]]
+            if out.get("children"):
+                out["children"] = [ids[c] for c in out["children"]]
+            if out.get("op") in ("create", "reparent") and out.get("parent") is None:
+                # at their root, so at the paste's
+                out.pop("parent", None)
+                if parent is not None:
+                    out["parent"] = parent
+            events.append(out)
+        _rebase_doc({"events": events}, base_dir, self._base_dir)
+
+        def merge(doc):
+            doc["variables"] = {**(doc.get("variables") or {}), **added}
+            if added_bounds:
+                doc["variable_bounds"] = {
+                    **(doc.get("variable_bounds") or {}),
+                    **added_bounds,
+                }
+            for event in events:
+                self._append(event)
+
+        pasted = [ids[i] for i in tops]
+        result = self._mutate_doc(merge, f"paste {', '.join(pasted)}")
+        if not result["ok"]:
+            return result
+        self._twins.update(twins)
+        return {**result, "ids": pasted, "renamed": renames}
 
     def begin_interaction(self):
         """Group the edits that follow into one undo step, until

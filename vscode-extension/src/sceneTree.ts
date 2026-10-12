@@ -367,6 +367,13 @@ export class SceneTreeProvider
     ) => Promise<void>,
     private readonly listOperations: (doc: SceneDocument) => Promise<SceneOperation[]>,
     private readonly load: (root: SceneRoot) => void,
+    /** Objects dropped on another scene: copied there, never moved. */
+    private readonly copyObjects: (
+      from: SceneDocument,
+      objects: SceneObject[],
+      into: SceneDocument,
+      parent: string | null,
+    ) => Promise<void>,
   ) {}
 
   /** Read `doc`'s rows again, and only its; with no scene, the scene rows
@@ -692,19 +699,18 @@ export class SceneTreeProvider
     if (!scene || !into) {
       return;
     }
-    if (into !== scene) {
-      void vscode.window.showInformationMessage(
-        'Magpylib Studio: copying an object into another scene comes next; ' +
-          'for now an object moves within its own scene.',
-      );
-      return;
-    }
     const parent =
       target === undefined || isSceneRoot(target)
         ? null
         : target.type === 'Collection' && !target.derived
           ? target.id
           : target.parent;
+    if (into !== scene) {
+      // a drag across scenes copies: one that slipped would otherwise take
+      // the object out of its scene (plans/several-scenes.md §5.1)
+      await this.copyObjects(scene, source, into, parent);
+      return;
+    }
     for (const obj of source) {
       if (obj.id !== parent && (obj.parent ?? null) !== parent) {
         await this.moveObject(scene, obj.id, parent); // engine rejects cycles cleanly

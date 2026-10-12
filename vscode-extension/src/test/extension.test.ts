@@ -18,8 +18,9 @@ import {
   splitTerms,
   stopEngineForTest,
 } from '../extension';
-import { bringToFront, frontScene, SceneDocument } from '../scenes';
+import { bringToFront, frontScene, openScenes, SceneDocument } from '../scenes';
 import {
+  isObject,
   SceneNode,
   SceneObject,
   SceneOperation,
@@ -43,6 +44,7 @@ async function oneSceneTree(
     async () => {},
     async () => operations,
     () => {},
+    async () => {},
   );
   // one scene shown: its rows are the tree's top
   return { tree, roots: await tree.getChildren() };
@@ -1213,8 +1215,8 @@ suite('magpylib-studio', () => {
     await vscode.commands.executeCommand('magpylib-studio.undo');
     await sceneWhere(holding('turn'), "the coil's undo to bring its turn back");
 
-    // A copy taken in one scene does not paste into another: its id means
-    // nothing there, or another object. (Copying across is a step of its own.)
+    // A copy taken in one scene pastes into another as a copy of the object,
+    // its variables with it: an id alone means nothing there.
     await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
     await sceneWhere(holding('halbach'), 'the halbach in front to copy from');
     await vscode.commands.executeCommand('magpylib-studio.copyObject', {
@@ -1225,14 +1227,12 @@ suite('magpylib-studio', () => {
       visible: true,
     });
     await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
-    const coilBefore = await sceneWhere(holding('coil'), 'the coil in front to paste into');
+    await sceneWhere(holding('coil'), 'the coil in front to paste into');
     await vscode.commands.executeCommand('magpylib-studio.pasteObject');
-    await pause(300);
-    assert.deepStrictEqual(
-      (await scene()).events,
-      coilBefore.events,
-      "a copy from the halbach landed in the coil",
-    );
+    const pasted = await sceneWhere(holding('r2'), "the halbach's magnet copied into the coil");
+    const variables = (pasted as unknown as { variables: Record<string, unknown> }).variables;
+    assert.strictEqual(variables.n, 10, 'its variables did not come with it');
+    assert.strictEqual(tab(halbach)?.isDirty, false, 'copying from the halbach changed it');
 
     // Pasted onto its own scene's row, a copy lands at that scene's top level.
     // A group, since a pattern's source needs one to stand in (plan §5.1).
@@ -1270,6 +1270,87 @@ suite('magpylib-studio', () => {
     assert.ok(!ids((await scene()).objects).has('late'), 'it landed in the coil, in front');
     await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
     await sceneWhere(holding('late'), 'the group to land in the halbach, where it began');
+  });
+
+  test('a drag copies across scenes, and Cut and Paste moves', async function () {
+    this.timeout(90000);
+    const halbach = tempScene('across-halbach.magpy.json');
+    await writeJson(halbach, await loadExample('halbach', 'halbach'));
+    const coil = tempScene('across-coil.magpy.json');
+    await writeJson(coil, await loadExample('coil', 'coil'));
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', halbach);
+    await vscode.commands.executeCommand('magpylib-studio.loadScene', coil);
+    await sceneWhere(holding('coil'), 'the coil in front');
+    const doc = (uri: vscode.Uri) => openScenes().find((d) => d.uri.toString() === uri.toString())!;
+    const tab = (uri: vscode.Uri) =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .find((t) => t.input instanceof vscode.TabInputCustom && t.input.uri.toString() === uri.toString());
+    const tree = sceneTreeForTest();
+    // a scene's row in Open Scenes, which the tree takes as a scene's heading
+    const heading = (uri: vscode.Uri) =>
+      openScenesForTest()
+        .getChildren()
+        .find((r) => r.uri.toString() === uri.toString())!;
+    const row = async (under: SceneNode, id: string): Promise<SceneObject | undefined> => {
+      for (const child of await tree.getChildren(under)) {
+        // a removed object's dimmed row, kept for its history, is not it
+        if (isObject(child) && !child.absent) {
+          const found = child.id === id ? child : await row(child, id);
+          if (found) {
+            return found;
+          }
+        }
+      }
+      return undefined;
+    };
+
+    // A drag onto the other scene's heading copies: that scene comes in
+    // front holding the copy, and the dragged one stays where it was.
+    const dragged = new vscode.DataTransfer();
+    tree.handleDrag([(await row(heading(halbach), 'r2'))!], dragged);
+    await tree.handleDrop(heading(coil), dragged);
+    await sceneWhere(holding('r2'), 'the dragged magnet copied into the coil, in front');
+    assert.strictEqual(frontScene(), doc(coil));
+    assert.strictEqual(tab(halbach)?.isDirty, false, 'a drag across moved the magnet');
+
+    // Cut in one scene and pasted in the other moves it; one undo where it
+    // landed puts it back where it was.
+    bringToFront(doc(halbach));
+    await sceneWhere(holding('ring1'), 'the halbach in front to cut from');
+    await vscode.commands.executeCommand('magpylib-studio.cutObject', {
+      id: 'ring1', type: 'Collection', label: 'Ring 1', parent: 'halbach', visible: true,
+    });
+    bringToFront(doc(coil));
+    await sceneWhere(holding('coil'), 'the coil in front to paste into');
+    await vscode.commands.executeCommand('magpylib-studio.pasteObject', heading(coil));
+    await sceneWhere(holding('ring1'), 'the ring moved into the coil');
+    await until(() => tab(halbach)?.isDirty === true, 'the cut to leave the halbach');
+    let halbachTop = await row(heading(halbach), 'ring1');
+    assert.strictEqual(halbachTop, undefined, 'the ring stayed in the halbach');
+    await vscode.commands.executeCommand('magpylib-studio.undo');
+    await sceneWhere(without('ring1'), 'the undo to take the ring out of the coil');
+    for (let i = 0; i < 40 && !halbachTop; i++) {
+      await pause(100);
+      sceneTreeForTest().refresh(doc(halbach));
+      halbachTop = await row(heading(halbach), 'ring1');
+    }
+    assert.ok(halbachTop, 'the same undo did not put the ring back in the halbach');
+
+    // A copy outlives its scene: taken, its tab closed, it still pastes.
+    bringToFront(doc(halbach));
+    await sceneWhere(holding('halbach'), 'the halbach in front to copy from');
+    await vscode.commands.executeCommand('magpylib-studio.copyObject', {
+      id: 'ring2', type: 'Collection', label: 'Ring 2', parent: 'halbach', visible: true,
+    });
+    await vscode.commands.executeCommand('magpylib-studio.saveScene');
+    const closing = tab(halbach)!;
+    await vscode.window.tabGroups.close(closing);
+    await until(() => !openScenes().some((d) => d.uri.toString() === halbach.toString()), 'the halbach to close');
+    bringToFront(doc(coil));
+    await sceneWhere(holding('coil'), 'the coil in front to paste into');
+    await vscode.commands.executeCommand('magpylib-studio.pasteObject', heading(coil));
+    await sceneWhere(holding('ring2'), 'the ring copied from a closed scene');
   });
 
   test('a scene a crash left with unsaved changes is offered them back', async function () {

@@ -19,6 +19,17 @@ ones picked. The Variables, Inspector and Undo views follow the scene in front.
 </details>
 
 <details>
+<summary>Copy, cut and drag objects between scenes</summary>
+
+Paste an object into another scene, or drag it onto that scene in the side bar,
+and it arrives as a copy where it stood, with the variables it uses: a name the
+scene already has comes in renamed (`radius` as `radius_2`), so the copy never
+moves with the other scene's slider. Cut and Paste moves it, and one undo where
+it landed puts it back. A copy taken before its scene closed still pastes.
+
+</details>
+
+<details>
 <summary>A scene's file is watched</summary>
 
 A change made elsewhere — git, another editor, an agent — comes into the tab as

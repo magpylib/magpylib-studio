@@ -55,8 +55,31 @@ let sceneTreeView: vscode.TreeView<SceneNode> | undefined;
 let openScenesList: OpenScenesProvider | undefined;
 /** The scenes Objects shows: those picked in Open Scenes. */
 let shownScenes = new Set<SceneDocument>();
-/** What Copy or Cut took, and from which scene: an id means nothing in another. */
-let clipboard: { id: string; cut: boolean; scene: SceneDocument | undefined } | undefined;
+/** An object written as a scene of its own, to paste into another
+ *  (`export_object`). */
+interface Exported {
+  scene: unknown;
+  base_dir: string | null;
+}
+/** What Copy or Cut took: the object and its scene, read when it is pasted,
+ *  as within a scene. When that scene closes, the copy is taken then
+ *  (`copy`), and the scene is gone (plans/several-scenes.md §5.1). */
+let clipboard:
+  | {
+      id: string;
+      label: string;
+      cut: boolean;
+      scene: SceneDocument | undefined;
+      /** The scene it came from, for the variables a paste shares. */
+      origin: string;
+      copy?: Promise<Exported | undefined>;
+    }
+  | undefined;
+/** The last Cut pasted into another scene: undoing that paste also undoes
+ *  the removal, while it is still its scene's latest step. */
+let lastMove:
+  | { into: SceneDocument; pasted: string; from: SceneDocument; removed: string }
+  | undefined;
 let historyTree: HistoryTreeProvider | undefined;
 let variablesTree: VariablesViewProvider | undefined;
 let inspector: InspectorViewProvider | undefined;
@@ -2770,6 +2793,17 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     },
     (root) => void loadSceneTab(root),
+    async (from, objects, into, parent) => {
+      const copies: Exported[] = [];
+      for (const obj of objects) {
+        const copy = await exportFrom(from, obj.id);
+        if (copy) {
+          copies.push(copy);
+        }
+      }
+      const labels = objects.map((obj) => obj.label).join(', ');
+      await pasteInto(into, copies, parent, from.key, `copied ${labels}`);
+    },
   );
   sceneTree = tree;
 
@@ -2886,9 +2920,21 @@ export function activate(context: vscode.ExtensionContext): void {
     return pick?.label;
   };
 
+  /** The label of the step `doc`'s next undo takes back. */
+  const latestStep = async (doc: SceneDocument) => {
+    const { undo } = await engineFor(context, doc).request<{ undo: string[] }>('get_history');
+    return undo[undo.length - 1];
+  };
+
   /** Undo/redo: refresh on success; a quiet status message when empty. */
   const undoRedo = async (method: 'undo' | 'redo') => {
     try {
+      // a Cut pasted into this scene: its removal goes back with it
+      const scene = actingScene();
+      const move =
+        method === 'undo' && lastMove && scene === lastMove.into && (await latestStep(scene)) === lastMove.pasted
+          ? lastMove
+          : undefined;
       const result = (await (await getEngine(context)).request(method)) as {
         ok: boolean;
         error?: string;
@@ -2898,11 +2944,84 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         vscode.window.setStatusBarMessage(`Magpylib Studio: ${result.error}`, 2000);
       }
+      if (move && result.ok) {
+        lastMove = undefined;
+        const from = move.from;
+        if (openScenes().includes(from) && (await latestStep(from)) === move.removed) {
+          await inScene(from.key, async () => {
+            if ((await engineFor(context, from).request<{ ok: boolean }>('undo')).ok) {
+              broadcastMutation();
+            }
+          });
+        } else {
+          vscode.window.setStatusBarMessage(
+            `Magpylib Studio: the cut object is still removed from ${from.name}; undo there`,
+            5000,
+          );
+        }
+      }
     } catch (err) {
       vscode.window.showErrorMessage(
         `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
       );
     }
+  };
+
+  /** `id` from `doc`, written as a scene of its own; said when it cannot be. */
+  const exportFrom = async (doc: SceneDocument, id: string): Promise<Exported | undefined> => {
+    const out = await engineFor(context, doc).request<Exported & { ok: boolean; error?: string }>(
+      'export_object',
+      { object_id: id },
+    );
+    if (!out.ok) {
+      void vscode.window.showErrorMessage(`Magpylib Studio: ${out.error}`);
+      return undefined;
+    }
+    return out;
+  };
+
+  /** Copies into `into`, under `parent`, each one step to undo there, with
+   *  variables of their own (plans/several-scenes.md §5.1). `into` comes in
+   *  front, its tab forward and the first copy selected, and the status bar
+   *  says what was done. What was made, by id. */
+  const pasteInto = async (
+    into: SceneDocument,
+    copies: Exported[],
+    parent: string | null,
+    origin: string,
+    what: string,
+  ): Promise<string[]> => {
+    const made: string[] = [];
+    const renamed: Record<string, string> = {};
+    await inScene(into.key, async () => {
+      for (const copy of copies) {
+        const result = await engineFor(context, into).request<{
+          ok: boolean;
+          error?: string;
+          ids?: string[];
+          renamed?: Record<string, string>;
+        }>('import_fragment', { fragment: copy.scene, parent, base_dir: copy.base_dir, origin });
+        if (!result.ok) {
+          void vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
+          break;
+        }
+        made.push(...(result.ids ?? []));
+        Object.assign(renamed, result.renamed);
+      }
+      if (made.length) {
+        broadcastMutation();
+      }
+    });
+    if (made.length) {
+      actOn(into);
+      selectObjectInStudio(context, made[0]);
+      const names = Object.entries(renamed).map(([old, now]) => `${old} → ${now}`);
+      vscode.window.setStatusBarMessage(
+        `Magpylib Studio: ${what} to ${into.name}${names.length ? ` (${names.join(', ')})` : ''}`,
+        5000,
+      );
+    }
+    return made;
   };
 
   /** Scene candidates captured by the last script import (one per show()
@@ -4224,7 +4343,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const closeSession = (doc: SceneDocument) => {
     if (engine?.isRunning && doc.engine === engine) {
+      if (clipboard?.scene === doc) {
+        // written before the close, so answered before it
+        const { id } = clipboard;
+        clipboard.copy = engine
+          .request<Exported & { ok: boolean }>('export_object', { object_id: id }, doc.session)
+          .then((out) => (out.ok ? out : undefined), () => undefined);
+        clipboard.scene = undefined;
+      }
       engine.request('close_session', { session: doc.session }).catch(() => {});
+    }
+    if (clipboard?.scene === doc) {
+      clipboard.scene = undefined; // no engine to ask: nothing to paste
     }
   };
 
@@ -4589,6 +4719,9 @@ export function activate(context: vscode.ExtensionContext): void {
         doc.opening = handed.doc.opening;
         doc.lastDocument = handed.doc.lastDocument;
         doc.selected = handed.doc.selected;
+        if (clipboard?.scene === handed.doc) {
+          clipboard.scene = doc;
+        }
         doc.diskText = handed.text;
         addScene(doc);
         watchFile(doc);
@@ -6367,7 +6500,8 @@ export function activate(context: vscode.ExtensionContext): void {
     registerCommand('magpylib-studio.copyObject', (obj?: SceneObject) => {
       const target = obj ?? treeSelection();
       if (target) {
-        clipboard = { id: target.id, cut: false, scene: actingScene() };
+        const scene = actingScene();
+        clipboard = { id: target.id, label: target.label, cut: false, scene, origin: scene?.key ?? '' };
         void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', true);
         vscode.window.setStatusBarMessage(
           `Magpylib Studio: copied "${target.label}"`,
@@ -6378,7 +6512,8 @@ export function activate(context: vscode.ExtensionContext): void {
     registerCommand('magpylib-studio.cutObject', (obj?: SceneObject) => {
       const target = obj ?? treeSelection();
       if (target) {
-        clipboard = { id: target.id, cut: true, scene: actingScene() };
+        const scene = actingScene();
+        clipboard = { id: target.id, label: target.label, cut: true, scene, origin: scene?.key ?? '' };
         void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', true);
         vscode.window.setStatusBarMessage(`Magpylib Studio: cut "${target.label}"`, 2000);
       }
@@ -6393,20 +6528,53 @@ export function activate(context: vscode.ExtensionContext): void {
         // The row pasted onto, whose scene came in front with it. A scene's
         // own row means its top level.
         const target = isObject(obj) ? obj : obj ? undefined : treeSelection();
-        // An id names an object in its own scene only: pasted into another it
-        // would copy, or for a Cut move, whatever that scene has under the
-        // same id. Copying across scenes is its own step (plan §5.1).
-        if (clipboard.scene !== actingScene()) {
-          vscode.window.showInformationMessage(
-            `Magpylib Studio: "${clipboard.id}" was copied from ` +
-              `${clipboard.scene?.name ?? 'a scene now closed'}; pasting into ` +
-              'another scene is not possible yet. Paste it into its own scene.',
-          );
-          return;
-        }
         // Paste into a collection when one is targeted, else at the scene root.
         const parent =
           target?.type === 'Collection' ? target.id : (target?.parent ?? null);
+        const into = actingScene();
+        if (into && clipboard.scene !== into) {
+          // Another scene: an id means nothing there, so the object goes as
+          // a copy of itself, its variables with it (plan §5.1).
+          const taken = clipboard;
+          const from = taken.scene;
+          const copy = from ? await exportFrom(from, taken.id) : await taken.copy;
+          if (!copy) {
+            if (!from) {
+              void vscode.window.showErrorMessage(
+                `Magpylib Studio: "${taken.label}" could not be kept when its scene closed.`,
+              );
+            }
+            return;
+          }
+          const moving = taken.cut && from !== undefined;
+          const made = await pasteInto(
+            into,
+            [copy],
+            parent,
+            taken.origin,
+            `${moving ? 'moved' : 'copied'} ${taken.label}`,
+          );
+          if (!made.length || !taken.cut) {
+            return;
+          }
+          clipboard = undefined; // a cut object can only land once
+          void vscode.commands.executeCommand('setContext', 'magpylib-studio.canPaste', false);
+          if (!from) {
+            vscode.window.setStatusBarMessage(
+              `Magpylib Studio: ${taken.label}'s scene has closed, so it was pasted as a copy`,
+              5000,
+            );
+            return;
+          }
+          const removed = await inScene(from.key, () =>
+            mutateFromTree('remove_object', { object_id: taken.id }, { checkVariables: false }),
+          );
+          if (removed) {
+            lastMove = { into, pasted: `paste ${made.join(', ')}`, from, removed: `remove ${taken.id}` };
+          }
+          actOn(into); // the removal's scene stays behind
+          return;
+        }
         if (clipboard.cut) {
           await mutateFromTree('move_object', {
             object_id: clipboard.id,

@@ -342,6 +342,19 @@ through the same exporter.
   (`import_fragment`), not a gesture: the widget is the view of one scene
   ([0022](../decisions.md#0022-what-the-widget-is-and-is-not)).
 
+Built 2026-10-12 as above, except:
+
+- **A copy within a scene keeps `copy_object`**: beside its source it stays in
+  the same groups and on the same variables, which an exported copy, with
+  variables of its own, would not.
+- **A pattern's source copied across comes in its own Collection wherever it
+  lands**, not only at a root: the copy is a scene that loads alone, and a
+  pattern at its root would not.
+- **The twin a paste shares is remembered by the session** that made it, keyed
+  by the scene copied from; after a reload the next paste makes a new one.
+- **The clipboard is the window's.** Pasting into another window, through the
+  system clipboard, is left for when someone asks.
+
 ## 6. Variants
 
 Built (#32): architecture.md says how they work,
@@ -377,9 +390,9 @@ Decided 2026-10-11. Each step lands with its changelog and architecture.md.
    hand-over, the recovery copy, a box's own undo in the view, the upgrade, the
    variants' side bar actions. The first slice anyone sees, and the riskiest,
    which step 0 de-risks.
-4. **Copying across scenes** (about 2 days), engine and interface together: the
-   exporter, the import, paste and drag, the clipboard; a copy within a scene
-   through the same exporter.
+4. **Copying across scenes** -- built 2026-10-12 (about 2 days), engine and
+   interface together: the exporter, the import, paste and drag, the clipboard;
+   a copy within a scene stays `copy_object` (§5.1).
 5. **Scripts outside the engine** (about 1 day), before any R3 step 2 work: the
    child process, the watchdog, Restart Engine.
 
