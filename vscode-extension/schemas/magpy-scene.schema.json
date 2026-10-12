@@ -137,17 +137,22 @@
       "type": "object"
     },
     "objectType": {
-      "description": "A magpylib class, dotted from the magpylib root.",
+      "description": "A magpylib class, dotted from the magpylib root: one of these, and nothing else is read.",
       "type": "string",
-      "examples": [
+      "enum": [
         "magnet.Cuboid",
         "magnet.Cylinder",
         "magnet.CylinderSegment",
         "magnet.Sphere",
         "magnet.Tetrahedron",
+        "magnet.TriangularMesh",
         "current.Circle",
         "current.Polyline",
+        "current.TriangleSheet",
+        "current.TriangleStrip",
+        "misc.CustomSource",
         "misc.Dipole",
+        "misc.Triangle",
         "Sensor",
         "Collection"
       ]
