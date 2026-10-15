@@ -101,10 +101,10 @@ def resolved_values(obj):
     """Effective style values (set values merged over the defaults). Returns
     {} if this magpylib cannot resolve them."""
     try:
-        from magpylib._src.defaults.defaults_classes import default_settings
+        import magpylib as magpy
         from magpylib._src.style import get_style
 
-        resolved = get_style(obj, default_settings)
+        resolved = get_style(obj, magpy.defaults)
     except Exception:  # noqa: BLE001 - private API, optional feature
         return {}
     if hasattr(resolved, "as_dict"):
