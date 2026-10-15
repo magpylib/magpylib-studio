@@ -18,7 +18,7 @@ and 10):
   prefix from it, so with the defaults an unrelated object moving changes
   everyone's vertices. `pinned_scene_units` fixes both, for the drawing's
   duration.
-* A trace's colour arrives one of three mutually exclusive ways, and two of
+* A mesh's colour arrives three ways, which are not exclusive, and two of
   them are traps -- see `_mesh_payload`.
 * The payload carries no transform, so a mesh has no origin to be rotated
   about. The session knows the objects and supplies them as anchors.
@@ -38,30 +38,12 @@ from scipy.spatial.transform import Rotation
 try:
     from magpylib.graphics.backend import DisplayBackend
 except ImportError:  # pragma: no cover - depends on the magpylib installed
-    try:
-        # For magpylib 5.2.3 and the unreleased builds before magpylib#978,
-        # where the public path was not importable from an entry point -- the
-        # one place magpylib documents for shipping a backend. Discovery ran
-        # from inside `defaults_classes` while magpylib was still importing,
-        # and `magpylib.graphics.__init__` pulls the style and display stack,
-        # which came back round to `default_settings` before it was bound:
-        #
-        #   ImportError: cannot import name 'default_settings' from partially
-        #   initialized module magpylib._src.defaults.defaults_classes
-        #
-        # Discovery now waits for the import to finish, so the public path
-        # above is the one taken. This stays while ">=5.2" is supported.
-        # `_src.display.api` is where the public path re-exports from, and
-        # `backend_registry` has already imported it by then, so it is there.
-        from magpylib._src.display.api import DisplayBackend
-    except ImportError:
-        #: The display-backend API landed in magpylib after 5.2.3, and this
-        #: module is the only thing here that needs it. Everything else the
-        #: studio does works with the released version, so this is not a hard
-        #: dependency: without it the scene graph is unavailable and the view
-        #: draws the Plotly figure, which is what it drew before any of this
-        #: existed.
-        DisplayBackend = None
+    #: The display-backend API landed in magpylib after 5.2.3, and this module
+    #: is the only thing here that needs it. Everything else the studio does
+    #: works with the released version, so this is not a hard dependency:
+    #: without it the scene graph is unavailable and the view draws the Plotly
+    #: figure, which is what it drew before any of this existed.
+    DisplayBackend = None
 
 #: Magpylib's `line_width` and `marker_size` are nominal: every backend scales
 #: them into its own units, and nothing in the contract says what a width of 2
@@ -199,12 +181,6 @@ def pinned_scene_units():
         ) = was
 
 
-def _hex_to_rgb(color):
-    """'#rrggbb' -> (r, g, b) floats in 0..1."""
-    color = color.lstrip("#")
-    return tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4))
-
-
 def _colorscale_lut(colorscale):
     """A Magpylib colorscale as a flat RGBA lookup table.
 
@@ -215,17 +191,18 @@ def _colorscale_lut(colorscale):
     ramp with no grey at all. What is interpolated across a face has to be the
     *intensity*, with the colour looked up per fragment: hence a texture,
     indexed by an intensity-valued UV. Plotly's shader does the same.
+
+    The stops' colours may be CSS names as well as hex: a magnet styled
+    ``magnetization_color_north="r"`` sends ``"red"``.
     """
-    stops = np.array([s for s, _ in colorscale], dtype=float)
-    colors = np.array([_hex_to_rgb(c) for _, c in colorscale], dtype=float)
+    from magpylib.graphics.backend import colors_from_colorscale
+
     samples = np.linspace(0.0, 1.0, LUT_SIZE)
-    lut = np.stack(
-        [np.interp(samples, stops, colors[:, channel]) for channel in range(3)]
-        # RGBA: three.js dropped RGBFormat in r137
-        + [np.ones_like(samples)],
-        axis=1,
-    )
-    return np.round(lut * 255).astype(int).ravel().tolist()
+    hexes = colors_from_colorscale(samples, colorscale, cmin=0, cmax=1)
+    # RGBA: three.js dropped RGBFormat in r137
+    return [
+        v for h in hexes for v in (*(int(h[i : i + 2], 16) for i in (1, 3, 5)), 255)
+    ]
 
 
 def _points(trace):
@@ -236,8 +213,9 @@ def _points(trace):
 def _mesh_payload(trace):
     """One `mesh3d` trace as buffers.
 
-    Colour arrives one of three mutually exclusive ways, and only the first is
-    what it looks like:
+    Colour arrives three ways, and only the first is what it looks like. They
+    are not exclusive: a magnet's mesh carries its base ``color``, for its
+    legend swatch, beside ``intensity`` or ``facecolor``, which win over it.
 
     * a flat ``color``;
     * ``intensity`` per vertex with a ``colorscale`` -- see `_colorscale_lut`;
@@ -362,14 +340,20 @@ UNAVAILABLE = (
 def available():
     """Whether the installed magpylib can do what the scene graph needs.
 
-    Two things, both newer than 5.2.3 and both from the same magpylib
-    release: a backend can be registered and handed a `Scene`, and the length
-    unit the scene is drawn in can be pinned. Without the second the geometry
-    follows the scene extent rather than the objects, which is the thing a
-    kept scene graph cannot survive -- so it is as much a requirement as the
-    first, and checked here rather than failing later inside a redraw.
+    Three things, all newer than 5.2.3: a backend can be registered and
+    handed a `Scene`, the length unit the scene is drawn in can be pinned,
+    and a backend can size and colour sensor pixels as magpylib does. Without
+    the second the geometry follows the scene extent rather than the objects,
+    which is the thing a kept scene graph cannot survive; without the third
+    the pixels the view draws itself (`_pixels_of`) cannot match magpylib's.
+    The last two are as much a requirement as the first, and checked here
+    rather than failing later inside a redraw.
     """
-    return DisplayBackend is not None and hasattr(magpy.defaults.display, "units")
+    return (
+        DisplayBackend is not None
+        and hasattr(magpy.defaults.display, "units")
+        and hasattr(magpy.graphics.backend, "sensor_pixel_fields")
+    )
 
 
 #: Where the capture backend below leaves the scene it was handed, for
@@ -931,16 +915,15 @@ def _instanced_pixels(objects, key_of):
     sensors = [] if key_of is None else _reading_sensors(objects)
     if not sensors:
         return [], lambda: None
-    from magpylib._src.display.traces_generic import get_sensor_pixel_field
+    from magpylib.graphics.backend import sensor_pixel_fields
 
-    fields = get_sensor_pixel_field(list(_given(objects)))
+    fields = sensor_pixel_fields(_given(objects))
     items = []
     for sensor in sensors:
         key = key_of(id(sensor))
-        read = fields.get(sensor) or {}
-        if key is None or not read:
+        if key is None or sensor not in fields:
             continue
-        items.extend(_pixels_of(sensor, next(iter(read.values())), key))
+        items.extend(_pixels_of(sensor, fields[sensor], key))
     was = [(sensor, sensor.style.pixel.size) for sensor in sensors]
     for sensor, _ in was:
         sensor.style.pixel.size = 0
@@ -961,11 +944,11 @@ def _pixels_of(sensor, field, key, path_ind=-1):
     spacing and the sensor's size, scaled by the reading where the style
     says so; the colour from the colormap over the reading. What differs is
     the shape: no mesh, a position, a direction, a size and a colour per
-    pixel. A reading is in the sensor's own frame, as magpylib hands it
-    over, and the sensor's pose takes it into the world's.
+    pixel. A reading is in the sensor's own frame, with only the components
+    its source names, as `sensor_pixel_fields` hands it over, and the
+    sensor's pose takes it into the world's.
     """
-    from magpylib._src.display.traces_core import _apply_scaling_transformation
-    from magpylib._src.display.traces_utility import get_hexcolors_from_colormap
+    from magpylib.graphics.backend import colors_from_colorscale, scale_pixel_norms
     from scipy.spatial.distance import pdist
 
     style = sensor.style
@@ -991,49 +974,27 @@ def _pixels_of(sensor, field, key, path_ind=-1):
         px_dim = dim_ext / 5 if min_dist == 0 else min_dist / 2
     sizes = np.full(len(pixel), px_dim * float(_resolve(sensor, "style.pixel.size")))
 
-    source = _resolve(sensor, "style.pixel.field.source")
-    _, *coords_str = source  # "B", or "Bxy" for two of its components
-    coords_str = coords_str or "xyz"
-    coords = list({"xyz".index(v) for v in coords_str if v in "xyz"})
-    other = [i for i in range(3) if i not in coords]
-    field = np.array(field, dtype=float)
-    field[..., other] = 0
+    # Scaled over the whole path, as magpylib scales them; NaN where a pixel
+    # reads nothing, whose size stays the style's and colour the null colour.
+    field = np.asarray(field, dtype=float)
     norms = np.linalg.norm(field, axis=-1)
-    is_null = np.logical_or(norms == 0, np.isnan(norms))
-    norms[is_null] = np.nan
-    # Nothing read anywhere -- no source, or every pixel on a null -- is no
-    # reading to scale by: the sizes stay the style's, the colours the null
-    # colour. magpylib's own scaling would warn over the all-NaN slice.
-    any_reading = not is_null.all()
-    if any_reading:
-        nmin, nmax = np.nanmin(norms), np.nanmax(norms)
-        ptp = nmax - nmin
-        norms = (norms - nmin) / ptp if ptp != 0 else np.full_like(norms, 0.5)
-    sizescaling = _resolve(sensor, "style.pixel.field.sizescaling")
-    if any_reading and sizescaling != "uniform":
-        scaled = _apply_scaling_transformation(
-            norms,
-            sizescaling,
-            is_null,
-            path_ind,
-            min_=_resolve(sensor, "style.pixel.field.sizemin"),
-        )
-        scaled[is_null[path_ind]] = 1
-        sizes = sizes * scaled
+    scaled = scale_pixel_norms(
+        norms,
+        _resolve(sensor, "style.pixel.field.sizescaling"),
+        minimum=_resolve(sensor, "style.pixel.field.sizemin"),
+    )[path_ind]
+    sizes = sizes * np.where(np.isnan(scaled), 1, scaled)
     pixel_color = _resolve(sensor, "style.pixel.color")
     colors = "black" if pixel_color is None else str(pixel_color)
     colorscaling = _resolve(sensor, "style.pixel.field.colorscaling")
-    if any_reading and colorscaling != "uniform":
-        graded = _apply_scaling_transformation(norms, colorscaling, is_null, path_ind)
-        colors = [
-            str(c)
-            for c in get_hexcolors_from_colormap(
-                values=graded,
-                colormap=_resolve(sensor, "style.pixel.field.colormap"),
-                cmin=0,
-                cmax=1,
-            )
-        ]
+    # "uniform" is no colormap at all, not the top of one
+    if colorscaling != "uniform":
+        colors = colors_from_colorscale(
+            scale_pixel_norms(norms, colorscaling)[path_ind],
+            _resolve(sensor, "style.pixel.field.colormap"),
+            cmin=0,
+            cmax=1,
+        )
 
     # into the world: the pixels sit in the sensor's frame, and so does the
     # reading, which magpylib rotates into it

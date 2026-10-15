@@ -692,18 +692,24 @@ def test_only_shapes_that_scale_are_offered(session):
 
 
 @needs_scene_graph
-def test_the_studio_runs_without_the_display_backend_api(session, monkeypatch):
+@pytest.mark.parametrize("missing", ["backend API", "pixel helpers"])
+def test_the_studio_runs_without_the_display_backend_api(session, monkeypatch, missing):
     """The scene graph needs an API newer than released magpylib, and nothing
     else here does.
 
     A hard import made the whole package unimportable against 5.2.3 -- not
     just the 3D view, everything -- which broke what this promises to work
     with. It is optional: the scene graph says what it needs, and the view
-    draws the plotly figure, as it did before any of this existed.
+    draws the plotly figure, as it did before any of this existed. The pixel
+    helpers came later than the API itself, so a magpylib can have one and
+    not the other.
     """
     from magpylib_studio import threejs
 
-    monkeypatch.setattr(threejs, "DisplayBackend", None)
+    if missing == "pixel helpers":
+        monkeypatch.delattr(magpy.graphics.backend, "sensor_pixel_fields")
+    else:
+        monkeypatch.setattr(threejs, "DisplayBackend", None)
     assert not threejs.available()
 
     # the things the studio is for keep working

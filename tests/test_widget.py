@@ -728,6 +728,19 @@ def test_a_colour_table_is_carried_once():
 
 
 @needs_scene_graph
+def test_a_colour_table_takes_named_colours():
+    """A magnet styled ``magnetization_color_north="r"`` sends "red" in its
+    colorscale, which the table used to read as hex and fail on."""
+    magnet = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=(1, 1, 1),
+        style_magnetization_color_north="r",
+    )
+    (lut,) = widget.SceneWidget(magnet).payload["luts"]
+    assert lut[-4:] == [255, 0, 0, 255]
+
+
+@needs_scene_graph
 def test_a_run_in_which_nothing_moves_is_motion_of_nothing():
     """A current that ramps changes nothing drawn: no tracks, nothing kept to
     serve -- and the view steps through it with nothing to ask for."""

@@ -20,7 +20,6 @@ import sys
 
 import magpylib as magpy
 import numpy as np
-from magpylib._src.display import display as _display_module
 
 from magpylib_studio import style_compat, units
 
@@ -357,9 +356,9 @@ def bounds_comment(limits):
 
 
 def _show_patch_targets():
-    """Everywhere a script can reach show(): the magpy/module functions plus
-    the base classes whose `show` attribute obj.show() binds."""
-    targets = [(magpy, "show"), (_display_module, "show")]
+    """Everywhere a script can reach show(): the magpy function plus the
+    base classes whose `show` attribute obj.show() binds."""
+    targets = [(magpy, "show")]
     for cls in (magpy.magnet.Cuboid, magpy.Collection, magpy.Sensor):
         owner = next(k for k in cls.__mro__ if "show" in vars(k))
         if all(o is not owner for o, _ in targets):
