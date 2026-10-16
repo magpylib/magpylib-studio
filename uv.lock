@@ -430,8 +430,8 @@ wheels = [
 
 [[package]]
 name = "magpylib"
-version = "5.2.4.dev32+g53c3668aa"
-source = { git = "https://github.com/magpylib/magpylib?branch=main#53c3668aaa782dda14dcee65e81f3ac377644599" }
+version = "5.2.4.dev34+g22c727d12"
+source = { git = "https://github.com/magpylib/magpylib?branch=main#22c727d12b73c130ac57f64ab03aa3c7bbcbd23e" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
