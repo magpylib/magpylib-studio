@@ -1906,7 +1906,8 @@ function render({ model, el }) {
   const editor = model.editor ?? {
     begin: () => call("begin_interaction"),
     // the scene comes back with the pose, and the drag redraws from it
-    preview: (edits) => call("apply_edits", { edits }, { scene: true }),
+    preview: (edits, { scene = true } = {}) =>
+      call("apply_edits", { edits }, { scene }),
     commit(edits, { define = false } = {}) {
       const done = call("apply_edits", {
         edits,
@@ -1934,7 +1935,7 @@ function render({ model, el }) {
       editor.begin({ objectIds, mode }).catch(() => {});
     },
     showPose,
-    preview: (pose) => editor.preview(pose.edits),
+    preview: (pose, options) => editor.preview(pose.edits, options),
     scene: () => editor.scene(),
     render(payload, { keep }) {
       if (drawing()) api.render(view, payload, { keep });

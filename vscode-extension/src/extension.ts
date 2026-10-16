@@ -2221,11 +2221,11 @@ function openFieldPanel(context: vscode.ExtensionContext): void {
  *
  * While the drag is running, the surfaces that show something the picture
  * cannot are brought up to date: the Inspector's numbers and the field. The
- * 3D view is not, because it is already showing the new pose -- it moved the
- * mesh itself -- and asking for the scene back would re-serialise every
- * object in it to move one, which is three quarters of the round trip and
- * the only part that grows with the size of the scene. That redraw and the
- * trees wait for the drag to end.
+ * 3D view moved the dragged mesh itself, but what the pose changes around it
+ * -- a sensor's arrows -- only the engine can draw: when the view says it
+ * will redraw (`scene`), the scene comes back with the answer to the pose,
+ * one trip through this host for a step rather than a second one for the
+ * scene. The trees wait for the drag to end.
  */
 interface Edit {
   objectId: string;
@@ -2237,9 +2237,10 @@ interface Edit {
 
 async function transformFromPanel(
   context: vscode.ExtensionContext,
-  message: { edits: Edit[]; define?: boolean },
+  message: { edits: Edit[]; define?: boolean; scene?: boolean },
   previewFor?: vscode.WebviewPanel,
 ): Promise<void> {
+  let scene: unknown;
   try {
     const engine = await getEngine(context);
     // The engine turns the view's edits into its own calls, as it does for
@@ -2266,6 +2267,12 @@ async function transformFromPanel(
     if (result.ok === false && !previewFor) {
       vscode.window.showErrorMessage(`Magpylib Studio: ${result.error}`);
     }
+    // From the engine that took the pose, so it is that pose's scene. A
+    // refused one has nothing new to draw, and a failed request leaves the
+    // view to ask for the scene itself, as it did before.
+    if (previewFor && message.scene && result.ok !== false) {
+      scene = await engine.request('get_scene', {});
+    }
   } catch (err) {
     if (!previewFor) {
       vscode.window.showErrorMessage(
@@ -2274,7 +2281,7 @@ async function transformFromPanel(
     }
   }
   if (previewFor) {
-    finishPreview(previewFor);
+    finishPreview(previewFor, scene);
     return;
   }
   // A refused drag still leaves the view showing where the object was dragged
@@ -2379,8 +2386,9 @@ function refreshLiveSurfaces(): void {
   refreshField(frontScene());
 }
 
-/** Bring the cheap surfaces up to date mid-drag, and let the next pose go. */
-function finishPreview(panel: vscode.WebviewPanel): void {
+/** Bring the cheap surfaces up to date mid-drag, and let the next pose go,
+ *  with the scene it made when there is one to redraw from. */
+function finishPreview(panel: vscode.WebviewPanel, scene?: unknown): void {
   try {
     refreshLiveSurfaces();
   } finally {
@@ -2389,7 +2397,7 @@ function finishPreview(panel: vscode.WebviewPanel): void {
     // falling further behind. Unconditional, because a preview that fails to
     // answer does not slow the drag down -- it ends it, silently, and every
     // remaining pose waits for a reply that is never coming.
-    panel.webview.postMessage({ type: 'previewDone' });
+    panel.webview.postMessage({ type: 'previewDone', ...(scene ? { scene } : {}) });
   }
 }
 

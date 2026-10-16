@@ -93,10 +93,13 @@ const model = {
       vscodeApi.postMessage({ type: "dragStart", objectId: objectIds[0] });
       return Promise.resolve({ ok: true });
     },
-    preview: (edits) =>
+    // the host answers with the scene the pose made, when the drag will draw
+    // it: one trip through the host for a step, not one for the pose and
+    // another for the scene
+    preview: (edits, { scene = true } = {}) =>
       new Promise((resolve) => {
         previewTaken = resolve;
-        vscodeApi.postMessage({ type: "previewTransform", edits });
+        vscodeApi.postMessage({ type: "previewTransform", edits, scene });
       }),
     // recorded and the group closed by the host, which says itself if the
     // engine refused it -- and redraws everything from what the engine has
@@ -303,8 +306,9 @@ window.addEventListener("message", (event) => {
     if (message.type === "rpcResult") entry.resolve(message.result);
     else entry.reject(new Error(message.method + ": " + message.error));
   } else if (message.type === "previewDone") {
-    // the engine has the pose: the view redraws, then sends the next
-    previewTaken?.();
+    // the engine has the pose, and the scene it made when that was asked
+    // for: the view redraws, then sends the next
+    previewTaken?.(message.scene ? { scene: message.scene } : undefined);
     previewTaken = null;
   } else if (message.type === "select") {
     // the sidebar, or a pick told back: one object, and the set restarts

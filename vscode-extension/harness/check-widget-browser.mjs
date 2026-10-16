@@ -947,13 +947,20 @@ async function studioDrag(port, base) {
           .map((m) => m.type)
           .lastIndexOf("previewTransform");
         if (since < 0) continue;
-        if (
-          !dragged.slice(since + 1, i).some((m) => m.method === "get_scene")
-        ) {
+        if (!dragged.slice(since + 1, i).some((m) => m.type === "redraw")) {
           return `two previews with no redraw between them: ${shown}`;
         }
       }
-      const last = dragged.at(-1);
+      // one trip a step: the pose asks for the scene, which comes back with
+      // the answer, and the view never asks for it on its own
+      const previews = dragged.filter((m) => m.type === "previewTransform");
+      if (previews.some((m) => m.scene !== true)) {
+        return `a preview did not ask for the scene: ${shown}`;
+      }
+      if (dragged.some((m) => m.method === "get_scene")) {
+        return `the view asked for the scene mid-drag: ${shown}`;
+      }
+      const last = dragged.filter((m) => m.type !== "redraw").at(-1);
       if (last?.type !== "transformObjects" || last.x !== 16) {
         return `it ended: ${shown}`;
       }

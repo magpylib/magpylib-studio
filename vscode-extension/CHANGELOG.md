@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>Dragging keeps up better where a sensor draws the field</summary>
+
+While you drag, the arrows a sensor draws are worked out again at every step,
+and a step now costs less: it makes one trip through VS Code's extension host
+instead of two, and magpylib reads the arrows' field once instead of three
+times. In the turning-magnet example, the engine's part of a step went from 13
+ms to about 5 ms on an M4.
+
+</details>
+
 ## [0.5.0]
 
 ### Added
