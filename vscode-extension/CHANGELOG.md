@@ -5,6 +5,8 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.5.1]
+
 ### Changed
 
 <details>
@@ -13,8 +15,22 @@ Python package it runs on. Open an entry for its details.
 While you drag, the arrows a sensor draws are worked out again at every step,
 and a step now costs less: it makes one trip through VS Code's extension host
 instead of two, and magpylib reads the arrows' field once instead of three
-times. In the turning-magnet example, the engine's part of a step went from 13
-ms to about 5 ms on an M4.
+times. In the turning-magnet example, the engine's part of a step went from
+about 12 ms to about 5 ms on an M4. Reading the field once needs magpylib's main
+branch (#43).
+
+</details>
+
+### Fixed
+
+<details>
+<summary>Magnets coloured by name, and sensor pixels that read nothing</summary>
+
+A magnet whose colours were given by name, such as
+`style_magnetization_color_north="red"`, stopped the 3D view from drawing.
+Sensor pixels that read no field are drawn grey, as magpylib draws them: they
+were black when no pixel read anything, and top-of-scale yellow beside one that
+did, which also lost its size under log scaling (#40).
 
 </details>
 
