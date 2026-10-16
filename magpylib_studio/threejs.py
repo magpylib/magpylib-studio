@@ -27,6 +27,7 @@ and 10):
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import math
 import warnings
@@ -194,15 +195,25 @@ def _colorscale_lut(colorscale):
 
     The stops' colours may be CSS names as well as hex: a magnet styled
     ``magnetization_color_north="r"`` sends ``"red"``.
+
+    Built once per scale: sampling one takes about 1.5 ms, every graded mesh
+    of every draw asks for one, and a scene's magnets share a scale or two.
     """
+    if not isinstance(colorscale, str):  # a user's model may send lists
+        colorscale = tuple((float(stop), str(color)) for stop, color in colorscale)
+    return list(_sampled_lut(colorscale))
+
+
+@functools.lru_cache(maxsize=64)
+def _sampled_lut(colorscale):
     from magpylib.graphics.backend import colors_from_colorscale
 
     samples = np.linspace(0.0, 1.0, LUT_SIZE)
     hexes = colors_from_colorscale(samples, colorscale, cmin=0, cmax=1)
     # RGBA: three.js dropped RGBFormat in r137
-    return [
+    return tuple(
         v for h in hexes for v in (*(int(h[i : i + 2], 16) for i in (1, 3, 5)), 255)
-    ]
+    )
 
 
 def _points(trace):
