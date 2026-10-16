@@ -50,8 +50,10 @@ export const REDRAW_BUDGET_MS = 8;
  *   anything it will supersede, before rather than after. Not on the press:
  *   the renderer reports nothing for a handle clicked and let go, so a group
  *   opened then would never be closed, and swallow the next edit made.
- * - `preview(pose)`: a pose reached mid-drag. Returns a promise, settled once
- *   the engine has taken it; the next is not sent until then.
+ * - `preview(pose, { scene })`: a pose reached mid-drag. Returns a promise,
+ *   settled once the engine has taken it; the next is not sent until then.
+ *   `scene` says the drag will redraw from what the pose made, which the
+ *   answer may carry -- see `scene()`.
  * - `commit(pose)`: the pose the drag ended on. Record it and close the group.
  * - `scene()`: a promise of the scene as it is now, to redraw around the drag.
  *   Spared when `preview` answers with a `scene` of its own: one message
@@ -88,7 +90,10 @@ export function watchDrags(host, view) {
     const pose = pending;
     pending = null;
     let carried = null; // the scene, when the preview's answer brought it
-    Promise.resolve(view.preview(pose))
+    // Asked for with the pose only while it will be drawn: a drag that has
+    // stopped redrawing would have the scene built on every step for nothing.
+    const scene = drawing() && Boolean(dragging) && !dragging.tooSlow;
+    Promise.resolve(view.preview(pose, { scene }))
       .then((answer) => {
         carried = answer && answer.scene ? answer.scene : null;
       })

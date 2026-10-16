@@ -40,7 +40,14 @@
               answer({ type: "rpcResult", reqId: message.reqId, result });
             });
           } else if (message.type === "previewTransform") {
-            answer({ type: "previewDone" }, 30); // the engine taking its time
+            // the engine taking its time, and the scene with the pose when
+            // the view will draw it, as the extension host answers
+            window.scenes.then(({ scene }) =>
+              answer(
+                { type: "previewDone", ...(message.scene ? { scene } : {}) },
+                30,
+              ),
+            );
           }
         },
       });
@@ -73,6 +80,7 @@
       const render = window.scene3d.render;
       window.scene3d.render = (el, payload, options) => {
         kept.push(options?.keep);
+        window.posted.push({ type: "redraw" }); // in order, among the messages
         return render(el, payload, options);
       };
 
@@ -84,6 +92,7 @@
           objectId: m.objectId,
           hide: m.hide,
           show: m.show,
+          scene: m.scene,
           x: m.edits?.[0]?.position?.[0],
         }));
       const view = document.querySelector(".magpy-scene-view");
@@ -115,7 +124,7 @@
         await until(() => window.posted.slice(at).some(previewed(x)));
         const i = at + window.posted.slice(at).findIndex(previewed(x));
         await until(() =>
-          window.posted.slice(i).some((m) => m.method === "get_scene"),
+          window.posted.slice(i).some((m) => m.type === "redraw"),
         );
         await wait(100);
       };
