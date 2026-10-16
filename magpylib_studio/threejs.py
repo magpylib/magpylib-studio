@@ -998,8 +998,8 @@ def _pixels_of(sensor, field, key, path_ind=-1):
 
     # into the world: the pixels sit in the sensor's frame, and so does the
     # reading, which magpylib rotates into it
-    pose = np.atleast_2d(np.asarray(sensor._position, dtype=float))[path_ind]
-    turn = sensor._orientation[path_ind]
+    pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[path_ind]
+    turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[path_ind]
     origins = turn.apply(pixel) + pose
     vectors = turn.apply(field[path_ind])
     null = (np.abs(field[path_ind]) < _NULL_VECTOR).all(axis=1)
