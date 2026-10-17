@@ -110,7 +110,14 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, meshes, style_compat, threejs, units
+from magpylib_studio import (
+    collisions,
+    expressions,
+    meshes,
+    style_compat,
+    threejs,
+    units,
+)
 
 
 def example_scene():
@@ -3592,7 +3599,28 @@ class MagpylibStudioSession:
             kind: self._shown(kind) for kind in ("length", "angle", "field")
         }
         scene["expressions"] = self._written_fields()
+        # Carried with every scene, a drag's preview frames included, so an
+        # overlap shows while the magnet is still under the pointer.
+        scene["overlaps"] = self.get_overlaps()
         return scene
+
+    def get_overlaps(self):
+        """The objects that overlap, as pairs of ids: ``[["r1", "r2"]]``.
+
+        Magpylib adds the magnetizations of two magnets wherever they overlap,
+        so the field of an overlapping pair looks plausible and is wrong.
+        Touching is not overlapping -- a Halbach ring touches on purpose -- so
+        a pair is listed only when it interpenetrates by more than a
+        nanometre (`collisions.TOL`). Sensors and dipoles never overlap, and
+        neither do two wires. Each object is taken where its path ends.
+        """
+        leaves = [
+            (i, obj)
+            for i, obj in self._objs.items()
+            if not isinstance(obj, magpy.Collection)
+        ]
+        pairs = collisions.find_overlaps([obj for _, obj in leaves])
+        return [[leaves[i][0], leaves[j][0]] for i, j in pairs]
 
     def _written_fields(self):
         """The expression each element of a drag-editable field was written
