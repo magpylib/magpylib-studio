@@ -15,11 +15,18 @@ import numpy as np
 import pytest
 
 from magpylib_studio import threejs
-from magpylib_studio.collisions import find_overlaps
+from magpylib_studio.collisions import find_overlaps, overlaps_along, separation
 from magpylib_studio.session import MagpylibStudioSession
 
 MM = 1e-3
 POL = (0, 0, 1)
+
+#: What draws a scene needs a magpylib newer than released: its tests say so
+#: rather than failing where the released one is installed.
+needs_scene_graph = pytest.mark.skipif(
+    not threejs.available(),
+    reason="the scene graph needs magpylib's display-backend API and unit pinning",
+)
 
 
 def cuboid(dim, position=(0, 0, 0), angles=None):
@@ -354,9 +361,111 @@ def test_the_session_says_which_objects_overlap():
     assert session.get_overlaps() == [["a", "c"], ["m", "g#1"], ["g#1", "g#2"]]
 
 
-@pytest.mark.skipif(
-    not threejs.available(),
-    reason="the scene graph needs magpylib's display-backend API and unit pinning",
-)
+@needs_scene_graph
 def test_every_scene_says_which_objects_overlap():
     assert three_cubes().get_scene()["overlaps"] == [["a", "c"]]
+
+
+def tilted_shaft_gap():
+    """From the bore's rim, at the ring's top face, to the surface of a 16 mm
+    shaft through the origin tilted 15 degrees about x: the rim point facing
+    the tilt is nearest."""
+    rim = np.array([0, -10, 4])
+    axis = np.array([0, -np.sin(np.radians(15)), np.cos(np.radians(15))])
+    return np.linalg.norm(np.cross(rim, axis)) - 8
+
+
+SEPARATIONS = {
+    "cubes 2 mm apart": (
+        cuboid((10, 10, 10)),
+        cuboid((10, 10, 10), (12, 0, 0)),
+        "gap",
+        2,
+    ),
+    "cubes touching": (
+        cuboid((10, 10, 10)),
+        cuboid((10, 10, 10), (10, 0, 0)),
+        "touch",
+        0,
+    ),
+    "a cube 0.1 mm in": (
+        cuboid((10, 10, 10)),
+        cuboid((10, 10, 10), (9.9, 0, 0)),
+        "overlap",
+        0.1,
+    ),
+    "bars crossed edge to edge": (
+        *CASES["bars crossed edge to edge"][0],
+        "overlap",
+        4 * np.sqrt(2) - 5.4,  # each edge 2*sqrt(2) from its bar's axis, 5.4 apart
+    ),
+    "a shaft 0.5 mm clear of its bore": (ring(10, 16, 8), cylinder(19, 30), "gap", 0.5),
+    "a tilted shaft in its bore": (
+        ring(10, 16, 8),
+        cylinder(16, 30, angles=(15, 0, 0)),
+        "gap",
+        tilted_shaft_gap(),
+    ),
+    "a coil 1 mm round its core": (
+        magpy.current.Circle(diameter=26 * MM, current=1),
+        cylinder(24, 20),
+        "gap",
+        1,
+    ),
+    "a cube 2 mm off the mesh's notch": (
+        l_prism(),
+        cuboid((4, 4, 4), (1, 1, 0)),
+        "gap",
+        2,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", SEPARATIONS)
+def test_how_far_apart_and_how_deep(name):
+    a, b, state, mm = SEPARATIONS[name]
+    found, value = separation(a, b)
+    assert found == state
+    assert value == pytest.approx(mm * MM, rel=1e-4, abs=1e-8)
+
+
+def test_a_path_is_checked_at_every_step():
+    passing = cuboid((10, 10, 10))
+    passing.position = np.multiply(
+        [(30, 0, 0), (15, 0, 0), (5, 0, 0), (-15, 0, 0), (-30, 0, 0)], MM
+    )
+    assert overlaps_along([passing, cuboid((10, 10, 10))]) == [[], [], [(0, 1)], [], []]
+
+
+def test_an_overlap_meant_as_a_cut_out_is_not_warned_about(tmp_path):
+    session = three_cubes()
+    assert session.set_overlap_intended("a", "c")["ok"]
+    assert session.get_overlaps() == []
+    assert session.get_overlaps(intended=True) == [["a", "c"]]
+    assert session.doc["intended_overlaps"] == [["a", "c"]]
+    assert not any("overlaps" in entry for entry in session.list_objects())
+    # through the script tab, which writes only what code can say
+    script = tmp_path / "scene.py"
+    script.write_text(session.to_builder_script(), encoding="utf-8")
+    assert session.apply_builder_script(str(script))["ok"]
+    assert session.get_overlaps(intended=True) == [["a", "c"]]
+    # and back, one step to undo
+    session.undo()
+    session.undo()
+    assert session.get_overlaps() == [["a", "c"]]
+    partners = {entry["id"]: entry.get("overlaps") for entry in session.list_objects()}
+    assert (partners["a"], partners["b"], partners["c"]) == (["c"], None, ["a"])
+    assert session.get_gap("a", "b") == {
+        "ok": True,
+        "state": "touch",
+        "shown": session.get_units()["shown"]["length"],
+    }
+
+
+@needs_scene_graph
+def test_a_view_nobody_edits_says_what_overlaps():
+    from magpylib_studio.widget import SceneWidget
+
+    a, c = cuboid((10, 10, 10)), cuboid((10, 10, 10), (9.9, 0, 0))
+    view = SceneWidget(a, c)
+    assert view.payload["overlaps"] == [[str(id(a)), str(id(c))]]

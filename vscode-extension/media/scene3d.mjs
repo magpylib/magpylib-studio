@@ -39,12 +39,24 @@ let outlines = [];
 let hintIds = [];
 // What overlaps another object, by id: outlined in amber round what is
 // drawn for it, as the selection is in green. Each scene the engine sends
-// says which (`overlaps`), so the outline follows a drag frame by frame. They
-// are found where each path ends (`endOverlapIds`), so a run shows them at
-// its last step only.
+// says which (`overlaps`), so the outline follows a drag frame by frame.
+// They are found where each path ends (`endOverlapIds`) and, where something
+// moves, at every step (`stepOverlapIds`), so a run shows each step's own.
 const NO_OVERLAPS = Object.freeze([]);
 let endOverlapIds = NO_OVERLAPS;
+let stepOverlapIds = null;
 let overlapIds = NO_OVERLAPS;
+
+/** What overlaps at frame `index` of a run of `frames`: the step it shows,
+ *  where the scene says each step's, else where the paths end and nothing
+ *  before. A run may have fewer frames than its paths have steps. */
+function overlapsAt(index, frames) {
+  if (!stepOverlapIds) return index >= frames - 1 ? endOverlapIds : NO_OVERLAPS;
+  const steps = stepOverlapIds.length;
+  const step =
+    frames > 1 ? Math.round((index * (steps - 1)) / (frames - 1)) : steps - 1;
+  return stepOverlapIds[Math.min(Math.max(step, 0), steps - 1)];
+}
 let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
 // How the host wants the scale said: "box", "cube" -- the view cube and the
@@ -2207,9 +2219,7 @@ function renderFrame(payload) {
   changes = [];
   changing = [];
   luts = payload.luts ?? [];
-  // Overlaps are found where each path ends; any other step is elsewhere.
-  overlapIds =
-    payload.frame >= payload.frames - 1 ? endOverlapIds : NO_OVERLAPS;
+  overlapIds = overlapsAt(payload.frame, payload.frames);
   for (const item of drawnItems(payload)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
@@ -2250,13 +2260,12 @@ function poseFrame(index) {
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
   }
-  // Overlaps are found where each path ends; any other step is elsewhere.
-  const last = Math.max(
-    0,
-    ...Object.values(tracks ?? {}).map((steps) => steps.length - 1),
-    ...Object.values(changes ?? {}).map((steps) => steps.length - 1),
+  const frames = Math.max(
+    1,
+    ...Object.values(tracks ?? {}).map((steps) => steps.length),
+    ...Object.values(changes ?? {}).map((steps) => steps.length),
   );
-  const shown = index >= last ? endOverlapIds : NO_OVERLAPS;
+  const shown = overlapsAt(index, frames);
   const turned = shown !== overlapIds;
   overlapIds = shown;
   // What moved carries its outline; what was built again needs a new one.
@@ -2432,6 +2441,9 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   anchors = payload.anchors || {};
   paths = payload.paths || {};
   endOverlapIds = [...new Set((payload.overlaps ?? []).flat())];
+  stepOverlapIds = payload.overlaps_by_step
+    ? payload.overlaps_by_step.map((pairs) => [...new Set(pairs.flat())])
+    : null;
   overlapIds = endOverlapIds;
   // Where the handles stand in each object's own frame. The payload's poses
   // are the last frame of a path -- which is the pose the geometry is drawn

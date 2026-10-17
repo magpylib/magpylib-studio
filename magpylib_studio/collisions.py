@@ -56,7 +56,7 @@ _LOOP_POINTS = 2048
 
 # Bodies kept built between calls, by what they are made of: a drag moves one
 # object, and the others' pieces -- a mesh's thousands of triangles -- stand.
-_CACHE_SIZE = 4096
+_CACHE_SIZE = 16384
 _cache: OrderedDict = OrderedDict()
 
 
@@ -447,6 +447,7 @@ class _Body:
     __slots__ = (
         "_made",
         "hi",
+        "key",
         "kind",
         "lo",
         "parts",
@@ -495,23 +496,38 @@ class _Body:
         return out
 
 
-def _pose(obj):
-    """Where an object stands at the last step of its path."""
-    position = np.asarray(obj.position, dtype=float).reshape(-1, 3)[-1]
-    rotation = obj.orientation.as_matrix().reshape(-1, 3, 3)[-1]
+def _pick(rows, step):
+    """Row `step` of a value along a path: the last when `step` is None or
+    past its end, as magpylib holds a shorter path at its last value."""
+    return rows[-1] if step is None or step >= len(rows) else rows[step]
+
+
+def _pose(obj, step=None):
+    """Where an object stands at a step of its path, the last by default."""
+    position = _pick(np.asarray(obj.position, dtype=float).reshape(-1, 3), step)
+    rotation = _pick(obj.orientation.as_matrix().reshape(-1, 3, 3), step)
     return tuple(float(v) for v in rotation.ravel()), tuple(float(v) for v in position)
 
 
-def _last(value, width):
-    return np.asarray(value, dtype=float).reshape(-1, width)[-1]
+def _row(value, width, step=None):
+    """A property that may vary along a path, at `step`."""
+    return _pick(np.asarray(value, dtype=float).reshape(-1, width), step)
 
 
-def _last_points(value):
-    """Points that may vary along a path, at its last step."""
+def _points_at(value, step=None):
+    """Points that may vary along a path, at `step`."""
     points = np.asarray(value, dtype=float)
     while points.ndim > 2:
-        points = points[-1]
+        points = _pick(points, step)
     return points.reshape(-1, 3)
+
+
+def path_length(objects):
+    """How many steps the longest path among `objects` has."""
+    return max(
+        (len(np.asarray(obj.position, dtype=float).reshape(-1, 3)) for obj in objects),
+        default=1,
+    )
 
 
 def _world(R, c, pts):
@@ -599,11 +615,11 @@ def _solid(part, probe):
     return _Body("solid", [probe], parts=[part] if isinstance(part, _Part) else part)
 
 
-def _build(obj, m, tol):
+def _build(obj, m, tol, step=None):
     kind = type(obj).__name__
-    R, c = _pose(obj)
+    R, c = _pose(obj, step)
     if kind == "Cuboid":
-        h = np.maximum(_last(obj.dimension, 3) / 2 - m, 0.0)
+        h = np.maximum(_row(obj.dimension, 3, step) / 2 - m, 0.0)
         corners = [
             (sx * h[0], sy * h[1], sz * h[2])
             for sx in (-1, 1)
@@ -612,17 +628,17 @@ def _build(obj, m, tol):
         ]
         return _solid(_Part(_Shape(_box(*h), R, c, reach=_reach_of_points(corners))), c)
     if kind == "Cylinder":
-        d, height = _last(obj.dimension, 2)
+        d, height = _row(obj.dimension, 2, step)
         r, hz = max(d / 2 - m, 0.0), max(height / 2 - m, 0.0)
         return _solid(
             _Part(_Shape(_cylinder(r, hz), R, c, reach=_reach_of_round(r))), c
         )
     if kind == "Sphere":
-        r = max(float(_last(obj.diameter, 1)[0]) / 2 - m, 0.0)
+        r = max(float(_row(obj.diameter, 1, step)[0]) / 2 - m, 0.0)
         return _solid(_Part(_Shape(_ball(r), R, c, reach=_reach_of_ball(r))), c)
     if kind == "Tetrahedron":
         # shrunk about its incentre, which moves every face in by the same `m`
-        v = _last_points(obj.vertices)[:4]
+        v = _points_at(obj.vertices, step)[:4]
         opposite = ((1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2))
         areas = np.array(
             [
@@ -639,7 +655,7 @@ def _build(obj, m, tol):
         shape = _Shape(_points(pts), R, c, tuple(centre), _reach_of_points(pts))
         return _solid(_Part(shape), shape.center)
     if kind == "CylinderSegment":
-        r1, r2, height, p1, p2 = _last(obj.dimension, 5)
+        r1, r2, height, p1, p2 = _row(obj.dimension, 5, step)
         span = math.radians(p2 - p1)
         full = span >= 2 * math.pi - 1e-12
         hz, r2 = max(height / 2 - m, 0.0), max(r2 - m, 0.0)
@@ -663,7 +679,7 @@ def _build(obj, m, tol):
             parts, _world(R, c, [rm * math.cos(mid), rm * math.sin(mid), 0.0])
         )
     if kind == "TriangularMesh":
-        vertices = _last_points(obj.vertices)
+        vertices = _points_at(obj.vertices, step)
         faces = np.asarray(obj.faces, dtype=int).reshape(-1, 3)
         shape = _mesh_shape(vertices, faces, m, tol)
         if shape is None:
@@ -680,14 +696,14 @@ def _build(obj, m, tol):
             segs=_world(R, c, vertices)[edges],
         )
     if kind == "Polyline":
-        pts = _world(R, c, _last_points(obj.vertices))
+        pts = _world(R, c, _points_at(obj.vertices, step))
         if len(pts) < 2:
             return None
         segs = np.stack([pts[:-1], pts[1:]], axis=1)
         probes = np.concatenate([pts, segs.mean(axis=1)])
         return _Body("curve", probes, parts=[_flat_part(s) for s in segs], segs=segs)
     if kind == "Circle":
-        r = float(_last(obj.diameter, 1)[0]) / 2
+        r = float(_row(obj.diameter, 1, step)[0]) / 2
         if r <= 0:
             return None
         t = np.linspace(0, 2 * math.pi, _LOOP_POINTS, endpoint=False)
@@ -698,7 +714,7 @@ def _build(obj, m, tol):
         # no segments: against a mesh the loop is its points, see `_LOOP_POINTS`
         return _Body("curve", ring, parts=parts)
     if kind in ("TriangleSheet", "TriangleStrip", "Triangle"):
-        vertices = _last_points(obj.vertices)
+        vertices = _points_at(obj.vertices, step)
         if kind == "TriangleSheet":
             faces = np.asarray(obj.faces, dtype=int).reshape(-1, 3)
         elif kind == "TriangleStrip":
@@ -718,43 +734,43 @@ def _build(obj, m, tol):
     return None
 
 
-def _fingerprint(obj):
-    """What an object's body is made of: its class, its pose and its
-    geometry, as bytes -- equal for a rebuilt object that has not changed."""
-    parts = [type(obj).__name__]
-    for name in (
-        "position",
-        "orientation",
-        "dimension",
-        "diameter",
-        "vertices",
-        "faces",
-    ):
+def _fingerprint(obj, step=None):
+    """What an object's body is made of at `step`: its class, its pose and
+    its geometry, as bytes -- equal for a rebuilt object that has not
+    changed, and for every step at which it has not moved."""
+    parts = [type(obj).__name__, *_pose(obj, step)]
+    for name in ("dimension", "diameter", "vertices", "faces"):
         value = getattr(obj, name, None)
         if value is None:
             continue
-        if name == "orientation":
-            value = value.as_quat()
-        value = np.asarray(value, dtype=float)
+        if name == "vertices":
+            value = _points_at(value, step)
+        elif name == "faces":
+            value = np.asarray(value, dtype=float)
+        else:
+            value = np.asarray(value, dtype=float)
+            value = _pick(value.reshape(-1, value.shape[-1] if value.ndim else 1), step)
         parts.append((name, value.shape, value.tobytes()))
     return tuple(parts)
 
 
-def _body(obj, tol):
-    """The body of a magpylib object, its solid pieces shrunk by half of
-    `tol`; None for what has no shape to overlap with -- a sensor, a dipole,
-    a custom source, a collection -- or no geometry yet."""
+def _body(obj, tol, step=None):
+    """The body of a magpylib object at a step of its path, its solid pieces
+    shrunk by half of `tol`; None for what has no shape to overlap with -- a
+    sensor, a dipole, a custom source, a collection -- or no geometry yet."""
     try:
-        key = (tol, _fingerprint(obj))
-    except (TypeError, ValueError):
+        key = (tol, _fingerprint(obj, step))
+    except (AttributeError, TypeError, ValueError):
         return None
     if key in _cache:
         _cache.move_to_end(key)
         return _cache[key]
     try:
-        body = _build(obj, tol / 2, tol)
+        body = _build(obj, tol / 2, tol, step)
     except (AttributeError, IndexError, TypeError, ValueError, ZeroDivisionError):
         body = None  # a shape whose geometry is missing or degenerate
+    if body is not None:
+        body.key = key
     _cache[key] = body
     if len(_cache) > _CACHE_SIZE:
         _cache.popitem(last=False)
@@ -848,41 +864,44 @@ def _in_bore(shape, bore, memo):
 
 def _decide(P, Q, depth, budget, eps, memo):
     """Whether pieces P and Q overlap, cutting a wedge in half while its two
-    stand-ins disagree."""
+    stand-ins disagree: the pair of pieces that shows it, or None."""
     budget[0] -= 1
     if budget[0] < 0:
-        return True  # not shown clear: say so rather than nothing
+        return (P, Q)  # not shown clear: say so rather than nothing
     for X, Y in ((P, Q), (Q, P)):
         if X.bore is not None and _in_bore(Y.outer, X.bore, memo):
-            return False  # Y stays inside X's bore
+            return None  # Y stays inside X's bore
     if not _mpr(P.outer, Q.outer, eps):
-        return False
+        return None
     if P.inner is P.outer and Q.inner is Q.outer:
-        return True
+        return (P, Q)
     if _mpr(P.inner, Q.inner, eps):
-        return True
+        return (P, Q)
     X = max(
         (p for p in (P, Q) if p.halve is not None), key=lambda p: p.span, default=None
     )
     if X is None or depth >= _MAX_CUTS:
-        return False  # the sliver between the stand-ins is below the tolerance
+        return None  # the sliver between the stand-ins is below the tolerance
     for half in X.halve():
-        if _decide(
+        found = _decide(
             half if X is P else P, half if X is Q else Q, depth + 1, budget, eps, memo
-        ):
-            return True
-    return False
+        )
+        if found:
+            return found
+    return None
 
 
 def _pieces_overlap(A, B, eps):
     """Whether a piece of A and a piece of B overlap, among those whose boxes
-    meet. A is a body with pieces of its own (a solid, a curve)."""
+    meet: the pair that shows it, or None. A is a body with pieces of its own
+    (a solid, a curve)."""
     memo = {}
     for P in A.parts:
         for Q in B.near(P.outer.lo, P.outer.hi):
-            if _decide(P, Q, 0, [_MAX_TESTS], eps, memo):
-                return True
-    return False
+            found = _decide(P, Q, 0, [_MAX_TESTS], eps, memo)
+            if found:
+                return found
+    return None
 
 
 def _pierces(segs, tris, tol):
@@ -1011,25 +1030,292 @@ def _candidates(lo, hi):
     return a[keep], b[keep]
 
 
-def find_overlaps(objects, tol=TOL):
-    """The pairs of `objects` that overlap, as index pairs `(i, j)`, `i < j`.
+# ------------------------------------------------------- how much, how far
+
+
+def _fibonacci(n):
+    """`n` directions spread evenly over the sphere."""
+    golden = math.pi * (3 - math.sqrt(5))
+    out = []
+    for i in range(n):
+        z = 1 - (2 * i + 1) / n
+        r = math.sqrt(1 - z * z)
+        out.append((r * math.cos(golden * i), r * math.sin(golden * i), z))
+    return out
+
+
+_DIRECTIONS = _fibonacci(128)
+
+
+def _penetration(A, B):
+    """How deep two convex shapes interpenetrate: the shortest push that
+    parts them, the smallest support of A - B over all directions. Searched
+    from the best of a spread of directions, to a millionth of a radian:
+    a number to show, not to decide by."""
+
+    def f(n):
+        return _dot(A.support(n), n) - _dot(B.support(_mul(n, -1.0)), n)
+
+    starts = sorted((f(n), n) for n in _DIRECTIONS)[:2]
+    best = starts[0][0]
+    for value, n in starts:
+        step, turn = 0.2, 0.0
+        for _ in range(400):
+            if step < 1e-6:
+                break
+            t1, t2 = _basis(n)
+            moved = False
+            for k in range(8):
+                a = turn + k * math.pi / 4
+                m = _unit(
+                    tuple(
+                        n[i] + step * (math.cos(a) * t1[i] + math.sin(a) * t2[i])
+                        for i in range(3)
+                    )
+                )
+                fm = f(m)
+                if fm < value - 1e-15:
+                    value, n, moved = fm, m, True
+                    break
+            if not moved:
+                step, turn = step / 2, turn + 0.7
+        best = min(best, value)
+    return max(best, 0.0)
+
+
+def _closest(simplex):
+    """The point of a simplex (one to four points) nearest the origin, and
+    the points it needs: Johnson's sub-algorithm, by Voronoi regions."""
+    if len(simplex) == 1:
+        return simplex[0], simplex
+    if len(simplex) == 2:
+        a, b = simplex
+        ab = _sub(b, a)
+        den = _dot(ab, ab)
+        t = -_dot(a, ab) / den if den > 0 else 0.0
+        if t <= 0:
+            return a, [a]
+        if t >= 1:
+            return b, [b]
+        return tuple(a[i] + t * ab[i] for i in range(3)), [a, b]
+    if len(simplex) == 3:
+        a, b, c = simplex
+        ab, ac = _sub(b, a), _sub(c, a)
+        d1, d2 = -_dot(ab, a), -_dot(ac, a)
+        if d1 <= 0 and d2 <= 0:
+            return a, [a]
+        d3, d4 = -_dot(ab, b), -_dot(ac, b)
+        if d3 >= 0 and d4 <= d3:
+            return b, [b]
+        vc = d1 * d4 - d3 * d2
+        if vc <= 0 and d1 >= 0 and d3 <= 0:
+            return _closest([a, b])
+        d5, d6 = -_dot(ab, c), -_dot(ac, c)
+        if d6 >= 0 and d5 <= d6:
+            return c, [c]
+        vb = d5 * d2 - d1 * d6
+        if vb <= 0 and d2 >= 0 and d6 <= 0:
+            return _closest([a, c])
+        va = d3 * d6 - d5 * d4
+        if va <= 0 and d4 - d3 >= 0 and d5 - d6 >= 0:
+            return _closest([b, c])
+        total = va + vb + vc
+        if total == 0:
+            return min(
+                (_closest(e) for e in ([a, b], [a, c], [b, c])),
+                key=lambda r: _dot(r[0], r[0]),
+            )
+        v, w = vb / total, vc / total
+        return tuple(a[i] + v * ab[i] + w * ac[i] for i in range(3)), [a, b, c]
+    best = None
+    a, b, c, d = simplex
+    for p, q, r, o in ((a, b, c, d), (a, c, d, b), (a, d, b, c), (b, d, c, a)):
+        n = _cross(_sub(q, p), _sub(r, p))
+        if -_dot(p, n) * _dot(_sub(o, p), n) < 0 or _dot(_sub(o, p), n) == 0:
+            found = _closest([p, q, r])
+            if best is None or _dot(found[0], found[0]) < _dot(best[0], best[0]):
+                best = found
+    return best or ((0.0, 0.0, 0.0), simplex)
+
+
+def _apart(A, B, eps):
+    """How far apart two convex shapes are, to `eps`: GJK in its distance
+    form, stopped when the bound the last support point gives from below
+    meets the distance to the simplex from above. 0 when they meet."""
+
+    def S(n):
+        return _sub(A.support(n), B.support(_mul(n, -1.0)))
+
+    v = S(_sub(B.center, A.center))
+    simplex, lower = [], 0.0
+    for _ in range(_MAX_ITER):
+        vv = _dot(v, v)
+        if vv <= eps * eps:
+            return 0.0
+        nv = math.sqrt(vv)
+        w = S(_mul(v, -1.0))
+        lower = max(lower, _dot(v, w) / nv)
+        if nv - lower <= eps or any(w == p for p in simplex):
+            return nv
+        simplex.append(w)
+        v, simplex = _closest(simplex)
+        if len(simplex) == 4:
+            return 0.0
+    return math.sqrt(_dot(v, v))
+
+
+def _pieces(body):
+    """Every piece of a body, made: a mesh's triangles too."""
+    if body.tris is None:
+        return body.parts
+    return body.near(np.full(3, -np.inf), np.full(3, np.inf))
+
+
+def _gap(A, B, precision):
+    """How far apart two bodies are: the least distance between their
+    pieces, found pair by pair in order of how near their boxes are, a wedge
+    halved while the distances to its two stand-ins differ by more than
+    `precision`, and anything that cannot be nearer than the best so far
+    left alone."""
+    pa, pb = _pieces(A), _pieces(B)
+    lo_a = np.array([p.outer.lo for p in pa])
+    hi_a = np.array([p.outer.hi for p in pa])
+    lo_b = np.array([p.outer.lo for p in pb])
+    hi_b = np.array([p.outer.hi for p in pb])
+    apart = np.maximum(
+        0.0, np.maximum(lo_b[None] - hi_a[:, None], lo_a[:, None] - hi_b[None])
+    )
+    boxes = np.linalg.norm(apart, axis=-1)
+    best = [math.inf]
+    memo = {}
+
+    def between(P, Q, depth):
+        lower = _apart(P.outer, Q.outer, precision / 4)
+        for X, Y in ((P, Q), (Q, P)):
+            if X.bore is not None:
+                c, w, r = X.bore
+                lower = max(lower, r - Y.outer.reach(c, w))  # Y in the bore
+        if lower >= best[0] - precision:
+            return
+        whole = P.inner is P.outer and Q.inner is Q.outer
+        upper = lower if whole else _apart(P.inner, Q.inner, precision / 4)
+        best[0] = min(best[0], upper)
+        if upper - lower <= precision or depth >= _MAX_CUTS:
+            return
+        X = max((p for p in (P, Q) if p.halve), key=lambda p: p.span, default=None)
+        if X is None:
+            return
+        for half in X.halve():
+            between(half if X is P else P, half if X is Q else Q, depth + 1)
+
+    for flat in np.argsort(boxes, axis=None):
+        i, j = np.unravel_index(flat, boxes.shape)
+        if boxes[i, j] >= best[0] - precision:
+            break
+        between(pa[i], pb[j], 0)
+    del memo
+    return best[0]
+
+
+def _depth(proof, tol):
+    """How deep the overlap a proof shows goes, or None when it was shown
+    some other way -- through a mesh's surface, or one wholly inside."""
+    if not isinstance(proof, tuple):
+        return None
+    P, Q = proof
+    # the inner stand-ins lie inside their pieces: at least this deep
+    return _penetration(P.inner, Q.inner) + tol
+
+
+def separation(a, b, tol=TOL, step=None):
+    """How two objects stand to each other: ``("gap", d)`` d metres apart,
+    ``("touch", 0.0)``, ``("overlap", depth)`` -- depth None where it is not
+    known -- or None when either has no shape to measure."""
+    A, B = _body(a, tol, step), _body(b, tol, step)
+    if A is None or B is None:
+        return None
+    proof = _overlap(A, B, tol)
+    if proof:
+        return ("overlap", _depth(proof, tol))
+    size = float(max(np.max(A.hi - A.lo), np.max(B.hi - B.lo)))
+    # the shrinking parts every pair by the tolerance it takes away
+    d = _gap(A, B, max(10 * tol, 1e-6 * size)) - tol
+    return ("touch", 0.0) if d <= tol else ("gap", d)
+
+
+def find_overlaps(objects, tol=TOL, step=None, depths=False):
+    """The pairs of `objects` that overlap, as index pairs `(i, j)`, `i < j`;
+    with `depths`, as ``(i, j, depth)``, depth in metres or None where it is
+    not known.
 
     Two objects overlap when they interpenetrate by more than `tol` metres;
     touching does not count. Collections are not looked into: pass their
     leaves. What has no shape to overlap with -- a sensor, a dipole, a custom
     source, a shape not yet given its geometry -- is never in a pair, and
     neither are two wires or two sheets, which have no thickness. Each object
-    is taken at the last step of its path.
+    is taken where it is at `step` of its path, the last by default.
     """
-    bodies = [_body(obj, tol) for obj in objects]
+    bodies = [_body(obj, tol, step) for obj in objects]
     index = [k for k, body in enumerate(bodies) if body is not None]
     if len(index) < 2:
         return []
     lo = np.array([bodies[k].lo for k in index])
     hi = np.array([bodies[k].hi for k in index])
-    found = set()
+    found = {}
     for a, b in zip(*_candidates(lo, hi), strict=True):
         i, j = sorted((index[a], index[b]))
-        if _overlap(bodies[i], bodies[j], tol):
-            found.add((i, j))
+        proof = _overlap(bodies[i], bodies[j], tol)
+        if proof:
+            found[(i, j)] = (
+                _measured(bodies[i], bodies[j], proof, tol) if depths else None
+            )
+    if depths:
+        return [(i, j, found[i, j]) for i, j in sorted(found)]
     return sorted(found)
+
+
+# How deep each overlapping pair goes, by what its two bodies are made of: a
+# drag moves one magnet, and the others' depths stand.
+_depths: OrderedDict = OrderedDict()
+
+
+def _measured(A, B, proof, tol):
+    key = (A.key, B.key)
+    if key not in _depths:
+        _depths[key] = _depth(proof, tol)
+        if len(_depths) > _CACHE_SIZE:
+            _depths.popitem(last=False)
+    _depths.move_to_end(key)
+    return _depths[key]
+
+
+def overlaps_along(objects, tol=TOL):
+    """The pairs that overlap at each step of the longest path among
+    `objects`: a list with an entry per step, each as `find_overlaps` gives
+    it. Pairs of objects that stand still are decided once; only pairs with
+    something moving are asked again at each step."""
+    steps = path_length(objects)
+    moving = {
+        k
+        for k, obj in enumerate(objects)
+        if len(np.asarray(obj.position).reshape(-1, 3)) > 1
+        or len(obj.orientation.as_quat().reshape(-1, 4)) > 1
+    }
+    still = [k for k in range(len(objects)) if k not in moving]
+    fixed = [
+        (still[i], still[j]) for i, j in find_overlaps([objects[k] for k in still], tol)
+    ]
+    along = []
+    for step in range(steps):
+        bodies = [_body(obj, tol, step) for obj in objects]
+        index = [k for k, body in enumerate(bodies) if body is not None]
+        found = set(fixed)
+        if moving and len(index) > 1:
+            lo = np.array([bodies[k].lo for k in index])
+            hi = np.array([bodies[k].hi for k in index])
+            for a, b in zip(*_candidates(lo, hi), strict=True):
+                i, j = sorted((index[a], index[b]))
+                if (i in moving or j in moving) and _overlap(bodies[i], bodies[j], tol):
+                    found.add((i, j))
+        along.append(sorted(found))
+    return along

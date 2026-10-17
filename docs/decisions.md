@@ -1540,3 +1540,63 @@ Code webview's messages.
 | marimo 0.24.0, run    | 101 ms                        | 103 ms                    |
 | marimo 0.24.0, edit   | 11.7 ms                       | 51 ms                     |
 | scene sent            | 34 KB                         | 132 KB                    |
+
+## 0029. Overlapping magnets are found, and said, as you edit
+
+**Status:** accepted 2026-10-18, as built on #47. **Record of:** the parts of
+`plans/overlaps.md` that are built; the plan keeps what is not.
+
+### Context
+
+Magpylib adds the magnetizations of two magnets wherever they overlap. A magnet
+pushed into its neighbour therefore computes a field that looks right and is
+not, and nothing says so: the most common silent mistake in a scene. Touching is
+not that mistake. A Halbach ring, a stack, a shaft in its bore and a coil on its
+core all touch on purpose, and many touch along a face, a line or a point that a
+looser test reads as an overlap.
+
+### Decision
+
+- **Two objects overlap when they interpenetrate by more than 1 nm**
+  (`collisions.TOL`); touching never counts. Every solid is shrunk by half that
+  before it is tested, so faces that touch end up apart.
+- **Every shape is convex pieces with exact support functions.** Cuboid,
+  Cylinder, Sphere, Tetrahedron and a convex mesh are one piece each, with
+  nothing curved turned into triangles. A CylinderSegment is cut into wedges,
+  each between an outer convex stand-in and an inner one, halved while the two
+  disagree, and cleared at once by its bore. A mesh that is not convex is its
+  triangles and a check that nothing sits wholly inside it. A current loop is
+  cut like a ring; wires and sheets are checked against magnets, never against
+  each other; sensors and dipoles never overlap.
+- **Two pieces are decided by MPR**, on 72,000 near-contact cases all right.
+- **The check takes magpylib objects and imports nothing from studio**
+  (`magpylib_studio/collisions.py`), so it can move into magpylib whole.
+- **Every scene says which pairs overlap**, a drag's previews included, how deep
+  each goes, and -- where something moves along a path -- the pairs at each
+  step. A view nobody edits says it too. `get_overlaps` lists them, `get_gap`
+  measures two objects, and `list_objects` names each object's.
+- **It is said where the eye is**: an amber outline in the 3D view, a warning at
+  the end of each overlapping row of the legend and of the Objects tree, and
+  above the legend a count that steps through the pairs.
+- **An overlap meant -- a cut-out -- is marked by the person**, pair by pair
+  (`set_overlap_intended`), kept in the document as `intended_overlaps`, carried
+  through the script tab, one step to undo. Marked, it is counted apart and
+  drawn faint, never hidden.
+
+### Rejected
+
+- **Triangulating every shape**: a tessellated cylinder is smaller than the
+  cylinder, so a shaft touching its bore reads as a gap or an overlap depending
+  on which side the facets fall.
+- **GJK's yes/no form**: it called up to 12 % of exactly touching curved pairs
+  overlapping. **GJK's distance form** for the yes/no: it missed 21 % of slight
+  sphere overlaps within its iterations. It measures gaps instead.
+- **Guessing intent from opposite polarizations**: a magnet reversed by mistake
+  inside another is exactly the error to report.
+- **The check in the browser**, at pointer rate: a second implementation, and
+  notebooks, agents and the RPC would not have it. A drag frame costs a few
+  milliseconds in Python, with the shapes of what did not move kept.
+- **A red outline**, which vanished on magpylib's red north poles; **magenta**,
+  which said nothing about what was wrong. **Lines joining an overlapping
+  pair**: the two are already in contact, so the line is a few pixels inside
+  them.

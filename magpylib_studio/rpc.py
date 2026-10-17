@@ -40,6 +40,8 @@ _PUBLIC = {
     "get_figure",
     "get_scene",
     "get_overlaps",
+    "set_overlap_intended",
+    "get_gap",
     "get_field",
     "get_field_figure",
     "get_field_map",

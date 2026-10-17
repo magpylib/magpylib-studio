@@ -5,6 +5,25 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>Magnets that overlap are found and marked as you edit</summary>
+
+magpylib adds the magnetizations of two magnets where they overlap, so a magnet
+pushed into its neighbour gives a field that looks right and is wrong. The view
+now finds such pairs, while a magnet is still being dragged, and says so: an
+amber outline in the 3D view, a warning on the object's row in the legend and in
+the Objects tree, and above the legend the number of pairs, a click looking at
+each in turn. Touching is not overlapping, so Halbach rings, stacks and a shaft
+in its bore are left alone. An overlap meant as a cut-out is marked once and no
+longer warned about; it stays in the scene's file. The legend says how deep an
+overlap goes and, with two objects selected, how far apart they are; a run
+outlines what overlaps at each of its steps. From code: `get_overlaps`,
+`get_gap` and `set_overlap_intended` on the session (#47).
+
+</details>
+
 ### Changed
 
 <details>

@@ -659,22 +659,33 @@
   display: none;
 }
 
-/* How many pairs overlap, above the list while any do: a click steps
-   through them. Sticky, so a long list keeps it in sight. */
-.magpy-legend-overlaps {
+/* Above the list while anything overlaps, or two objects are measured: how
+   many pairs overlap and how many are meant, a click stepping through each,
+   and for the one shown a way to say otherwise. Sticky, so a long list
+   keeps it in sight. */
+.magpy-legend-header {
   position: sticky;
   top: 0;
   z-index: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 8px;
   padding: 3px 8px 4px;
   margin-bottom: 2px;
   background: inherit;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+.magpy-legend-header[hidden] {
+  display: none;
+}
+.magpy-legend-overlaps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--vscode-editorWarning-foreground, #d18616);
   font-weight: 600;
   cursor: pointer;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
 }
 .magpy-legend-overlaps::before {
   content: "";
@@ -687,11 +698,43 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1.5 15 14H1zM7.2 5.8h1.6v4.4H7.2zM7.2 11.2h1.6v1.6H7.2z'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
-.magpy-legend-overlaps:hover {
+.magpy-legend-overlaps:hover,
+.magpy-legend-intended:hover,
+.magpy-legend-act:hover {
   text-decoration: underline;
 }
-.magpy-legend-overlaps:focus-visible {
+.magpy-legend-overlaps:focus-visible,
+.magpy-legend-intended:focus-visible,
+.magpy-legend-act:focus-visible {
   outline: 1px solid currentColor;
+}
+
+/* Overlaps marked as meant: counted, quietly. */
+.magpy-legend-intended {
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+/* What can be said about the pair shown: it is meant, or it is not. */
+.magpy-legend-act {
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* How far apart the two selected are. */
+.magpy-legend-measure {
+  flex-basis: 100%;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A row whose overlaps are all meant: its mark faint, still there to say so,
+   and a click warns about them again. */
+.magpy-legend-overlap.intended {
+  opacity: 0.35;
 }
 
 /* --- the variables -------------------------------------------------------
