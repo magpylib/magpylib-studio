@@ -696,8 +696,9 @@ def test_only_what_changes_is_carried():
 
 @needs_scene_graph
 def test_a_moving_collection_does_not_stop_the_studio_drawing():
-    """magpylib's `Collection.centroid` raises when the members move along a
-    path; the studio's Edit view is still drawn, handles at its position."""
+    """A collection whose members move along a path is drawn, its handles at
+    its centroid -- or at its position, where magpylib cannot say the
+    centroid: before magpylib#1024, `Collection.centroid` raised for one."""
     ring = magpy.Collection(
         magpy.magnet.Cuboid(
             polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
@@ -707,7 +708,11 @@ def test_a_moving_collection_does_not_stop_the_studio_drawing():
     ring.rotate_from_angax(np.linspace(0, 90, 5), "z", anchor=0, start=0)
     payload = threejs.scene_payload([ring], live={"ring": ring})
     assert payload["meshes"]
-    assert payload["centroids"]["ring"] == payload["anchors"]["ring"]
+    try:
+        expected = np.atleast_2d(ring.centroid)[-1].tolist()
+    except ValueError:
+        expected = payload["anchors"]["ring"]
+    assert payload["centroids"]["ring"] == pytest.approx(expected)
 
 
 @needs_scene_graph
