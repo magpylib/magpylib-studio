@@ -3600,8 +3600,13 @@ class MagpylibStudioSession:
         }
         scene["expressions"] = self._written_fields()
         # Carried with every scene, a drag's preview frames included, so an
-        # overlap shows while the magnet is still under the pointer.
-        scene["overlaps"] = self.get_overlaps()
+        # overlap shows while the magnet is still under the pointer. A check
+        # that fails costs the scene nothing but its outlines, and says why.
+        try:
+            scene["overlaps"] = self.get_overlaps()
+        except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
+            scene["overlaps"] = []
+            scene["overlaps_error"] = f"{type(e).__name__}: {e}"
         return scene
 
     def get_overlaps(self):
@@ -3613,14 +3618,32 @@ class MagpylibStudioSession:
         a pair is listed only when it interpenetrates by more than a
         nanometre (`collisions.TOL`). Sensors and dipoles never overlap, and
         neither do two wires. Each object is taken where its path ends.
+
+        Every magnet is checked, copies a pattern made included. One inside a
+        copied group has no id of its own, and is named by the copy that holds
+        it: the id the view draws it under.
         """
-        leaves = [
-            (i, obj)
-            for i, obj in self._objs.items()
-            if not isinstance(obj, magpy.Collection)
-        ]
-        pairs = collisions.find_overlaps([obj for _, obj in leaves])
-        return [[leaves[i][0], leaves[j][0]] for i, j in pairs]
+        named = {id(obj): key for key, obj in self._objs.items()}
+        # the innermost group with an id, as `threejs._key_map` finds it
+        holder = {}
+        for key, obj in sorted(
+            self._objs.items(), key=lambda kv: -len(getattr(kv[1], "children_all", ()))
+        ):
+            for child in getattr(obj, "children_all", ()):
+                holder[id(child)] = key
+        leaves, seen = [], set()
+        for obj in self._objs.values():
+            for each in (obj, *getattr(obj, "children_all", ())):
+                if isinstance(each, magpy.Collection) or id(each) in seen:
+                    continue
+                seen.add(id(each))
+                leaves.append((named.get(id(each)) or holder[id(each)], each))
+        pairs = []
+        for i, j in collisions.find_overlaps([obj for _, obj in leaves]):
+            pair = [leaves[i][0], leaves[j][0]]
+            if pair not in pairs:
+                pairs.append(pair)
+        return pairs
 
     def _written_fields(self):
         """The expression each element of a drag-editable field was written

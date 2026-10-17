@@ -93,9 +93,11 @@ contact 50 to 60 µs; the box sweep takes 0.05 ms for 100 objects and 1.4 ms for
 - The Objects tree and the Inspector saying it; the agent skill teaching it.
 - A read-only view: a notebook's `show()` or a script's figure is drawn from
   magpylib's display scene, not a session, so it shows no overlaps yet.
-- Pieces kept between builds: every scene builds them again.
-- A loop meets a mesh that is not convex as a 256-sided polygon; large meshes
-  compare every edge's box with every triangle's.
+- A loop meets a mesh that is not convex as 2048 points on it, so a dip into the
+  mesh shorter than their spacing is missed; a mesh against a mesh compares
+  every edge's box with every triangle's.
+- A pair of pieces that takes more than 20,000 tests is called overlapping,
+  since it was not shown clear: a guard no scene tried has reached.
 
 ## Done when
 

@@ -5,7 +5,7 @@ overlap computes a field that looks plausible and is wrong, and nothing says
 so. Touching is not overlapping: a Halbach ring or a stack touches on purpose.
 A pair counts only when the two interpenetrate by more than `tol`.
 
-The method (docs/plans/overlaps.md):
+The method:
 
 * Every shape is a set of convex pieces, each known by its support function,
   its farthest point along a direction. That is exact for a cuboid, a
@@ -32,6 +32,7 @@ magpylib as it is.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 
 import numpy as np
 from scipy.spatial import ConvexHull, QhullError
@@ -40,14 +41,23 @@ from scipy.spatial import ConvexHull, QhullError
 #: the rounding of a scene in millimetres, far below anything built.
 TOL = 1e-9
 
-# Guards a real scene does not reach. Twelve halvings of a 90 degree wedge
-# leave a sliver a hundred-millionth of the bore's radius thick.
-_MAX_CUTS = 12
-_MAX_TESTS = 5000
+# Thirty halvings of a 90 degree wedge leave a sliver between its stand-ins a
+# 1e-19th of the bore's radius thick: below the tolerance for any bore.
+_MAX_CUTS = 30
+# How many tests one pair of pieces may take. A guard a real scene does not
+# reach; reached, the pair is called overlapping, since it was not shown clear.
+_MAX_TESTS = 20_000
 _MAX_ITER = 64
 
-# A current loop meets a mesh's triangles as this many straight segments.
-_LOOP_SEGMENTS = 256
+# How many points of a current loop are checked against a mesh that is not
+# convex: the loop itself, not a polygon whose chords would cut into a
+# faceted surface it only touches.
+_LOOP_POINTS = 2048
+
+# Bodies kept built between calls, by what they are made of: a drag moves one
+# object, and the others' pieces -- a mesh's thousands of triangles -- stand.
+_CACHE_SIZE = 4096
+_cache: OrderedDict = OrderedDict()
 
 
 # ------------------------------------------------------------------ vectors
@@ -74,8 +84,13 @@ def _cross(a, b):
 
 
 def _unit(a):
-    n = math.sqrt(_dot(a, a))
-    return _mul(a, 1.0 / n) if n else a
+    """`a` made unit length, scaled first so that a tiny vector -- the cross
+    product of two nearly parallel ones -- does not underflow on the way."""
+    big = max(abs(a[0]), abs(a[1]), abs(a[2]))
+    if big == 0:
+        return a
+    a = (a[0] / big, a[1] / big, a[2] / big)
+    return _mul(a, 1.0 / math.sqrt(_dot(a, a)))
 
 
 def _basis(w):
@@ -100,7 +115,7 @@ class _Shape:
     where that frame stands. `center` is a point inside it (inside its plane,
     for a flat one), where MPR starts."""
 
-    __slots__ = ("R", "_reach", "c", "center", "hi", "lo", "local")
+    __slots__ = ("R", "_reach", "c", "center", "hi", "lo", "local", "size")
 
     def __init__(self, local, R, c, center=(0.0, 0.0, 0.0), reach=None):
         self.local = local
@@ -116,6 +131,7 @@ class _Shape:
             e[k] = -1.0
             lo.append(self.support(tuple(e))[k])
         self.lo, self.hi = lo, hi
+        self.size = max(top - bottom for top, bottom in zip(hi, lo, strict=True))
 
     def to_world(self, p):
         R, c = self.R, self.c
@@ -130,6 +146,7 @@ class _Shape:
         return (self.R[2], self.R[5], self.R[8])
 
     def support(self, d):
+        d = _unit(d)
         R = self.R
         p = self.local(
             R[0] * d[0] + R[3] * d[1] + R[6] * d[2],
@@ -137,6 +154,14 @@ class _Shape:
             R[2] * d[0] + R[5] * d[1] + R[8] * d[2],
         )
         return self.to_world(p)
+
+    def corners(self):
+        return [
+            (x, y, z)
+            for x in (self.lo[0], self.hi[0])
+            for y in (self.lo[1], self.hi[1])
+            for z in (self.lo[2], self.hi[2])
+        ]
 
     def reach(self, c, w):
         """How far the shape reaches from the line through `c` along `w`:
@@ -325,9 +350,8 @@ def _wedge(R, c, r1, r2, hz, a, b, face_a, face_b, m):
     inner_pts = (
         [_line_at(nL, oL, tL, r1), _line_at(nR, oR, tR, r1)] if walled else [corner]
     )
-    outer_d = (r2, aL, aR, inner_pts, hz)
     outer = _Shape(
-        _arc_prism(*outer_d),
+        _arc_prism(r2, aL, aR, inner_pts, hz),
         R,
         c,
         _centre2(inner_pts, r2, aL, aR),
@@ -393,13 +417,18 @@ def _arc(R, c, r, a, b):
     return _Part(outer, inner, (c, (R[2], R[5], R[8]), r), halve, b - a)
 
 
-def _segment_parts(R, c, pts):
-    """Convex pieces with no volume -- a wire's segments, a sheet's triangles --
-    in the world already, so posed at the identity."""
-    return [
-        _Part(_Shape(_points(p), R, c, tuple(np.mean(p, axis=0)), _reach_of_points(p)))
-        for p in pts
-    ]
+_IDENTITY = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+_ORIGIN = (0.0, 0.0, 0.0)
+
+
+def _flat_part(pts):
+    """A piece with no volume -- a wire's segment, a sheet's or a mesh's
+    triangle -- in the world already."""
+    pts = [tuple(float(v) for v in p) for p in pts]
+    centre = tuple(sum(p[k] for p in pts) / len(pts) for k in range(3))
+    return _Part(
+        _Shape(_points(pts), _IDENTITY, _ORIGIN, centre, _reach_of_points(pts))
+    )
 
 
 # ------------------------------------------------------------------- bodies
@@ -407,22 +436,63 @@ def _segment_parts(R, c, pts):
 
 class _Body:
     """An object as the test sees it: `solid` (convex pieces, wedges among
-    them), `mesh` (a closed surface that is not convex: its triangles),
-    `curve` or `sheet` (no thickness)."""
+    them), `mesh` (a closed surface that is not convex), `curve` or `sheet`
+    (no thickness).
 
-    __slots__ = ("hi", "kind", "lo", "parts", "sample", "segs", "tris")
+    A body with triangles -- a mesh, a sheet -- makes a piece of a triangle
+    only when something comes near it: an imported part has thousands, and a
+    magnet across the scene needs none of them. `probes` are its points for
+    asking whether it is inside a mesh: inside it, never on its surface."""
 
-    def __init__(self, kind, parts, sample, tris=None, segs=None):
+    __slots__ = (
+        "_made",
+        "hi",
+        "kind",
+        "lo",
+        "parts",
+        "probes",
+        "segs",
+        "tri_hi",
+        "tri_lo",
+        "tris",
+    )
+
+    def __init__(self, kind, probes, parts=None, tris=None, segs=None):
         self.kind = kind
         self.parts = parts
-        self.sample = np.asarray(sample, dtype=float)
         self.tris = tris
         self.segs = segs
-        self.lo = np.min([p.outer.lo for p in parts], axis=0)
-        self.hi = np.max([p.outer.hi for p in parts], axis=0)
+        self.probes = np.asarray(probes, dtype=float).reshape(-1, 3)
+        self._made = {}
+        if tris is not None:
+            self.tri_lo, self.tri_hi = tris.min(axis=1), tris.max(axis=1)
+            self.lo, self.hi = self.tri_lo.min(axis=0), self.tri_hi.max(axis=0)
+        else:
+            self.tri_lo = self.tri_hi = None
+            self.lo = np.min([p.outer.lo for p in parts], axis=0)
+            self.hi = np.max([p.outer.hi for p in parts], axis=0)
 
-
-_IDENTITY = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    def near(self, lo, hi):
+        """Its pieces whose boxes meet the box from `lo` to `hi`."""
+        if self.tris is None:
+            return [
+                p
+                for p in self.parts
+                if all(
+                    p.outer.lo[k] < hi[k] and lo[k] < p.outer.hi[k] for k in range(3)
+                )
+            ]
+        found = np.nonzero(
+            np.all(self.tri_lo < hi, axis=1)
+            & np.all(np.asarray(lo) < self.tri_hi, axis=1)
+        )[0]
+        out = []
+        for i in found:
+            part = self._made.get(i)
+            if part is None:
+                part = self._made[i] = _flat_part(self.tris[i])
+            out.append(part)
+        return out
 
 
 def _pose(obj):
@@ -436,6 +506,14 @@ def _last(value, width):
     return np.asarray(value, dtype=float).reshape(-1, width)[-1]
 
 
+def _last_points(value):
+    """Points that may vary along a path, at its last step."""
+    points = np.asarray(value, dtype=float)
+    while points.ndim > 2:
+        points = points[-1]
+    return points.reshape(-1, 3)
+
+
 def _world(R, c, pts):
     return np.asarray(pts, dtype=float) @ np.asarray(R).reshape(3, 3).T + np.asarray(c)
 
@@ -447,15 +525,76 @@ def _edges_of(faces):
     return np.unique(pairs, axis=0)
 
 
-def _body(obj, m):
-    """The body of a magpylib object, its solid pieces shrunk by `m`; None
-    for what has no shape to overlap with: a sensor, a dipole, a custom
-    source, a collection."""
+def _inward_probe(tris, tol):
+    """A point just inside a closed mesh: a few tolerances in from the middle
+    of its largest face. Inside it, and never on another body's surface it
+    merely touches."""
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    outward = (
+        np.sign(np.einsum("ij,ij->", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])))
+        or 1.0
+    )
+    k = int(np.argmax(np.linalg.norm(normals, axis=1)))
+    n = normals[k] / np.linalg.norm(normals[k]) * outward
+    return tris[k].mean(axis=0) - 4 * tol * n
+
+
+_shapes: OrderedDict = OrderedDict()
+
+
+def _not_convex(vertices, tris, tol):
+    """Whether some face has vertices beyond its own plane on both sides:
+    proof a mesh is not convex, from a few faces, without building a hull.
+    Faces chosen at random, seeded: a stride lands on the same wall of a
+    mesh built round by round."""
+    pick = tris[np.random.default_rng(0).choice(len(tris), min(len(tris), 256), replace=False)]
+    normals = np.cross(pick[:, 1] - pick[:, 0], pick[:, 2] - pick[:, 0])
+    size = np.linalg.norm(normals, axis=1)
+    normals, pick = normals[size > 0] / size[size > 0, None], pick[size > 0]
+    side = (vertices @ normals.T) - np.einsum("ij,ij->i", pick[:, 0], normals)
+    return bool(np.any((side.max(axis=0) > tol) & (side.min(axis=0) < -tol)))
+
+
+def _mesh_shape(vertices, faces, m, tol):
+    """What a mesh is in its own frame, whatever its pose: convex (its hull
+    shrunk by `m`), or not (its edges, and a point just inside it). Kept by
+    the mesh's own numbers, so that moving a mesh asks none of it again."""
+    key = (m, tol, vertices.tobytes(), faces.tobytes())
+    if key in _shapes:
+        _shapes.move_to_end(key)
+        return _shapes[key]
+    tris = vertices[faces]
+    shape = None
+    if not _not_convex(vertices, tris, tol):
+        volume = abs(np.einsum("ij,ij->", tris[:, 0], np.cross(tris[:, 1], tris[:, 2]))) / 6
+        try:
+            hull = ConvexHull(vertices)
+        except (QhullError, ValueError):  # flat or degenerate: no volume to overlap
+            hull = None
+        if hull is not None and volume >= hull.volume * (1 - 1e-9):
+            # shrunk about a point inside, by the nearest face's distance, so
+            # that every face moves in by at least `m`
+            centre = vertices[hull.vertices].mean(0)
+            depth = -(hull.equations[:, :3] @ centre + hull.equations[:, 3]).max()
+            corners = centre + (vertices[hull.vertices] - centre) * max(depth - m, 0.0) / depth
+            shape = ("convex", [tuple(p) for p in corners], tuple(centre))
+        elif hull is None:
+            return None
+    if shape is None:
+        shape = ("mesh", _edges_of(faces), _inward_probe(tris, tol))
+    _shapes[key] = shape
+    if len(_shapes) > _CACHE_SIZE:
+        _shapes.popitem(last=False)
+    return shape
+
+
+def _solid(part, probe):
+    return _Body("solid", [probe], parts=[part] if isinstance(part, _Part) else part)
+
+
+def _build(obj, m, tol):
     kind = type(obj).__name__
-    try:
-        R, c = _pose(obj)
-    except AttributeError:
-        return None
+    R, c = _pose(obj)
     if kind == "Cuboid":
         h = np.maximum(_last(obj.dimension, 3) / 2 - m, 0.0)
         corners = [
@@ -464,25 +603,19 @@ def _body(obj, m):
             for sy in (-1, 1)
             for sz in (-1, 1)
         ]
-        return _Body(
-            "solid", [_Part(_Shape(_box(*h), R, c, reach=_reach_of_points(corners)))], c
-        )
+        return _solid(_Part(_Shape(_box(*h), R, c, reach=_reach_of_points(corners))), c)
     if kind == "Cylinder":
         d, height = _last(obj.dimension, 2)
         r, hz = max(d / 2 - m, 0.0), max(height / 2 - m, 0.0)
-        return _Body(
-            "solid",
-            [_Part(_Shape(_cylinder(r, hz), R, c, reach=_reach_of_round(r)))],
-            c,
+        return _solid(
+            _Part(_Shape(_cylinder(r, hz), R, c, reach=_reach_of_round(r))), c
         )
     if kind == "Sphere":
         r = max(float(_last(obj.diameter, 1)[0]) / 2 - m, 0.0)
-        return _Body(
-            "solid", [_Part(_Shape(_ball(r), R, c, reach=_reach_of_ball(r)))], c
-        )
+        return _solid(_Part(_Shape(_ball(r), R, c, reach=_reach_of_ball(r))), c)
     if kind == "Tetrahedron":
         # shrunk about its incentre, which moves every face in by the same `m`
-        v = _last(obj.vertices, 12).reshape(4, 3)
+        v = _last_points(obj.vertices)[:4]
         opposite = ((1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2))
         areas = np.array(
             [
@@ -496,117 +629,69 @@ def _body(obj, m):
         centre = (areas[:, None] * v).sum(0) / areas.sum()
         r_in = 3 * volume / areas.sum()
         pts = [tuple(p) for p in centre + (v - centre) * max(r_in - m, 0.0) / r_in]
-        return _Body(
-            "solid",
-            [_Part(_Shape(_points(pts), R, c, tuple(centre), _reach_of_points(pts)))],
-            c,
-        )
+        shape = _Shape(_points(pts), R, c, tuple(centre), _reach_of_points(pts))
+        return _solid(_Part(shape), shape.center)
     if kind == "CylinderSegment":
         r1, r2, height, p1, p2 = _last(obj.dimension, 5)
         span = math.radians(p2 - p1)
         full = span >= 2 * math.pi - 1e-12
         hz, r2 = max(height / 2 - m, 0.0), max(r2 - m, 0.0)
         if full and r1 == 0:
-            return _Body(
-                "solid",
-                [_Part(_Shape(_cylinder(r2, hz), R, c, reach=_reach_of_round(r2)))],
-                c,
+            return _solid(
+                _Part(_Shape(_cylinder(r2, hz), R, c, reach=_reach_of_round(r2))), c
             )
         # within `m` of where the faces meet is within `m` of a face
         r1 = r1 + m if r1 > 0 else m
         a0, n = math.radians(p1), max(1, math.ceil(span / (math.pi / 2) - 1e-9))
         parts = [
             _wedge(
-                R,
-                c,
-                r1,
-                r2,
-                hz,
-                a0 + span * i / n,
-                a0 + span * (i + 1) / n,
-                not full and i == 0,
-                not full and i == n - 1,
-                m,
+                R, c, r1, r2, hz,
+                a0 + span * i / n, a0 + span * (i + 1) / n,
+                not full and i == 0, not full and i == n - 1, m,
             )
             for i in range(n)
-        ]
+        ]  # fmt: skip
         mid, rm = a0 + span / 2, (r1 + r2) / 2
-        return _Body(
-            "solid", parts, _world(R, c, [rm * math.cos(mid), rm * math.sin(mid), 0.0])
+        return _solid(
+            parts, _world(R, c, [rm * math.cos(mid), rm * math.sin(mid), 0.0])
         )
     if kind == "TriangularMesh":
-        vertices = np.asarray(obj.vertices, dtype=float)
-        faces = np.asarray(obj.faces, dtype=int)
-        tris = vertices[faces]
-        volume = (
-            abs(
-                np.einsum(
-                    "ij,ij->i", tris[:, 0], np.cross(tris[:, 1], tris[:, 2])
-                ).sum()
-            )
-            / 6
-        )
-        try:
-            hull = ConvexHull(vertices)
-        except (QhullError, ValueError):  # flat or degenerate: no volume to overlap
+        vertices = _last_points(obj.vertices)
+        faces = np.asarray(obj.faces, dtype=int).reshape(-1, 3)
+        shape = _mesh_shape(vertices, faces, m, tol)
+        if shape is None:
             return None
-        convex = volume >= hull.volume * (1 - 1e-9)
-        if convex:
-            centre = vertices[hull.vertices].mean(0)
-            depth = -(hull.equations[:, :3] @ centre + hull.equations[:, 3]).min()
-            pts = [
-                tuple(p)
-                for p in centre
-                + (vertices[hull.vertices] - centre) * max(depth - m, 0.0) / depth
-            ]
-            return _Body(
-                "solid",
-                [
-                    _Part(
-                        _Shape(_points(pts), R, c, tuple(centre), _reach_of_points(pts))
-                    )
-                ],
-                c,
-            )
-        world = _world(R, c, tris)
-        edges = _edges_of(faces)
-        segs = _world(R, c, vertices)[edges]
+        if shape[0] == "convex":
+            _, pts, centre = shape
+            solid = _Shape(_points(pts), R, c, centre, _reach_of_points(pts))
+            return _solid(_Part(solid), solid.center)
+        _, edges, probe = shape
         return _Body(
             "mesh",
-            _segment_parts(
-                _IDENTITY, (0.0, 0.0, 0.0), [list(map(tuple, t)) for t in world]
-            ),
-            world[0, 0],
-            tris=world,
-            segs=segs,
+            [_world(R, c, probe)],
+            tris=_world(R, c, vertices[faces]),
+            segs=_world(R, c, vertices)[edges],
         )
     if kind == "Polyline":
-        pts = _world(R, c, np.asarray(obj.vertices, dtype=float).reshape(-1, 3))
+        pts = _world(R, c, _last_points(obj.vertices))
         if len(pts) < 2:
             return None
         segs = np.stack([pts[:-1], pts[1:]], axis=1)
-        return _Body(
-            "curve",
-            _segment_parts(
-                _IDENTITY, (0.0, 0.0, 0.0), [list(map(tuple, s)) for s in segs]
-            ),
-            pts[0],
-            segs=segs,
-        )
+        probes = np.concatenate([pts, segs.mean(axis=1)])
+        return _Body("curve", probes, parts=[_flat_part(s) for s in segs], segs=segs)
     if kind == "Circle":
         r = float(_last(obj.diameter, 1)[0]) / 2
         if r <= 0:
             return None
+        t = np.linspace(0, 2 * math.pi, _LOOP_POINTS, endpoint=False)
+        ring = _world(R, c, np.stack([r * np.cos(t), r * np.sin(t), 0 * t], axis=1))
         parts = [
             _arc(R, c, r, i * math.pi / 2, (i + 1) * math.pi / 2) for i in range(4)
         ]
-        t = np.linspace(0, 2 * math.pi, _LOOP_SEGMENTS + 1)
-        ring = _world(R, c, np.stack([r * np.cos(t), r * np.sin(t), 0 * t], axis=1))
-        return _Body(
-            "curve", parts, ring[0], segs=np.stack([ring[:-1], ring[1:]], axis=1)
-        )
+        # no segments: against a mesh the loop is its points, see `_LOOP_POINTS`
+        return _Body("curve", ring, parts=parts)
     if kind in ("TriangleSheet", "TriangleStrip", "Triangle"):
-        vertices = np.asarray(obj.vertices, dtype=float).reshape(-1, 3)
+        vertices = _last_points(obj.vertices)
         if kind == "TriangleSheet":
             faces = np.asarray(obj.faces, dtype=int).reshape(-1, 3)
         elif kind == "TriangleStrip":
@@ -615,18 +700,58 @@ def _body(obj, m):
             )
         else:
             faces = np.array([[0, 1, 2]])
+        if not len(faces):
+            return None
         world = _world(R, c, vertices[faces])
         segs = _world(R, c, vertices)[_edges_of(faces)]
-        return _Body(
-            "sheet",
-            _segment_parts(
-                _IDENTITY, (0.0, 0.0, 0.0), [list(map(tuple, t)) for t in world]
-            ),
-            world[0, 0],
-            tris=world,
-            segs=segs,
+        probes = np.concatenate(
+            [world.reshape(-1, 3), world.mean(axis=1), segs.mean(axis=1)]
         )
+        return _Body("sheet", probes, tris=world, segs=segs)
     return None
+
+
+def _fingerprint(obj):
+    """What an object's body is made of: its class, its pose and its
+    geometry, as bytes -- equal for a rebuilt object that has not changed."""
+    parts = [type(obj).__name__]
+    for name in (
+        "position",
+        "orientation",
+        "dimension",
+        "diameter",
+        "vertices",
+        "faces",
+    ):
+        value = getattr(obj, name, None)
+        if value is None:
+            continue
+        if name == "orientation":
+            value = value.as_quat()
+        value = np.asarray(value, dtype=float)
+        parts.append((name, value.shape, value.tobytes()))
+    return tuple(parts)
+
+
+def _body(obj, tol):
+    """The body of a magpylib object, its solid pieces shrunk by half of
+    `tol`; None for what has no shape to overlap with -- a sensor, a dipole,
+    a custom source, a collection -- or no geometry yet."""
+    try:
+        key = (tol, _fingerprint(obj))
+    except (TypeError, ValueError):
+        return None
+    if key in _cache:
+        _cache.move_to_end(key)
+        return _cache[key]
+    try:
+        body = _build(obj, tol / 2, tol)
+    except (AttributeError, IndexError, TypeError, ValueError, ZeroDivisionError):
+        body = None  # a shape whose geometry is missing or degenerate
+    _cache[key] = body
+    if len(_cache) > _CACHE_SIZE:
+        _cache.popitem(last=False)
+    return body
 
 
 # ------------------------------------------------------------------- tests
@@ -645,17 +770,17 @@ def _mpr(A, B, eps):
         return _sub(A.support(n), B.support(_mul(n, -1.0)))
 
     v0 = _sub(A.center, B.center)
-    if v0 == (0.0, 0.0, 0.0):
-        v0 = (1e-300, 0.0, 0.0)
+    if max(abs(v0[0]), abs(v0[1]), abs(v0[2])) <= 1e-12 * max(A.size, B.size, 1e-300):
+        return True  # a point inside each, in the same place
     n = _mul(v0, -1.0)
     v1 = S(n)
-    if _dot(v1, n) <= 0:
+    if _dot(v1, _unit(n)) <= 0:
         return False
     n = _cross(v1, v0)
     if n == (0.0, 0.0, 0.0):
         return True  # the origin is on the segment from v0 to v1
     v2 = S(n)
-    if _dot(v2, n) <= 0:
+    if _dot(v2, _unit(n)) <= 0:
         return False
     n = _cross(_sub(v1, v0), _sub(v2, v0))
     if _dot(n, v0) > 0:
@@ -663,7 +788,7 @@ def _mpr(A, B, eps):
         n = _mul(n, -1.0)
     for _ in range(_MAX_ITER):  # a portal the ray passes through
         v3 = S(n)
-        if _dot(v3, n) <= 0:
+        if _dot(v3, _unit(n)) <= 0:
             return False
         if _dot(_cross(v1, v3), v0) < 0:
             v2, n = v3, _cross(_sub(v1, v0), _sub(v3, v0))
@@ -676,10 +801,9 @@ def _mpr(A, B, eps):
         return False
     for _ in range(_MAX_ITER):  # refined towards the surface
         n = _cross(_sub(v2, v1), _sub(v3, v1))
-        nn = math.sqrt(_dot(n, n))
-        if nn == 0:
+        if n == (0.0, 0.0, 0.0):
             return True
-        n = _mul(n, 1.0 / nn)
+        n = _unit(n)
         if _dot(n, v1) >= 0:
             return True
         v4 = S(n)
@@ -702,14 +826,27 @@ def _mpr(A, B, eps):
     return False
 
 
-def _decide(P, Q, depth, budget, eps):
+def _in_bore(shape, bore, memo):
+    """Whether `shape` stays within the bore's radius of its axis."""
+    c, w, r = bore
+    if _off_axis(shape.center, c, w) > r:
+        return False  # a point of it is already outside
+    if max(_off_axis(p, c, w) for p in shape.corners()) <= r:
+        return True  # its whole box is inside
+    key = (id(shape), bore)
+    if key not in memo:
+        memo[key] = shape.reach(c, w) <= r
+    return memo[key]
+
+
+def _decide(P, Q, depth, budget, eps, memo):
     """Whether pieces P and Q overlap, cutting a wedge in half while its two
     stand-ins disagree."""
     budget[0] -= 1
     if budget[0] < 0:
-        return False
+        return True  # not shown clear: say so rather than nothing
     for X, Y in ((P, Q), (Q, P)):
-        if X.bore is not None and Y.outer.reach(X.bore[0], X.bore[1]) <= X.bore[2]:
+        if X.bore is not None and _in_bore(Y.outer, X.bore, memo):
             return False  # Y stays inside X's bore
     if not _mpr(P.outer, Q.outer, eps):
         return False
@@ -724,27 +861,20 @@ def _decide(P, Q, depth, budget, eps):
         return False  # the sliver between the stand-ins is below the tolerance
     for half in X.halve():
         if _decide(
-            half if X is P else P, half if X is Q else Q, depth + 1, budget, eps
+            half if X is P else P, half if X is Q else Q, depth + 1, budget, eps, memo
         ):
             return True
     return False
 
 
-def _boxes_meet(a_lo, a_hi, b_lo, b_hi):
-    return np.all(a_lo[:, None, :] < b_hi[None, :, :], axis=-1) & np.all(
-        b_lo[None, :, :] < a_hi[:, None, :], axis=-1
-    )
-
-
 def _pieces_overlap(A, B, eps):
-    a_lo = np.array([p.outer.lo for p in A.parts])
-    a_hi = np.array([p.outer.hi for p in A.parts])
-    b_lo = np.array([p.outer.lo for p in B.parts])
-    b_hi = np.array([p.outer.hi for p in B.parts])
-    budget = [_MAX_TESTS]
-    for i, j in zip(*np.nonzero(_boxes_meet(a_lo, a_hi, b_lo, b_hi)), strict=True):
-        if _decide(A.parts[i], B.parts[j], 0, budget, eps):
-            return True
+    """Whether a piece of A and a piece of B overlap, among those whose boxes
+    meet. A is a body with pieces of its own (a solid, a curve)."""
+    memo = {}
+    for P in A.parts:
+        for Q in B.near(P.outer.lo, P.outer.hi):
+            if _decide(P, Q, 0, [_MAX_TESTS], eps, memo):
+                return True
     return False
 
 
@@ -786,23 +916,58 @@ def _pierces(segs, tris, tol):
     return False
 
 
-def _inside(mesh, point):
-    """Whether `point` is inside a closed mesh: an odd number of its
-    triangles cut a ray from it."""
-    tris = mesh.tris
+def _parity(tris, points):
+    """For each point, whether an odd number of triangles cut a ray from it."""
     d = np.array([0.4472135955, 0.5773502691, 0.6831300511])
     e1, e2 = tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
     p = np.cross(d, e2)
     det = np.einsum("ij,ij->i", e1, p)
     ok = np.abs(det) > 1e-300
     inv = np.where(ok, 1 / np.where(ok, det, 1), 0)
-    s = point - tris[:, 0]
-    u = np.einsum("ij,ij->i", s, p) * inv
-    q = np.cross(s, e1)
-    v = (q @ d) * inv
-    t = np.einsum("ij,ij->i", e2, q) * inv
-    hits = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
-    return bool(hits.sum() % 2)
+    out = np.zeros(len(points), dtype=bool)
+    for start in range(0, len(points), 64):
+        s = points[start : start + 64, None, :] - tris[None, :, 0]
+        u = np.einsum("ptj,tj->pt", s, p) * inv
+        q = np.cross(s, e1[None])
+        v = (q @ d) * inv
+        t = np.einsum("tj,ptj->pt", e2, q) * inv
+        hits = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
+        out[start : start + 64] = hits.sum(axis=1) % 2 == 1
+    return out
+
+
+def _distance(tris, point):
+    """How far `point` is from the nearest of `tris`."""
+    a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
+    ab, ac, ap = b - a, c - a, point - a
+    n = np.cross(ab, ac)
+    nn = np.einsum("ij,ij->i", n, n)
+    flat = nn > 0
+    along = np.einsum("ij,ij->i", ap, n) / np.where(flat, nn, 1)
+    foot = ap - along[:, None] * n
+    d00, d01, d11 = (ab * ab).sum(1), (ab * ac).sum(1), (ac * ac).sum(1)
+    f0, f1 = (foot * ab).sum(1), (foot * ac).sum(1)
+    den = np.where(flat, d00 * d11 - d01 * d01, 1)
+    v, w = (d11 * f0 - d01 * f1) / den, (d00 * f1 - d01 * f0) / den
+    inside = flat & (v >= 0) & (w >= 0) & (v + w <= 1)
+    best = np.where(inside, np.abs(along) * np.sqrt(nn), np.inf)
+    for s0, e in ((a, ab), (a, ac), (b, c - b)):
+        ee = np.einsum("ij,ij->i", e, e)
+        t = np.clip(
+            np.einsum("ij,ij->i", point - s0, e) / np.where(ee > 0, ee, 1), 0, 1
+        )
+        best = np.minimum(best, np.linalg.norm(point - s0 - t[:, None] * e, axis=1))
+    return float(best.min())
+
+
+def _inside(mesh, points, tol):
+    """Whether any of `points` is inside a closed mesh by more than `tol`:
+    on its surface is touching it, not being inside it."""
+    pts = np.asarray(points, dtype=float).reshape(-1, 3)
+    pts = pts[np.all((pts > mesh.lo + tol) & (pts < mesh.hi - tol), axis=1)]
+    if not len(pts):
+        return False
+    return any(_distance(mesh.tris, p) > tol for p in pts[_parity(mesh.tris, pts)])
 
 
 def _overlap(A, B, tol):
@@ -812,18 +977,31 @@ def _overlap(A, B, tol):
         return False  # no thickness on either side
     if A.kind == "mesh" or B.kind == "mesh":
         mesh, other = (A, B) if A.kind == "mesh" else (B, A)
-        if other.kind != "solid":
-            # a mesh against a mesh, a wire or a sheet: an edge through a triangle
-            if _pierces(other.segs, mesh.tris, tol) or _pierces(
-                mesh.segs, other.tris, tol
-            ):
-                return True
-            return _inside(mesh, other.sample) or (
-                other.kind == "mesh" and _inside(other, mesh.sample)
-            )
-    if _pieces_overlap(A, B, eps):
-        return True
-    return any(X.kind == "mesh" and _inside(X, Y.sample) for X, Y in ((A, B), (B, A)))
+        if other.kind == "solid":
+            return _pieces_overlap(other, mesh, eps) or _inside(mesh, other.probes, tol)
+        # a mesh against a mesh, a wire or a sheet: an edge through a triangle,
+        # or one inside the other
+        if _pierces(other.segs, mesh.tris, tol) or _pierces(mesh.segs, other.tris, tol):
+            return True
+        return _inside(mesh, other.probes, tol) or (
+            other.kind == "mesh" and _inside(other, mesh.probes, tol)
+        )
+    solid, other = (A, B) if A.kind == "solid" else (B, A)
+    return _pieces_overlap(solid, other, eps)
+
+
+def _candidates(lo, hi):
+    """Pairs of boxes that overlap: sorted along x and swept, then y and z."""
+    n = len(lo)
+    order = np.argsort(lo[:, 0], kind="stable")
+    lo_x = lo[order, 0]
+    end = np.searchsorted(lo_x, hi[order, 0], side="left")
+    counts = np.maximum(end - np.arange(n) - 1, 0)
+    first = np.repeat(np.arange(n), counts)
+    offset = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
+    a, b = order[first], order[first + 1 + offset]
+    keep = np.all(lo[a] < hi[b], axis=1) & np.all(lo[b] < hi[a], axis=1)
+    return a[keep], b[keep]
 
 
 def find_overlaps(objects, tol=TOL):
@@ -832,26 +1010,19 @@ def find_overlaps(objects, tol=TOL):
     Two objects overlap when they interpenetrate by more than `tol` metres;
     touching does not count. Collections are not looked into: pass their
     leaves. What has no shape to overlap with -- a sensor, a dipole, a custom
-    source -- is never in a pair, and neither are two wires or two sheets,
-    which have no thickness. Each object is taken at the last step of its
-    path.
+    source, a shape not yet given its geometry -- is never in a pair, and
+    neither are two wires or two sheets, which have no thickness. Each object
+    is taken at the last step of its path.
     """
-    m = tol / 2
-    bodies = [_body(obj, m) for obj in objects]
+    bodies = [_body(obj, tol) for obj in objects]
     index = [k for k, body in enumerate(bodies) if body is not None]
     if len(index) < 2:
         return []
     lo = np.array([bodies[k].lo for k in index])
     hi = np.array([bodies[k].hi for k in index])
-    # sort and sweep along x, then the boxes' y and z
-    order = np.argsort(lo[:, 0])
-    found = []
-    for n, a in enumerate(order):
-        for b in order[n + 1 :]:
-            if lo[b, 0] >= hi[a, 0]:
-                break
-            if np.all(lo[a, 1:] < hi[b, 1:]) and np.all(lo[b, 1:] < hi[a, 1:]):
-                i, j = sorted((index[a], index[b]))
-                if _overlap(bodies[i], bodies[j], tol):
-                    found.append((i, j))
+    found = set()
+    for a, b in zip(*_candidates(lo, hi), strict=True):
+        i, j = sorted((index[a], index[b]))
+        if _overlap(bodies[i], bodies[j], tol):
+            found.add((i, j))
     return sorted(found)

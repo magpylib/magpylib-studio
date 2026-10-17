@@ -7,8 +7,8 @@ Needs the widget extra and marimo:
 A scene where one magnet overlaps another and everything else only touches: a
 Halbach ring, a shaft in its bore, two cubes side by side, a coil on its core.
 The view outlines what overlaps in magenta, frame by frame while a magnet is
-dragged. The table under it lists the pairs after each settled edit, from
-`find_overlaps` called on the view's objects.
+dragged. The table under it lists the pairs after each settled edit: the
+ones the view outlines, read off the scene it was sent.
 """
 
 import marimo
@@ -22,10 +22,9 @@ def _():
     import magpylib as magpy
     import marimo as mo
 
-    from magpylib_studio.collisions import find_overlaps
     from magpylib_studio.widget import SceneWidget
 
-    return SceneWidget, find_overlaps, magpy, mo
+    return SceneWidget, magpy, mo
 
 
 @app.cell(hide_code=True)
@@ -118,16 +117,16 @@ def _(SceneWidget, magpy, mo):
 
 
 @app.cell(hide_code=True)
-def _(find_overlaps, mo, view, view3d):
+def _(mo, view, view3d):
     # Reads the view, so it re-runs once per settled edit -- a drag's end,
-    # an undo -- never a frame of a drag in progress.
+    # an undo -- never a frame of a drag in progress. The pairs are the ones
+    # the view outlines, by id: a pattern's copies included.
     _ = view.value["revision"]
+    _pairs = view3d.payload.get("overlaps", [])
     _objects = view3d.objects
-    _ids = list(_objects)
-    _pairs = find_overlaps(list(_objects.values()))
 
-    def _name(i):
-        return _objects[_ids[i]].style.label or _ids[i]
+    def _name(key):
+        return _objects[key].style.label if key in _objects else key
 
     mo.vstack(
         [
@@ -136,7 +135,7 @@ def _(find_overlaps, mo, view, view3d):
                 f"after {view.value['revision']} edits."
             ),
             mo.ui.table(
-                [{"magnet": _name(i), "overlaps": _name(j)} for i, j in _pairs],
+                [{"magnet": _name(a), "overlaps": _name(b)} for a, b in _pairs],
                 selection=None,
             )
             if _pairs

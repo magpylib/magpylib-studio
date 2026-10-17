@@ -86,6 +86,85 @@ def halbach(n):
     return [ring(10, 16, 8, 0, 360 / n, angle=i * 360 / n) for i in range(n)]
 
 
+def tube(facets, r_in=5, r_out=10, h=8):
+    """A tube faceted `facets` times round: a mesh that is not convex, whose
+    outer corners sit on the circle a coil wound on it would follow."""
+    t = np.arange(facets) * 2 * np.pi / facets
+    rings = [
+        np.c_[r * np.cos(t), r * np.sin(t), np.full(facets, z)]
+        for r in (r_out, r_in)
+        for z in (-h / 2, h / 2)
+    ]
+    vertices = np.vstack(rings) * MM
+    out_lo, out_hi, in_lo, in_hi = (k * facets for k in range(4))
+    faces = []
+    for i in range(facets):
+        j = (i + 1) % facets
+        faces += [
+            (out_lo + i, out_lo + j, out_hi + j),
+            (out_lo + i, out_hi + j, out_hi + i),
+        ]
+        faces += [(in_lo + i, in_hi + j, in_lo + j), (in_lo + i, in_hi + i, in_hi + j)]
+        faces += [
+            (out_hi + i, out_hi + j, in_hi + j),
+            (out_hi + i, in_hi + j, in_hi + i),
+        ]
+        faces += [
+            (out_lo + i, in_lo + j, out_lo + j),
+            (out_lo + i, in_lo + i, in_lo + j),
+        ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return magpy.magnet.TriangularMesh(
+            vertices=vertices, faces=faces, polarization=POL
+        )
+
+
+def hull(corners, position=(0, 0, 0)):
+    """A convex mesh round `corners` (mm)."""
+    return magpy.magnet.TriangularMesh.from_ConvexHull(
+        points=np.multiply(corners, MM),
+        polarization=POL,
+        position=np.multiply(position, MM),
+    )
+
+
+def box_corners(lo, hi):
+    return [
+        (x, y, z)
+        for x in (lo[0], hi[0])
+        for y in (lo[1], hi[1])
+        for z in (lo[2], hi[2])
+    ]
+
+
+def wire(*steps):
+    """A wire whose vertices are given for each step of its path (mm)."""
+    vertices = np.multiply(steps, MM)
+    return magpy.current.Polyline(
+        vertices=vertices if len(steps) > 1 else vertices[0], current=1
+    )
+
+
+def against_bore(r1, depth, angle):
+    """A 10 mm sphere inside a ring's bore, `depth` mm into its wall at `angle`."""
+    centre = (r1 - 5 + depth) * np.array(
+        [np.cos(np.radians(angle)), np.sin(np.radians(angle)), 0]
+    )
+    return [ring(r1, r1 + 10, 10), sphere(10, centre)]
+
+
+L_OUTLINE = [
+    (-10, -10, 0),
+    (10, -10, 0),
+    (10, -3, 0),
+    (-3, -3, 0),
+    (-3, 10, 0),
+    (-10, 10, 0),
+    (-10, -10, 0),
+]
+
+
 CASES = {
     # touching, every kind of contact
     "cubes face to face": (
@@ -134,6 +213,38 @@ CASES = {
     "cube in the mesh's notch": ([l_prism(), cuboid((13, 13, 8), (3.5, 3.5, 0))], []),
     "meshes side by side": ([l_prism(), l_prism((20, 0, 0))], []),
     "sensor inside a magnet": ([cuboid((10, 10, 10)), magpy.Sensor()], []),
+    "tetrahedron in the mesh's notch, its position in the arm": (
+        [
+            l_prism(),
+            magpy.magnet.Tetrahedron(
+                vertices=np.multiply(
+                    [(8, 2, -2), (12, 2, -2), (8, 6, -2), (9, 3, 3)], MM
+                ),
+                polarization=POL,
+                position=(-6 * MM, 0, 0),
+            ),
+        ],
+        [],
+    ),
+    "wire wound round the mesh from a corner": ([l_prism(), wire(L_OUTLINE)], []),
+    "coil on a faceted core": (
+        [tube(16), magpy.current.Circle(diameter=20 * MM, current=1)],
+        [],
+    ),
+    "wire whose path ends clear of a cube": (
+        [
+            cuboid((10, 10, 10)),
+            wire([(-20, 0, 0), (20, 0, 0)], [(-20, 0, 30), (20, 0, 30)]),
+        ],
+        [],
+    ),
+    "convex plates half a nanometre in": (
+        [
+            hull(box_corners((0, 0, 0), (20, 20, 0.01))),
+            hull(box_corners((0, 0, 0), (20, 20, 0.01)), (0, 0, 0.01 - 0.5e-6)),
+        ],
+        [],
+    ),
     # overlapping
     "cube pushed 0.1 mm in": (
         [cuboid((10, 10, 10)), cuboid((10, 10, 10), (9.9, 0, 0))],
@@ -158,6 +269,16 @@ CASES = {
     ),
     "magnet inside the mesh": ([l_prism(), cuboid((4, 4, 4), (-6.5, 3, 0))], [(0, 1)]),
     "meshes interlocking": ([l_prism(), l_prism((5, 5, 0))], [(0, 1)]),
+    "spheres in the same place": (
+        [sphere(10, (10, 0, 0)), sphere(10, (10, 0, 0))],
+        [(0, 1)],
+    ),
+    "sphere inside a sphere": ([sphere(10), sphere(4)], [(0, 1)]),
+    "convex mesh inside the mesh, its position outside": (
+        [l_prism(), hull(box_corners((-8, 1.5, -1.5), (-5, 4.5, 1.5)))],
+        [(0, 1)],
+    ),
+    "sphere 2 nm into a wide bore's wall": (against_bore(300, 2e-6, 21), [(0, 1)]),
 }
 
 
@@ -196,5 +317,24 @@ def test_the_scene_says_which_objects_overlap():
             "position": [0, 0.0099, 0],
         },
     )
+    # a wire not yet given its vertices is drawn, and overlaps nothing
+    session.add_object("w", "current.Polyline", params={"current": 1})
     assert session.get_overlaps() == [["a", "c"]]
     assert session.get_scene()["overlaps"] == [["a", "c"]]
+
+    # a pattern of a group: the magnets in its copies have no id of their
+    # own, and overlap under the copy that holds them
+    session.add_object("outer", "Collection")
+    session.add_object("g", "Collection", parent="outer")
+    session.add_object(
+        "m",
+        "magnet.Cuboid",
+        params={
+            "dimension": [0.01, 0.01, 0.01],
+            "polarization": [0, 0, 1],
+            "position": [0, 0, 0.05],
+        },
+        parent="g",
+    )
+    session.duplicate_along("g", 3, [0.005, 0, 0])
+    assert session.get_overlaps() == [["a", "c"], ["m", "g#1"], ["g#1", "g#2"]]
