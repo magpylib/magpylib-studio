@@ -547,7 +547,9 @@ def _not_convex(vertices, tris, tol):
     proof a mesh is not convex, from a few faces, without building a hull.
     Faces chosen at random, seeded: a stride lands on the same wall of a
     mesh built round by round."""
-    pick = tris[np.random.default_rng(0).choice(len(tris), min(len(tris), 256), replace=False)]
+    pick = tris[
+        np.random.default_rng(0).choice(len(tris), min(len(tris), 256), replace=False)
+    ]
     normals = np.cross(pick[:, 1] - pick[:, 0], pick[:, 2] - pick[:, 0])
     size = np.linalg.norm(normals, axis=1)
     normals, pick = normals[size > 0] / size[size > 0, None], pick[size > 0]
@@ -566,7 +568,9 @@ def _mesh_shape(vertices, faces, m, tol):
     tris = vertices[faces]
     shape = None
     if not _not_convex(vertices, tris, tol):
-        volume = abs(np.einsum("ij,ij->", tris[:, 0], np.cross(tris[:, 1], tris[:, 2]))) / 6
+        volume = (
+            abs(np.einsum("ij,ij->", tris[:, 0], np.cross(tris[:, 1], tris[:, 2]))) / 6
+        )
         try:
             hull = ConvexHull(vertices)
         except (QhullError, ValueError):  # flat or degenerate: no volume to overlap
@@ -576,7 +580,10 @@ def _mesh_shape(vertices, faces, m, tol):
             # that every face moves in by at least `m`
             centre = vertices[hull.vertices].mean(0)
             depth = -(hull.equations[:, :3] @ centre + hull.equations[:, 3]).max()
-            corners = centre + (vertices[hull.vertices] - centre) * max(depth - m, 0.0) / depth
+            corners = (
+                centre
+                + (vertices[hull.vertices] - centre) * max(depth - m, 0.0) / depth
+            )
             shape = ("convex", [tuple(p) for p in corners], tuple(centre))
         elif hull is None:
             return None
