@@ -1,8 +1,9 @@
 """Field lines: the field on a grid, for a view to integrate. Prototype (#45).
 
-The view draws lines of B through the pixels of each sensor that reads the
-field -- the sensors `threejs._reading_sensors` finds -- integrated in the
-browser, where a frame of lines costs a few milliseconds against tens in
+The view draws lines of the field through the pixels of each sensor that
+reads it -- B or H, as its ``style.pixel.field.source`` says, however its
+pixels themselves are drawn: at ``style.pixel.size = 0`` the lines alone --
+integrated in the browser, where a frame of lines costs a few milliseconds against tens in
 numpy. What python sends is the field on a grid round the sensor, and what
 the view needs to draw lines nobody has to tune:
 
@@ -41,7 +42,7 @@ REST_POINTS = 8_000
 DRAG_POINTS = 2_500
 DRAG_POINTS_ALL = 1_200
 #: Colours in the table a line is coloured from by |B|.
-LUT_STEPS = 32
+LUT_STEPS = 64
 #: Pixels offered as starts at most; the spacing keeps far fewer of them.
 MAX_SEEDS = 400
 #: How much of B may cross a sensor's plane, over the plane, for its lines to
@@ -61,6 +62,29 @@ def sources_of(objects):
                 continue
             seen.add(id(each))
             found.append(each)
+    return found
+
+
+def kind_of(sensor):
+    """The field `sensor`'s lines are of: ``"B"`` or ``"H"``, as its pixels'
+    source says; None for one that reads none, or M or J, which are nothing
+    outside a magnet and draw no lines."""
+    source = getattr(getattr(sensor.style.pixel, "field", None), "source", None)
+    kind = (source or "")[:1]
+    return kind if kind in ("B", "H") else None
+
+
+def sensors_of(objects):
+    """The sensors among `objects`, collections opened up, that have pixels
+    and read B or H at them: those that draw lines."""
+    found, seen = [], set()
+    for obj in objects:
+        for each in (obj, *getattr(obj, "children_all", ())):
+            if not isinstance(each, magpy.Sensor) or id(each) in seen:
+                continue
+            seen.add(id(each))
+            if each.pixel is not None and kind_of(each) is not None:
+                found.append(each)
     return found
 
 
@@ -163,11 +187,12 @@ def points_of(grid):
     return grid["origin"] + local @ grid["axes"]
 
 
-def field(sources, points):
-    """B at `points` from `sources`, summed; zero for no sources."""
+def field(sources, points, kind="B"):
+    """B, or H, at `points` from `sources`, summed; zero for no sources."""
     if not sources:
         return np.zeros((len(points), 3))
-    return np.asarray(magpy.getB(sources, points, sumup=True)).reshape(-1, 3)
+    get = magpy.getH if kind == "H" else magpy.getB
+    return np.asarray(get(sources, points, sumup=True)).reshape(-1, 3)
 
 
 def inside(sources, points):
@@ -179,16 +204,48 @@ def inside(sources, points):
     return np.linalg.norm(polarization, axis=1) > 0
 
 
-def item(sensor, key, grid, values, within, seeds):
-    """The ``fieldlines`` item for `sensor`, drawn on its node: the grid, B
-    along its axes, which points are inside a magnet, the pixels to start
-    from, nearest the middle first, and how far apart to keep the lines."""
-    from magpylib.graphics.backend import colors_from_colorscale
+def colours(sensor, readings):
+    """The table a line of `sensor` is coloured from: colours for |field|
+    evenly from the least to the most its pixels read, as its arrows are
+    coloured -- by magpylib's own `scale_pixel_norms` over the readings and
+    `colors_from_colorscale`, with the sensor's ``colorscaling`` and
+    ``colormap`` -- so a line and an arrow where they meet are one colour,
+    and a change to either setting is the lines' too. ``(table, [low, high])``;
+    past the readings a line takes the end colour.
+
+    `readings` are the sensor's, as `sensor_pixel_fields` hands them over:
+    ``(path_length, n_pixels, 3)``, or None where it reads nothing yet.
+    """
+    from magpylib.graphics.backend import colors_from_colorscale, scale_pixel_norms
 
     from magpylib_studio.threejs import _resolve
 
-    colormap = _resolve(sensor, "style.pixel.field.colormap") or "Viridis"
-    lut = colors_from_colorscale(np.linspace(0, 1, LUT_STEPS), colormap, cmin=0, cmax=1)
+    norms = (
+        np.zeros(0) if readings is None else np.linalg.norm(readings, axis=-1).ravel()
+    )
+    read = norms[np.isfinite(norms) & (norms > 0)]
+    scaling = _resolve(sensor, "style.pixel.field.colorscaling")
+    if scaling == "uniform" or not len(read):
+        # one colour, as the arrows then are: the pixels' own
+        colour = str(_resolve(sensor, "style.pixel.color") or "black")
+        return [colour, colour], [0.0, 1.0]
+    low, high = float(read.min()), float(read.max())
+    if high <= low:
+        high = low * (1 + 1e-9) + 1e-30
+    levels = np.linspace(low, high, LUT_STEPS)
+    # among the readings, so they are spread over [0, 1] as the arrows' are
+    factors = scale_pixel_norms(np.concatenate([norms, levels]), scaling)[-LUT_STEPS:]
+    colormap = _resolve(sensor, "style.pixel.field.colormap")
+    table = colors_from_colorscale(factors, colormap, cmin=0, cmax=1)
+    return list(table), [low, high]
+
+
+def item(sensor, key, grid, values, within, seeds, readings):
+    """The ``fieldlines`` item for `sensor`, drawn on its node: the grid, the
+    field along its axes, which points are inside a magnet, the pixels to
+    start from, nearest the middle first, how far apart to keep the lines,
+    and the colours their |field| takes (`colours`)."""
+    lut, levels = colours(sensor, readings)
     # 16 bits a component, against the peak: a quarter of the bytes JSON
     # numbers took, and 40 uT steps for a 1.3 T peak, finer than a line shows
     along = values @ grid["axes"].T
@@ -211,5 +268,6 @@ def item(sensor, key, grid, values, within, seeds):
         ),
         "seeds": np.round(starts, 9).ravel().tolist(),
         "spacing": spacing_of(seeds, grid),
-        "lut": list(lut),
+        "lut": lut,
+        "levels": levels,
     }

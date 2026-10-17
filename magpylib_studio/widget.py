@@ -522,7 +522,9 @@ class SceneWidget(anywidget.AnyWidget):
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
             # the sensors that read the field, which the lines' button is
             # shown for -- keyed as this payload keys objects, by magpylib's id
-            reading = threejs._reading_sensors(objects)
+            from magpylib_studio import fieldlines
+
+            reading = fieldlines.sensors_of(objects)
             if reading:
                 readings = [str(id(sensor)) for sensor in reading]
                 self.payload = {**self.payload, "readings": readings}

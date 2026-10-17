@@ -1337,10 +1337,12 @@ const FIELD_LINE_BANDS = [
  *  - A line also stops leaving the grid, closing on itself, or where the
  *    field is under a twenty-fifth of the sensor's; in a plane, also at a
  *    magnet the plane cuts.
- *  - Coloured by |B| from the sensor's colormap, on a log scale a decade
- *    either way of the field at the pixels -- a fringe falls off as the cube
- *    of the distance, and a linear scale shows a bore and nothing else -- and
- *    fainter where the field is weaker (`FIELD_LINE_BANDS`).
+ *  - Coloured by |field| from the table python sends, which magpylib made
+ *    from the sensor's colorscaling and colormap over what its pixels read:
+ *    a line and an arrow where they meet are one colour. Fainter where the
+ *    field is weaker, on a log scale a decade either way of the field at the
+ *    pixels (`FIELD_LINE_BANDS`) -- a fringe falls off as the cube of the
+ *    distance.
  *
  *  Not a trace: nothing outlines or picks it, and it is the sensor's
  *  drawing, rebuilt with its readings. */
@@ -1512,8 +1514,18 @@ function buildFieldLines(item) {
       );
     }
   };
+  // how strongly it shows, by the field against the sensor's
   const tone = (magnitude) =>
     Math.min(Math.max(0.5 + 0.5 * Math.log10(magnitude / middle), 0), 1);
+  // its colour, from the table, past the readings the end colour
+  const [low, high] = item.levels;
+  const colourOf = (magnitude) =>
+    lut[
+      Math.round(
+        Math.min(Math.max((magnitude - low) / (high - low), 0), 1) *
+          (lut.length - 1),
+      )
+    ];
   const ds = 0.5;
   const longest = Math.ceil((2 * (nx + ny + nz)) / ds);
   // How near another line a line may run. In a plane, half a spacing: the
@@ -1578,8 +1590,8 @@ function buildFieldLines(item) {
           bands[FIELD_LINE_BANDS.findIndex((each) => t < each.below)];
         world(x, y, z, band.positions);
         world(tx, ty, tz, band.positions);
-        const c0 = lut[Math.round(t * (lut.length - 1))];
-        const c1 = lut[Math.round(tone(strength) * (lut.length - 1))];
+        const c0 = colourOf(shown);
+        const c1 = colourOf(strength);
         band.colours.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
         claim(tx, ty, tz, line, step);
         // a start beside the line every spacing or so along it

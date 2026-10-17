@@ -3858,11 +3858,18 @@ class MagpylibStudioSession:
         sources = fieldlines.sources_of(self.scene)
         names = self._moving_names() if gesture else None
         key_of = {id(obj): key for key, obj in self._objs.items()}
+        sensors = fieldlines.sensors_of(self.scene)
+        if not sensors:
+            return []
+        from magpylib.graphics.backend import sensor_pixel_fields
+
+        readings = sensor_pixel_fields(self.scene)
         items = []
-        for sensor in threejs._reading_sensors(self.scene):
+        for sensor in sensors:
             key = key_of.get(id(sensor))
             if key is None:
                 continue
+            kind = fieldlines.kind_of(sensor)
             seeds = fieldlines.seeds_of(sensor)
             cache = self._field_cache.get(key)
             follows = names is None or key in names
@@ -3875,11 +3882,11 @@ class MagpylibStudioSession:
             else:
                 grid = fieldlines.grid_around(sources, seeds, budget)
                 if fieldlines.is_flat(grid) and not self._keeps_to_plane(
-                    sources, seeds
+                    sources, seeds, kind
                 ):
                     grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
             values, within = self._field_on(
-                key, grid, sources, names, gesture and not follows
+                key, grid, sources, names, gesture and not follows, kind
             )
             if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
                 grid, values, within
@@ -3887,13 +3894,17 @@ class MagpylibStudioSession:
                 # a drag took the field off the sensor's plane: its lines, in 3D
                 grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
                 values, within = self._field_on(
-                    key, grid, sources, names, gesture and not follows
+                    key, grid, sources, names, gesture and not follows, kind
                 )
-            items.append(fieldlines.item(sensor, key, grid, values, within, seeds))
+            items.append(
+                fieldlines.item(
+                    sensor, key, grid, values, within, seeds, readings.get(sensor)
+                )
+            )
         return items
 
     @staticmethod
-    def _keeps_to_plane(sources, seeds):
+    def _keeps_to_plane(sources, seeds, kind):
         """Whether the field keeps to the plane of `seeds`, from a coarse look
         at it -- before the grid it would be drawn from is computed."""
         from magpylib_studio import fieldlines
@@ -3902,19 +3913,22 @@ class MagpylibStudioSession:
         points = fieldlines.points_of(probe)
         return fieldlines.keeps_to(
             probe,
-            fieldlines.field(sources, points),
+            fieldlines.field(sources, points, kind),
             fieldlines.inside(sources, points),
         )
 
-    def _field_on(self, key, grid, sources, names, stays):
-        """B on `grid`, and which of its points are inside a magnet. Where
+    def _field_on(self, key, grid, sources, names, stays, kind):
+        """The field -- B or H, as `kind` -- on `grid`, and which of its points are inside a magnet. Where
         the grid `stays` for the gesture, the field of what does not move is
         kept, under `key`, and only the moving sources' added."""
         from magpylib_studio import fieldlines
 
         points = fieldlines.points_of(grid)
         if not stays:
-            return fieldlines.field(sources, points), fieldlines.inside(sources, points)
+            return (
+                fieldlines.field(sources, points, kind),
+                fieldlines.inside(sources, points),
+            )
         key_of = {id(obj): k for k, obj in self._objs.items()}
         moving = self._sources_named(sources, names, key_of)
         cache = self._field_cache.get(key)
@@ -3924,11 +3938,11 @@ class MagpylibStudioSession:
             cache = {
                 "grid": grid,
                 "names": names,
-                "field": fieldlines.field(still, points),
+                "field": fieldlines.field(still, points, kind),
                 "inside": fieldlines.inside(still, points),
             }
             self._field_cache[key] = cache
-        values = cache["field"] + fieldlines.field(moving, points)
+        values = cache["field"] + fieldlines.field(moving, points, kind)
         within = cache["inside"] | fieldlines.inside(moving, points)
         return values, within
 
