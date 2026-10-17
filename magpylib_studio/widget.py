@@ -262,6 +262,9 @@ class SceneWidget(anywidget.AnyWidget):
     #: and the two move together; the view's model is the one that owns the
     #: numbers. A name the scene has no variable of is refused.
     variables = traitlets.Dict().tag(sync=True)
+    #: Prototype (#45): lines of the field through the pixels of each sensor
+    #: that reads it, drawn while a drag moves the magnets. An editable view's.
+    field_lines = traitlets.Bool(False).tag(sync=True)
 
     #: What an editable view may ask of its session: a drag, and undoing one;
     #: the variables, to list and to set, with a typed value read through
@@ -859,8 +862,16 @@ class SceneWidget(anywidget.AnyWidget):
         # steps made from code -- is its starting point, not edits.
         session.forget_history()
         self._start = json.dumps(session.doc, sort_keys=True, default=str)
+        session.field_lines = self.field_lines
         self.editable = handles
         self._show(None)
+
+    @traitlets.observe("field_lines")
+    def _field_lines_asked_for(self, change):
+        if getattr(self, "_session", None) is None:
+            return
+        self._session.field_lines = change["new"]
+        self.payload = self._session.get_scene()
 
     def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected,

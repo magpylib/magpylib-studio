@@ -2492,6 +2492,14 @@ class MagpylibStudioSession:
         #: What redo held when the current gesture began, to put back if the
         #: gesture turns out to have changed nothing.
         self._interaction_redo: list[dict] = []
+        #: Prototype (#45): whether `get_scene` carries field lines through
+        #: the pixels of the sensors that read the field.
+        self.field_lines = False
+        #: Inside a gesture: the ids it moves -- a set, or None for anything,
+        #: as a variable does -- and per sensor, the grid and the field of
+        #: what stays, computed once for the gesture. See `_field_lines`.
+        self._moving: set | None = set()
+        self._field_cache: dict = {}
         #: Per object, the motion the steps after its edit replay over it —
         #: measured once per gesture. See `_replay_frame`.
         self._replay_frames: dict = {}
@@ -3634,6 +3642,8 @@ class MagpylibStudioSession:
         except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
             scene["overlaps"] = []
             scene["overlaps_error"] = f"{type(e).__name__}: {e}"
+        if self.field_lines:
+            scene["fieldlines"] = self._field_lines()
         return scene
 
     def _overlap_payload(self):
@@ -3813,6 +3823,97 @@ class MagpylibStudioSession:
         return isinstance(group, magpy.Collection) and any(
             child is obj for child in group.children_all
         )
+
+    def _moved(self, ids):
+        """What the gesture in progress moves: `ids`, or anything (None)."""
+        if self._interaction is None:
+            return
+        if ids is None or self._moving is None:
+            self._moving = None
+        else:
+            self._moving.update(ids)
+
+    def _forget_field(self):
+        self._moving = set()
+        self._field_cache = {}
+
+    def _field_lines(self):
+        """Prototype (#45): a ``fieldlines`` item per sensor that reads the
+        field -- the field on a grid round it, for the view to draw lines of
+        through its pixels; see `fieldlines`.
+
+        In a gesture the grid is coarser and kept for its length, and the
+        field is the field of what stays, computed at the first frame, plus
+        the field of what moves, computed every frame: the same field to float
+        precision, at the cost of the moving sources alone -- a twentieth of
+        it for one magnet of the Halbach demo's 24. A variable moves anything,
+        and a sensor dragged takes its grid with it: then the whole field is
+        computed every frame, on the coarser grid.
+        """
+        from magpylib_studio import fieldlines
+
+        gesture = self._interaction is not None
+        if not gesture:
+            self._forget_field()
+        sources = fieldlines.sources_of(self.scene)
+        names = self._moving_names() if gesture else None
+        key_of = {id(obj): key for key, obj in self._objs.items()}
+        items = []
+        for sensor in threejs._reading_sensors(self.scene):
+            key = key_of.get(id(sensor))
+            if key is None:
+                continue
+            seeds = fieldlines.seeds_of(sensor)
+            cache = self._field_cache.get(key)
+            follows = names is None or key in names
+            if not gesture:
+                grid = fieldlines.grid_around(sources, seeds, fieldlines.REST_POINTS)
+            elif cache is not None and not follows:
+                grid = cache["grid"]
+            else:
+                budget = fieldlines.DRAG_POINTS if names else fieldlines.DRAG_POINTS_ALL
+                grid = fieldlines.grid_around(sources, seeds, budget)
+            points = fieldlines.points_of(grid)
+            if gesture and not follows:
+                moving = self._sources_named(sources, names, key_of)
+                if cache is None or cache["names"] != names:
+                    ids = {id(s) for s in moving}
+                    still = [s for s in sources if id(s) not in ids]
+                    cache = {
+                        "grid": grid,
+                        "names": names,
+                        "field": fieldlines.field(still, points),
+                        "inside": fieldlines.inside(still, points),
+                    }
+                    self._field_cache[key] = cache
+                values = cache["field"] + fieldlines.field(moving, points)
+                within = cache["inside"] | fieldlines.inside(moving, points)
+            else:
+                values = fieldlines.field(sources, points)
+                within = fieldlines.inside(sources, points)
+            items.append(fieldlines.item(sensor, key, grid, values, within, seeds))
+        return items
+
+    def _moving_names(self):
+        """The ids the gesture in progress moves -- the objects it named, the
+        copies made from them, what a collection among them holds -- or None
+        where that is anything."""
+        if self._moving is None:
+            return None
+        name_of = {id(o): k for k, o in self._objs.items()}
+        names = set()
+        for name in self._moving:
+            names.add(name)
+            names.update(self._derived.get(name, ()))
+            for child in getattr(self._objs.get(name), "children_all", ()):
+                names.add(name_of.get(id(child)))
+        return frozenset(names - {None})
+
+    @staticmethod
+    def _sources_named(sources, names, key_of):
+        """The `sources` among `names`, and those the session has no name
+        for, which cannot be known to stay."""
+        return [s for s in sources if key_of.get(id(s)) in names or id(s) not in key_of]
 
     def _written_fields(self):
         """The expression each element of a drag-editable field was written
@@ -5247,6 +5348,7 @@ class MagpylibStudioSession:
         self._interaction = False
         self._interaction_redo = list(self._redo)
         self._replay_frames = {}
+        self._forget_field()
         return {"ok": True}
 
     def end_interaction(self):
@@ -5264,6 +5366,7 @@ class MagpylibStudioSession:
             self._redo = self._interaction_redo
         self._interaction = None
         self._interaction_redo = []
+        self._forget_field()
 
     def apply_edits(self, edits, define=False):
         """Record what a 3D view's handles did.
@@ -5294,6 +5397,7 @@ class MagpylibStudioSession:
             made = [d["params"]["name"] for d in definitions]
             calls = [*definitions, *calls]
         ids = sorted({edit["objectId"] for edit in edits})
+        self._moved(ids)
         result = self.apply_calls(calls, f"edit {', '.join(ids)}")
         if made and result.get("ok"):
             result = {**result, "defined": made}
@@ -6239,6 +6343,7 @@ class MagpylibStudioSession:
         aside for this: it is put back, and the value it replaces set aside in
         turn if that named a variable of its own.
         """
+        self._moved(None)
         shadowed = self._shadowed_variable_sources().get(name)
         if not shadowed:
             return {
@@ -6632,6 +6737,7 @@ class MagpylibStudioSession:
         `unit` says what it measures in the same step (see
         `set_variable_unit`), so a variable is created a length rather than
         created and then made one; None leaves what it says as it was."""
+        self._moved(None)
         problem = _variable_problem(name, value)
         if problem:
             return {"ok": False, "error": problem}
@@ -6663,6 +6769,7 @@ class MagpylibStudioSession:
         whole when any value is. So a combination that holds only together --
         two lengths a wall is the difference of -- is taken as the
         combination it is, never checked half-set."""
+        self._moved(None)
         if not isinstance(values, dict) or not values:
             return {"ok": False, "error": "give the variables' values by name"}
         for name, value in values.items():
@@ -6820,6 +6927,7 @@ class MagpylibStudioSession:
         and the answer lists them as `untouched`. An entry naming no variable
         that holds a value -- renamed by an older studio, or a formula now --
         is left out, and listed as `ignored`."""
+        self._moved(None)
         variants = self.doc.get("variants") or {}
         if name not in variants:
             return {"ok": False, "error": f"no variant {name!r}"}
