@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>Dragging redraws faster: the view keeps its shaders</summary>
+
+Every step of a drag rebuilds the scene, and the view used to throw away each
+mesh's material with it, which had the browser compile its shaders anew on the
+next step: about seven programs, 14 ms of a frame on an M4 Pro. The materials
+now stay, so drawing a step costs about 2 ms instead of 15, in the notebook
+widget and the VS Code view alike. The picture is unchanged (#44).
+
+</details>
+
 ## [0.5.1]
 
 ### Changed
