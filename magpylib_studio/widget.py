@@ -440,6 +440,9 @@ class SceneWidget(anywidget.AnyWidget):
             raise TypeError(f"no objects to draw with {', '.join(kwargs)}")
         if editable is None and self._session is None:
             self.editable = None  # never: a session's view said so in `_edit`
+        if self.field_lines and self._session is None:
+            # asked for when the view was made, before there were objects
+            self._field_lines_asked_for({"new": True})
 
     @classmethod
     def _split(cls, kwargs):
@@ -517,6 +520,12 @@ class SceneWidget(anywidget.AnyWidget):
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
+            # the sensors that read the field, which the lines' button is
+            # shown for -- keyed as this payload keys objects, by magpylib's id
+            reading = threejs._reading_sensors(objects)
+            if reading:
+                readings = [str(id(sensor)) for sensor in reading]
+                self.payload = {**self.payload, "readings": readings}
             self.identify(*objects)
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
@@ -868,10 +877,20 @@ class SceneWidget(anywidget.AnyWidget):
 
     @traitlets.observe("field_lines")
     def _field_lines_asked_for(self, change):
-        if getattr(self, "_session", None) is None:
-            return
-        self._session.field_lines = change["new"]
-        self.payload = self._session.get_scene()
+        """The lines asked for, or put away: the view's button, or
+        ``view.field_lines``. They are computed by a session, so a view of
+        the cell's own objects copies them into one now, as the pencil does,
+        with the handles left away -- the view stays one to look at."""
+        if getattr(self, "_session", None) is not None:
+            self._session.field_lines = change["new"]
+            self.payload = self._session.get_scene()
+        elif change["new"] and getattr(self, "_given", None):
+            if self.editable is None:
+                return  # made for looking only: no session, so no lines
+            with self.hold_sync():
+                self._scene = None
+                self.frames = 1
+                self._edit(_session_of(self._given, self._named), handles=False)
 
     def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected,

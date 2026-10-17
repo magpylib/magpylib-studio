@@ -199,8 +199,11 @@ def _(halbach):
 def _(SceneWidget, mo, s):
     # The view of the document itself -- its own session, nothing copied --
     # made once, so the camera stays where you left it. Editable from the
-    # start: the handles, and the sliders toggle under them. The widget
-    # has a name of its own beside the element around it, for the cell below.
+    # start: the handles, and the sliders toggle under them. With the field
+    # lines through the bore's pixels, which follow a drag as its arrows do;
+    # the lines button among the view's tools puts them away (#45). The
+    # widget has a name of its own beside the element around it, for the
+    # cell below.
     view3d = SceneWidget(s, editable=True, height=560, field_lines=True)
     view = mo.ui.anywidget(view3d)
     # The settled edits, counted, as state: a cell that names `view` re-runs
@@ -210,21 +213,6 @@ def _(SceneWidget, mo, s):
     view3d.observe(lambda change: set_edited(change.new), names="revision")
     view
     return edited, view, view3d
-
-
-@app.cell
-def _(mo):
-    # Prototype (#45): lines of the field through the bore's pixels, which
-    # follow a drag as the arrows do. Off, the view is as it was.
-    lines = mo.ui.switch(value=True, label="Field lines through the bore")
-    lines
-    return (lines,)
-
-
-@app.cell
-def _(lines, view3d):
-    view3d.field_lines = lines.value
-    return
 
 
 @app.cell
