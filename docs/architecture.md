@@ -285,9 +285,11 @@ Every scene also says which objects overlap (`overlaps`, pairs of ids, from
 never, each where its path ends; a magnet inside a pattern's copied group is
 named by the copy that holds it. `collisions.py` decides it from the magpylib
 objects alone, building each shape once and keeping it while it is unchanged.
-The view outlines each overlapping object in magenta, its own traces only, and
-only at a run's last step; a selected one keeps its green. A check that fails
-leaves `overlaps` empty and says why in `overlaps_error`.
+The view outlines each overlapping object in amber, its own traces only, and
+only at a run's last step; a selected one keeps its green. The legend marks each
+overlapping row with a warning, passed up to a folded collection, and above the
+list counts the pairs, a click stepping through them. A check that fails leaves
+`overlaps` empty and says why in `overlaps_error`.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is

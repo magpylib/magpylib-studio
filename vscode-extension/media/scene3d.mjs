@@ -37,7 +37,7 @@ let outlines = [];
 // selected: a legend row under the pointer. By id, so it can be drawn again
 // round whatever a redraw builds for them.
 let hintIds = [];
-// What overlaps another object, by id: outlined in magenta round what is
+// What overlaps another object, by id: outlined in amber round what is
 // drawn for it, as the selection is in green. Each scene the engine sends
 // says which (`overlaps`), so the outline follows a drag frame by frame. They
 // are found where each path ends (`endOverlapIds`), so a run shows them at
@@ -832,12 +832,12 @@ const EDGE_ANGLE = 25;
  *  yellower than the green magpylib paints a magnet's south pole. */
 const SELECTION_COLOUR = "#39ff14";
 
-/** What an overlap is drawn in: a magenta, which nothing else in a scene is.
- *  Not a red: magpylib paints a magnet's north pole red, white and green
- *  across it, and a red outline vanished on the very magnets it marked. Lines
- *  only, as the selection is, so a magnet's own colours still say its
- *  magnetization. */
-const OVERLAP_COLOUR = "#ff2bd6";
+/** What an overlap is drawn in: an amber, the colour of a warning, as the
+ *  legend's mark is. Not a red: magpylib paints a magnet's north pole red,
+ *  white and green across it, and a red outline vanished on the very magnets
+ *  it marked. Lines only, as the selection is, so a magnet's own colours
+ *  still say its magnetization. */
+const OVERLAP_COLOUR = "#ffab00";
 
 /** How faint a pattern's copies are outlined beside their source, drawn in
  *  full: the family reads as one leader and its followers, and a click on

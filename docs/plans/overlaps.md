@@ -58,10 +58,13 @@ It imports nothing from studio, so it can move into magpylib as it is.
 The session lists the pairs as `get_overlaps` (also over RPC) and in every scene
 it sends (`overlaps`), a drag's preview frames included, so an overlap shows
 while the magnet is still under the pointer. The 3D view outlines each
-overlapping object in magenta, with the selection's outline: lines only, so a
-magnet's colours still say its magnetization. Not red: magpylib paints a
-magnet's north pole red, and a red outline vanished on the magnets it marked
-(checked on a screenshot). A selected object keeps its green.
+overlapping object in amber, a warning's colour, with the selection's outline:
+lines only, so a magnet's colours still say its magnetization. Not red: magpylib
+paints a magnet's north pole red, and a red outline vanished on the magnets it
+marked (checked on a screenshot). A selected object keeps its green. The legend
+puts a warning at the end of each overlapping row, in the editor's warning
+colour, passed up to a collection while it is folded; above the list, the number
+of pairs, a click selecting and framing each in turn.
 
 ## Numbers
 

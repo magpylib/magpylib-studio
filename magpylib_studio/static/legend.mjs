@@ -17,6 +17,12 @@
  * is told them (`sync`) and says what a click would make them (`onSelect`,
  * `onHide`), what it would look at (`onFrame`), or what the pointer is on
  * (`onHint`); the widget decides.
+ *
+ * What overlaps is marked: a warning at the end of each overlapping row,
+ * passed up to a folded collection, and above the list a count that steps
+ * through the pairs. The payload says which (`overlaps`), by the ids the view
+ * draws, a pattern's copies among them; a copy is not listed, so it is
+ * marked on its source's row.
  */
 
 /** Every node, parents before their children. */
@@ -172,6 +178,10 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   // depth starts folded like the ones that were there.
   let foldDepth = Infinity;
   const folds = new Map(); // path -> what folds or opens that collection
+  let pairs = []; // the overlapping pairs, as the payload lists them
+  let sourceOf = new Map(); // a pattern's copy -> the source it is listed as
+  let labels = new Map(); // id -> its row's label
+  let stepped = -1; // the pair the count last showed
 
   container.classList.add("magpy-legend");
   // A shift-click extends whatever text selection the page already has, and
@@ -278,6 +288,8 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
       count.textContent = `×${drawn}`;
       row.append(count);
     }
+    const warning = overlapMark(node);
+    if (warning) row.append(warning);
     // At the end of the row, as Figma's layers and VS Code's trees put a
     // row's actions: most of the time it is not showing, and a column kept
     // for it at the start pushed every name away from its caret.
@@ -330,6 +342,90 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     });
   }
 
+  /** The row an id is listed on: its own, or its source's for a copy. */
+  const rowOf = (id) => sourceOf.get(id) ?? id;
+
+  /** What an id is called: its row's label, and which copy for a copy. */
+  function nameOf(id) {
+    const row = rowOf(id);
+    const label = labels.get(row) ?? row;
+    return row === id
+      ? label
+      : `${label} (copy ${id.slice(id.lastIndexOf("#") + 1)})`;
+  }
+
+  /** The pairs `node` is in: its own, its copies', and -- for a collection,
+   *  shown while it is folded -- everything beneath it. */
+  function pairsOf(node) {
+    const mine = new Set(
+      node.children.length ? inTreeOrder([node]).map((n) => n.id) : [node.id],
+    );
+    return pairs.filter(([a, b]) => mine.has(rowOf(a)) || mine.has(rowOf(b)));
+  }
+
+  /** The warning at the end of an overlapping row, or nothing. Resting on it
+   *  shows the others; a click looks at them all. */
+  function overlapMark(node) {
+    const found = pairsOf(node);
+    if (!found.length) return null;
+    const mark = part("magpy-legend-overlap");
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", "overlaps");
+    // Its own pairs -- its copies', for a patterned collection -- always; those
+    // of the rows beneath it only while it is folded and they are not shown.
+    const own = found.filter((pair) =>
+      pair.some((id) => rowOf(id) === node.id),
+    );
+    if (!own.length) mark.classList.add("inside");
+    const lines = own.map(([a, b]) => {
+      const [mine, other] = rowOf(a) === node.id ? [a, b] : [b, a];
+      return mine === node.id
+        ? `Overlaps ${nameOf(other)}`
+        : `Copy ${mine.slice(mine.lastIndexOf("#") + 1)} overlaps ${nameOf(other)}`;
+    });
+    const inside = found.length - own.length;
+    if (inside)
+      lines.push(`${inside} overlapping pair${inside === 1 ? "" : "s"} inside`);
+    mark.title = lines.join("\n");
+    const involved = [...new Set(found.flat().map(rowOf))];
+    mark.addEventListener("mouseenter", () => onHint?.(involved));
+    mark.addEventListener("mouseleave", () => onHint?.(leaves.get(node.id)));
+    mark.addEventListener("click", (event) => {
+      event.stopPropagation(); // looking, not choosing
+      onFrame?.(involved);
+    });
+    return mark;
+  }
+
+  /** Above the list while anything overlaps: how many pairs, and a click to
+   *  step through them, each selected and looked at in turn -- in a scene of
+   *  hundreds, or with a magnet inside a ring, the one place to find them. */
+  function overlapCount() {
+    if (!pairs.length) return null;
+    const count = document.createElement("div");
+    count.className = "magpy-legend-overlaps";
+    count.setAttribute("role", "button");
+    count.tabIndex = 0;
+    count.textContent = `${pairs.length} overlap${pairs.length === 1 ? "" : "s"}`;
+    count.title =
+      "Magnets that overlap: magpylib adds their magnetizations where they do, so the field there is wrong. Click to look at each pair in turn.";
+    const step = () => {
+      stepped = (stepped + 1) % pairs.length;
+      const pair = [...new Set(pairs[stepped].map(rowOf))];
+      count.title = `Pair ${stepped + 1} of ${pairs.length}: ${pairs[stepped].map(nameOf).join(" and ")}. Click for the next.`;
+      propose(pair);
+      onFrame?.(pair);
+    };
+    count.addEventListener("click", step);
+    count.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        step();
+      }
+    });
+    return count;
+  }
+
   /** Draw `tree`, for a view drawing `payload`. */
   function update({ tree, payload }) {
     const drawn = drawnIn(payload);
@@ -340,10 +436,20 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     pathOf = new Map();
     for (const node of tree) collectLeaves(node, drawn);
     swatches = swatchesOf(payload);
+    pairs = payload.overlaps ?? [];
+    if (stepped >= pairs.length) stepped = -1;
+    sourceOf = new Map(
+      Object.entries(payload.copies ?? {}).flatMap(([source, made]) =>
+        made.map((copy) => [copy, source]),
+      ),
+    );
+    labels = new Map(order.map((node) => [node.id, node.label]));
     if (!order.some((node) => node.id === anchor)) anchor = null;
     rows.clear();
     folds.clear();
     container.replaceChildren();
+    const count = overlapCount();
+    if (count) container.append(count);
     tree.forEach((node, i) => addRow(node, String(i), container));
     paint();
   }

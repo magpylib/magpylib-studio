@@ -6,8 +6,8 @@ Needs the widget extra and marimo:
 
 A scene where one magnet overlaps another and everything else only touches: a
 Halbach ring, a shaft in its bore, two cubes side by side, a coil on its core.
-The view outlines what overlaps in magenta, frame by frame while a magnet is
-dragged. The table under it lists the pairs after each settled edit: the
+The view outlines what overlaps in amber, frame by frame while a magnet is
+dragged, and the legend marks it. The table under it lists the pairs after each settled edit: the
 ones the view outlines, read off the scene it was sent.
 """
 
@@ -35,7 +35,8 @@ def _(mo):
     Magpylib adds the magnetizations of two magnets wherever they overlap,
     so a magnet pushed into its neighbour computes a field that looks right
     and is not. The view outlines every magnet that overlaps another in
-    magenta. Touching does not count: the Halbach ring, the shaft in its
+    amber, and the legend marks its row; the count above the legend steps
+    through the pairs. Touching does not count: the Halbach ring, the shaft in its
     bore, the cubes **a** and **b** side by side and the coil on its core all
     touch on purpose. Only **c**, pushed 1 mm into **b**, overlaps.
 

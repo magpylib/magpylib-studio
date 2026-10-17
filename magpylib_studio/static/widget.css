@@ -640,6 +640,60 @@
   visibility: hidden;
 }
 
+/* An overlap: a warning triangle in the editor's own warning colour, before
+   the eye, always shown -- it is the one thing in the list that is wrong. A
+   collection passes up what is beneath it only while it is folded. */
+.magpy-legend-overlap {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  cursor: pointer;
+  background: var(--vscode-editorWarning-foreground, #d18616);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1.5 15 14H1zM7.2 5.8h1.6v4.4H7.2zM7.2 11.2h1.6v1.6H7.2z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1.5 15 14H1zM7.2 5.8h1.6v4.4H7.2zM7.2 11.2h1.6v1.6H7.2z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.magpy-legend-row.group:not(.folded) > .magpy-legend-overlap.inside {
+  display: none;
+}
+
+/* How many pairs overlap, above the list while any do: a click steps
+   through them. Sticky, so a long list keeps it in sight. */
+.magpy-legend-overlaps {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 4px;
+  margin-bottom: 2px;
+  background: inherit;
+  color: var(--vscode-editorWarning-foreground, #d18616);
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+.magpy-legend-overlaps::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1.5 15 14H1zM7.2 5.8h1.6v4.4H7.2zM7.2 11.2h1.6v1.6H7.2z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M8 1.5 15 14H1zM7.2 5.8h1.6v4.4H7.2zM7.2 11.2h1.6v1.6H7.2z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.magpy-legend-overlaps:hover {
+  text-decoration: underline;
+}
+.magpy-legend-overlaps:focus-visible {
+  outline: 1px solid currentColor;
+}
+
 /* --- the variables -------------------------------------------------------
    The scene's variables as a panel: in the widget, the dock's content (see
    the dock, below), shown with the handles; in the VS Code sidebar, the
