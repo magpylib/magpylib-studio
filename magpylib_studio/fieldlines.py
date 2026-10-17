@@ -6,16 +6,20 @@ browser, where a frame of lines costs a few milliseconds against tens in
 numpy. What python sends is the field on a grid round the sensor, and what
 the view needs to draw lines nobody has to tune:
 
-- **Where.** A sensor whose pixels lie in a plane has its lines drawn in that
-  plane, from the field sampled on the plane alone -- the classic streamplot,
-  and four times finer for the same points than a box. Any other sensor's
-  lines run in 3D, through a box round it and the sources near it.
+- **Where.** A sensor whose pixels lie in a plane that the field keeps to --
+  a plane of symmetry, where B has no part across it -- has its lines drawn
+  in that plane, from the field sampled on the plane alone: the classic
+  streamplot, and four times finer for the same points than a box. Any other
+  sensor's lines run in 3D, through a box round it and the sources near it:
+  lines kept to a plane the field leaves would be the field's shadow on it,
+  not its lines.
 - **How many.** As far apart as the pixels: a line stops where it comes
   within half a spacing of another, and a pixel already on a line starts
   none, so a uniform field shows a line per row and not one per pixel.
-- **Where they end.** Leaving the grid, entering a magnet -- the grid points
-  inside one, from magpylib's own polarization (`getJ`), so every shape it
-  knows -- closing on itself, or where the field fades out.
+- **Where they end.** Leaving the grid, closing on itself, or where the field
+  fades out; a line in a plane also at a magnet the plane cuts -- the grid
+  points inside one, from magpylib's own polarization (`getJ`), so every
+  shape it knows. A line in 3D goes through a magnet, as the field does.
 
 During a gesture the grid is coarser and kept for its length, unless the
 sensor itself moves: the field of what does not move is computed once and
@@ -40,6 +44,12 @@ DRAG_POINTS_ALL = 1_200
 LUT_STEPS = 32
 #: Pixels offered as starts at most; the spacing keeps far fewer of them.
 MAX_SEEDS = 400
+#: How much of B may cross a sensor's plane, over the plane, for its lines to
+#: be drawn in it: a plane of symmetry has none, and the Halbach demo's bore,
+#: whose rings are turned half a step apart, has 40 % -- its lines leave it.
+ACROSS = 0.02
+#: Points of the coarse look at the plane that decides it, before its grid.
+PROBE_POINTS = 600
 
 
 def sources_of(objects):
@@ -91,8 +101,9 @@ def spacing_of(seeds, grid):
     return float(min(own, finest))
 
 
-def grid_around(sources, seeds, points):
-    """The grid for `seeds`: in their plane, if they lie in one, else a box;
+def grid_around(sources, seeds, points, flat=None):
+    """The grid for `seeds`: in their plane, if they lie in one and `flat` is
+    not False, else a box;
     round them and the sources near them, padded by a quarter of its largest
     side, about `points` evenly spaced points.
 
@@ -101,6 +112,8 @@ def grid_around(sources, seeds, points):
     dragged a metre off spreads its points so thin that the bore has none.
     """
     axes, planar = frame_of(seeds)
+    if flat is False:
+        axes, planar = np.eye(3), False
     centre = seeds.mean(axis=0)
     reach = 3 * max(float(np.max(np.linalg.norm(seeds - centre, axis=1))), 0.005)
     centres = [np.atleast_2d(np.asarray(s.position, dtype=float))[-1] for s in sources]
@@ -124,6 +137,22 @@ def grid_around(sources, seeds, points):
         "step": step,
         "shape": [int(n) for n in shape],
     }
+
+
+def is_flat(grid):
+    """Whether `grid` is a plane's."""
+    return grid["shape"][2] == 1
+
+
+def keeps_to(grid, values, within):
+    """Whether the field `values` on a flat `grid` stays in its plane: what
+    crosses it, against all of it, over the plane outside the magnets, under
+    `ACROSS`."""
+    across = np.abs(values @ grid["axes"][2])
+    size = np.linalg.norm(values, axis=1)
+    outside = ~within
+    total = float(size[outside].sum())
+    return total == 0 or float(across[outside].sum()) <= ACROSS * total
 
 
 def points_of(grid):

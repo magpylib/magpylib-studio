@@ -3867,32 +3867,70 @@ class MagpylibStudioSession:
             cache = self._field_cache.get(key)
             follows = names is None or key in names
             if not gesture:
-                grid = fieldlines.grid_around(sources, seeds, fieldlines.REST_POINTS)
-            elif cache is not None and not follows:
-                grid = cache["grid"]
+                budget = fieldlines.REST_POINTS
             else:
                 budget = fieldlines.DRAG_POINTS if names else fieldlines.DRAG_POINTS_ALL
-                grid = fieldlines.grid_around(sources, seeds, budget)
-            points = fieldlines.points_of(grid)
-            if gesture and not follows:
-                moving = self._sources_named(sources, names, key_of)
-                if cache is None or cache["names"] != names:
-                    ids = {id(s) for s in moving}
-                    still = [s for s in sources if id(s) not in ids]
-                    cache = {
-                        "grid": grid,
-                        "names": names,
-                        "field": fieldlines.field(still, points),
-                        "inside": fieldlines.inside(still, points),
-                    }
-                    self._field_cache[key] = cache
-                values = cache["field"] + fieldlines.field(moving, points)
-                within = cache["inside"] | fieldlines.inside(moving, points)
+            if gesture and cache is not None and not follows:
+                grid = cache["grid"]
             else:
-                values = fieldlines.field(sources, points)
-                within = fieldlines.inside(sources, points)
+                grid = fieldlines.grid_around(sources, seeds, budget)
+                if fieldlines.is_flat(grid) and not self._keeps_to_plane(
+                    sources, seeds
+                ):
+                    grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
+            values, within = self._field_on(
+                key, grid, sources, names, gesture and not follows
+            )
+            if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
+                grid, values, within
+            ):
+                # a drag took the field off the sensor's plane: its lines, in 3D
+                grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
+                values, within = self._field_on(
+                    key, grid, sources, names, gesture and not follows
+                )
             items.append(fieldlines.item(sensor, key, grid, values, within, seeds))
         return items
+
+    @staticmethod
+    def _keeps_to_plane(sources, seeds):
+        """Whether the field keeps to the plane of `seeds`, from a coarse look
+        at it -- before the grid it would be drawn from is computed."""
+        from magpylib_studio import fieldlines
+
+        probe = fieldlines.grid_around(sources, seeds, fieldlines.PROBE_POINTS)
+        points = fieldlines.points_of(probe)
+        return fieldlines.keeps_to(
+            probe,
+            fieldlines.field(sources, points),
+            fieldlines.inside(sources, points),
+        )
+
+    def _field_on(self, key, grid, sources, names, stays):
+        """B on `grid`, and which of its points are inside a magnet. Where
+        the grid `stays` for the gesture, the field of what does not move is
+        kept, under `key`, and only the moving sources' added."""
+        from magpylib_studio import fieldlines
+
+        points = fieldlines.points_of(grid)
+        if not stays:
+            return fieldlines.field(sources, points), fieldlines.inside(sources, points)
+        key_of = {id(obj): k for k, obj in self._objs.items()}
+        moving = self._sources_named(sources, names, key_of)
+        cache = self._field_cache.get(key)
+        if cache is None or cache["names"] != names or cache["grid"] is not grid:
+            ids = {id(s) for s in moving}
+            still = [s for s in sources if id(s) not in ids]
+            cache = {
+                "grid": grid,
+                "names": names,
+                "field": fieldlines.field(still, points),
+                "inside": fieldlines.inside(still, points),
+            }
+            self._field_cache[key] = cache
+        values = cache["field"] + fieldlines.field(moving, points)
+        within = cache["inside"] | fieldlines.inside(moving, points)
+        return values, within
 
     def _moving_names(self):
         """The ids the gesture in progress moves -- the objects it named, the

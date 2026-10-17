@@ -1334,8 +1334,9 @@ const FIELD_LINE_BANDS = [
  *  - As far apart as the pixels: a pixel already on a line starts none, and
  *    a line stops within half a spacing of another (Jobard and Lefer's
  *    evenly spaced streamlines), so a uniform field draws a line per row.
- *  - A line also stops leaving the grid, entering a magnet, closing on
- *    itself, or where the field is under a twenty-fifth of the sensor's.
+ *  - A line also stops leaving the grid, closing on itself, or where the
+ *    field is under a twenty-fifth of the sensor's; in a plane, also at a
+ *    magnet the plane cuts.
  *  - Coloured by |B| from the sensor's colormap, on a log scale a decade
  *    either way of the field at the pixels -- a fringe falls off as the cube
  *    of the distance, and a linear scale shows a bore and nothing else -- and
@@ -1375,9 +1376,10 @@ function buildFieldLines(item) {
     const i = Math.min(Math.floor(fx), nx - 2);
     const j = Math.min(Math.floor(fy), ny - 2);
     const k = flat ? 0 : Math.min(Math.floor(fz), nz - 2);
-    if (within(Math.round(fx), Math.round(fy), flat ? 0 : Math.round(fz))) {
-      return -1;
-    }
+    // A line in a plane stops at a magnet, which its plane cuts; in 3D it
+    // goes through, as the field does, hidden by the magnet while inside,
+    // and closes its loop round the far side.
+    if (flat && within(Math.round(fx), Math.round(fy), 0)) return -1;
     const tx = fx - i;
     const ty = fy - j;
     const tz = flat ? 0 : fz - k;
@@ -1514,6 +1516,11 @@ function buildFieldLines(item) {
     Math.min(Math.max(0.5 + 0.5 * Math.log10(magnitude / middle), 0), 1);
   const ds = 0.5;
   const longest = Math.ceil((2 * (nx + ny + nz)) / ds);
+  // How near another line a line may run. In a plane, half a spacing: the
+  // even look of a streamplot. In 3D lines crowd where the field does --
+  // into the gaps between magnets -- and that crowding is the picture: a line
+  // stops only on running into another.
+  const nearest = (flat ? 0.5 : 0.15) * spacing;
   // where a flat grid's lines may start next: beside a line, a spacing off
   const frontier = [];
   let lines = 0;
@@ -1563,7 +1570,7 @@ function buildFieldLines(item) {
           : z + (ds / 6) * (k1z + 2 * k2z + 2 * k3z + (sign * b[2]) / m4);
         const next = sample(tx, ty, tz); // leaves `b` at the new point
         const step = sign * (n + 1);
-        if (next <= fade || crowded(tx, ty, tz, line, step, 0.5 * spacing)) {
+        if (next <= fade || crowded(tx, ty, tz, line, step, nearest)) {
           break;
         }
         const t = tone(shown);

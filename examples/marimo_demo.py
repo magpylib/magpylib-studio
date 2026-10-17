@@ -101,10 +101,11 @@ def _(
         tilt: Annotated[float, Angle(-180, 180, slider=(-90, 90))] = 0.0,
         tilt_axis: Literal["x", "y", "z"] = "z",
         density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
+        layers: Annotated[int, Count(1, 9, slider=(1, 5))] = 1,
     ):
         """Two rings of magnets whose polarization turns twice per revolution,
         the upper ring half a step round from the lower, and a grid of field
-        arrows across the bore."""
+        arrows across the bore -- `layers` of it, stacked up the axis."""
         stagger = derived("stagger", 180 / n, unit="angle")
         stack = magpy.Collection(style_label="Halbach stack")
         rings = {}
@@ -124,7 +125,7 @@ def _(
 
         reach = radius / 2
         bore = magpy.Sensor(
-            pixel=grid(reach, density),
+            pixel=grid(reach, density, layers=layers),
             style={
                 "label": "bore",
                 "size": 0.004,
