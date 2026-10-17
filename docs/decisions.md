@@ -36,6 +36,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0025](#0025-a-panel-is-a-widget-of-its-own-where-a-host-places-it)                            | A panel is a widget of its own where a host places it        | accepted 2026-10-10, as built                                        |
 | [0026](#0026-variants-are-named-value-sets-inside-a-scene)                                     | Variants are named value sets inside a scene                 | accepted 2026-10-11, as built (#32)                                  |
 | [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built                                        |
+| [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251)                                  | marimo's slow answers were its own, fixed in 0.25.1          | accepted 2026-10-17                                                  |
 
 ---
 
@@ -556,7 +557,9 @@ marimo pair, marimo-lens and marimo-studio (2026); Zoo's Zookeeper; Embodied CAD
 
 ## 0010. The notebook widget edits with the package alone
 
-**Status:** accepted 2026-09-29 (#18 and `094150d`; TASKS W1). **Record of:**
+**Status:** accepted 2026-09-29 (#18 and `094150d`; TASKS W1). Its marimo
+measurement explained by
+[0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251). **Record of:**
 the editable-widget plan, now deleted.
 
 ### Context
@@ -1136,7 +1139,8 @@ metre across too.
 
 ## 0021. A frame is one message, and a reading's pixels are instances
 
-**Status:** accepted 2026-10-10, as built.
+**Status:** accepted 2026-10-10, as built. Its marimo premise explained by
+[0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251).
 
 ### Context
 
@@ -1477,3 +1481,62 @@ bar.
 - **The host's insets as CSS properties the renderer reads**: a style read per
   frame and per pointer move, for a value that changes when a column comes or
   goes.
+
+## 0028. marimo's slow answers were its own, fixed in 0.25.1
+
+**Status:** accepted 2026-10-17. Supersedes the line in
+[0010](#0010-the-notebook-widget-edits-with-the-package-alone)'s measurements
+that marimo adds 60–85 ms to a call slower than about 20 ms, cause unknown,
+which [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)
+started from. Both decisions stand. **Record of:** a drag bench on the marimo
+demo's Halbach, in every host, in the gitignored `sandbox/drag-bench/`.
+
+### Context
+
+0010 found marimo slower than JupyterLab and the VS Code panel by a near-fixed
+amount on any call past about 20 ms, and could not say why. 0021 halved the
+messages a drag frame sends on account of it. Measured again, with the frame the
+view sends today, the amount was marimo's and is gone.
+
+### Decision
+
+- **The cause was marimo's run mode, and marimo has fixed it.** Under
+  `marimo run` the kernel is a thread of the server. In 0.24.0 it handed each
+  message to the websocket writer from a thread of its own, with
+  `asyncio.Queue.put_nowait`, which does not wake the server's event loop: the
+  answer waited until the loop woke for something else, about every 100 ms. A
+  short call was answered while the loop was still awake from the request that
+  brought it, which is why only calls past about 20 ms paid, and a frame came to
+  the next 100 ms tick: 0010's 102 and 475 ms. `marimo edit`, whose kernel is a
+  process the loop reads itself, never had it. 0.25.1 hands over with
+  `call_soon_threadsafe`.
+- **Nothing in the widget works round it.** A notebook's transport costs about 3
+  ms a frame over the panel's stdio, in JupyterLab and marimo alike: a
+  millisecond to python and one and a half back.
+- **0021 stands.** One message a frame is a round trip fewer on every host, and
+  the 38 KB frame is what every host carries.
+
+### Rejected
+
+- **Keeping marimo's loop awake from the widget**, a timer poking it: reaching
+  from the kernel into marimo's server, for a bug its release has fixed.
+- **Asking for marimo 0.25.1 in the package**: marimo is not a dependency, and
+  the demo's instructions install the latest.
+
+### Measured
+
+One frame of a magnet dragged, `apply_edits` with the scene in the answer,
+median of 30, M4 Pro. The radius slider, `set_variable` as a preview, is the
+same to a millisecond. The engine is 9.5 ms of the demo's frame and 45 ms of the
+heavier one's; not counted are the renderer, the same everywhere, and the VS
+Code webview's messages.
+
+| host                  | demo: 24 magnets, 7 × 7 probe | 96 magnets, 25 × 25 probe |
+| --------------------- | ----------------------------- | ------------------------- |
+| VS Code panel (stdio) | 8.9 ms                        | 44 ms                     |
+| JupyterLab            | 12.2 ms                       | 51 ms                     |
+| marimo 0.25.1, run    | 12.3 ms                       | 51 ms                     |
+| marimo 0.25.1, edit   | 11.7 ms                       | 51 ms                     |
+| marimo 0.24.0, run    | 101 ms                        | 103 ms                    |
+| marimo 0.24.0, edit   | 11.7 ms                       | 51 ms                     |
+| scene sent            | 34 KB                         | 132 KB                    |
