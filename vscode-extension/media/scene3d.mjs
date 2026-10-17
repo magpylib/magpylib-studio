@@ -1003,9 +1003,8 @@ function pathMarkers(part, opacity) {
 function takeOff(added) {
   for (const { on, part } of added) {
     on.remove(part);
-    if (!part.userData.borrowed) part.geometry?.dispose();
     wideMaterials.delete(part.material);
-    part.material?.dispose();
+    free(part);
   }
 }
 
@@ -1634,11 +1633,7 @@ function readsBest(metres) {
 function drawAxes(ranges, labels) {
   if (axes) {
     scene.remove(axes);
-    axes.traverse((child) => {
-      child.geometry?.dispose();
-      child.material?.map?.dispose();
-      child.material?.dispose();
-    });
+    axes.traverse(free);
     axes = null;
   }
   // The unit the coordinates are in, for the box's numbers and the scale
@@ -1802,13 +1797,9 @@ function dressCorner() {
 
 function dropCorner() {
   if (!corner) return;
-  for (const material of corner.body.material) {
-    material.map.dispose();
-    material.dispose();
-  }
+  for (const material of corner.body.material) material.map.dispose();
   corner.body.geometry.dispose();
   corner.mark.geometry.dispose();
-  corner.mark.material.dispose();
   corner = null;
 }
 
@@ -2056,7 +2047,6 @@ function dropBar() {
   if (!bar) return;
   bar.texture.dispose();
   bar.plane.geometry.dispose();
-  bar.plane.material.dispose();
   bar = null;
 }
 
@@ -2104,19 +2094,26 @@ function paintBar(text, pixels) {
   bar.texture.needsUpdate = true;
 }
 
-/** Drop every node but the ones held, freeing what they hold on the GPU.
- *  This runs on every edit: a colorscale texture per mesh, left to
- *  accumulate, is a leak. */
+/** Free what `part` holds on the GPU: its geometry, unless borrowed from a
+ *  path that still draws it, and its texture. Not its material. A material
+ *  owns nothing on the GPU itself; its compiled program is three's, shared by
+ *  every material of the same kind and let go when the last of them is
+ *  disposed -- and a scene is rebuilt on every frame of a drag, so disposing
+ *  the old meshes' materials threw every program away, and the next frame
+ *  compiled and linked them all again: seven programs a frame, 14 ms of a
+ *  16 ms frame on an M4 Pro, measured. Left alone, a material goes with its
+ *  mesh, and the program stays for the next one like it. */
+function free(part) {
+  if (!part.userData.borrowed) part.geometry?.dispose();
+  part.material?.map?.dispose();
+}
+
 /** Take what is drawn on `node` off it, and free it. The node itself stays,
  *  and whatever is attached to it -- the handles -- with it. */
 function clearNode(node) {
   for (const child of [...(node?.children ?? [])]) {
     node.remove(child);
-    child.traverse((part) => {
-      part.geometry?.dispose();
-      part.material?.map?.dispose();
-      part.material?.dispose();
-    });
+    child.traverse(free);
   }
 }
 
@@ -2127,15 +2124,14 @@ function drawnItems(payload) {
   return payload.meshes.concat(payload.scatters, payload.pixels ?? []);
 }
 
+/** Drop every node but the ones held, freeing what they hold on the GPU.
+ *  This runs on every edit: a colorscale texture per mesh, left to
+ *  accumulate, is a leak. */
 function discard(held) {
   for (const [objectId, node] of byObjectId) {
     if (held.has(objectId)) continue;
     scene.remove(node);
-    node.traverse((child) => {
-      child.geometry?.dispose();
-      child.material?.map?.dispose();
-      child.material?.dispose();
-    });
+    node.traverse(free);
     byObjectId.delete(objectId);
   }
 }
@@ -2200,11 +2196,7 @@ function poseFrame(index) {
     const steps = changes[entry.changes];
     const item = steps[Math.min(index, steps.length - 1)];
     entry.node.remove(entry.built);
-    entry.built.traverse((part) => {
-      part.geometry?.dispose();
-      part.material?.map?.dispose();
-      part.material?.dispose();
-    });
+    entry.built.traverse(free);
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
   }
