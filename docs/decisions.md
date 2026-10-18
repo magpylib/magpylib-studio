@@ -1493,7 +1493,9 @@ bar.
 that marimo adds 60–85 ms to a call slower than about 20 ms, cause unknown,
 which [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)
 started from. Both decisions stand. **Record of:** a drag bench on the marimo
-demo's Halbach, in every host, in the gitignored `sandbox/drag-bench/`.
+demo's Halbach, in every host, kept out of the repo and since removed; a drag in
+a real marimo is measured by `vscode-extension/harness/drag-rate.mjs`
+(`npm run drag-rate`).
 
 ### Context
 
