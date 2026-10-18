@@ -3621,8 +3621,15 @@ class MagpylibStudioSession:
             return threejs.frame_payload(
                 self._animated, frame, live=self._objs, derived=self._derived
             )
+        # The field the pixels read, once a scene: the arrows are drawn from
+        # it, and the lines take their colours from it.
+        readings = None
+        if self.field_lines:
+            from magpylib.graphics.backend import pixel_fields
+
+            readings = pixel_fields(self.scene)
         scene = threejs.scene_payload(
-            self.scene, live=self._objs, derived=self._derived
+            self.scene, live=self._objs, derived=self._derived, fields=readings
         )
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
@@ -3643,7 +3650,7 @@ class MagpylibStudioSession:
             scene["overlaps"] = []
             scene["overlaps_error"] = f"{type(e).__name__}: {e}"
         if self.field_lines:
-            scene["fieldlines"] = self._field_lines()
+            scene["fieldlines"] = self._field_lines(readings)
         return scene
 
     def _overlap_payload(self):
@@ -3837,7 +3844,7 @@ class MagpylibStudioSession:
         self._moving = set()
         self._field_cache = {}
 
-    def _field_lines(self):
+    def _field_lines(self, readings=None):
         """Prototype (#45): a ``fieldlines`` item per sensor that reads the
         field -- the field on a grid round it, for the view to draw lines of
         through its pixels; see `fieldlines`.
@@ -3849,6 +3856,8 @@ class MagpylibStudioSession:
         it for one magnet of the Halbach demo's 24. A variable moves anything,
         and a sensor dragged takes its grid with it: then the whole field is
         computed every frame, on the coarser grid.
+
+        `readings` are the sensors' pixel fields, where the scene has them.
         """
         from magpylib_studio import fieldlines
 
@@ -3861,9 +3870,10 @@ class MagpylibStudioSession:
         sensors = fieldlines.sensors_of(self.scene)
         if not sensors:
             return []
-        from magpylib.graphics.backend import pixel_fields
+        if readings is None:
+            from magpylib.graphics.backend import pixel_fields
 
-        readings = pixel_fields(self.scene)
+            readings = pixel_fields(self.scene)
         items = []
         for sensor in sensors:
             key = key_of.get(id(sensor))
