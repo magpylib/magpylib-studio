@@ -108,9 +108,7 @@ def style_set(obj):
     copy differently once it exists."""
     if getattr(obj, "_style", None) is None:
         return flat(getattr(obj, "_style_kwargs", None) or {})
-    if hasattr(obj.style, "set_values"):  # the property tree: what was set
-        return dict(obj.style.set_values())
-    return flat(obj.style.as_dict())
+    return obj.style.set_values()
 
 
 class Recorder:

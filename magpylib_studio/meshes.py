@@ -363,18 +363,15 @@ def status_of(obj, original_faces=None):
     needed fixing, which is how many faces came back wound the other way —
     `flipped`, counted against the faces the file actually held.
     """
-    # Read defensively: the engine supports released magpylib as well as its
-    # main branch, and a check one of them does not have should cost this
-    # dictionary a key rather than the import an AttributeError.
     counts = {
-        "open_edges": getattr(obj, "status_open_data", None),
-        "parts": getattr(obj, "status_disconnected_data", None),
-        "intersecting_faces": getattr(obj, "status_selfintersecting_data", None),
+        "open_edges": obj.status_open_data,
+        "parts": obj.status_disconnected_data,
+        "intersecting_faces": obj.status_selfintersecting_data,
     }
     status = {
-        "open": getattr(obj, "status_open", None),
-        "disconnected": getattr(obj, "status_disconnected", None),
-        "selfintersecting": getattr(obj, "status_selfintersecting", None),
+        "open": obj.status_open,
+        "disconnected": obj.status_disconnected,
+        "selfintersecting": obj.status_selfintersecting,
         **{k: len(v) for k, v in counts.items() if v is not None},
     }
     if original_faces is not None:

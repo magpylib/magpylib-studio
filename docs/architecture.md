@@ -8,50 +8,35 @@ what is next is in [roadmap.md](roadmap.md)._
 
 ## The parts
 
-| Part                   | Where                                             | What it is                                                                                                                                             |
-| ---------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| the engine             | `magpylib_studio/session.py`                      | `MagpylibStudioSession`: the document, the build, and every operation the GUI, the widget, the builder and the RPC call                                |
-| the scene function     | `magpylib_studio/recording.py`, `hook.py`         | `@scene` and studio's words: a plain magpylib function recorded into a document through magpylib's hook, or a copy of it from outside                  |
-| the document builder   | `magpylib_studio/build.py`                        | `Scene`: a document written one operation at a time, underneath the recorder; the writer that turns a document back into a function                    |
-| expressions            | `magpylib_studio/expressions.py`                  | the hermetic expression language of the document                                                                                                       |
-| units                  | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                                           |
-| meshes                 | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                             |
-| import                 | `magpylib_studio/importer.py`                     | `load_script` (run a script, intercept `show()`), `document_from_objects`                                                                              |
-| scripts outside        | `magpylib_studio/runner.py`                       | a script run in a process of its own -- the script tab's save, Open in Studio -- handing back documents, the meshes carried                            |
-| transport              | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                              |
-| drawing                | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                            |
-| the 3D view's data     | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                                        |
-| the notebook widget    | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
-| magpylib compatibility | `magpylib_studio/style_compat.py`                 | the style operations on released magpylib ([0016](decisions.md#0016-released-magpylib-through-a-shim-until-the-release))                               |
-| the agent skill        | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                               |
-| the VS Code extension  | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks             |
-| the renderer           | `vscode-extension/media/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use                                                                               |
-| tools                  | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                     |
-| the agent evaluation   | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                   |
-| tests                  | `tests/`, `vscode-extension/src/test/`            | the engine suite (against both magpylibs), the extension suite in a real Extension Development Host, browser checks of the widget                      |
+| Part                  | Where                                             | What it is                                                                                                                                             |
+| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the engine            | `magpylib_studio/session.py`                      | `MagpylibStudioSession`: the document, the build, and every operation the GUI, the widget, the builder and the RPC call                                |
+| the scene function    | `magpylib_studio/recording.py`, `hook.py`         | `@scene` and studio's words: a plain magpylib function recorded into a document through magpylib's hook, or a copy of it from outside                  |
+| the document builder  | `magpylib_studio/build.py`                        | `Scene`: a document written one operation at a time, underneath the recorder; the writer that turns a document back into a function                    |
+| expressions           | `magpylib_studio/expressions.py`                  | the hermetic expression language of the document                                                                                                       |
+| units                 | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                                           |
+| meshes                | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                             |
+| import                | `magpylib_studio/importer.py`                     | `load_script` (run a script, intercept `show()`), `document_from_objects`                                                                              |
+| scripts outside       | `magpylib_studio/runner.py`                       | a script run in a process of its own -- the script tab's save, Open in Studio -- handing back documents, the meshes carried                            |
+| transport             | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                              |
+| drawing               | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                            |
+| the 3D view's data    | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                                        |
+| the notebook widget   | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
+| the agent skill       | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                               |
+| the VS Code extension | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks             |
+| the renderer          | `vscode-extension/media/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use                                                                               |
+| tools                 | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                     |
+| the agent evaluation  | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                   |
+| tests                 | `tests/`, `vscode-extension/src/test/`            | the engine suite, the extension suite in a real Extension Development Host, browser checks of the widget                                               |
 
 ## The engine and magpylib's versions
 
-`pip install magpylib-studio` is enough: the engine works with **released
-magpylib** (≥ 5.2). [magpylib's main][branch], not yet released, adds a
-first-class style API, path-valued physics properties
+The engine needs magpylib 6 (`magpylib>=6.0.0rc0`), the first release with what
+it is built on: the style property tree it reads and writes styles through
+(`schema()`, `set`, `set_values()`), path-valued physics properties
 (`current=[100, 200, 300]`), the display-backend API the 3D view draws through,
-and `Panel.objects`, which gives a bare `magpy.show()` a legend:
-
-```sh
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
-```
-
-`style_compat.py` detects which one you have and reproduces the four style
-operations the engine needs from `style.update()` / `style.as_dict()`, with a
-generated copy of main's JSON Schema (`style_schemas.json`) so the inspector
-keeps real widgets. The test suite runs against both. Without the
-display-backend API the 3D view is not available and the studio draws the plotly
-figure. One difference is silent: on 5.2.3
-`show(backend="plotly", plotly_renderer=...)` drops the argument, which is why
-`viewer.draw_here()` sets plotly's own default renderer instead.
-
-[branch]: https://github.com/magpylib/magpylib/tree/main
+with its pixel helpers, and `Panel.objects`, which gives a bare `magpy.show()` a
+legend.
 
 ## The document
 

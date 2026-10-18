@@ -744,10 +744,6 @@ def test_a_script_that_makes_a_widget_opens_in_the_studio(tmp_path):
     in the studio, where `show()` is a stand-in that captures the script's
     calls, the widget's own drawing still reaches magpylib."""
     pytest.importorskip("anywidget")
-    from magpylib_studio import threejs
-
-    if not threejs.available():
-        pytest.skip("the 3D view needs magpylib's display-backend API")
     path = tmp_path / "ring.py"
     path.write_text(
         "import magpylib as magpy\n"
@@ -774,8 +770,7 @@ def test_the_demo_opens_in_the_studio():
     assert studio.load_script(str(demo))["ok"] is True
     variables = studio.to_dict()["variables"]
     assert {"n", "radius", "gap", "stagger", "density"} <= set(variables)
-    # the arrows, built from their formula: density 7, so a 7 × 7 grid -- asked
-    # of the object rather than the view, which needs a newer magpylib
+    # the arrows, built from their formula: density 7, so a 7 × 7 grid
     assert np.asarray(studio._objs["bore"].pixel).reshape(-1, 3).shape[0] == 49
 
 

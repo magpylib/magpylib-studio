@@ -69,7 +69,7 @@ import magpylib as magpy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import build, expressions, hook, meshes, style_compat
+from magpylib_studio import build, expressions, hook, meshes
 from magpylib_studio.build import BuildError, Expression, Sampled, _arg, _value
 
 __all__ = [
@@ -479,7 +479,7 @@ def _style_set(obj):
     `obj.style` creates it, and `copy()` then labels the copy."""
     if getattr(obj, "_style", None) is None:
         return _flat_style(getattr(obj, "_style_kwargs", None))
-    return style_compat.set_values(obj)
+    return obj.style.set_values()
 
 
 def _same(a, b):

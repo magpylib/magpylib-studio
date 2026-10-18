@@ -20,13 +20,6 @@ from magpylib_studio.session import (
     _linspace_lit,
 )
 
-#: The scene graph needs a magpylib newer than 5.2.3 -- see `threejs.available`.
-#: Its tests say so rather than failing where the released one is installed.
-needs_scene_graph = pytest.mark.skipif(
-    not threejs.available(),
-    reason="the scene graph needs magpylib's display-backend API and unit pinning",
-)
-
 # Small fixed scene for tests (sessions start empty by default).
 TEST_SCENE = {
     "objects": [
@@ -52,18 +45,6 @@ TEST_SCENE = {
         },
     ]
 }
-
-
-def supports_property_paths():
-    """Path-valued physics properties (current=[...], polarization=[[...]])
-    exist on the magpylib property-tree branch, not on released magpylib."""
-    import magpylib as magpy
-
-    try:
-        magpy.current.Circle(current=[1, 2], diameter=1)
-    except Exception:  # noqa: BLE001 - capability probe
-        return False
-    return True
 
 
 def same_field(
@@ -136,7 +117,6 @@ def test_the_object_tree_is_what_a_legend_draws():
     assert hidden["visible"] is False
 
 
-@needs_scene_graph
 def test_the_payload_says_what_each_collection_holds():
     """By the ids a view draws them under, nested collections too, and a
     pattern's copies as their source, whose node they are drawn on. A
@@ -244,7 +224,6 @@ def test_get_figure_is_json_serializable(session):
     json.dumps(fig)  # to_json handled numpy/bdata
 
 
-@needs_scene_graph
 def test_get_scene_is_json_and_keyed_by_studio_ids(session):
     scene = session.get_scene()
     json.dumps(scene)  # must cross the wire
@@ -257,7 +236,6 @@ def test_get_scene_is_json_and_keyed_by_studio_ids(session):
     assert set(scene["anchors"]) == {"cube", "cyl"}
 
 
-@needs_scene_graph
 def test_get_scene_ids_survive_a_rebuild(session):
     """The point of using studio's ids rather than magpylib's.
 
@@ -276,7 +254,6 @@ def test_get_scene_ids_survive_a_rebuild(session):
     assert after["anchors"]["cube"] == [2.0, 0.0, 0.0]
 
 
-@needs_scene_graph
 def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
     """What lets a view keep the scene instead of rebuilding it.
 
@@ -296,7 +273,6 @@ def test_get_scene_geometry_does_not_depend_on_the_rest_of_the_scene(session):
     assert cube_after["position"] == cube_before["position"]
 
 
-@needs_scene_graph
 def test_get_scene_draws_pattern_copies_on_their_source(session):
     """Every id in the payload must be one the engine accepts.
 
@@ -328,7 +304,6 @@ def test_get_scene_draws_pattern_copies_on_their_source(session):
 
 
 @pytest.mark.parametrize("name", list(EXAMPLES))
-@needs_scene_graph
 def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     """magpylib works in SI units, so a scene written in round numbers is a
     magnet a metre on a side. Every shipped example is a bench-top assembly.
@@ -350,7 +325,6 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
         )
 
 
-@needs_scene_graph
 def test_the_scene_payload_is_json_the_view_can_parse():
     """Every scene has to survive the wire, and NaN does not.
 
@@ -401,7 +375,6 @@ def test_the_scene_payload_is_json_the_view_can_parse():
 
 
 @pytest.mark.parametrize("name", list(EXAMPLES))
-@needs_scene_graph
 def test_every_id_the_scene_names_can_be_edited(name):
     """The invariant the whole 3D view rests on, over every shipped example.
 
@@ -420,7 +393,6 @@ def test_every_id_the_scene_names_can_be_edited(name):
         session._spec(object_id)  # raises KeyError if the engine would refuse
 
 
-@needs_scene_graph
 def test_a_dragged_position_is_world_absolute(session):
     """What the 3D view's move gizmo relies on.
 
@@ -631,7 +603,6 @@ def _drawn(session, object_id):
         ("magnet.Sphere", {"diameter": 2}, "diameter", 3.0),
     ],
 )
-@needs_scene_graph
 def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
     """What the resize gizmo relies on, per class it offers to resize.
 
@@ -655,7 +626,6 @@ def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
     )
 
 
-@needs_scene_graph
 def test_a_cylinder_resizes_across_then_along():
     """The axis mapping the view assumes: a Cylinder's dimension is
     (diameter, height), so the first number is x and y together and the second
@@ -674,7 +644,6 @@ def test_a_cylinder_resizes_across_then_along():
     assert extent() / base == pytest.approx([1, 1, 2])
 
 
-@needs_scene_graph
 def test_only_shapes_that_scale_are_offered(session):
     """A resize is offered for a Cuboid and refused for a Sensor, whose pixels
     sit at real coordinates while its cross is styled -- scaling the drawing
@@ -691,37 +660,6 @@ def test_only_shapes_that_scale_are_offered(session):
     assert "probe" not in shapes
 
 
-@needs_scene_graph
-@pytest.mark.parametrize("missing", ["backend API", "pixel helpers"])
-def test_the_studio_runs_without_the_display_backend_api(session, monkeypatch, missing):
-    """The scene graph needs an API newer than released magpylib, and nothing
-    else here does.
-
-    A hard import made the whole package unimportable against 5.2.3 -- not
-    just the 3D view, everything -- which broke what this promises to work
-    with. It is optional: the scene graph says what it needs, and the view
-    draws the plotly figure, as it did before any of this existed. The pixel
-    helpers came later than the API itself, so a magpylib can have one and
-    not the other.
-    """
-    from magpylib_studio import threejs
-
-    if missing == "pixel helpers":
-        monkeypatch.delattr(magpy.graphics.backend, "pixel_colors")
-    else:
-        monkeypatch.setattr(threejs, "DisplayBackend", None)
-    assert not threejs.available()
-
-    # the things the studio is for keep working
-    assert session.get_figure()["data"]
-    assert [o["id"] for o in session.list_objects()]
-    assert session.move("cube", [1, 0, 0])["ok"]
-
-    with pytest.raises(RuntimeError, match="display-backend API"):
-        session.get_scene()
-
-
-@needs_scene_graph
 def test_a_played_frame_recomputes_what_the_field_decides():
     """Why playback asks for frames rather than moving meshes about.
 
@@ -753,7 +691,6 @@ def test_a_played_frame_recomputes_what_the_field_decides():
 
 
 @pytest.mark.parametrize("steps", [25, 250, 600])
-@needs_scene_graph
 def test_every_step_of_a_path_is_a_frame_to_stop_on(steps):
     """`animation=True` alone does not give every step.
 
@@ -779,7 +716,6 @@ def animation_time():
 
 
 @pytest.mark.parametrize("seconds", [5, 2])
-@needs_scene_graph
 def test_a_run_lasts_what_the_animation_settings_say(seconds, animation_time):
     """`animation.time` is a duration, not a frame count: five seconds by
     default, whatever the path's length. The view paces to it and drops what
@@ -796,7 +732,6 @@ def test_a_run_lasts_what_the_animation_settings_say(seconds, animation_time):
     assert scene["frames"] == 60  # the length of the path, not time x fps
 
 
-@needs_scene_graph
 def test_the_captured_run_is_dropped_when_the_scene_changes():
     """It is a recording of a scene that no longer exists. Keeping it would
     play the old one."""
@@ -810,7 +745,6 @@ def test_the_captured_run_is_dropped_when_the_scene_changes():
     assert session._animated is None
 
 
-@needs_scene_graph
 def test_dragging_an_object_with_a_path_moves_the_whole_path():
     """Reporting one pose for an object that has a path deletes the path.
 
@@ -839,11 +773,9 @@ def test_dragging_an_object_with_a_path_moves_the_whole_path():
     assert np.asarray(session._objs["sensor"].position) == pytest.approx(displaced)
 
 
-@needs_scene_graph
 def test_a_path_is_only_carried_while_it_is_worth_carrying(session):
     """It rides in every payload, like a mesh's vertices, so it is capped —
     and an object standing still has no path to carry in the first place."""
-    from magpylib_studio import threejs
 
     assert session.get_scene()["paths"] == {}  # nothing in this scene moves
 
@@ -858,7 +790,6 @@ def test_a_path_is_only_carried_while_it_is_worth_carrying(session):
         threejs.MAX_DRAGGABLE_PATH = monkey
 
 
-@needs_scene_graph
 def test_the_handles_sit_where_the_object_looks(session):
     """A Tetrahedron's position is the origin its vertices are written
     against, not the middle of the shape, so handles drawn there float off a
@@ -880,7 +811,6 @@ def test_the_handles_sit_where_the_object_looks(session):
     assert scene["centroids"]["cube"] == pytest.approx(scene["anchors"]["cube"])
 
 
-@needs_scene_graph
 def test_a_mesh_is_resized_by_its_vertices(session):
     """A mesh has no dimension, so the array itself is what a resize drags.
 
@@ -901,7 +831,6 @@ def test_a_mesh_is_resized_by_its_vertices(session):
     assert _drawn(session, "tet") - anchor == pytest.approx((before - anchor) * 2)
 
 
-@needs_scene_graph
 def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     """The array rides in every payload, so past a point it is a lot of
     numbers to ship on the chance that someone resizes it. Those meshes keep
@@ -910,7 +839,6 @@ def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     Only a TriangularMesh can reach the cap: a Tetrahedron is four vertices by
     definition, which magpylib enforces.
     """
-    from magpylib_studio import threejs
 
     corners = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]]
     faces = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]
@@ -952,7 +880,6 @@ def test_the_quiver_grid_is_a_number_to_drag():
     assert "density = " in script and "t % density" in script
 
 
-@needs_scene_graph
 def test_polarization_is_reported_in_the_objects_own_frame(session):
     """Which frame the aim gizmo has to undo before it writes back.
 
@@ -971,7 +898,6 @@ def test_polarization_is_reported_in_the_objects_own_frame(session):
     assert world == pytest.approx([0, 1, 0])  # and not what it points at
 
 
-@needs_scene_graph
 def test_parametric_names_the_variables_a_drag_would_supersede(session):
     """What lets the view warn before the drag rather than after.
 
@@ -997,7 +923,6 @@ def test_parametric_names_the_variables_a_drag_would_supersede(session):
     assert "cube" not in parametric  # nothing parametric about it
 
 
-@needs_scene_graph
 def test_get_scene_names_what_draws_its_own_reading():
     """A sensor whose pixels show the field is not right where a drag carries
     it, as a magnet is: the view redraws it while it is dragged. The quiver's
@@ -1010,7 +935,6 @@ def test_get_scene_names_what_draws_its_own_reading():
     assert halbach.get_scene()["readings"] == []
 
 
-@needs_scene_graph
 def test_get_scene_reports_the_orientation_a_drag_needs(session):
     """The rotation a drag has to add its turn to, which the picture cannot
     show: magpylib bakes it into the vertices, so the node arrives unrotated
@@ -2963,10 +2887,6 @@ rotor.rotate_from_angax(np.linspace(0, 270, 10), 'z', anchor=0)
     )
 
 
-@pytest.mark.skipif(
-    not supports_property_paths(),
-    reason="path-valued properties need the magpylib property-tree branch",
-)
 def test_load_script_property_paths(tmp_path):
     import numpy as np
 
@@ -5016,7 +4936,6 @@ def test_jsonrpc_roundtrip():
     assert responses[3]["error"]["type"] == "MethodError"  # unknown method rejected
 
 
-@needs_scene_graph
 def test_a_sensors_pixels_are_drawn_as_instances():
     """A sensor whose pixels read the field is no longer a mesh of every
     arrow: its pixels come as one `pixels` item -- a position, a direction,
@@ -5051,7 +4970,6 @@ def test_a_sensors_pixels_are_drawn_as_instances():
     assert not [p for p in s.get_scene()["pixels"] if p["object_id"] == "field"]
 
 
-@needs_scene_graph
 def test_a_bare_name_typed_where_a_number_was_is_made_at_that_value():
     """`apply_edits(define=True)`: a variable's name the document lacks,
     typed as the whole of a pose's element, is made at the value it
@@ -5089,7 +5007,6 @@ def test_a_bare_name_typed_where_a_number_was_is_made_at_that_value():
     }
 
 
-@needs_scene_graph
 def test_set_param_and_set_transform_make_a_bare_name_on_request():
     """`define` on the two calls the Inspector makes, as on `apply_edits`:
     a bare name the document lacks is made at the value it replaces, in the
@@ -5118,7 +5035,6 @@ def test_set_param_and_set_transform_make_a_bare_name_on_request():
     assert refused["ok"] is False and "nope" in refused["error"]
 
 
-@needs_scene_graph
 def test_a_bare_name_in_a_segments_angle_is_made_as_an_angle():
     """A CylinderSegment's dimension is three lengths and two angles: a name
     typed in its fourth place is made in degrees, as the field is shown, not
@@ -5140,7 +5056,6 @@ def test_a_bare_name_in_a_segments_angle_is_made_as_an_angle():
     assert made["start"]["value"] == pytest.approx(0)
 
 
-@needs_scene_graph
 def test_a_style_set_on_a_patterns_source_reaches_its_copies(session):
     """A pattern's copies are made from their source at the step that copies
     it: a colour set on the source has to come through to them, as a drag's
@@ -5163,7 +5078,6 @@ def test_a_style_set_on_a_patterns_source_reaches_its_copies(session):
     assert session.apply_edit("r2", "color", "no such colour")["ok"] is False
 
 
-@needs_scene_graph
 def test_a_copys_traces_say_which_copy_they_are(session):
     """Drawn under its source's id, a copy's trace still names the copy, so
     the view can outline the source full and the copies faint."""

@@ -34,17 +34,8 @@ import warnings
 
 import magpylib as magpy
 import numpy as np
+from magpylib.graphics.backend import DisplayBackend
 from scipy.spatial.transform import Rotation
-
-try:
-    from magpylib.graphics.backend import DisplayBackend
-except ImportError:  # pragma: no cover - depends on the magpylib installed
-    #: The display-backend API landed in magpylib after 5.2.3, and this module
-    #: is the only thing here that needs it. Everything else the studio does
-    #: works with the released version, so this is not a hard dependency:
-    #: without it the scene graph is unavailable and the view draws the Plotly
-    #: figure, which is what it drew before any of this existed.
-    DisplayBackend = None
 
 #: Magpylib's `line_width` and `marker_size` are nominal: every backend scales
 #: them into its own units, and nothing in the contract says what a width of 2
@@ -156,8 +147,6 @@ def pinned_scene_units():
     out, so a notebook's own `magpy.show()` after the studio has drawn is as
     it was -- it used to find every bare sensor a metre across.
     """
-    if not available():
-        raise RuntimeError(UNAVAILABLE)
     display = magpy.defaults.display
     sensor, dipole = display.style.sensor, display.style.dipole
     was = (
@@ -339,84 +328,55 @@ def _scatter_payload(trace):
     }
 
 
-#: What to say when the installed magpylib cannot do this, once, in the words
-#: of the thing to do about it.
-UNAVAILABLE = (
-    "The scene graph needs magpylib's display-backend API, which is newer "
-    "than the installed magpylib. Draw with the chart instead, or install "
-    "magpylib from git."
-)
-
-
-def available():
-    """Whether the installed magpylib can do what the scene graph needs.
-
-    Three things, all newer than 5.2.3: a backend can be registered and
-    handed a `Scene`, the length unit the scene is drawn in can be pinned,
-    and a backend can size and colour sensor pixels as magpylib does. Without
-    the second the geometry follows the scene extent rather than the objects,
-    which is the thing a kept scene graph cannot survive; without the third
-    the pixels the view draws itself (`_pixels_of`) cannot match magpylib's.
-    The last two are as much a requirement as the first, and checked here
-    rather than failing later inside a redraw.
-    """
-    return (
-        DisplayBackend is not None
-        and hasattr(magpy.defaults.display, "units")
-        and hasattr(magpy.graphics.backend, "pixel_colors")
-    )
-
-
 #: Where the capture backend below leaves the scene it was handed, for
 #: `_capture` to read back. Module level so that the backend can be an
 #: ordinary registered class: a closure over a per-call dict would have to be
 #: swapped into it on every call.
 _captured = {}
 
-if DisplayBackend is None:  # pragma: no cover - depends on magpylib
-    SceneGraphBackend = None
-else:
 
-    class SceneGraphBackend(DisplayBackend):
-        """What a three.js view of a magpylib scene can draw, declared once.
+class SceneGraphBackend(DisplayBackend):
+    """What a three.js view of a magpylib scene can draw, declared once.
 
-        The panel, the notebook widget and the capture below are all the one
-        renderer, so they can all draw the same things. Nameless, so it
-        registers nothing itself: magpylib registers the subclasses that
-        name themselves.
-        """
+    The panel, the notebook widget and the capture below are all the one
+    renderer, so they can all draw the same things. Nameless, so it
+    registers nothing itself: magpylib registers the subclasses that
+    name themselves.
+    """
 
-        #: three.js interpolates vertex colours, so the gradient arrives whole
-        #: rather than sliced into one mesh per colour band.
-        supports_colorgradient = True
-        #: One mesh per object, so each object's traces hang on one node and
-        #: highlight together -- and a click lands on an object, not a band.
-        merge_traces = False
-        handles_traces = frozenset({"mesh3d", "scatter3d"})
-        #: Pinned, not inherited. Inheriting takes whatever the installed
-        #: magpylib emits, so the two can never disagree and the mismatch
-        #: warning this exists for could never fire. This is the version the
-        #: payload was written against; raise it when it has been checked.
-        api_version = 1
-        supports_subplots = False
+    #: three.js interpolates vertex colours, so the gradient arrives whole
+    #: rather than sliced into one mesh per colour band.
+    supports_colorgradient = True
+    #: One mesh per object, so each object's traces hang on one node and
+    #: highlight together -- and a click lands on an object, not a band.
+    merge_traces = False
+    handles_traces = frozenset({"mesh3d", "scatter3d"})
+    #: Pinned, not inherited. Inheriting takes whatever the installed
+    #: magpylib emits, so the two can never disagree and the mismatch
+    #: warning this exists for could never fire. This is the version the
+    #: payload was written against; raise it when it has been checked.
+    api_version = 1
+    supports_subplots = False
 
-    class _CaptureBackend(SceneGraphBackend):
-        """Hands the scene back instead of drawing it. See `_capture`."""
 
-        name = _BACKEND
-        description = "Magpylib Studio — captures a scene for its own views"
-        supports_animation = True
-        accepts_options = frozenset()
+class _CaptureBackend(SceneGraphBackend):
+    """Hands the scene back instead of drawing it. See `_capture`."""
 
-        def show(self, scene):
-            # `setdefault`: a backend called twice for one figure yields the
-            # first scene rather than the last.
-            return _captured.setdefault("scene", scene)
+    name = _BACKEND
+    description = "Magpylib Studio — captures a scene for its own views"
+    supports_animation = True
+    accepts_options = frozenset()
 
-    # Out of magpylib's registry until a capture needs it. Registered, its
-    # internal name was offered to users as a backend to choose -- in the
-    # list magpylib gives when one cannot animate -- which it is not.
-    _CAPTURE = DisplayBackend.backends.pop(_BACKEND)
+    def show(self, scene):
+        # `setdefault`: a backend called twice for one figure yields the
+        # first scene rather than the last.
+        return _captured.setdefault("scene", scene)
+
+
+# Out of magpylib's registry until a capture needs it. Registered, its
+# internal name was offered to users as a backend to choose -- in the
+# list magpylib gives when one cannot animate -- which it is not.
+_CAPTURE = DisplayBackend.backends.pop(_BACKEND)
 
 
 def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
@@ -428,18 +388,13 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
     along its path, or pixels coloured by the field they pass through.
 
     Taken out of `_captured` as it is read, not left there: a scene holds
-    every trace of every frame, and -- where magpylib hands its backends the
-    objects -- the objects themselves, which a module-level reference would
-    keep alive until the next capture.
+    every trace of every frame and the objects themselves (`Panel.objects`),
+    which a module-level reference would keep alive until the next capture.
 
     What magpylib warns about along the way -- an unexpected keyword, say --
     is said again in the name of the backend the capture is `on_behalf_of`:
     the user asked for a widget, and has never heard of this one.
     """
-    # `available()` says as much; saying it again is what tells a type checker
-    # that the display-backend API is there to register with.
-    if not available() or DisplayBackend is None:
-        raise RuntimeError(UNAVAILABLE)
     _captured.clear()
     DisplayBackend.backends[_BACKEND] = _CAPTURE
     # While a script is being opened in the studio, show() is a stand-in that
@@ -483,13 +438,12 @@ def _mark_paths(scene, objects=None):
     can the two be told apart -- in the payload a path is a line like a
     current's loop -- and here by the one thing that makes it a path: its
     points are the object's positions. `objects` are those the scene was
-    drawn from; without them, the ones magpylib handed its backend, where it
-    hands them. A line that is not found to be one is drawn as it was, and
+    drawn from; without them, the ones magpylib handed its backend. A line that is not found to be one is drawn as it was, and
     so is a path that goes nowhere -- a collection turning where it stands,
     its every step one point -- which is a dot, not a line to follow.
     """
     if objects is None:
-        objects = [o for panel in scene.panels for o in getattr(panel, "objects", ())]
+        objects = [o for panel in scene.panels for o in panel.objects]
     known = {}
     for obj in _given(objects):
         for each in (obj, *getattr(obj, "children_all", ())):
@@ -1167,7 +1121,7 @@ def widget_state(scene, height=DEFAULT_HEIGHT):
     Returns ``{"state": ..., "run": [...]}``, the shape `_saved` has.
     """
     payload, served = run_payload(scene)
-    objects = [obj for panel in scene.panels for obj in getattr(panel, "objects", ())]
+    objects = [obj for panel in scene.panels for obj in panel.objects]
     tree, _ = object_tree(objects)
     frames, run = len(scene.frames), []
     if served is not None:
@@ -1306,20 +1260,9 @@ def scene_payload(objects, live=None, derived=None):
         # is: a Tetrahedron's position is the origin its vertices are written
         # against, and handles drawn there float off the corner of the shape.
         # The two agree for everything that is centred on its own position.
-        try:
-            centroid = getattr(obj, "centroid", None)
-        except ValueError:
-            # magpylib cannot say, for a Collection whose members move along
-            # a path: it adds each member's centroid, one per step, into a
-            # single point, and raises. Its position is the next best place
-            # for the handles -- and failing here left the whole scene, and
-            # the studio's Edit view with it, undrawn.
-            centroid = None
-        centroids[key] = (
-            anchors[key]
-            if centroid is None
-            else np.atleast_2d(np.asarray(centroid, dtype=float))[-1].tolist()
-        )
+        centroids[key] = np.atleast_2d(np.asarray(obj.centroid, dtype=float))[
+            -1
+        ].tolist()
         orientations[key] = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))[
             -1
         ].tolist()

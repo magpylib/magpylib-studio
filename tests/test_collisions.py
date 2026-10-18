@@ -14,19 +14,11 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import threejs
 from magpylib_studio.collisions import find_overlaps, overlaps_along, separation
 from magpylib_studio.session import MagpylibStudioSession
 
 MM = 1e-3
 POL = (0, 0, 1)
-
-#: What draws a scene needs a magpylib newer than released: its tests say so
-#: rather than failing where the released one is installed.
-needs_scene_graph = pytest.mark.skipif(
-    not threejs.available(),
-    reason="the scene graph needs magpylib's display-backend API and unit pinning",
-)
 
 
 def cuboid(dim, position=(0, 0, 0), angles=None):
@@ -147,16 +139,11 @@ def box_corners(lo, hi):
 
 
 def wire(*steps):
-    """A wire whose vertices are given for each step of its path (mm).
-    Several steps need a magpylib with path-valued vertices, which released
-    magpylib does not have: the case is skipped there."""
+    """A wire whose vertices are given for each step of its path (mm)."""
     vertices = np.multiply(steps, MM)
     if len(steps) == 1:
         return magpy.current.Polyline(vertices=vertices[0], current=1)
-    try:
-        return magpy.current.Polyline(vertices=vertices, current=1)
-    except Exception:  # noqa: BLE001 - capability probe
-        pytest.skip("path-valued vertices need magpylib newer than released")
+    return magpy.current.Polyline(vertices=vertices, current=1)
 
 
 def against_bore(r1, depth, angle):
@@ -361,7 +348,6 @@ def test_the_session_says_which_objects_overlap():
     assert session.get_overlaps() == [["a", "c"], ["m", "g#1"], ["g#1", "g#2"]]
 
 
-@needs_scene_graph
 def test_every_scene_says_which_objects_overlap():
     assert three_cubes().get_scene()["overlaps"] == [["a", "c"]]
 
@@ -462,7 +448,6 @@ def test_an_overlap_meant_as_a_cut_out_is_not_warned_about(tmp_path):
     }
 
 
-@needs_scene_graph
 def test_a_view_nobody_edits_says_what_overlaps():
     from magpylib_studio.widget import SceneWidget
 

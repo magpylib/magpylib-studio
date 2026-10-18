@@ -34,9 +34,9 @@
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
  * renderer loads, and a python with the widget's extra installed -- `pip
- * install -e ".[widget]"` -- and magpylib's display-backend API. Missing any of them
- * is a failure, not a skip: a check that passes without having run is worse
- * than none. WebGL runs on SwiftShader, so no GPU is needed.
+ * install -e ".[widget]"`. Missing any of them is a failure, not a skip: a
+ * check that passes without having run is worse than none. WebGL runs on
+ * SwiftShader, so no GPU is needed.
  */
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";

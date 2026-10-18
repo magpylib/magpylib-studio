@@ -5,12 +5,7 @@ _The full guide. The short version is in the
 
 ```sh
 pip install "magpylib-studio[widget]"
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"
 ```
-
-The second line is not optional yet. The widget draws through magpylib's
-display-backend API, which is on main and in no release: on 5.2.3,
-`backend="widget"` does not exist.
 
 ```python
 import magpylib as magpy

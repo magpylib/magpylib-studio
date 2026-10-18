@@ -27,6 +27,18 @@ outlines what overlaps at each of its steps. From code: `get_overlaps`,
 ### Changed
 
 <details>
+<summary>The engine needs magpylib 6</summary>
+
+`pip install magpylib-studio` now brings magpylib 6 (`magpylib>=6.0.0rc0`, so
+pip takes the pre-release), and nothing needs installing from magpylib's git any
+more. What kept the engine working on 5.2 is gone: the style shim and its copy
+of the style schema, the check that turned the 3D view off without the
+display-backend API, and the panel falling back to the chart when it did.
+Nothing a scene file or a script holds changes.
+
+</details>
+
+<details>
 <summary>Dragging redraws faster: the view keeps its shaders</summary>
 
 Every step of a drag rebuilds the scene, and the view used to throw away each

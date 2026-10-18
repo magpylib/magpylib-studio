@@ -119,12 +119,7 @@ def plotly_default():
 
 
 def test_draw_here_is_enough_on_its_own(drop, plotly_default):
-    """The route that works on every magpylib this package supports.
-
-    `show(plotly_renderer=...)` reaches the figure on 5.2.4.dev and is dropped
-    without a word on 5.2.3, so the example asks plotly directly instead. Here
-    that is a figure shown with no renderer named at all.
-    """
+    """A figure shown with no renderer named at all reaches the window."""
     assert plotly_view.draw_here() == plotly_view.RENDERER_NAME
     go.Figure(go.Scatter3d(x=[0], y=[0], z=[0])).show()
     assert len(list(drop.iterdir())) == 1
@@ -133,13 +128,6 @@ def test_draw_here_is_enough_on_its_own(drop, plotly_default):
 # --- the scene graph, drawn from a script ---------------------------------
 
 
-needs_scene_graph = pytest.mark.skipif(
-    not threejs.available(),
-    reason="the scene graph needs magpylib's display-backend API and unit pinning",
-)
-
-
-@needs_scene_graph
 def test_the_backend_is_found_by_installing_the_package():
     """No import in the user's script: magpylib resolves the entry point.
 
@@ -172,7 +160,6 @@ def test_the_backend_is_found_by_installing_the_package():
     assert out.stdout.strip() == "True", out.stderr
 
 
-@needs_scene_graph
 def test_a_scene_is_drawn_through_show(drop):
     magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
     sensor = magpy.Sensor(position=(0, 0, 2), pixel=[(0, 0, 0), (0.5, 0, 0)])
@@ -186,7 +173,6 @@ def test_a_scene_is_drawn_through_show(drop):
     assert scene["ranges"], "the view frames its camera from these"
 
 
-@needs_scene_graph
 def test_each_object_keeps_its_own_identity(drop):
     """Two objects, two ids — so a pick or a highlight acts on one of them.
 
@@ -211,7 +197,6 @@ def _written(drop):
     return json.loads(written.read_text(encoding="utf-8"))["body"]
 
 
-@needs_scene_graph
 def test_a_scripts_figure_carries_the_legend(drop):
     """The panel's legend nests as the objects do, from `Panel.objects`."""
     inner = magpy.Collection(
@@ -225,7 +210,6 @@ def test_a_scripts_figure_carries_the_legend(drop):
     assert tree[0]["children"][0]["label"] == "inner"
 
 
-@needs_scene_graph
 def test_a_scripts_run_plays_in_the_panel(drop):
     """No script is left to serve frames: a run that moves travels as its
     motion, and the panel plays it."""
@@ -242,7 +226,6 @@ def test_a_scripts_run_plays_in_the_panel(drop):
     assert body["run"] == []  # nothing to serve: the motion is enough
 
 
-@needs_scene_graph
 def test_a_run_too_big_to_carry_travels_whole(drop, monkeypatch):
     """Past the carry limit a notebook serves frames from python; the panel
     has none to ask, so the figure carries every frame, as a saved page does."""
@@ -256,7 +239,6 @@ def test_a_run_too_big_to_carry_travels_whole(drop, monkeypatch):
     assert len(body["run"]) == body["state"]["frames"] > 1
 
 
-@needs_scene_graph
 def test_the_scene_payload_is_plain_json(drop):
     """No plotly encoder in this path: threejs.py has already made it lists.
 
@@ -271,7 +253,6 @@ def test_the_scene_payload_is_plain_json(drop):
     json.loads(written.read_text(encoding="utf-8"))
 
 
-@needs_scene_graph
 def test_a_scene_asked_for_outside_a_window_says_so(monkeypatch):
     monkeypatch.delenv("MAGPYLIB_STUDIO_DROP", raising=False)
     with pytest.raises(RuntimeError, match="not run from one"):
@@ -325,14 +306,12 @@ def asked(monkeypatch, tmp_path, default_backend):
     magpy.defaults.display.backend = "auto"
 
 
-@needs_scene_graph
 def test_the_window_can_be_asked_to_choose(asked, monkeypatch):
     monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
     assert backend._claim_default() is True
     assert magpy.defaults.display.backend == backend.BACKEND_NAME
 
 
-@needs_scene_graph
 def test_nothing_is_claimed_unasked(asked, monkeypatch):
     """The address alone never chooses; that is the whole design."""
     monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
@@ -341,7 +320,6 @@ def test_nothing_is_claimed_unasked(asked, monkeypatch):
     assert magpy.defaults.display.backend == "auto"
 
 
-@needs_scene_graph
 def test_a_script_that_chose_for_itself_wins(asked, monkeypatch):
     monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)
     magpy.defaults.display.backend = "plotly"
@@ -349,7 +327,6 @@ def test_a_script_that_chose_for_itself_wins(asked, monkeypatch):
     assert magpy.defaults.display.backend == "plotly"
 
 
-@needs_scene_graph
 def test_a_test_run_is_left_alone(asked, monkeypatch):
     """A courtesy, not a rule -- but a suite is what opens panels by the
     dozen, and it is the case the setting's description warns about.
@@ -362,7 +339,6 @@ def test_a_test_run_is_left_alone(asked, monkeypatch):
     assert magpy.defaults.display.backend == "auto"
 
 
-@needs_scene_graph
 def test_a_suite_is_left_alone_at_collection_time(asked):
     """The moment the environment variable does not cover.
 
@@ -374,7 +350,6 @@ def test_a_suite_is_left_alone_at_collection_time(asked):
     assert backend._claim_default() is False
 
 
-@needs_scene_graph
 def test_a_plain_script_claims_at_import(tmp_path, monkeypatch):
     """End to end, in an interpreter that is not a test run.
 
@@ -405,7 +380,6 @@ def test_a_plain_script_claims_at_import(tmp_path, monkeypatch):
     assert out.stdout.strip() == backend.BACKEND_NAME, out.stderr
 
 
-@needs_scene_graph
 def test_nothing_is_claimed_without_somewhere_to_draw(asked, monkeypatch):
     """Claiming with no address makes the first show() raise instead."""
     monkeypatch.setattr(backend, "_under_a_test_runner", lambda: False)

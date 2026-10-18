@@ -49,74 +49,68 @@ WIDGET_BACKEND_NAME = "widget"
 #: What that needs beyond the engine: the `widget` extra, and what it brings.
 WIDGET_REQUIRES = frozenset({"anywidget", "ipywidgets", "traitlets"})
 
-if threejs.SceneGraphBackend is None:  # pragma: no cover - depends on magpylib
-    # 5.2.3 and earlier have no display-backend API to subclass. They also have
-    # no entry-point discovery, so nothing ever asks for these names there, and
-    # the plotly half of the viewer still works.
-    StudioBackend = None
-    WidgetBackend = None
-else:
-    # What the scene graph can draw is `SceneGraphBackend`'s to declare; what
-    # differs between the two is where it goes, and so what a host can play.
 
-    class StudioBackend(threejs.SceneGraphBackend):
-        """Draws a magpylib scene in the studio window the script ran from."""
+# What the scene graph can draw is `SceneGraphBackend`'s to declare; what
+# differs between the two is where it goes, and so what a host can play.
+class StudioBackend(threejs.SceneGraphBackend):
+    """Draws a magpylib scene in the studio window the script ran from."""
 
-        name = BACKEND_NAME
-        description = "Magpylib Studio (VS Code) — read-only scene view"
-        accepts_options = frozenset()
-        #: The script that owns the objects has usually exited by the time the
-        #: panel draws, so nothing could serve a run a frame at a time. The
-        #: figure carries it instead -- as motion and changes, or whole -- and
-        #: the panel plays it, as a page saved with `write_html` does.
-        supports_animation = True
+    name = BACKEND_NAME
+    description = "Magpylib Studio (VS Code) — read-only scene view"
+    accepts_options = frozenset()
+    #: The script that owns the objects has usually exited by the time the
+    #: panel draws, so nothing could serve a run a frame at a time. The
+    #: figure carries it instead -- as motion and changes, or whole -- and
+    #: the panel plays it, as a page saved with `write_html` does.
+    supports_animation = True
 
-        def show(self, scene):
-            # The notebook widget's state, which the panel draws the widget
-            # from: the same legend, playback, tools and keys as a cell.
-            body = threejs.widget_state(scene)
-            if write_view("widget", body, title=scene.title, claimed=CLAIMED) is None:
-                raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
-            return body
+    def show(self, scene):
+        # The notebook widget's state, which the panel draws the widget
+        # from: the same legend, playback, tools and keys as a cell.
+        body = threejs.widget_state(scene)
+        if write_view("widget", body, title=scene.title, claimed=CLAIMED) is None:
+            raise RuntimeError(unaddressed(f"the {BACKEND_NAME!r} backend"))
+        return body
 
-    class WidgetBackend(threejs.SceneGraphBackend):
-        """Draws a magpylib scene in the notebook cell that asked for it."""
 
-        name = WIDGET_BACKEND_NAME
-        description = "Magpylib Studio — 3D scene as a notebook widget"
-        #: Unlike the panel's, this view can play a run: from its motion, in
-        #: the browser, when every step is the first one moved -- and
-        #: otherwise from frames the widget holds and serves one at a time,
-        #: which is the job the session does in the studio.
-        supports_animation = True
-        #: How tall to draw, in pixels. A figure keyword rather than a widget
-        #: one so that `magpy.show(..., backend="widget", height=600)` says it
-        #: the way every other backend option is said.
-        accepts_options = frozenset({"height"})
+class WidgetBackend(threejs.SceneGraphBackend):
+    """Draws a magpylib scene in the notebook cell that asked for it."""
 
-        def show(self, scene):
-            # Imported here, not at module scope: this module is loaded while
-            # magpylib is importing, and the widget brings ipywidgets with it.
-            # Which it may not have: the name is advertised by installing the
-            # package, and anywidget comes only with its `widget` extra.
-            try:
-                from magpylib_studio.widget import SceneWidget, display
-            except ModuleNotFoundError as error:
-                if error.name not in WIDGET_REQUIRES:
-                    raise
-                raise ModuleNotFoundError(
-                    f"the {WIDGET_BACKEND_NAME!r} backend needs {error.name}, "
-                    "which comes with the widget extra: "
-                    'pip install "magpylib-studio[widget]"',
-                    name=error.name,
-                ) from error
+    name = WIDGET_BACKEND_NAME
+    description = "Magpylib Studio — 3D scene as a notebook widget"
+    #: Unlike the panel's, this view can play a run: from its motion, in
+    #: the browser, when every step is the first one moved -- and
+    #: otherwise from frames the widget holds and serves one at a time,
+    #: which is the job the session does in the studio.
+    supports_animation = True
+    #: How tall to draw, in pixels. A figure keyword rather than a widget
+    #: one so that `magpy.show(..., backend="widget", height=600)` says it
+    #: the way every other backend option is said.
+    accepts_options = frozenset({"height"})
 
-            widget = SceneWidget._from_scene(scene)
-            if scene.options.get("height") is not None:
-                widget.height = int(scene.options["height"])
-            if not scene.return_fig and not display(widget):
-                _outside_a_notebook(widget, scene.title)
-            return widget
+    def show(self, scene):
+        # Imported here, not at module scope: this module is loaded while
+        # magpylib is importing, and the widget brings ipywidgets with it.
+        # Which it may not have: the name is advertised by installing the
+        # package, and anywidget comes only with its `widget` extra.
+        try:
+            from magpylib_studio.widget import SceneWidget, display
+        except ModuleNotFoundError as error:
+            if error.name not in WIDGET_REQUIRES:
+                raise
+            raise ModuleNotFoundError(
+                f"the {WIDGET_BACKEND_NAME!r} backend needs {error.name}, "
+                "which comes with the widget extra: "
+                'pip install "magpylib-studio[widget]"',
+                name=error.name,
+            ) from error
+
+        widget = SceneWidget._from_scene(scene)
+        if scene.options.get("height") is not None:
+            widget.height = int(scene.options["height"])
+        if not scene.return_fig and not display(widget):
+            _outside_a_notebook(widget, scene.title)
+        return widget
 
 
 def _outside_a_notebook(widget, title):
@@ -191,7 +185,7 @@ def _claim_default() -> bool:
     does *before* it reads the default -- so the first `show()` of the process
     already sees this.
     """
-    if StudioBackend is None or os.environ.get(CLAIM_VAR) != BACKEND_NAME:
+    if os.environ.get(CLAIM_VAR) != BACKEND_NAME:
         return False
     if drop_dir() is None:
         return False

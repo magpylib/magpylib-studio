@@ -27,11 +27,6 @@ def draw_here() -> str:
     Sets plotly's own default renderer and returns its name. A script's author
     is entitled to do that for their script — it is the environment doing it
     behind their back that design decision 8 rules out.
-
-    It is also the only route that works on every magpylib this package
-    supports. `show(backend="plotly", plotly_renderer=...)` reaches the figure
-    on 5.2.4.dev, and 5.2.3 drops the argument without a word — no warning, no
-    error, and a browser tab opens instead. Measured, both ways.
     """
     pio.renderers.default = RENDERER_NAME
     return RENDERER_NAME

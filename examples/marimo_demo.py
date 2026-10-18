@@ -595,7 +595,7 @@ def _(SceneWidget, magpy, mo, np):
         return mo.vstack(
             [
                 mo.md(
-                    "On magpylib main more than the pose can vary along a path: a "
+                    "More than the pose can vary along a path: a "
                     "polarization turning a full circle, a coil growing while its "
                     "current ramps, pixels coloured by the field they sit in. No "
                     "motion can play that, so the widget serves the frames one at a "

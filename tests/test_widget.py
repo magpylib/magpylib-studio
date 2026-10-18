@@ -7,7 +7,6 @@ turns a click back into a magpylib object, and the frames it serves.
 """
 
 import base64
-import dataclasses
 import gzip
 import io
 import json
@@ -23,11 +22,6 @@ import traitlets
 from magpylib_studio import backend, threejs
 
 widget = pytest.importorskip("magpylib_studio.widget")
-
-needs_scene_graph = pytest.mark.skipif(
-    not threejs.available(),
-    reason="the installed magpylib has no display-backend API",
-)
 
 
 @pytest.fixture
@@ -65,7 +59,6 @@ def morphing():
     return (magnet,)
 
 
-@needs_scene_graph
 def test_the_backend_draws_a_widget(scene_objects):
     """`backend="widget"` is registered by installing the package."""
     drawn = magpy.show(*scene_objects, backend="widget", return_fig=True)
@@ -73,7 +66,6 @@ def test_the_backend_draws_a_widget(scene_objects):
     assert len(drawn.payload["meshes"]) == 2
 
 
-@needs_scene_graph
 def test_a_script_gets_the_view_in_a_page_of_its_own(
     scene_objects, tmp_path, monkeypatch, capsys
 ):
@@ -100,7 +92,6 @@ def test_a_script_gets_the_view_in_a_page_of_its_own(
     assert "opened in your browser" in capsys.readouterr().err
 
 
-@needs_scene_graph
 def test_a_script_in_a_studio_terminal_gets_the_view_in_the_panel(
     scene_objects, tmp_path, monkeypatch, capsys
 ):
@@ -143,7 +134,6 @@ def test_a_terminal_ipython_is_no_notebook(monkeypatch):
     assert shown == [view]
 
 
-@needs_scene_graph
 def test_a_run_too_big_to_hand_over_whole_is_shown_still(
     morphing, served, tmp_path, monkeypatch
 ):
@@ -172,7 +162,6 @@ def test_a_run_too_big_to_hand_over_whole_is_shown_still(
     assert len(saved["run"]) == view.frames == 10
 
 
-@needs_scene_graph
 def test_height_is_said_the_way_every_other_backend_option_is(scene_objects):
     assert (
         magpy.show(*scene_objects, backend="widget", height=600, return_fig=True).height
@@ -180,7 +169,6 @@ def test_height_is_said_the_way_every_other_backend_option_is(scene_objects):
     )
 
 
-@needs_scene_graph
 def test_a_click_resolves_to_the_object_that_was_clicked(scene_objects):
     """The payload keys traces by `id(obj)`; `identify` makes that an identity."""
     magnet, sensor = scene_objects
@@ -194,7 +182,6 @@ def test_a_click_resolves_to_the_object_that_was_clicked(scene_objects):
     assert view.picked == [sensor, magnet]
 
 
-@needs_scene_graph
 def test_a_collections_children_are_what_a_click_lands_on():
     """A collection is drawn as its children, and they carry the trace ids."""
     child = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1)
@@ -204,31 +191,6 @@ def test_a_collections_children_are_what_a_click_lands_on():
     assert view.picked == [child]
 
 
-def _hands_over_objects():
-    """Whether this magpylib gives a backend the objects (`Panel.objects`)."""
-    try:
-        from magpylib.graphics.backend import Panel
-    except ImportError:
-        return False
-    return "objects" in {f.name for f in dataclasses.fields(Panel)}
-
-
-@needs_scene_graph
-@pytest.mark.skipif(
-    _hands_over_objects(), reason="this magpylib hands its backends the objects"
-)
-def test_ids_alone_are_left_alone_when_nobody_said_what_they_are(scene_objects):
-    """`magpy.show` has no objects to hand over, so a click stays an id."""
-    drawn = magpy.show(*scene_objects, backend="widget", return_fig=True)
-    drawn.selected = [str(id(scene_objects[0]))]
-    assert drawn.tree == []
-    assert drawn.picked == []
-
-
-@needs_scene_graph
-@pytest.mark.skipif(
-    not _hands_over_objects(), reason="this magpylib hands its backends no objects"
-)
 def test_a_bare_show_is_named_by_the_objects_magpylib_hands_over(nested):
     """With `Panel.objects`, the backend's view has the legend and `picked`."""
     outer, _, deep = nested
@@ -242,7 +204,6 @@ def test_a_bare_show_is_named_by_the_objects_magpylib_hands_over(nested):
     assert drawn.picked == [deep]
 
 
-@needs_scene_graph
 def test_a_static_scene_keeps_no_run(scene_objects):
     """One frame is not a run: nothing to hold, and nothing to play."""
     view = widget.SceneWidget(*scene_objects)
@@ -250,7 +211,6 @@ def test_a_static_scene_keeps_no_run(scene_objects):
     assert view._scene is None
 
 
-@needs_scene_graph
 def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing, served):
     """What keeps a slider smooth: the element, and the camera, stay put."""
     view = widget.SceneWidget()
@@ -284,7 +244,6 @@ def test_the_scale_is_said_one_of_three_ways():
         view.axes = "cubes"
 
 
-@needs_scene_graph
 def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch):
     """One call for both: how to draw, for magpylib, and how to show it."""
     given = {}
@@ -307,7 +266,6 @@ def test_a_keyword_is_the_widgets_if_it_names_a_trait(scene_objects, monkeypatch
     assert given == {}
 
 
-@needs_scene_graph
 def test_a_trait_given_to_the_constructor_outlives_the_scene(swept):
     """Drawing a run sets its pace from magpylib; a `repeat` given is kept."""
     view = widget.SceneWidget(*swept, animation=True, repeat=True, duration=2.5)
@@ -315,7 +273,6 @@ def test_a_trait_given_to_the_constructor_outlives_the_scene(swept):
     assert (view.repeat, view.duration) == (True, 2.5)
 
 
-@needs_scene_graph
 def test_the_capture_is_no_backend_to_choose(scene_objects):
     """Studio's internal capture stays out of magpylib's registry, and what
     magpylib warns about during one is said in the widget's name."""
@@ -331,7 +288,6 @@ def test_the_capture_is_no_backend_to_choose(scene_objects):
     assert threejs._BACKEND not in DisplayBackend.backends
 
 
-@needs_scene_graph
 def test_a_missing_extra_is_named(scene_objects, monkeypatch):
     """The name is advertised by installing the package; anywidget is not."""
     import sys
@@ -349,7 +305,6 @@ def test_options_for_magpylib_need_something_to_draw():
         widget.SceneWidget(zoom=2)
 
 
-@needs_scene_graph
 def test_a_selection_goes_with_the_objects_it_named(scene_objects):
     """An object passed again keeps its place; one gone takes its entry."""
     magnet, sensor = scene_objects
@@ -361,7 +316,6 @@ def test_a_selection_goes_with_the_objects_it_named(scene_objects):
     assert view.picked == [magnet]
 
 
-@needs_scene_graph
 def test_a_rebuild_keeps_what_was_chosen_where_it_was(nested):
     """A slider rebuilds the objects; "the lower ring" is still the one below."""
 
@@ -397,7 +351,6 @@ def test_a_rebuild_keeps_what_was_chosen_where_it_was(nested):
     assert view.picked[0] is rebuilt.children[0].children[2]
 
 
-@needs_scene_graph
 def test_an_object_passed_again_keeps_its_selection_wherever_it_moved(
     scene_objects,
 ):
@@ -433,7 +386,6 @@ def _walk(nodes):
         yield from _walk(node["children"])
 
 
-@needs_scene_graph
 def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
     """Every trace under a Collection carries the outermost one's legendgroup,
     so the tree has to come from the objects -- and it does."""
@@ -450,7 +402,6 @@ def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
     assert drawn <= named
 
 
-@needs_scene_graph
 def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     """Passing a collection and something inside it names the thing once."""
     outer, _, deep = nested
@@ -458,7 +409,6 @@ def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     assert _outline(view.tree) == [("outer", [("inner", [("deep", [])]), ("ball", [])])]
 
 
-@needs_scene_graph
 def test_hiding_is_a_value_like_selecting(scene_objects):
     """Kept by id, resolved by the view, and dropped with its objects."""
     magnet, sensor = scene_objects
@@ -471,7 +421,6 @@ def test_hiding_is_a_value_like_selecting(scene_objects):
     assert view.hidden == []
 
 
-@needs_scene_graph
 def test_a_scene_and_its_tree_arrive_together(scene_objects, monkeypatch):
     """Sent apart, the browser draws the new scene against the old tree."""
     view = widget.SceneWidget()
@@ -488,7 +437,6 @@ def test_a_scene_and_its_tree_arrive_together(scene_objects, monkeypatch):
     assert {"payload", "tree"} <= sent[0]
 
 
-@needs_scene_graph
 def test_updating_a_view_is_not_itself_a_view(scene_objects):
     """A cell's value is its last expression, and this is the last line of one.
 
@@ -499,7 +447,6 @@ def test_updating_a_view_is_not_itself_a_view(scene_objects):
     assert widget.SceneWidget().update(*scene_objects) is None
 
 
-@needs_scene_graph
 def test_frames_are_served_one_at_a_time(morphing, served):
     """The whole run is megabytes; the payload carries one frame of it."""
     view = widget.SceneWidget(*morphing, animation=True)
@@ -524,7 +471,6 @@ def test_frames_are_served_one_at_a_time(morphing, served):
     assert len(sent) == 2
 
 
-@needs_scene_graph
 def test_a_capture_keeps_nothing_behind(scene_objects):
     """Read and let go: a module-level scene would keep its objects alive."""
     scene = threejs._capture(scene_objects)
@@ -532,7 +478,6 @@ def test_a_capture_keeps_nothing_behind(scene_objects):
     assert threejs._captured == {}
 
 
-@needs_scene_graph
 def test_one_frame_is_drawn_rather_than_all_of_them(swept):
     """Every frame at once is right for a static scene and a smear for a run."""
     scene = threejs._capture(swept, animation=True)
@@ -575,7 +520,6 @@ def _replays(scene, played):
             np.testing.assert_allclose(shown, _positions(then), atol=1e-6)
 
 
-@needs_scene_graph
 def test_a_run_that_only_moves_travels_as_its_motion(swept):
     """Each frame is the first one moved: sent as poses, it is the same run."""
     scene = threejs._capture(swept, animation=True)
@@ -587,7 +531,6 @@ def test_a_run_that_only_moves_travels_as_its_motion(swept):
     _replays(scene, played)
 
 
-@needs_scene_graph
 def test_things_that_move_together_share_a_track():
     """Eight magnets turned as one ring are one motion, not eight."""
     ring = magpy.Collection(
@@ -604,7 +547,6 @@ def test_things_that_move_together_share_a_track():
     assert [item["track"] for item in played["meshes"]] == [0] * 8
 
 
-@needs_scene_graph
 @pytest.mark.parametrize("animation", [False, True])
 def test_a_path_is_marked_apart_from_what_travels_it(animation):
     """A view outlines a selected object and draws its path apart, so the
@@ -644,7 +586,6 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
     assert marked(payload) == [5, 10, 10]
 
 
-@needs_scene_graph
 def test_a_run_that_changes_shape_carries_the_change(morphing):
     """A cube that grows is not a cube that moves, however it is fitted: its
     trace is carried as it is at every step, and the run still plays."""
@@ -656,7 +597,6 @@ def test_a_run_that_changes_shape_carries_the_change(morphing):
     _replays(scene, played)
 
 
-@needs_scene_graph
 def test_changes_past_the_limit_are_served_instead(morphing, served):
     """Past `_CARRY_LIMIT` the run is served a frame at a time, as before."""
     assert threejs.played_payload(threejs._capture(morphing, animation=True)) is None
@@ -664,7 +604,6 @@ def test_changes_past_the_limit_are_served_instead(morphing, served):
     assert view._scene is not None
 
 
-@needs_scene_graph
 def test_only_what_changes_is_carried():
     """Pixels coloured by the field they sit in change as the sensor passes;
     the magnets turning past it only move. Carried as frames, the ring would
@@ -694,11 +633,9 @@ def test_only_what_changes_is_carried():
     _replays(scene, played)
 
 
-@needs_scene_graph
 def test_a_moving_collection_does_not_stop_the_studio_drawing():
     """A collection whose members move along a path is drawn, its handles at
-    its centroid -- or at its position, where magpylib cannot say the
-    centroid: before magpylib#1024, `Collection.centroid` raised for one."""
+    its centroid."""
     ring = magpy.Collection(
         magpy.magnet.Cuboid(
             polarization=(0, 0, 1), dimension=(1, 1, 1), position=(3, 0, 0)
@@ -708,14 +645,10 @@ def test_a_moving_collection_does_not_stop_the_studio_drawing():
     ring.rotate_from_angax(np.linspace(0, 90, 5), "z", anchor=0, start=0)
     payload = threejs.scene_payload([ring], live={"ring": ring})
     assert payload["meshes"]
-    try:
-        expected = np.atleast_2d(ring.centroid)[-1].tolist()
-    except ValueError:
-        expected = payload["anchors"]["ring"]
+    expected = np.atleast_2d(ring.centroid)[-1].tolist()
     assert payload["centroids"]["ring"] == pytest.approx(expected)
 
 
-@needs_scene_graph
 def test_a_colour_table_is_carried_once():
     """Eight magnets coloured by their polarization share one colour table,
     named by index -- not copied into each, in each frame."""
@@ -732,7 +665,6 @@ def test_a_colour_table_is_carried_once():
     assert [mesh["lut"] for mesh in payload["meshes"]] == [0] * 8
 
 
-@needs_scene_graph
 def test_a_colour_table_takes_named_colours():
     """A magnet styled ``magnetization_color_north="r"`` sends "red" in its
     colorscale, which the table used to read as hex and fail on."""
@@ -745,7 +677,6 @@ def test_a_colour_table_takes_named_colours():
     assert lut[-4:] == [255, 0, 0, 255]
 
 
-@needs_scene_graph
 def test_a_run_in_which_nothing_moves_is_motion_of_nothing():
     """A current that ramps changes nothing drawn: no tracks, nothing kept to
     serve -- and the view steps through it with nothing to ask for."""
@@ -756,7 +687,6 @@ def test_a_run_in_which_nothing_moves_is_motion_of_nothing():
     assert view._scene is None
 
 
-@needs_scene_graph
 def test_a_small_change_far_from_the_origin_is_not_motion():
     """The fit is held to each trace's own size, not to how far out it is: a
     millimetre magnet a kilometre away may move, but not grow."""
@@ -782,7 +712,6 @@ def test_a_small_change_far_from_the_origin_is_not_motion():
     assert track_of[0] is not None
 
 
-@needs_scene_graph
 def test_a_frame_says_which_run_it_was_asked_for(morphing, served):
     """The view drops a frame of a run it has been re-pointed away from."""
     view = widget.SceneWidget(*morphing, animation=True)
@@ -792,7 +721,6 @@ def test_a_frame_says_which_run_it_was_asked_for(morphing, served):
     assert sent[-1]["runId"] == 7
 
 
-@needs_scene_graph
 def test_a_view_plays_a_moving_run_itself(swept):
     """Nothing kept to serve, and a saved page carries poses, not frames."""
     view = widget.SceneWidget(*swept, animation=True)
@@ -811,7 +739,6 @@ def _unpacked(page, name):
     return gzip.decompress(base64.b64decode(found.group(1))).decode("utf-8")
 
 
-@needs_scene_graph
 def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_path):
     """The widget and its scene, with nothing to fetch and no kernel to ask."""
     magnet, sensor = scene_objects
@@ -838,7 +765,6 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert "$" not in page.split("<script", 1)[0]  # every placeholder filled
 
 
-@needs_scene_graph
 def test_a_view_writes_to_an_open_file_as_well(scene_objects):
     """A path or anything with `write`, as Plotly's `write_html` takes."""
     view = widget.SceneWidget(*scene_objects)
@@ -847,7 +773,6 @@ def test_a_view_writes_to_an_open_file_as_well(scene_objects):
     assert out.getvalue() == view.to_html()
 
 
-@needs_scene_graph
 def test_a_saved_run_plays_without_python(morphing, served):
     """Every frame travels with the file, so the page answers for them."""
     view = widget.SceneWidget(*morphing, animation=True)
@@ -856,7 +781,6 @@ def test_a_saved_run_plays_without_python(morphing, served):
     assert saved["run"][3] == threejs.frame_payload(view._scene, 3)
 
 
-@needs_scene_graph
 def test_the_export_button_is_answered_with_the_file(scene_objects):
     view = widget.SceneWidget(*scene_objects)
     sent = []
@@ -867,7 +791,6 @@ def test_the_export_button_is_answered_with_the_file(scene_objects):
     assert sent[-1]["html"] == view.to_html()
 
 
-@needs_scene_graph
 def test_a_saved_view_opens_where_the_view_was_looking(scene_objects):
     """As the view last said, and as the export button says it is now."""
     view = widget.SceneWidget(*scene_objects)
@@ -984,7 +907,6 @@ def _studio_of(scene):
     return studio
 
 
-@needs_scene_graph
 def test_a_scene_to_edit_is_named_as_the_cell_names_it():
     """`edit` takes the objects under the caller's names, nests them as they
     are nested, and says once what it could not name."""
@@ -999,7 +921,6 @@ def test_a_scene_to_edit_is_named_as_the_cell_names_it():
     assert "probe" in studio.to_script()
 
 
-@needs_scene_graph
 def test_a_drag_in_the_view_is_one_edit_and_one_word_to_the_notebook():
     """Poses go to the session as the drag goes, the notebook is told once
     when it ends, and one undo takes the whole of it back."""
@@ -1022,7 +943,6 @@ def test_a_drag_in_the_view_is_one_edit_and_one_word_to_the_notebook():
     assert np.ravel(studio.objects["probe"].position) == pytest.approx([0.03, 0, 0.02])
 
 
-@needs_scene_graph
 def test_undo_stops_at_the_scene_as_it_was_given():
     """Loading the objects is where editing starts, not an edit: undoing
     past the first drag -- or before one -- says there is nothing to undo,
@@ -1046,7 +966,6 @@ def test_undo_stops_at_the_scene_as_it_was_given():
     assert sorted(studio.objects) == before
 
 
-@needs_scene_graph
 def test_a_resize_and_an_aim_in_the_view_are_edits_too():
     """R and P hand the session a size and a polarization, as the panel's do."""
     studio = _studio()
@@ -1064,7 +983,6 @@ def test_a_resize_and_an_aim_in_the_view_are_edits_too():
     assert edited.polarization == pytest.approx([1, 0, 0])
 
 
-@needs_scene_graph
 def test_the_notebook_edits_as_the_view_does():
     """`set` is one edit -- a pose and a parameter together, one step to
     undo -- told to the notebook like a drag's end; and a value already there
@@ -1089,7 +1007,6 @@ def test_the_notebook_edits_as_the_view_does():
         widget.SceneWidget(magpy.Sensor()).set("x", position=(0, 0, 0))
 
 
-@needs_scene_graph
 def test_the_view_may_not_run_files(tmp_path):
     """The view calls what a drag needs, and nothing that executes."""
     script = tmp_path / "touch.py"
@@ -1101,7 +1018,6 @@ def test_the_view_may_not_run_files(tmp_path):
     assert not marker.exists()
 
 
-@needs_scene_graph
 def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
     """A path is a script to run, or a scene the studio saved -- which is
     what `save` writes."""
@@ -1120,7 +1036,6 @@ def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
     assert json.loads(saved.read_text(encoding="utf-8")) == studio._session.to_dict()
 
 
-@needs_scene_graph
 def test_a_scene_written_in_code_is_edited_as_it_is():
     """Its own session, not a copy: what a drag does is in the scene after."""
     from magpylib_studio import name, scene
@@ -1158,7 +1073,6 @@ def test_a_scene_written_in_code_is_edited_as_it_is():
     assert studio.objects["cube"].position == pytest.approx([0.02, 0, 0])
 
 
-@needs_scene_graph
 def test_a_page_saved_from_a_studio_is_read_only():
     """No kernel behind a saved page, so nothing to keep an edit."""
     studio = _studio()
@@ -1167,7 +1081,6 @@ def test_a_page_saved_from_a_studio_is_read_only():
     assert not saved["state"].get("editable")
 
 
-@needs_scene_graph
 def test_a_studio_is_not_re_pointed():
     """And the refusal says what a view the notebook re-points is made with."""
     studio = _studio()
@@ -1175,7 +1088,6 @@ def test_a_studio_is_not_re_pointed():
         studio.update(magpy.Sensor())
 
 
-@needs_scene_graph
 def test_the_pencil_puts_a_view_into_editing_later(scene_objects):
     """A view of the cell's own objects is read only until asked: `editable`
     set later -- the pencil among the view's tools sets it -- copies the
@@ -1205,7 +1117,6 @@ def test_the_pencil_puts_a_view_into_editing_later(scene_objects):
         view.update(magpy.Sensor())
 
 
-@needs_scene_graph
 def test_a_view_of_nothing_has_nothing_to_edit(scene_objects):
     """Handles over nothing would reach nothing that keeps an edit; pointed
     at objects later, the view has them, named as the cell names them then."""
@@ -1220,7 +1131,6 @@ def test_a_view_of_nothing_has_nothing_to_edit(scene_objects):
     assert view._scene is None and view.frames == 1
 
 
-@needs_scene_graph
 def test_a_view_made_with_editable_none_is_never_edited(scene_objects):
     """`editable=None` is a view for looking only, a figure handed to
     someone else: no pencil, and the trait refuses to turn on -- of the
@@ -1251,7 +1161,6 @@ def test_a_view_made_with_editable_none_is_never_edited(scene_objects):
         looked_at.editable = True
 
 
-@needs_scene_graph
 def test_undo_stops_where_the_view_started_and_reset_goes_back_there():
     """A built scene's own building is not the view's to undo; and `reset`
     takes every edit since the view started back in one step, which is
@@ -1290,7 +1199,6 @@ def test_undo_stops_where_the_view_started_and_reset_goes_back_there():
     assert np.allclose(s.session.get_transform("cube")["position"], (0.02, 0, 0))
 
 
-@needs_scene_graph
 def test_a_path_is_opened_as_a_scene_of_its_own(scene_objects, tmp_path):
     """A path is a scene with a session of its own, shown with the handles
     away until the pencil -- and a view of a session takes objects and
@@ -1315,7 +1223,6 @@ def test_a_path_is_opened_as_a_scene_of_its_own(scene_objects, tmp_path):
 # --- the editable view, as the review of #20 found it ----------------------
 
 
-@needs_scene_graph
 def test_numpy_values_do_not_poison_the_session(tmp_path):
     """A value handed over as an array is stored as a list: the document
     stays JSON, and every edit after it -- and a save -- still works."""
@@ -1327,7 +1234,6 @@ def test_numpy_values_do_not_poison_the_session(tmp_path):
     assert studio.objects[magnet].dimension == pytest.approx([0.02, 0.01, 0.01])
 
 
-@needs_scene_graph
 def test_a_refused_set_changes_nothing():
     """A pose and a size set together are one edit: when the size is
     refused, the pose does not go through either, and nothing is told."""
@@ -1342,7 +1248,6 @@ def test_a_refused_set_changes_nothing():
     assert len(studio._session.get_history()["undo"]) == steps
 
 
-@needs_scene_graph
 def test_a_small_value_is_still_an_edit():
     """In SI units a real edit can be tiny: a nanoampere-metre moment, a
     nanometre move. Only the very same value is no edit."""
@@ -1355,7 +1260,6 @@ def test_a_small_value_is_still_an_edit():
     assert studio.revision == revision
 
 
-@needs_scene_graph
 def test_only_a_change_is_news():
     """Undo with nothing to undo, or a gesture that changed nothing, tells
     the notebook nothing; `undo()` says whether it did anything."""
@@ -1368,7 +1272,6 @@ def test_only_a_change_is_news():
     assert studio.revision == revision
 
 
-@needs_scene_graph
 def test_the_view_is_answered_before_the_notebook_is_told():
     """A callback on `revision` that raises -- or takes long -- does not
     keep the answer from the view, which would give up on it."""
@@ -1392,7 +1295,6 @@ def test_the_view_is_answered_before_the_notebook_is_told():
     assert "error" not in answer
 
 
-@needs_scene_graph
 def test_what_an_edit_was_is_said():
     """`last_edit` says what `revision` counted: a drag and what it left, a
     `set`, an undo and the step it took back."""
@@ -1416,7 +1318,6 @@ def test_what_an_edit_was_is_said():
     assert studio.last_edit == {"by": "undo", "step": "set transform probe"}
 
 
-@needs_scene_graph
 def test_objects_are_named_after_the_callers_own_variables():
     """A function's own variables name its objects, not only a module's."""
 
@@ -1428,7 +1329,6 @@ def test_objects_are_named_after_the_callers_own_variables():
     assert sorted(make().objects) == ["cube", "pickup"]
 
 
-@needs_scene_graph
 def test_the_legend_names_an_unlabelled_object_as_the_scene_does():
     """No label of its own: listed as the name it has in the scene, which is
     what the readout and `objects` say, not as its type."""
@@ -1441,7 +1341,6 @@ def test_the_legend_names_an_unlabelled_object_as_the_scene_does():
     ]
 
 
-@needs_scene_graph
 def test_objects_may_come_as_a_list(scene_objects):
     """As `show` and a read-only view take them -- and none is said plainly."""
     studio = widget.SceneWidget(list(scene_objects), editable=True)
@@ -1450,7 +1349,6 @@ def test_objects_may_come_as_a_list(scene_objects):
         widget.SceneWidget(editable=True)
 
 
-@needs_scene_graph
 def test_a_saved_step_that_no_longer_applies_is_said(tmp_path):
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
     doc = widget.SceneWidget(cube, editable=True)._session.to_dict()
@@ -1462,7 +1360,6 @@ def test_a_saved_step_that_no_longer_applies_is_said(tmp_path):
         widget.SceneWidget(saved, editable=True)
 
 
-@needs_scene_graph
 def test_the_views_variables_follow_the_scene():
     """`variables` holds every variable as resolved, for a cell to read, and
     follows a `set_variable` from code and an undo. A view of the cell's own
@@ -1484,7 +1381,6 @@ def test_the_views_variables_follow_the_scene():
     assert plain.variables == {}
 
 
-@needs_scene_graph
 def test_the_views_variables_panel_edits_through_the_session():
     """The panel in the view lists the variables and sets them as the studio's
     Variables view does: a value the pointer is still on changes the scene
@@ -1521,7 +1417,6 @@ def test_the_views_variables_panel_edits_through_the_session():
     assert not studio.undo(), "and nothing before it belongs to the view"
 
 
-@needs_scene_graph
 def test_a_choice_and_a_typed_value_commit_as_one_edit_each():
     """A dropdown's pick and a typed `3 cm` are each one settled edit; the
     typed text is read by the engine, in the variable's unit."""
@@ -1538,7 +1433,6 @@ def test_a_choice_and_a_typed_value_commit_as_one_edit_each():
     assert "sin" in help_["functions"]
 
 
-@needs_scene_graph
 def test_a_refused_variable_is_reported_and_changes_nothing():
     """A value past the hard limits is refused in the answer, as the panel
     shows it, and the notebook hears nothing."""
@@ -1553,7 +1447,6 @@ def test_a_refused_variable_is_reported_and_changes_nothing():
     assert _ask(studio, "remove_variable", name="n")["error"]["type"] == "MethodError"
 
 
-@needs_scene_graph
 def test_variables_assigned_set_the_scene_and_read_it_back():
     """`variables` assigned sets what differs, as one edit, and then holds
     every variable as the scene has it; the same values are no edit; a name
@@ -1593,7 +1486,6 @@ def test_variables_assigned_set_the_scene_and_read_it_back():
         plain.variables = {"n": 1}
 
 
-@needs_scene_graph
 def test_another_controls_trait_links_to_the_variables_both_ways():
     """A `traitlets.link` from a control's trait -- a call expression's
     values -- moves the scene when the control moves, and the control when
@@ -1620,7 +1512,6 @@ def test_another_controls_trait_links_to_the_variables_both_ways():
     assert knobs.values["axis"] == "y"
 
 
-@needs_scene_graph
 def test_a_bare_sensor_is_drawn_the_studios_size_and_magpylib_is_left_as_it_was():
     """A sensor whose style says no size is drawn at the studio's default --
     five millimetres, not magpylib's default of one, which the studio's
@@ -1669,7 +1560,6 @@ def test_a_bare_sensor_is_drawn_the_studios_size_and_magpylib_is_left_as_it_was(
     assert sized["style"]["size"] == 0.002
 
 
-@needs_scene_graph
 def test_a_preview_carries_the_scene_in_its_own_answer():
     """One message where there were two: a value under the pointer, or a
     pose, asked with `scene` is answered with the scene as it is now -- the
@@ -1695,7 +1585,6 @@ def test_a_preview_carries_the_scene_in_its_own_answer():
     assert "scene" not in plain["result"], "only when asked"
 
 
-@needs_scene_graph
 def test_the_readout_makes_a_variable_from_a_bare_name():
     """A variable's name typed in the readout where a number was, that the
     scene lacks, is made at the value it replaces when the view asks
@@ -1718,7 +1607,6 @@ def test_the_readout_makes_a_variable_from_a_bare_name():
     assert studio.objects["m"].position == pytest.approx([0.05, 0, 0])
 
 
-@needs_scene_graph
 def test_the_object_panel_reads_and_sets_through_the_session():
     """The object panel's calls: the selection's parameters and pose are
     read, a parameter set is one settled edit told as a `set`, a pose set
@@ -1755,7 +1643,6 @@ def test_the_object_panel_reads_and_sets_through_the_session():
     assert read == {"ok": True, "values": [0.02]}
 
 
-@needs_scene_graph
 def test_the_object_panel_sets_style_through_the_session():
     """The style tree's calls: the schema and the values are read, a property
     set is one settled edit told as a `set` of its path under `style`, and a
@@ -1800,7 +1687,6 @@ def _ask_panel(panel, method, preview=False, **params):
     return panel.sent[-1]
 
 
-@needs_scene_graph
 def test_a_panel_of_its_own_edits_through_the_view():
     """`view.panel("variables")` is a widget the notebook places apart: it
     reads the scene's variables through the view; a value it sets is one
@@ -1837,7 +1723,6 @@ def test_a_panel_of_its_own_edits_through_the_view():
     assert "may not call" in refused["error"]["message"]
 
 
-@needs_scene_graph
 def test_a_panel_of_its_own_needs_an_editable_view():
     """A view of the cell's own objects, with no scene of its own, has no
     panel to give; a kind the view does not know is refused by name."""
@@ -1851,7 +1736,6 @@ def test_a_panel_of_its_own_needs_an_editable_view():
         looking.panel("variables")
 
 
-@needs_scene_graph
 def test_the_view_takes_the_scene_function_itself():
     """`SceneWidget(ring)` builds the function, as `SceneWidget(ring.build())`
     did: the view shows the scene's own session, variables and all, editable
@@ -1863,7 +1747,6 @@ def test_the_view_takes_the_scene_function_itself():
     assert "n" in looking.variables
 
 
-@needs_scene_graph
 def test_never_is_the_word_for_a_view_that_is_never_edited():
     """`editable="never"` reads where `None` made a reader stop; both make the
     view that offers no pencil and refuses to turn on."""
@@ -1876,7 +1759,6 @@ def test_never_is_the_word_for_a_view_that_is_never_edited():
         view.editable = True
 
 
-@needs_scene_graph
 def test_a_plain_function_is_a_scene_to_the_view():
     """Handed to the view, a function whose parameters are the variables is a
     scene without the mark: built the same way, its parameters its variables.
@@ -1900,7 +1782,6 @@ def test_a_plain_function_is_a_scene_to_the_view():
     assert studio.objects["m"].position[0] == pytest.approx(0.03)
 
 
-@needs_scene_graph
 def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
     """`view.save_variant(name)` keeps the values as they are, formulas left
     out, and hands them back to paste into the mark; the panel lists it at
@@ -1933,7 +1814,6 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
         assert _ask(studio, method, name="start")["error"]["type"] == "MethodError"
 
 
-@needs_scene_graph
 def test_variables_assigned_together_rebuild_the_scene_once():
     """Several values assigned at once are one rebuild, not one each: using a
     variant from a cell costs what moving one slider does."""
@@ -1949,7 +1829,6 @@ def test_variables_assigned_together_rebuild_the_scene_once():
     }
 
 
-@needs_scene_graph
 def test_variables_assigned_that_change_nothing_leave_no_step():
     """Values that come to the scene it already is -- a formula a variable
     already has, a number as text -- leave no step to undo, keep the redo an
@@ -1968,7 +1847,6 @@ def test_variables_assigned_that_change_nothing_leave_no_step():
     assert studio.redo()
 
 
-@needs_scene_graph
 def test_a_variant_saved_from_a_cell_hands_back_what_the_mark_can_hold():
     """The view's variant keeps every variable that holds a value; what comes
     back to paste into the mark is the scene function's parameters alone,
