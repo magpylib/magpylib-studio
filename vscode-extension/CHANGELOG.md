@@ -27,6 +27,18 @@ outlines what overlaps at each of its steps. From code: `get_overlaps`,
 </details>
 
 <details>
+<summary>Field lines through a sensor's pixels, following a drag (prototype)</summary>
+
+A sensor whose pixels read B or H can draw the field's lines through them: the
+lines button among the view's tools, `SceneWidget(..., field_lines=True)` or
+`set_field_lines` on the session. In a plane of the field's symmetry the lines
+keep to it, elsewhere they run in 3D, coloured as the sensor's arrows are. They
+follow a drag, are saved with the scene and undone like an edit, and a saved
+page carries them. In the notebook widget and the VS Code panel alike (#46).
+
+</details>
+
+<details>
 <summary>Fade an object from the legend, to see what is inside it</summary>
 
 Press an object's eye in the view's legend and slide sideways: left fades it,
