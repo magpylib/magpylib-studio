@@ -1469,7 +1469,9 @@ def test_every_example_builds_and_is_worth_opening():
     assert np.allclose(grid[0, 0], [-0.002, -0.002, 0])
     assert s.set_variable("tolerance", 0.006) == {"ok": True}
     assert np.allclose(np.array(s._objs["probe"].pixel)[0, 0], [-0.006, -0.006, 0])
-    assert len(s.get_field_map(sensor_id="probe")["data"][0]["z"]) == 7
+    pixels = s.get_field_map(sensor_id="probe")["data"][0]
+    assert len(pixels["z"]) == 7
+    assert "zsmooth" not in pixels  # each cell a pixel's reading
 
 
 def test_pattern_copies_are_named_after_their_source():
@@ -1910,6 +1912,7 @@ def test_field_map_plane():
     assert np.array(trace["z"]).shape == (12, 12)
     assert fig["layout"]["yaxis"]["scaleanchor"] == "x"  # undistorted geometry
     assert "zmid" not in trace  # magnitude is sequential, no diverging midpoint
+    assert trace["zsmooth"] == "best"  # a sampled field, drawn continuous
     json.dumps(fig)
 
     # a signed component gets a diverging scale anchored at zero
