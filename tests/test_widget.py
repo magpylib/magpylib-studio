@@ -342,11 +342,13 @@ def test_a_rebuild_keeps_what_was_chosen_where_it_was(nested):
     view.update(stack)
     lower = stack.children[1]
     view.hidden = [str(id(child)) for child in lower.children]
+    view.faded = {str(id(stack.children[0])): 0.3}
     view.selected = [str(id(stack.children[0].children[2]))]
 
     rebuilt = build()
     view.update(rebuilt)
     assert view.hidden == [str(id(child)) for child in rebuilt.children[1].children]
+    assert view.faded == {str(id(rebuilt.children[0])): 0.3}
     assert [obj.style.label for obj in view.picked] == ["upper 2"]
     assert view.picked[0] is rebuilt.children[0].children[2]
 
@@ -409,16 +411,19 @@ def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     assert _outline(view.tree) == [("outer", [("inner", [("deep", [])]), ("ball", [])])]
 
 
-def test_hiding_is_a_value_like_selecting(scene_objects):
-    """Kept by id, resolved by the view, and dropped with its objects."""
+def test_hiding_and_fading_are_values_like_selecting(scene_objects):
+    """Kept by id, resolved by the view, and dropped with their objects."""
     magnet, sensor = scene_objects
     view = widget.SceneWidget(magnet, sensor)
     view.hidden = [str(id(sensor))]
+    view.faded = {str(id(sensor)): 0.5}
 
     view.update(magnet, sensor)
     assert view.hidden == [str(id(sensor))]
+    assert view.faded == {str(id(sensor)): 0.5}
     view.update(magnet)  # nothing where the sensor was
     assert view.hidden == []
+    assert view.faded == {}
 
 
 def test_a_scene_and_its_tree_arrive_together(scene_objects, monkeypatch):
@@ -744,6 +749,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     magnet, sensor = scene_objects
     view = widget.SceneWidget(magnet, sensor)
     view.hidden = [str(id(sensor))]
+    view.faded = {str(id(magnet)): 0.4}
     view.axes = False
     view.theme = "dark"
     path = tmp_path / "scene.html"
@@ -756,6 +762,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["state"]["payload"] == view.payload
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
+    assert saved["state"]["faded"] == {str(id(magnet)): 0.4}
     assert saved["state"]["axes"] == "none"  # the cube by default; put away here
     assert saved["state"]["theme"] == "dark"
     # A page with no python behind it offers no export of its own.

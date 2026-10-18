@@ -862,6 +862,12 @@ function render({ model, el }) {
   const legend = createLegend(legendEl, {
     onSelect: (ids) => commit("selected", ids),
     onHide: (ids) => commit("hidden", ids),
+    // Each step of a slide drawn here, and the model told once, at its end:
+    // a kernel round trip a step would trail the pointer.
+    onFade: (levels, { settled }) => {
+      if (drawing()) api.setFades(levels);
+      if (settled) commit("faded", levels);
+    },
     onFrame: (ids) => api?.fitView(ids),
     onHint: (ids) => api?.hint(ids),
     // An overlap marked as meant, or warned about again: an edit, settled
@@ -1048,6 +1054,7 @@ function render({ model, el }) {
   const stateOf = () => ({
     selected: model.get("selected") || [],
     hidden: model.get("hidden") || [],
+    faded: model.get("faded") || {},
   });
 
   // The toggles say what is in force, the way the panel's do: pressed when
@@ -1991,6 +1998,7 @@ function render({ model, el }) {
     "tree",
     "selected",
     "hidden",
+    "faded",
     "axes",
     "theme",
     "editable",
@@ -2061,6 +2069,7 @@ function render({ model, el }) {
     // python for the old view would land on the new one's scene.
     if (!drawing()) return;
     if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
+    if (now.has("faded")) api.setFades(model.get("faded") || {});
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
       if (editable()) setHandles(handles); // what was asked, for the new one
@@ -2112,6 +2121,7 @@ function render({ model, el }) {
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
+    api.setFades(model.get("faded") || {});
     api.setAxes(axesChoice(model.get("axes")));
     api.watchCamera(tellCamera);
     if (!framed) {

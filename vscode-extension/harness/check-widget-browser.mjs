@@ -1925,6 +1925,68 @@ async function savedView(port, base, out, expected) {
     return rounded(selected) === rounded(want) ? null : `selected ${selected}`;
   });
 
+  await check(
+    "the eye slid fades a row, and a click goes through what is faded",
+    async () => {
+      const was = await tab.evaluate("return window.scene3d.cameraState()");
+      const slide = async ({ x, y }, dx) => {
+        const mouse = (type, at, buttons) =>
+          tab.send("Input.dispatchMouseEvent", {
+            type,
+            x: at,
+            y,
+            button: "left",
+            buttons,
+            clickCount: 1,
+          });
+        await mouse("mousePressed", x, 1);
+        for (let step = 1; step <= 10; step++) {
+          await mouse("mouseMoved", x + (dx * step) / 10, 1);
+        }
+        await mouse("mouseReleased", x + dx, 0);
+        await wait(300);
+      };
+      const picked = async (at) => {
+        await tab.click(at);
+        await wait(300);
+        return tab.evaluate(
+          `return [...document.querySelectorAll(".magpy-legend-row.selected")].map((r) => r.querySelector(".magpy-legend-label").textContent).join()`,
+        );
+      };
+      const eye = `${row("upper")}.querySelector(".magpy-legend-eye")`;
+      try {
+        // Looking straight down, parallel, ten units to the view's height:
+        // each upper magnet stands over a lower one, and "upper 0" is three
+        // units right of the middle.
+        const at = await tab.evaluate(`
+          window.scene3d.setCamera({ projection: "parallel", position: [0, 0, 20],
+            target: [0, 0, 0], up: [0, 1, 0], zoom: 1, height: 10, near: -80, far: 400 });
+          const box = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+          return { x: box.x + box.width / 2 + (3 * box.height) / 10, y: box.y + box.height / 2 };`);
+        await wait(300);
+        const whole = await picked(at);
+        if (whole !== "upper 0") return `a click on upper 0 picked "${whole}"`;
+
+        await slide(await tab.evaluate(centreOf(eye)), -50);
+        const state = await tab.evaluate(
+          `return { classes: ${row("upper")}.className, level: ${eye}.style.getPropertyValue("--fade") }`,
+        );
+        if (!state.classes.includes("faded") || state.level !== "0.5") {
+          return `slid half way, the row is ${JSON.stringify(state)}`;
+        }
+        // the release of a slide is a click too, and not one that hides
+        if (state.classes.includes("off")) return "the slide hid the row";
+        const through = await picked(at);
+        return through === "lower 0"
+          ? null
+          : `with upper faded, the click picked "${through}"`;
+      } finally {
+        await slide(await tab.evaluate(centreOf(eye)), 80); // whole again
+        await tab.evaluate(`window.scene3d.setCamera(${JSON.stringify(was)})`);
+      }
+    },
+  );
+
   await check("the eye hides what a row holds", async () => {
     await tab.evaluate(
       `${row("lower")}.querySelector(".magpy-legend-eye").click()`,

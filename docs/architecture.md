@@ -247,13 +247,15 @@ of one shape, sized and coloured as magpylib sizes and colours them
 ([0021](decisions.md#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances));
 the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
 drawing. It picks, multi-selects, drags with handles (move, turn, resize, aim a
-polarization; world or object axes; one-axis locks; snapping), hides, plays
-paths, and has one keys table both hosts use. It says the scene's scale one of
-three ways (`setAxes`, the widget's `axes`): by default a view cube and a scale
-bar, drawn into the canvas's corner after the scene in the same frame, the cube
-a click away from twenty-six views and the bar a round length at the orbit
-centre, said in the unit that reads best, kept by the PNG where the cube is not;
-the graduated box round the scene; or neither
+polarization; world or object axes; one-axis locks; snapping), hides, fades by
+id (`setFades`: a share of each object's own opacity, looked through by a click;
+[0031](decisions.md#0031-the-legends-eye-fades-as-a-view-setting)), plays paths,
+and has one keys table both hosts use. It says the scene's scale one of three
+ways (`setAxes`, the widget's `axes`): by default a view cube and a scale bar,
+drawn into the canvas's corner after the scene in the same frame, the cube a
+click away from twenty-six views and the bar a round length at the orbit centre,
+said in the unit that reads best, kept by the PNG where the cube is not; the
+graduated box round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
 [0030](decisions.md#0030-the-view-cube-is-the-default-scale)). A drag goes
 through `static/drag.mjs`: open an undo group, pace previews with one request in
@@ -335,8 +337,8 @@ through a fake connection.
 `selected`, `hidden`) and an editor that sends the drag's messages to the
 extension host, which refreshes the tree, the Inspector, the field view, the
 history and the script tab, and marks the scene unsaved. In the studio hiding is
-an edit; in a notebook a view setting; the model decides. Chart mode swaps in
-the read-only plotly figure.
+an edit; in a notebook a view setting; the model decides. Fading is a view
+setting in both. Chart mode swaps in the read-only plotly figure.
 
 **Field views**: `get_field` (summed B, H, J or M at points or along a sensor,
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D

@@ -3,7 +3,8 @@
  *
  * The tree view of magpylib's three.js prototype (`sandbox/threejs`), kept as
  * it was: a caret folds a collection, an eye hides it and everything beneath
- * it, a swatch says what it is drawn in, and the label selects -- a plain click
+ * it -- or, pressed and slid sideways, fades it -- a swatch says what it is
+ * drawn in, and the label selects -- a plain click
  * replaces, cmd/ctrl toggles, shift takes the range from the last row clicked,
  * in tree order, which is the only order a scene has. A double click frames
  * what the row holds, and the pointer resting on a row shows where it is.
@@ -13,10 +14,10 @@
  * whole; otherwise, and for the other clicks, what it holds.
  *
  * A component, not a panel with opinions: it holds nothing a notebook can see.
- * What is selected and what is hidden are the widget's traitlets. The legend
+ * What is selected, hidden and faded are the widget's traitlets. The legend
  * is told them (`sync`) and says what a click would make them (`onSelect`,
- * `onHide`), what it would look at (`onFrame`), or what the pointer is on
- * (`onHint`); the widget decides.
+ * `onHide`, `onFade`), what it would look at (`onFrame`), or what the pointer
+ * is on (`onHint`); the widget decides.
  *
  * What overlaps is marked: a warning at the end of each overlapping row,
  * passed up to a folded collection, and above the list a count that steps
@@ -140,6 +141,13 @@ const FOLD_ABOVE = 12;
 /** How deep a row sits, by its address: "0" is at the top, "0/1" one down. */
 const depthOf = (path) => path.split("/").length - 1;
 
+/** How far a press on an eye moves before it is a slide, not a click; how
+ *  far a slide goes from faintest to whole; and how faint is faintest --
+ *  not gone, which is the click's. */
+const SLIDE_START = 3;
+const SLIDE_RANGE = 100;
+const FAINTEST = 0.1;
+
 function modeOf(event) {
   if (event.shiftKey) return "range";
   // cmd on a mac, ctrl elsewhere, as for a click in the view
@@ -155,7 +163,7 @@ function part(className, title) {
 
 export function createLegend(
   container,
-  { onSelect, onHide, onFrame, onHint, onIntend, onMeasure, canEdit },
+  { onSelect, onHide, onFade, onFrame, onHint, onIntend, onMeasure, canEdit },
 ) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
@@ -163,12 +171,15 @@ export function createLegend(
   let swatches = new Map();
   let selected = [];
   let hidden = new Set();
+  let faded = new Map(); // id -> the share of its opacity it is drawn at
   let anchor = null; // the row a shift-click ranges from
   let proposed = null; // the selection a click here last asked for
   let parents = new Map(); // id -> the id of the collection holding it
   let pathOf = new Map(); // id -> where it sits, as the folds address it
   let primaryAt; // where the first selected object sits
   const rows = new Map(); // id -> row element
+  const eyes = new Map(); // id -> its row's eye
+  let barEl = null; // how far a slide has faded its row, along the row's foot
   // Folded collections, by where they sit rather than by id: a re-pointed view
   // is new objects at new ids, and a slider drag should not unfold what the
   // user had folded.
@@ -259,12 +270,89 @@ export function createLegend(
     onHide([...next]);
   }
 
+  /** The share of their own opacity a row's objects are drawn at, together. */
+  function levelOf(node) {
+    const mine = leaves.get(node.id);
+    if (!mine.length) return 1;
+    const sum = mine.reduce((total, id) => total + (faded.get(id) ?? 1), 0);
+    return sum / mine.length;
+  }
+
+  /** What is faded, with all `node` holds at `level`. Drawn whole is not
+   *  faded, and is left out. */
+  function fadedWith(node, level) {
+    const next = new Map(faded);
+    for (const id of leaves.get(node.id)) {
+      level < 1 ? next.set(id, level) : next.delete(id);
+    }
+    return next;
+  }
+
+  /** Press on a row's eye and slide sideways to fade what the row holds:
+   *  left for less of it, right for more, `SLIDE_RANGE` pixels the whole
+   *  way. A press that does not slide is a click, and hides. The view is
+   *  told at every step, and the level settled once, at the release. */
+  function slideToFade(eye, node) {
+    let from = null; // where the press began, and the level then
+    let slid = false;
+    eye.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      eye.setPointerCapture(event.pointerId);
+      from = { x: event.clientX, level: levelOf(node) };
+      slid = false;
+    });
+    eye.addEventListener("pointermove", (event) => {
+      if (!from) return;
+      const dx = event.clientX - from.x;
+      if (!slid) {
+        if (Math.abs(dx) < SLIDE_START) return;
+        slid = true;
+        rows.get(node.id).classList.add("sliding");
+        onHint?.([]); // the hover's outline would cover the fade it shows
+        // a hidden row slid is a row to look at
+        const mine = leaves.get(node.id);
+        if (mine.every((id) => hidden.has(id))) {
+          onHide([...hidden].filter((id) => !mine.includes(id)));
+        }
+      }
+      // in hundredths, so a notebook reads 0.3 back rather than 0.30000000000000004
+      const level =
+        Math.round(
+          100 * Math.min(1, Math.max(FAINTEST, from.level + dx / SLIDE_RANGE)),
+        ) / 100;
+      faded = fadedWith(node, level);
+      paint();
+      barEl ??= part("magpy-legend-bar");
+      barEl.style.setProperty("--fade", String(level));
+      rows.get(node.id).append(barEl);
+      onFade(Object.fromEntries(faded), { settled: false });
+    });
+    const release = () => {
+      if (!from) return;
+      from = null;
+      if (!slid) return;
+      rows.get(node.id)?.classList.remove("sliding");
+      barEl?.remove();
+      onFade(Object.fromEntries(faded), { settled: true });
+    };
+    eye.addEventListener("pointerup", release);
+    eye.addEventListener("pointercancel", release);
+    // The release of a slide is a click as well, and not one that hides.
+    eye.addEventListener("click", () => {
+      if (slid) slid = false;
+      else toggleHidden(node);
+    });
+  }
+
   function addRow(node, path, into) {
     pathOf.set(node.id, path);
     const row = document.createElement("div");
     row.className = "magpy-legend-row";
     const caret = part("magpy-legend-caret");
-    const eye = part("magpy-legend-eye", "Show / hide");
+    const eye = part(
+      "magpy-legend-eye",
+      "Show / hide — slide sideways to fade",
+    );
     const swatch = part("magpy-legend-swatch");
     const label = part("magpy-legend-label");
     label.textContent = node.label;
@@ -305,8 +393,9 @@ export function createLegend(
     row.append(eye);
     into.append(row);
     rows.set(node.id, row);
+    eyes.set(node.id, eye);
 
-    eye.addEventListener("click", () => toggleHidden(node));
+    slideToFade(eye, node);
     // The whole row selects, as a row in any tree view does -- all of it but
     // the caret and the eye, which have their own work.
     const own = (event) =>
@@ -602,16 +691,18 @@ export function createLegend(
     labels = new Map(order.map((node) => [node.id, node.label]));
     if (!order.some((node) => node.id === anchor)) anchor = null;
     rows.clear();
+    eyes.clear();
     folds.clear();
     container.replaceChildren(overlapHeader());
     tree.forEach((node, i) => addRow(node, String(i), container));
     paint();
   }
 
-  /** Mirror what is selected and what is hidden onto the rows. */
+  /** Mirror what is selected, hidden and faded onto the rows. */
   function sync(state) {
     selected = state.selected;
     hidden = new Set(state.hidden);
+    faded = new Map(Object.entries(state.faded ?? {}));
     paint();
     measure();
     // A selection made here is already in view; one made in the view or in
@@ -665,6 +756,9 @@ export function createLegend(
       row.classList.toggle("off", all(gone));
       row.classList.toggle("mixed", some(gone));
       row.classList.toggle("empty", mine.length === 0);
+      const level = levelOf(node);
+      row.classList.toggle("faded", level < 1);
+      eyes.get(node.id).style.setProperty("--fade", String(level));
     }
   }
 

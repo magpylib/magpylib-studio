@@ -47,6 +47,8 @@ const values = {
   tree: [],
   selected: [],
   hidden: [],
+  // a view setting here too, not told to the host: docs/decisions.md#0031-the-legends-eye-fades-as-a-view-setting
+  faded: {},
   axes: "cube",
   theme: "auto",
   height: 400,

@@ -194,6 +194,13 @@ class SceneWidget(anywidget.AnyWidget):
     #: Which objects are not drawn, by the same ids. Written by the legend's
     #: eye, and assignable from the notebook like `selected`.
     hidden = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: How faintly objects are drawn, by the same ids: the share of their own
+    #: opacity, from 0.1 to below 1; an object not named is drawn whole.
+    #: Written by sliding the legend's eye, assignable from the notebook. A
+    #: view setting: the scene's own style is not touched.
+    faded = traitlets.Dict(
+        value_trait=traitlets.Float(), key_trait=traitlets.Unicode()
+    ).tag(sync=True)
     #: How the scene's scale is said: ``"cube"``, the default, a scale bar and
     #: a cube to look from a side by, in a corner; ``"box"``, the graduated box
     #: round it; or ``"none"``. A cell can put it away for a clean picture, and
@@ -526,7 +533,7 @@ class SceneWidget(anywidget.AnyWidget):
         magpylib object, and the view can say what it is called -- and holding
         them here is also what keeps the address meaning what it meant.
 
-        What was selected or hidden carries over to these objects: an object
+        What was selected, hidden or faded carries over to these objects: an object
         passed again keeps its place in both, and one that is not moves to
         whatever now sits where it sat in the tree. That second case is the
         usual one in a reactive notebook -- a slider rebuilds the objects, so
@@ -541,14 +548,15 @@ class SceneWidget(anywidget.AnyWidget):
         tree, objects = threejs.object_tree(objects)
         after = {path: key for key, path in _positions(tree)}
 
+        def moved(key):
+            # An id among the new objects is the same object: the old ones
+            # are still held in `_objects`, so no new one can have been
+            # given an old one's address.
+            return key if key in objects else after.get(before.get(key))
+
         def carried(ids):
             out = []
-            for key in ids:
-                # An id among the new objects is the same object: the old ones
-                # are still held in `_objects`, so no new one can have been
-                # given an old one's address.
-                if key not in objects:
-                    key = after.get(before.get(key))
+            for key in map(moved, ids):
                 if key is not None and key not in out:
                     out.append(key)
             return out
@@ -560,6 +568,11 @@ class SceneWidget(anywidget.AnyWidget):
             self.tree = tree
             self.selected = carried(self.selected)
             self.hidden = carried(self.hidden)
+            self.faded = {
+                moved(key): level
+                for key, level in self.faded.items()
+                if moved(key) is not None
+            }
             payload = self.payload or {}
             if any(payload.get(key) != value for key, value in found.items()):
                 self.payload = {**payload, **found}
@@ -850,8 +863,8 @@ class SceneWidget(anywidget.AnyWidget):
         self._show(None)
 
     def _show(self, edit):
-        """Draw the session's scene as it is now, keeping what is selected
-        and hidden where those objects still are, and tell the notebook what
+        """Draw the session's scene as it is now, keeping what is selected,
+        hidden and faded where those objects still are, and tell the notebook what
         `edit` was. Returns whether anything had changed: a drag that ended
         where it began, or an undo with nothing to undo, is no news."""
         doc = json.dumps(self._session.doc, sort_keys=True, default=str)
@@ -867,6 +880,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.tree = tree
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
+            self.faded = {k: v for k, v in self.faded.items() if k in ids}
             self.variables = _values_of(self._session)
             if not first:
                 self.last_edit = edit or {}
@@ -937,6 +951,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.repeat,
             selected=self.selected,
             hidden=self.hidden,
+            faded=self.faded,
             axes=self.axes,
             theme=self.theme,
             height=self.height,
