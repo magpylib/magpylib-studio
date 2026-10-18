@@ -15,21 +15,29 @@
  * wherever the scene's cost puts it -- measured from 1.4 ms for two magnets
  * to 180 ms for a thousand. Any fixed interval would be wrong at one end of
  * that or the other, and a queue would only make the view lag further behind
- * the pointer the longer the drag went on.
+ * the pointer the longer the drag went on. No more than one is sent a frame:
+ * a small scene answers in under two milliseconds, and building it several
+ * hundred times a second to show it sixty is work the screen throws away.
  *
  * ## Redrawing around the drag
  *
  * Moving a magnet moves more than the magnet: a field's arrows are computed
- * from it and have to be asked for again. This is the expensive half of the
- * round trip, so it runs *inside* the pacing loop rather than beside it --
- * the next pose is not sent until the scene it caused has been drawn, which
- * keeps a heavy scene sending fewer poses instead of falling behind.
+ * from it and have to be asked for again. The engine builds the scene for
+ * the next pose while the view draws the last one: the newest answer is
+ * drawn on the next frame, and an answer overtaken before then is dropped.
+ * Done in turn instead -- answer, frame, draw, then the next pose -- a round
+ * trip a little longer than a frame cost two, and the demo's Halbach with
+ * field lines drew 30 scenes a second where it now draws 51 (#45). Nothing
+ * queues: one pose is in flight, and one scene waits to be drawn.
  *
  * Pacing stops the work queueing up; it does not stop one slow redraw from
- * stuttering the drag it is meant to illustrate. So the first redraw of each
- * gesture is timed, and if building the scene costs more than a frame, the
- * rest of that drag goes without: the object under the pointer keeps up, and
- * the scene catches up when the drag ends. A big scene on a slow machine then
+ * stuttering the drag it is meant to illustrate. So the redraws of each
+ * gesture are timed, and once building the scene costs more than a frame
+ * twice in a row, the rest of that drag goes without: the object under the
+ * pointer keeps up, and the scene catches up when the drag ends. Not the
+ * first redraw: it pays for what a drag makes once, and judged on it alone,
+ * a field that redraws in 5 ms stopped for the whole drag one time in two
+ * (#45). A big scene on a slow machine then
  * loses the thing that was never going to look right anyway, rather than the
  * smoothness of the gesture.
  */
@@ -69,46 +77,77 @@ export const REDRAW_BUDGET_MS = 8;
  */
 export function watchDrags(host, view) {
   const drawing = view.drawing ?? (() => true);
-  let dragging = null; // { keep, tooSlow, begun } while a handle is held
+  let dragging = null; // { keep, tooSlow, redraws, slow, begun } while a handle is held
   let pending = null; // the newest pose not yet sent
   let inFlight = false;
+  let ticked = true; // a frame has begun since the last pose was sent
+  let toDraw = null; // { drag, carried }: the newest answer, for the next frame
+  let drawAsked = false; // a frame is asked for to draw it
+  let redrawing = false; // a redraw is waiting on the scene it asked for
 
   async function redrawAround(carried) {
     if (!drawing() || !dragging || dragging.tooSlow) return;
+    const drag = dragging;
     const payload = carried ?? (await view.scene());
-    if (!dragging) return; // released while the scene was on its way
+    if (dragging !== drag) return; // released while the scene was on its way
     // Timed around the render alone. The request before it is the engine's
     // time, not the view's: it delays the next pose without blocking this one.
     const started = performance.now();
     view.render(payload, { keep: dragging.keep });
-    dragging.tooSlow = performance.now() - started > REDRAW_BUDGET_MS;
+    const slow = performance.now() - started > REDRAW_BUDGET_MS;
+    dragging.redraws += 1;
+    dragging.slow = slow && dragging.redraws > 1 ? dragging.slow + 1 : 0;
+    dragging.tooSlow = dragging.slow >= 2;
   }
 
   function send() {
-    if (inFlight || !pending) return;
+    if (inFlight || !pending || !ticked) return;
     inFlight = true;
+    ticked = false;
+    requestAnimationFrame(() => {
+      ticked = true;
+      send();
+    });
     const pose = pending;
     pending = null;
-    let carried = null; // the scene, when the preview's answer brought it
+    const drag = dragging;
     // Asked for with the pose only while it will be drawn: a drag that has
     // stopped redrawing would have the scene built on every step for nothing.
     const scene = drawing() && Boolean(dragging) && !dragging.tooSlow;
     Promise.resolve(view.preview(pose, { scene }))
       .then((answer) => {
-        carried = answer && answer.scene ? answer.scene : null;
+        if (scene) drawSoon(drag, answer && answer.scene ? answer.scene : null);
       })
-      // On the next frame, not on the reply: a small scene answers in under
-      // two milliseconds, and rebuilding it several hundred times a second to
-      // show it sixty is work the screen throws away. Whichever is slower
-      // decides -- and the object under the pointer is not waiting on any of
-      // it, since the handles move its node locally.
-      .then(() => new Promise((resolve) => requestAnimationFrame(resolve)))
-      .then(() => redrawAround(carried))
-      .catch(() => {}) // a failed preview or redraw must not end the drag
+      .catch(() => {}) // a failed preview must not end the drag
       .finally(() => {
         inFlight = false;
         send(); // whatever the pointer reached while that one was away
       });
+  }
+
+  /** Draw what `carried` shows on the next frame, unless a newer answer
+   *  comes first -- or, with no scene carried, what the engine has then. The
+   *  object under the pointer waits on none of it: the handles move its node
+   *  locally. */
+  function drawSoon(drag, carried) {
+    toDraw = { drag, carried };
+    if (drawAsked || redrawing) return;
+    drawAsked = true;
+    requestAnimationFrame(async () => {
+      drawAsked = false;
+      const next = toDraw;
+      toDraw = null;
+      if (!next || next.drag !== dragging) return; // let go since
+      redrawing = true;
+      try {
+        await redrawAround(next.carried);
+      } catch {
+        // a failed redraw must not end the drag
+      } finally {
+        redrawing = false;
+      }
+      if (toDraw) drawSoon(toDraw.drag, toDraw.carried);
+    });
   }
 
   function onStart(event) {
@@ -129,6 +168,8 @@ export function watchDrags(host, view) {
     dragging = {
       keep: rebuilt ? null : objectIds,
       tooSlow: false,
+      redraws: 0, // redraws in this drag, and slow ones in a row
+      slow: 0,
       begun: false,
       objectIds,
       mode,
@@ -156,6 +197,7 @@ export function watchDrags(host, view) {
     }
     dragging = null;
     pending = null; // the pose it ended on supersedes anything still waiting
+    toDraw = null;
     view.commit(pose);
   }
 

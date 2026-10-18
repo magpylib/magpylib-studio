@@ -349,7 +349,15 @@ def test_the_session_says_which_objects_overlap():
 
 
 def test_every_scene_says_which_objects_overlap():
-    assert three_cubes().get_scene()["overlaps"] == [["a", "c"]]
+    session = three_cubes()
+    deep = [pytest.approx(1e-4, abs=1e-8)]
+    assert session.get_scene()["overlaps"] == [["a", "c"]]
+    assert session.get_scene()["overlap_depths"] == deep
+    # mid-drag, which pairs; how deep, once the drag ends
+    session.begin_interaction()
+    assert session.get_scene()["overlap_depths"] == [None]
+    session.end_interaction()
+    assert session.get_scene()["overlap_depths"] == deep
 
 
 def tilted_shaft_gap():

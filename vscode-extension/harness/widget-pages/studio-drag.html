@@ -43,10 +43,14 @@
             // the engine taking its time, and the scene with the pose when
             // the view will draw it, as the extension host answers
             window.scenes.then(({ scene }) =>
-              answer(
-                { type: "previewDone", ...(message.scene ? { scene } : {}) },
-                30,
-              ),
+              setTimeout(() => {
+                // in order among the messages: one pose in flight at a time
+                window.posted.push({ type: "answered" });
+                window.postMessage(
+                  { type: "previewDone", ...(message.scene ? { scene } : {}) },
+                  "*",
+                );
+              }, 30),
             );
           }
         },

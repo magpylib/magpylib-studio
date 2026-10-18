@@ -62,13 +62,17 @@ Nothing a scene file or a script holds changes.
 </details>
 
 <details>
-<summary>Dragging redraws faster: the view keeps its shaders</summary>
+<summary>Dragging redraws faster</summary>
 
 Every step of a drag rebuilds the scene, and the view used to throw away each
 mesh's material with it, which had the browser compile its shaders anew on the
 next step: about seven programs, 14 ms of a frame on an M4 Pro. The materials
 now stay, so drawing a step costs about 2 ms instead of 15, in the notebook
 widget and the VS Code view alike. The picture is unchanged (#44).
+
+The engine also builds the next step's scene while the view draws the last one,
+where it used to wait: a step a little longer than a frame cost two. The marimo
+demo now gets 58 scenes a second during a drag where it got 52 (#55).
 
 </details>
 

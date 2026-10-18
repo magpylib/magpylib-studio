@@ -3677,11 +3677,18 @@ class MagpylibStudioSession:
         left out; with `intended`, only those are listed. With `details`,
         every pair comes as ``{"a", "b", "depth", "intended"}``: how deep it
         goes, in metres -- None where it is not known, through a mesh's
-        surface -- and whether it was marked.
+        surface, or mid-drag -- and whether it was marked.
         """
         leaves = self._overlap_leaves()
         marked = self._intended_pairs()
-        found = collisions.find_overlaps([obj for _, obj in leaves], depths=True)
+        objects = [obj for _, obj in leaves]
+        # Not mid-drag: a depth is a search, 1.6 ms a pair on every frame of a
+        # drag into a neighbour, against 0.3 ms for finding the pairs at all.
+        # The scene sent at the release says it.
+        if details and self._interaction is None:
+            found = collisions.find_overlaps(objects, depths=True)
+        else:
+            found = [(i, j, None) for i, j in collisions.find_overlaps(objects)]
         pairs, seen = [], set()
         for i, j, depth in found:
             pair = [leaves[i][0], leaves[j][0]]
