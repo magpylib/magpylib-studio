@@ -707,7 +707,7 @@ def test_the_studio_runs_without_the_display_backend_api(session, monkeypatch, m
     from magpylib_studio import threejs
 
     if missing == "pixel helpers":
-        monkeypatch.delattr(magpy.graphics.backend, "sensor_pixel_fields")
+        monkeypatch.delattr(magpy.graphics.backend, "pixel_colors")
     else:
         monkeypatch.setattr(threejs, "DisplayBackend", None)
     assert not threejs.available()

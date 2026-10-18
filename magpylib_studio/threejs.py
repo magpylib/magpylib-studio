@@ -363,7 +363,7 @@ def available():
     return (
         DisplayBackend is not None
         and hasattr(magpy.defaults.display, "units")
-        and hasattr(magpy.graphics.backend, "sensor_pixel_fields")
+        and hasattr(magpy.graphics.backend, "pixel_colors")
     )
 
 
@@ -926,9 +926,9 @@ def _instanced_pixels(objects, key_of):
     sensors = [] if key_of is None else _reading_sensors(objects)
     if not sensors:
         return [], lambda: None
-    from magpylib.graphics.backend import sensor_pixel_fields
+    from magpylib.graphics.backend import pixel_fields
 
-    fields = sensor_pixel_fields(_given(objects))
+    fields = pixel_fields(_given(objects))
     items = []
     for sensor in sensors:
         key = key_of(id(sensor))
@@ -950,62 +950,20 @@ def _pixels_of(sensor, field, key, path_ind=-1):
     """A sensor's pixels as ``pixels`` items: one for its readings, and one
     of cubes for the pixels that read nothing, where the style shows those.
 
-    Mirrors `make_Sensor` and `make_Pixels` in magpylib's `traces_core`, so
-    the sizes and the colours are magpylib's own: the size from the pixel
-    spacing and the sensor's size, scaled by the reading where the style
-    says so; the colour from the colormap over the reading. What differs is
-    the shape: no mesh, a position, a direction, a size and a colour per
-    pixel. A reading is in the sensor's own frame, with only the components
-    its source names, as `sensor_pixel_fields` hands it over, and the
-    sensor's pose takes it into the world's.
+    Sized and colored by magpylib's own `pixel_sizes` and `pixel_colors`, so
+    they match the built-in backends; what differs is the shape: no mesh, a
+    position, a direction, a size and a color per pixel. A reading is in the
+    sensor's own frame, with only the components its source names, as
+    `pixel_fields` hands it over, and the sensor's pose takes it into the
+    world's.
     """
-    from magpylib.graphics.backend import colors_from_colorscale, scale_pixel_norms
-    from scipy.spatial.distance import pdist
+    from magpylib.graphics.backend import pixel_colors, pixel_sizes
 
     style = sensor.style
     pixel = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
-    one_pix = pixel.shape[0] == 1
-    hull = np.concatenate([[[0, 0, 0]], pixel]) if one_pix else pixel
-    dimension = getattr(sensor, "dimension", None)
-    if dimension is None:
-        dimension = _resolve(sensor, "style.size")
-    dim = np.array(
-        [dimension] * 3 if isinstance(dimension, float | int) else dimension[:3],
-        dtype=float,
-    )
-    hull_dim = hull.max(axis=0) - hull.min(axis=0)
-    dim_ext = max(float(np.mean(dim)), float(np.min(hull_dim)))
-    px_dim = 1.0
-    if _resolve(sensor, "style.pixel.sizemode") == "scaled":
-        if len(pixel) < 1000:
-            min_dist = float(np.min(pdist(pixel))) if len(pixel) > 1 else 0.0
-        else:
-            vol = float(np.prod(np.ptp(pixel, axis=0)))
-            min_dist = (vol / len(pixel)) ** (1 / 3)
-        px_dim = dim_ext / 5 if min_dist == 0 else min_dist / 2
-    sizes = np.full(len(pixel), px_dim * float(_resolve(sensor, "style.pixel.size")))
-
-    # Scaled over the whole path, as magpylib scales them; NaN where a pixel
-    # reads nothing, whose size stays the style's and colour the null colour.
     field = np.asarray(field, dtype=float)
-    norms = np.linalg.norm(field, axis=-1)
-    scaled = scale_pixel_norms(
-        norms,
-        _resolve(sensor, "style.pixel.field.sizescaling"),
-        minimum=_resolve(sensor, "style.pixel.field.sizemin"),
-    )[path_ind]
-    sizes = sizes * np.where(np.isnan(scaled), 1, scaled)
-    pixel_color = _resolve(sensor, "style.pixel.color")
-    colors = "black" if pixel_color is None else str(pixel_color)
-    colorscaling = _resolve(sensor, "style.pixel.field.colorscaling")
-    # "uniform" is no colormap at all, not the top of one
-    if colorscaling != "uniform":
-        colors = colors_from_colorscale(
-            scale_pixel_norms(norms, colorscaling)[path_ind],
-            _resolve(sensor, "style.pixel.field.colormap"),
-            cmin=0,
-            cmax=1,
-        )
+    sizes = pixel_sizes(sensor, field, path_index=path_ind)
+    colors = pixel_colors(sensor, field, path_index=path_ind)
 
     # into the world: the pixels sit in the sensor's frame, and so does the
     # reading, which magpylib rotates into it
