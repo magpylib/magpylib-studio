@@ -1978,17 +1978,10 @@ async function savedView(port, base, out, expected) {
   await check(
     "the view cube turns the view, and stays out of the picture",
     async () => {
+      // the cube is the default, and what the checks after expect
       await tab.hover(await tab.evaluate(centreOf(VIEW)));
       await wait(300);
-      await tab.click(await tab.evaluate(centreOf(tool("Scale")))); // the box's next
-      try {
-        return await cubeTurnsTheView();
-      } finally {
-        // the cube's next is none, and none's the box the checks after expect
-        for (let i = 0; i < 2; i++) {
-          await tab.click(await tab.evaluate(centreOf(tool("Scale"))));
-        }
-      }
+      return await cubeTurnsTheView();
     },
   );
 

@@ -62,7 +62,7 @@ let axes = null; // the box, ticks and names that give the scene a scale
 // How the host wants the scale said: "box", "cube" -- the view cube and the
 // scale bar, in a corner -- or "none". Held here, like hiding, because the box
 // is drawn again on every redraw.
-let axesMode = "box";
+let axesMode = "cube";
 let selectedIds = []; // the primary is first: what the sidebar is showing
 // What a drag of several objects turns. It stands at the middle of the
 // selection and is never drawn -- only the motion it makes is read off it.
@@ -807,11 +807,11 @@ function setHidden(objectIds) {
   drawHints();
 }
 
-/** Say the scene's scale with the graduated box, with the view cube and a
- *  scale bar, or not at all: `"box"`, `"cube"` or `"none"`. Framing leaves
- *  room for the box's numbers only while it is there. */
+/** Say the scene's scale with the view cube and a scale bar, with the
+ *  graduated box, or not at all: `"cube"`, `"box"` or `"none"`. Framing
+ *  leaves room for the box's numbers only while it is there. */
 function setAxes(mode) {
-  axesMode = mode === "cube" || mode === "none" ? mode : "box";
+  axesMode = mode === "box" || mode === "none" ? mode : "cube";
   if (axes) axes.visible = axesMode === "box";
   // Whatever was under the pointer was under it in the last view drawn,
   // which a pooled renderer is moving on from.

@@ -350,26 +350,27 @@ const KEY_LIST = {
 /** The axes button's round: each way the scale is said, its icon, what it is
  *  called -- in full, and in a word or two as the next one -- and the next. */
 const AXES = {
-  box: {
-    icon: "axes",
-    says: "Scale: the graduated box",
-    named: "the box",
-    next: "cube",
-  },
   cube: {
     icon: "cube",
     says: "Scale: a view cube and a scale bar",
     named: "the view cube",
+    next: "box",
+  },
+  box: {
+    icon: "axes",
+    says: "Scale: the graduated box",
+    named: "the box",
     next: "none",
   },
-  none: { icon: "axes", says: "Scale: not shown", named: "none", next: "box" },
+  none: { icon: "axes", says: "Scale: not shown", named: "none", next: "cube" },
 };
 
 /** One of `AXES`, from what the model holds: `true` and `false` are what a
- *  view saved before there was a choice holds. */
+ *  view saved before there was a choice holds, and were the box and none. */
 function axesChoice(value) {
   if (AXES[value]) return value;
-  return value === false ? "none" : "box";
+  if (value === true) return "box";
+  return value === false ? "none" : "cube";
 }
 
 /** The theme button's round: each choice, what it is called, and the next. */

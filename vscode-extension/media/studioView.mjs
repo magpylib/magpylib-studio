@@ -47,7 +47,7 @@ const values = {
   tree: [],
   selected: [],
   hidden: [],
-  axes: true,
+  axes: "cube",
   theme: "auto",
   height: 400,
   frames: 1,

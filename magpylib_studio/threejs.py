@@ -1071,7 +1071,7 @@ def saved_state(
     *,
     selected=(),
     hidden=(),
-    axes="box",
+    axes="cube",
     theme="auto",
     height=DEFAULT_HEIGHT,
     camera=None,

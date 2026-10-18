@@ -67,7 +67,7 @@ DEFAULT_HEIGHT = threejs.DEFAULT_HEIGHT
 EXPORT_NAME = "magpylib-scene.html"
 
 #: The ways `SceneWidget.axes` says the scene's scale.
-AXES = ("box", "cube", "none")
+AXES = ("cube", "box", "none")
 
 #: A saved view: the widget itself, run against a model this page holds. The
 #: bundle and the scene travel gzipped and in base64 -- a third of the size,
@@ -194,13 +194,13 @@ class SceneWidget(anywidget.AnyWidget):
     #: Which objects are not drawn, by the same ids. Written by the legend's
     #: eye, and assignable from the notebook like `selected`.
     hidden = traitlets.List(traitlets.Unicode()).tag(sync=True)
-    #: How the scene's scale is said: ``"box"``, the graduated box round it;
-    #: ``"cube"``, a scale bar and a cube to look from a side by, in a corner;
-    #: or ``"none"``. A cell can put it away for a clean picture, and an
-    #: export keeps it that way. ``True`` and ``False``, which it took before
-    #: there was a choice, are the box and none.
+    #: How the scene's scale is said: ``"cube"``, the default, a scale bar and
+    #: a cube to look from a side by, in a corner; ``"box"``, the graduated box
+    #: round it; or ``"none"``. A cell can put it away for a clean picture, and
+    #: an export keeps it that way. ``True`` and ``False``, which it took
+    #: before there was a choice, are the box and none.
     axes = traitlets.Union(
-        [traitlets.Enum(AXES), traitlets.Bool()], default_value="box"
+        [traitlets.Enum(AXES), traitlets.Bool()], default_value="cube"
     ).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and

@@ -26,11 +26,12 @@ along the foot of the view plays and scrubs them: in the browser, from the
 motion, when every step is the first one moved — and a frame at a time from
 python when the run changes shape as it goes.
 
-The axes button goes round three ways to show the scale: the graduated box, a
-view cube with a scale bar, and none; `axes="box"`, `"cube"` or `"none"` chooses
-one from code. Click a face, an edge or a corner of the cube to look from there.
-Lengths are said in the unit that reads best: the bar under a Halbach ring reads
-`20 mm`, and the box round it is ticked in millimetres too.
+The axes button goes round three ways to show the scale: a view cube with a
+scale bar, which is the default, the graduated box, and none; `axes="cube"`,
+`"box"` or `"none"` chooses one from code. Click a face, an edge or a corner of
+the cube to look from there. Lengths are said in the unit that reads best: the
+bar under a Halbach ring reads `20 mm`, and the box round it is ticked in
+millimetres too.
 
 ![The Halbach example with the view cube in the corner, its near corner marked under the pointer, and a 20 mm scale bar beside it](../view-cube.png)
 

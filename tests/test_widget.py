@@ -232,12 +232,12 @@ def test_a_view_is_re_pointed_rather_than_remade(scene_objects, morphing, served
 
 
 def test_the_scale_is_said_one_of_three_ways():
-    """The box, the cube or none -- and True and False, which the trait took
+    """The cube, the box or none -- and True and False, which the trait took
     before there was a choice, as the box and none: a cell or a saved page
     from then still says what it said."""
     view = widget.SceneWidget()
-    assert view.axes == "box"
-    for given, said in [("cube", "cube"), (False, "none"), (True, "box")]:
+    assert view.axes == "cube"
+    for given, said in [("box", "box"), (False, "none"), (True, "box")]:
         view.axes = given
         assert view.axes == said
     with pytest.raises(traitlets.TraitError):
@@ -756,7 +756,7 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
     assert saved["state"]["payload"] == view.payload
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
-    assert saved["state"]["axes"] == "none"  # the box by default; put away here
+    assert saved["state"]["axes"] == "none"  # the cube by default; put away here
     assert saved["state"]["theme"] == "dark"
     # A page with no python behind it offers no export of its own.
     assert saved["state"]["standalone"] is True
