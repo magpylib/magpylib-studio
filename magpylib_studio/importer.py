@@ -21,7 +21,7 @@ import sys
 import magpylib as magpy
 import numpy as np
 
-from magpylib_studio import style_compat, units
+from magpylib_studio import units
 
 # Constructor kwargs worth introspecting, tried in order per object.
 # magnetization is intentionally absent: it is derived from polarization.
@@ -146,7 +146,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names):
                         "axis": _zeroed((rotvec[0] / angle).round(9)).tolist(),
                     }
                 ]
-    style = style_compat.set_values(obj)
+    style = obj.style.set_values()
     if style:
         spec["style"] = style
     return spec

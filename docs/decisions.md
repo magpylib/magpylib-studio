@@ -35,8 +35,10 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
 | [0025](#0025-a-panel-is-a-widget-of-its-own-where-a-host-places-it)                            | A panel is a widget of its own where a host places it        | accepted 2026-10-10, as built                                        |
 | [0026](#0026-variants-are-named-value-sets-inside-a-scene)                                     | Variants are named value sets inside a scene                 | accepted 2026-10-11, as built (#32)                                  |
-| [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built                                        |
+| [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built; its default superseded by 0030        |
 | [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251)                                  | marimo's slow answers were its own, fixed in 0.25.1          | accepted 2026-10-17                                                  |
+| [0029](#0029-overlapping-magnets-are-found-and-said-as-you-edit)                               | Overlapping magnets are found, and said, as you edit         | accepted 2026-10-18, as built (#47)                                  |
+| [0030](#0030-the-view-cube-is-the-default-scale)                                               | The view cube is the default scale                           | accepted 2026-10-18                                                  |
 
 ---
 
@@ -1430,8 +1432,9 @@ the first with its first edit. Roadmap R9 named variants as not separate scenes:
 
 ## 0027. The scale is said round the scene, or in its corner
 
-**Status:** accepted 2026-10-12, as built. **Record of:** `plans/view-cube.md`,
-now deleted.
+**Status:** accepted 2026-10-12, as built; its default superseded by
+[0030](#0030-the-view-cube-is-the-default-scale). **Record of:**
+`plans/view-cube.md`, now deleted.
 
 ### Context
 
@@ -1600,3 +1603,35 @@ looser test reads as an overlap.
   which said nothing about what was wrong. **Lines joining an overlapping
   pair**: the two are already in contact, so the line is a few pixels inside
   them.
+
+---
+
+## 0030. The view cube is the default scale
+
+**Status:** accepted 2026-10-18; supersedes the default of
+[0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner), whose other
+rules carry over.
+
+### Context
+
+0027 gave the view three ways to say its scale and made the graduated box the
+default. Its own context says what the box costs while editing: it frames the
+scene a little wider than the objects, and its numbers sit over whatever is near
+its edge. Alex chose the cube as the default instead.
+
+### Decision
+
+- **`axes` is `"cube"` unless something says otherwise**: in the widget, in the
+  studio's panel, in a figure the `studio` and `widget` backends draw, and in a
+  page saved without a choice.
+- **The button goes round from it**: cube, box, none, and the cube again. The
+  default's next is still the other way to say the scale, and none still comes
+  last.
+- **`True` is still the box**, and `False` none. A page saved with a choice
+  keeps it.
+
+### Rejected
+
+- **Reading `True` as the cube**: `True` is what a view held when the box was
+  the only scale there was, so it says the box, and a cell or a saved page from
+  then still draws what it drew.

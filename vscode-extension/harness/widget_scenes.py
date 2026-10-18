@@ -328,12 +328,13 @@ def main(out):
 
     # Edited, so its session draws it in metres -- magpylib's own display would
     # pick millimetres, where 56 of them are nothing like small. Never drawn,
-    # so no camera: the page frames it, with its axes on.
+    # so no camera: the page frames it, with the box on -- the box is what
+    # the first fit once framed wrong.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # the ring's magnets have no names
-        small = SceneWidget(small_ring(), editable=True)
+        small = SceneWidget(small_ring(), editable=True, axes="box")
     if small._camera is not None or small.axes != "box":
-        raise SystemExit("small.html: a view never drawn, with its axes on")
+        raise SystemExit("small.html: a view never drawn, with the box on")
     small.write_html(out / "small.html")
     span = max(high - low for low, high in small.payload["ranges"])
 

@@ -95,7 +95,6 @@ Protocol surface (all JSON-serializable in/out):
 from __future__ import annotations
 
 import ast
-import contextlib
 import difflib
 import json
 import math
@@ -108,13 +107,13 @@ from importlib.metadata import version as _package_version
 import magpylib as magpy
 import numpy as np
 import plotly.graph_objects as go
+from magpylib._src.style import get_style
 from scipy.spatial.transform import Rotation as R
 
 from magpylib_studio import (
     collisions,
     expressions,
     meshes,
-    style_compat,
     threejs,
     units,
 )
@@ -2675,7 +2674,7 @@ class MagpylibStudioSession:
             obj = _resolve_type(event["type"])(**params)
         self._stamp_mesh(obj, object_id)
         for path, value in (event.get("style") or {}).items():
-            style_compat.set_style(obj, path, value)  # same call the GUI/LLM makes
+            obj.style.set(path, value)  # same call the GUI/LLM makes
         self._objs[object_id] = obj
         self._specs[object_id] = spec
         parent = event.get("parent")
@@ -3049,7 +3048,7 @@ class MagpylibStudioSession:
             obj = cls(**params)
         self._stamp_mesh(obj, spec["id"])
         for path, value in spec.get("style", {}).items():
-            style_compat.set_style(obj, path, value)  # same call the GUI/LLM makes
+            obj.style.set(path, value)  # same call the GUI/LLM makes
         if spec["id"] in self._objs:
             raise ValueError(f"duplicate object id {spec['id']!r}")
         self._objs[spec["id"]] = obj
@@ -3276,7 +3275,7 @@ class MagpylibStudioSession:
         return {"pixels": list(pixel.shape[:2])} if pixel.ndim == 3 else {}
 
     def get_schema(self, object_id):
-        schema = style_compat.schema(self._objs[object_id])
+        schema = type(self._objs[object_id].style).schema()
         # magpylib's schema does not say what a pixel field source may be —
         # only that it is one. We know: it is the set the engine evaluates.
         # Without this the inspector has nothing to build a widget from and
@@ -3551,8 +3550,9 @@ class MagpylibStudioSession:
     def get_values(self, object_id):
         obj = self._objs[object_id]
         return {
-            "set": style_compat.set_values(obj),  # explicitly set (dotted keys)
-            "resolved": style_compat.resolved_values(obj),  # effective values
+            "set": obj.style.set_values(),  # explicitly set (dotted keys)
+            # effective values: the set ones merged over the defaults
+            "resolved": get_style(obj, magpy.defaults).as_dict(flatten=True),
         }
 
     def get_figure(self, animation=False, template=None):
@@ -3562,17 +3562,9 @@ class MagpylibStudioSession:
         resolved here because plotly.js has no named-template registry.
         The whole scene is always drawn: objects hidden via set_visible carry
         magpylib's own hide switches, keeping every colour assignment stable."""
-        # Drawn as the 3D view draws, where magpylib can: a bare sensor the same
-
-        # size in the chart as in the view. On released magpylib the chart is all
-
-        # there is, and it draws as magpylib does.
-
-        with (
-            threejs.pinned_scene_units()
-            if threejs.available()
-            else contextlib.nullcontext()
-        ):
+        # Drawn as the 3D view draws: a bare sensor the same size in the chart
+        # as in the view.
+        with threejs.pinned_scene_units():
             fig = magpy.show(
                 self.scene, backend="plotly", animation=animation, return_fig=True
             )
@@ -4302,10 +4294,10 @@ class MagpylibStudioSession:
         first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
         try:
-            style_compat.set_style(obj, path, value)
+            obj.style.set(path, value)
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
             return {"ok": False, "error": str(e)}
-        style = style_compat.set_values(obj)
+        style = obj.style.set_values()
 
         def mutate(doc):
             self._create_event(object_id)["style"] = style

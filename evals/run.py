@@ -111,7 +111,15 @@ def environments(rebuild=False):
     plain = ENVS / "plain"
     if rebuild or not (plain / "bin" / "python").exists():
         _uv("venv", "--clear", "--python", "3.13", str(plain))
-        _uv("pip", "install", "--python", str(plain / "bin" / "python"), "magpylib")
+        # the magpylib the studio condition gets, named: a pre-release is
+        # not what a bare `magpylib` resolves to
+        _uv(
+            "pip",
+            "install",
+            "--python",
+            str(plain / "bin" / "python"),
+            "magpylib>=6.0.0rc0",
+        )
     studio = ENVS / "studio"
     wheels = ENVS / "wheel"
     shutil.rmtree(wheels, ignore_errors=True)
@@ -121,7 +129,6 @@ def environments(rebuild=False):
     _uv(
         "pip",
         "install",
-        "--no-sources",
         "--python",
         str(studio / "bin" / "python"),
         str(wheel),

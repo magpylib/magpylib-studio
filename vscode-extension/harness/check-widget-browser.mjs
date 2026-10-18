@@ -34,9 +34,9 @@
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
  * renderer loads, and a python with the widget's extra installed -- `pip
- * install -e ".[widget]"` -- and magpylib's display-backend API. Missing any of them
- * is a failure, not a skip: a check that passes without having run is worse
- * than none. WebGL runs on SwiftShader, so no GPU is needed.
+ * install -e ".[widget]"`. Missing any of them is a failure, not a skip: a
+ * check that passes without having run is worse than none. WebGL runs on
+ * SwiftShader, so no GPU is needed.
  */
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -1978,17 +1978,10 @@ async function savedView(port, base, out, expected) {
   await check(
     "the view cube turns the view, and stays out of the picture",
     async () => {
+      // the cube is the default, and what the checks after expect
       await tab.hover(await tab.evaluate(centreOf(VIEW)));
       await wait(300);
-      await tab.click(await tab.evaluate(centreOf(tool("Scale")))); // the box's next
-      try {
-        return await cubeTurnsTheView();
-      } finally {
-        // the cube's next is none, and none's the box the checks after expect
-        for (let i = 0; i < 2; i++) {
-          await tab.click(await tab.evaluate(centreOf(tool("Scale"))));
-        }
-      }
+      return await cubeTurnsTheView();
     },
   );
 

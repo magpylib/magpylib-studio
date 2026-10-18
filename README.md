@@ -49,7 +49,6 @@ The same 3D view, in Jupyter, marimo, VS Code notebooks or Colab:
 
 ```sh
 pip install "magpylib-studio[widget]"
-pip install "magpylib @ git+https://github.com/magpylib/magpylib@main"  # until magpylib's next release
 ```
 
 ```python
@@ -120,7 +119,7 @@ uvx library-skills  # pick magpylib-studio; for Claude Code, install into .claud
 pip install magpylib-studio
 ```
 
-Python 3.11 or newer, and magpylib 5.2 or newer.
+Python 3.11 or newer, and magpylib 6 (6.0.0rc0 or newer).
 
 ## Learn more
 

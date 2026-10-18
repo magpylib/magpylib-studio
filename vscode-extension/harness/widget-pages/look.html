@@ -4,7 +4,7 @@
   payload from the fixtures, read only, with nothing to ask python for.
   `?out=readings.json&index=0` names the fixture and, for a file holding a
   list, which entry; `?dark` and `?light` say what the page is; `?tools`
-  keeps the hover bar in sight, `?editable` offers the pencil, `?axes=cube`
+  keeps the hover bar in sight, `?editable` offers the pencil, `?axes=box`
   says the scale another way. No check reads this page; a person does, by
   screenshot.
 -->
@@ -38,7 +38,7 @@
         tree: fixture.tree ?? fixture.state?.tree ?? [],
         selected: [],
         hidden: [],
-        axes: query.get("axes") ?? "box",
+        axes: query.get("axes") ?? "cube",
         theme: "auto",
         height: Number(query.get("height") ?? 520),
         frames: 1,

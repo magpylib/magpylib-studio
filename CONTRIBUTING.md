@@ -38,10 +38,7 @@ it, as GitHub already does.
 
 ## What is checked, and where
 
-The engine's tests run against both magpylib versions
-(`.venv/bin/python -m pytest -q`): released magpylib has no display-backend API,
-so a test that draws (`get_scene`) fails there; ask the objects instead, or skip
-as the widget tests do.
+The engine's tests: `.venv/bin/python -m pytest -q`.
 
 The extension is checked at three levels, all wired into `npm run compile` so
 they run before every F5 and before packaging: type-checking and ESLint over
@@ -58,12 +55,12 @@ save/open path. Two notes: the user-data dir is forced into the system temp dir
 because a unix socket path cannot exceed 103 characters; and `.vscode-test/`
 holds a 300 MB VS Code download, gitignored.
 
-Both suites and the packaging run in CI on every push, the engine against **both
-magpylib versions**, and a job installs the built wheel alone and runs an edit
-through a fake kernel connection (`tools/check-package-alone.py`). Pushing a
-`v*` tag builds the `.vsix` and attaches it to a GitHub release; the engine goes
-to PyPI and the extension to the Marketplace from the same tag, which is what
-lets **Install the Engine** set the engine up rather than tell you to.
+Both suites and the packaging run in CI on every push, and a job installs the
+built wheel alone and runs an edit through a fake kernel connection
+(`tools/check-package-alone.py`). Pushing a `v*` tag builds the `.vsix` and
+attaches it to a GitHub release; the engine goes to PyPI and the extension to
+the Marketplace from the same tag, which is what lets **Install the Engine** set
+the engine up rather than tell you to.
 
 To release, bump `vscode-extension/package.json` and rename the `[Unreleased]`
 heading of `vscode-extension/CHANGELOG.md` in one commit, then push the `v*`

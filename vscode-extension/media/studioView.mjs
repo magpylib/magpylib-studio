@@ -47,7 +47,7 @@ const values = {
   tree: [],
   selected: [],
   hidden: [],
-  axes: true,
+  axes: "cube",
   theme: "auto",
   height: 400,
   frames: 1,
@@ -201,23 +201,10 @@ async function refresh() {
 }
 
 async function drawScene() {
-  let payload;
-  let tree;
-  try {
-    [payload, tree] = await Promise.all([
-      rpc("get_scene", {}),
-      rpc("object_tree", {}),
-    ]);
-  } catch (error) {
-    // The engine cannot draw a scene graph -- an older magpylib, most likely,
-    // without the display-backend API. The chart is what the panel drew before
-    // any of this, so it falls back to that and says why.
-    setMode(true);
-    const text = String(error.message || error);
-    say(text);
-    vscodeApi.postMessage({ type: "notice", text });
-    return;
-  }
+  const [payload, tree] = await Promise.all([
+    rpc("get_scene", {}),
+    rpc("object_tree", {}),
+  ]);
   if (charting()) return; // switched while the engine was answering
   const hidden = hiddenIn(tree);
   told.hidden = hidden;
