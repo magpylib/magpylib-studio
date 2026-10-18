@@ -4073,7 +4073,7 @@ class MagpylibStudioSession:
         plane="xy",
         offset=0.0,
         extent=None,
-        resolution=40,
+        resolution=80,
         field="B",
         component="magnitude",
         log=False,
@@ -4135,6 +4135,7 @@ class MagpylibStudioSession:
             labels=(f"{plane[0]} ({model})", f"{plane[1]} ({model})"),
             subtitle=f"on {plane} at {'xyz'[inormal]} = {offset * scale:g} {model}"
             + _skipped_note(data.get("skipped")),
+            smooth=True,
         )
 
     def _sensor_field_map(
@@ -4184,10 +4185,24 @@ class MagpylibStudioSession:
         )
 
     def _heatmap(
-        self, u, v, values, unit, field, component, log, template, labels, subtitle
+        self,
+        u,
+        v,
+        values,
+        unit,
+        field,
+        component,
+        log,
+        template,
+        labels,
+        subtitle,
+        smooth=False,
     ):
         """Shared heatmap builder for both field-map sources. `values` and
-        `unit` are SI; the map is in the scene's field unit."""
+        `unit` are SI; the map is in the scene's field unit. With `smooth`,
+        plotly interpolates between the samples: a field sampled on a plane is
+        continuous, and drawn as blocks a ring 20 samples across was a jagged
+        mosaic. A sensor's map is not smoothed: each cell is a pixel's reading."""
         scale, unit = self._field_shown(field, unit)
         values = np.asarray(values) * scale
         if component == "magnitude":
@@ -4233,6 +4248,8 @@ class MagpylibStudioSession:
         }
         if zmid is not None:
             heatmap["zmid"] = zmid
+        if smooth:
+            heatmap["zsmooth"] = "best"
         fig = go.Figure(data=[heatmap])
         fig.update_layout(
             xaxis_title=labels[0],
