@@ -2492,9 +2492,6 @@ class MagpylibStudioSession:
         #: What redo held when the current gesture began, to put back if the
         #: gesture turns out to have changed nothing.
         self._interaction_redo: list[dict] = []
-        #: Prototype (#45): whether `get_scene` carries field lines through
-        #: the pixels of the sensors that read the field.
-        self.field_lines = False
         #: Inside a gesture: the ids it moves -- a set, or None for anything,
         #: as a variable does -- and per sensor, the grid and the field of
         #: what stays, computed once for the gesture. See `_field_lines`.
@@ -3651,6 +3648,8 @@ class MagpylibStudioSession:
             scene["overlaps_error"] = f"{type(e).__name__}: {e}"
         if self.field_lines:
             scene["fieldlines"] = self._field_lines(readings)
+            # for a view that keeps no switch of its own: the studio's panel
+            scene["field_lines"] = True
         return scene
 
     def _overlap_payload(self):
@@ -3785,6 +3784,29 @@ class MagpylibStudioSession:
 
         verb = "overlap on purpose" if intended else "warn about the overlap of"
         return self._edit_unbuilt(mutate, f"{verb} {a} and {b}")
+
+    @property
+    def field_lines(self):
+        """Prototype (#45): whether `get_scene` carries field lines through
+        the pixels of the sensors that read the field. The document's, so the
+        scene's file keeps it -- see `set_field_lines`."""
+        return bool(self.doc.get("field_lines"))
+
+    def set_field_lines(self, on=True):
+        """Draw field lines through the pixels of each sensor that reads the
+        field, or put them away. Kept in the document as one step to undo, as
+        a view's choice the scene's file should remember, and carried through
+        the script tab; the scene is not rebuilt."""
+        if self.field_lines == bool(on):
+            return {"ok": True, "unchanged": True}
+
+        def mutate(doc):
+            if on:
+                doc["field_lines"] = True
+            else:
+                doc.pop("field_lines", None)
+
+        return self._edit_unbuilt(mutate, "field lines " + ("on" if on else "off"))
 
     def get_gap(self, a, b):
         """How objects `a` and `b` stand to each other, each where its path

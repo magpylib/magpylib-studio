@@ -1685,3 +1685,40 @@ it is an edit of the scene, made to look inside.
 - **The level as a percentage beside the eye**: it covered the end of the row.
 - **Sliding to nothing hides**: hiding stays the click's, so faded and hidden do
   not blur.
+
+## 0032. Field lines are switched in the scene's document
+
+**Status:** accepted 2026-10-18, for the field-lines prototype
+([#45](https://github.com/magpylib/magpylib-studio/issues/45)).
+
+### Context
+
+The lines' switch was a widget trait and a flag on the session: gone when the
+view went, never in the scene's file, and nowhere in the VS Code panel, whose
+view has no kernel to set a trait on. #45 asked where to keep it: a magpylib
+style property, or the studio's document.
+
+### Decision
+
+- **The document's**, as `"field_lines": true`, beside `intended_overlaps`: a
+  key the engine carries and does not build from, so the script tab keeps it.
+  `set_field_lines(on)` switches it as one step to undo, with no rebuild, and
+  over RPC.
+- **Saved, unlike a fade
+  ([0031](#0031-the-legends-eye-fades-as-a-view-setting))**, because it says
+  what the scene shows of the field, as hiding does, and a file reopened without
+  its lines would look like a different scene.
+- **Every host reads it there.** A notebook's `field_lines` trait follows the
+  document after each edit, undo and redo; asked for when a view is made, it is
+  where editing starts, not an edit. The panel takes it from the scene the
+  engine sends and tells the host when its button flips it, as hiding is told.
+- **On or off for the whole scene**, for every sensor that reads the field.
+
+### Rejected
+
+- **A magpylib style property per sensor** (`style.pixel.field.lines`): the
+  right home in the end, since the lines are that sensor's drawing and every
+  backend could read it, but an API change to magpylib after 6.0. When it lands,
+  the document's key becomes the sensors' property.
+- **A view setting, not saved**, as a fade is: lost on every reopen, and the
+  panel's view would have nothing to keep it in.

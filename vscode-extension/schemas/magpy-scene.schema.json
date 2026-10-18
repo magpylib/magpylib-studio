@@ -78,6 +78,10 @@
         "maxItems": 2
       }
     },
+    "field_lines": {
+      "description": "Draw field lines through the pixels of each sensor that reads the field. A prototype (#45).",
+      "type": "boolean"
+    },
     "events": {
       "type": "array",
       "description": "What built the scene, in order. Folding it from the start reproduces the scene exactly, ids included.",

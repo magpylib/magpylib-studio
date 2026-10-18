@@ -868,24 +868,31 @@ class SceneWidget(anywidget.AnyWidget):
         self._shown = None
         #: The edits of the drag in progress, as the view last sent them.
         self._dragged = None
+        # Lines asked for when the view was made are part of where editing
+        # starts, not an edit; a document that has them on shows them.
+        if self.field_lines and not session.field_lines:
+            session.set_field_lines(True)
         # Where editing starts: undo stops here, and `reset` comes back here.
         # What the session did before the view -- a scene function's build,
         # steps made from code -- is its starting point, not edits.
         session.forget_history()
         self._start = json.dumps(session.doc, sort_keys=True, default=str)
-        session.field_lines = self.field_lines
         self.editable = handles
         self._show(None)
 
     @traitlets.observe("field_lines")
     def _field_lines_asked_for(self, change):
         """The lines asked for, or put away: the view's button, or
-        ``view.field_lines``. They are computed by a session, so a view of
-        the cell's own objects copies them into one now, as the pencil does,
-        with the handles left away -- the view stays one to look at."""
-        if getattr(self, "_session", None) is not None:
-            self._session.field_lines = change["new"]
-            self.payload = self._session.get_scene()
+        ``view.field_lines``. The document keeps the choice, as one step to
+        undo (`set_field_lines`), and the trait follows the document back --
+        see `_show`. They are computed by a session, so a view of the cell's
+        own objects copies them into one now, as the pencil does, with the
+        handles left away -- the view stays one to look at."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            if bool(change["new"]) != session.field_lines:
+                session.set_field_lines(change["new"])
+                self._show({"by": "field_lines", "on": bool(change["new"])})
         elif change["new"] and getattr(self, "_given", None):
             if self.editable is None:
                 return  # made for looking only: no session, so no lines
@@ -914,6 +921,8 @@ class SceneWidget(anywidget.AnyWidget):
             self.hidden = [key for key in self.hidden if key in ids]
             self.faded = {k: v for k, v in self.faded.items() if k in ids}
             self.variables = _values_of(self._session)
+            # an undo or a redo can turn the lines on or off
+            self.field_lines = self._session.field_lines
             if not first:
                 self.last_edit = edit or {}
                 self.revision += 1

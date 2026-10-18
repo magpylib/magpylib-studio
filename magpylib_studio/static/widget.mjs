@@ -1640,13 +1640,13 @@ function render({ model, el }) {
    *  panel, where the view is the editor. Pressed while the handles are
    *  out, as the projection button is while the view is orthographic. */
   /** The lines' button: pressed while they are drawn; hidden with no sensor
-   *  that reads the field, and wherever no python can compute it -- a saved
-   *  page, a host's own editor, a view made for looking only. */
+   *  that reads the field, and wherever nothing can compute it -- a saved
+   *  page, a view made for looking only. The studio's panel has no kernel
+   *  but an engine behind its editor, which the switch goes to as an edit. */
   function showLines() {
     linesButton.hidden =
       model.get("editable") === null ||
-      model.editor !== undefined ||
-      Boolean(model.get("standalone")) ||
+      (Boolean(model.get("standalone")) && model.editor === undefined) ||
       !(model.get("payload")?.readings ?? []).length;
     pressed(linesButton, Boolean(model.get("field_lines")));
   }
