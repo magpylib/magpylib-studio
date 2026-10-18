@@ -207,16 +207,16 @@ def inside(sources, points):
 def colours(sensor, readings):
     """The table a line of `sensor` is coloured from: colours for |field|
     evenly from the least to the most its pixels read, as its arrows are
-    coloured -- by magpylib's own `scale_pixel_norms` over the readings and
+    coloured -- by magpylib's own `scaled_norms` over the readings and
     `colors_from_colorscale`, with the sensor's ``colorscaling`` and
     ``colormap`` -- so a line and an arrow where they meet are one colour,
     and a change to either setting is the lines' too. ``(table, [low, high])``;
     past the readings a line takes the end colour.
 
-    `readings` are the sensor's, as `sensor_pixel_fields` hands them over:
+    `readings` are the sensor's, as `pixel_fields` hands them over:
     ``(path_length, n_pixels, 3)``, or None where it reads nothing yet.
     """
-    from magpylib.graphics.backend import colors_from_colorscale, scale_pixel_norms
+    from magpylib.graphics.backend import colors_from_colorscale, scaled_norms
 
     from magpylib_studio.threejs import _resolve
 
@@ -234,7 +234,7 @@ def colours(sensor, readings):
         high = low * (1 + 1e-9) + 1e-30
     levels = np.linspace(low, high, LUT_STEPS)
     # among the readings, so they are spread over [0, 1] as the arrows' are
-    factors = scale_pixel_norms(np.concatenate([norms, levels]), scaling)[-LUT_STEPS:]
+    factors = scaled_norms(np.concatenate([norms, levels]), scaling)[-LUT_STEPS:]
     colormap = _resolve(sensor, "style.pixel.field.colormap")
     table = colors_from_colorscale(factors, colormap, cmin=0, cmax=1)
     return list(table), [low, high]

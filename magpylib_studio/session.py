@@ -3861,9 +3861,9 @@ class MagpylibStudioSession:
         sensors = fieldlines.sensors_of(self.scene)
         if not sensors:
             return []
-        from magpylib.graphics.backend import sensor_pixel_fields
+        from magpylib.graphics.backend import pixel_fields
 
-        readings = sensor_pixel_fields(self.scene)
+        readings = pixel_fields(self.scene)
         items = []
         for sensor in sensors:
             key = key_of.get(id(sensor))
