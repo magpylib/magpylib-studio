@@ -280,6 +280,27 @@ payload says the scene's `units` and the `expressions` written behind the pose
 fields, so the view's readout shows `gap` in the scene's millimetres and reads
 `15 mm`, `5°` or a name back through `quantity`.
 
+Every scene also says which objects overlap
+([0029](decisions.md#0029-overlapping-magnets-are-found-and-said-as-you-edit)):
+`overlaps`, pairs of ids, with `overlap_depths`; `intended_overlaps`, the pairs
+marked as meant; and `overlaps_by_step` where something moves along a path. Two
+objects overlap when they interpenetrate by more than a nanometre, touching
+never, each where its path ends; a magnet inside a pattern's copied group is
+named by the copy that holds it. `collisions.py` decides it from the magpylib
+objects alone, keeping each shape built while it is unchanged, so a drag
+rebuilds only what moved. `get_overlaps` lists the pairs, `get_gap` measures two
+objects, `set_overlap_intended` marks a pair, kept in the document's
+`intended_overlaps` and carried through the script tab, and `list_objects` names
+each object's partners, which the Objects tree marks as it marks a broken mesh.
+The view outlines each overlapping object in amber, its own traces only, and in
+a run the pairs of the step shown; a selected one keeps its green. The legend
+marks each overlapping row, passed up to a folded collection, faint for a pair
+marked as meant; above the list it counts the pairs, a click stepping through
+them with a way to mark the one shown, and with two objects selected says how
+far apart they are. A read-only view works the overlaps out from the objects it
+was given, keyed as its payload. A check that fails leaves `overlaps` empty and
+says why in `overlaps_error`.
+
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is
 that renderer as an anywidget with a legend that nests the objects, tools,
@@ -461,7 +482,7 @@ read, so a part in two scenes is reoriented once.
 | patterns  | `duplicate_around` (circular) · `duplicate_along` (linear; twice = a grid) · `mirror`                                                                                                                                                                                                                                                                                                          |
 | variables | `get_variables` · `set_variable` · `set_variable_bounds` · `set_variable_unit` · `set_model_unit` · `set_field_unit` · `get_units` · `quantity` · `read_values` · `field_units` · `unit_kinds` · `rename_variable` · `remove_variable` · `unknown_variables` · `expression_help` · `check_expression` · `set_variables` · `use_variant` · `save_variant` · `rename_variant` · `remove_variant` |
 | history   | `get_events` · `edit_event` · `move_event` · `remove_event` · `set_rollback`                                                                                                                                                                                                                                                                                                                   |
-| view      | `get_scene` (3D payload) · `get_figure` (plotly) · `get_field_figure` · `get_field_map` · `get_sweep_figure`                                                                                                                                                                                                                                                                                   |
+| view      | `get_scene` (3D payload) · `get_overlaps` · `get_figure` (plotly) · `get_field_figure` · `get_field_map` · `get_sweep_figure`                                                                                                                                                                                                                                                                  |
 | field     | `get_field` · `sweep`                                                                                                                                                                                                                                                                                                                                                                          |
 | undo      | `undo` · `redo` · `goto_history`                                                                                                                                                                                                                                                                                                                                                               |
 | I/O       | `load_scene` · `set_base_dir` · `load_script` · `load_captured` · `apply_builder_script` · `list_examples` · `load_example` · `clear_scene` · `to_dict` · `to_script` · `to_builder_script`                                                                                                                                                                                                    |

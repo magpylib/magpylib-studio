@@ -863,6 +863,13 @@ function render({ model, el }) {
     onHide: (ids) => commit("hidden", ids),
     onFrame: (ids) => api?.fitView(ids),
     onHint: (ids) => api?.hint(ids),
+    // An overlap marked as meant, or warned about again: an edit, settled
+    // like any other, so the scene comes back without it.
+    onIntend: ([a, b], intended) =>
+      call("set_overlap_intended", { a, b, intended }).catch(() => {}),
+    // How far apart two selected objects are, which only a session can say.
+    onMeasure: (a, b) => (editable() ? call("get_gap", { a, b }) : null),
+    canEdit: () => editable(),
   });
   let legendOpen = null; // undecided until there is a tree, and room, to decide by
   let legendRoom = null; // waits for the view to have a size to decide in

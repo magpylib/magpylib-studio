@@ -37,6 +37,26 @@ let outlines = [];
 // selected: a legend row under the pointer. By id, so it can be drawn again
 // round whatever a redraw builds for them.
 let hintIds = [];
+// What overlaps another object, by id: outlined in amber round what is
+// drawn for it, as the selection is in green. Each scene the engine sends
+// says which (`overlaps`), so the outline follows a drag frame by frame.
+// They are found where each path ends (`endOverlapIds`) and, where something
+// moves, at every step (`stepOverlapIds`), so a run shows each step's own.
+const NO_OVERLAPS = Object.freeze([]);
+let endOverlapIds = NO_OVERLAPS;
+let stepOverlapIds = null;
+let overlapIds = NO_OVERLAPS;
+
+/** What overlaps at frame `index` of a run of `frames`: the step it shows,
+ *  where the scene says each step's, else where the paths end and nothing
+ *  before. A run may have fewer frames than its paths have steps. */
+function overlapsAt(index, frames) {
+  if (!stepOverlapIds) return index >= frames - 1 ? endOverlapIds : NO_OVERLAPS;
+  const steps = stepOverlapIds.length;
+  const step =
+    frames > 1 ? Math.round((index * (steps - 1)) / (frames - 1)) : steps - 1;
+  return stepOverlapIds[Math.min(Math.max(step, 0), steps - 1)];
+}
 let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
 // How the host wants the scale said: "box", "cube" -- the view cube and the
@@ -824,6 +844,13 @@ const EDGE_ANGLE = 25;
  *  yellower than the green magpylib paints a magnet's south pole. */
 const SELECTION_COLOUR = "#39ff14";
 
+/** What an overlap is drawn in: an amber, the colour of a warning, as the
+ *  legend's mark is. Not a red: magpylib paints a magnet's north pole red,
+ *  white and green across it, and a red outline vanished on the very magnets
+ *  it marked. Lines only, as the selection is, so a magnet's own colours
+ *  still say its magnetization. */
+const OVERLAP_COLOUR = "#ffab00";
+
 /** How faint a pattern's copies are outlined beside their source, drawn in
  *  full: the family reads as one leader and its followers, and a click on
  *  any of them selects the source. */
@@ -860,41 +887,71 @@ const wideMaterials = new Set();
  */
 function outline(objectIds, opacity, copyOpacity = opacity) {
   const added = [];
-  const hang = (on, part) => {
-    part.raycast = () => {}; // an indicator, not a target
-    part.renderOrder = 1; // drawn over what it marks
-    part.userData.outline = true;
-    on.add(part);
-    added.push({ on, part });
-  };
+  const hang = hanger(added);
   for (const objectId of drawnFor(objectIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue; // a handle, or another node
       const own = trace.userData.copy ? copyOpacity : opacity;
-      if (trace.isMesh) {
-        outlineShape(trace, own, hang);
-        continue;
-      }
-      // A scatter: its lines take the selection's colour, and its markers
-      // too where it is a path. A sensor's markers can be its pixels,
-      // coloured by the field they read.
-      for (const part of trace.children) {
-        if (part.isLine) {
-          const pairs = segmentsOf(
-            part.geometry.getAttribute("position").array,
-          );
-          if (pairs.length) {
-            hang(part, wideSegments(pairs, OUTLINE_WIDTH, own, true));
-          }
-        } else if (trace.userData.path && part.isPoints) {
-          hang(part, pathMarkers(part, own));
-        }
+      outlineTrace(trace, own, hang, SELECTION_COLOUR, true);
+    }
+  }
+  return added;
+}
+
+/** Mark what overlaps, in the overlap's colour: each id's own traces and no
+ *  others. A pattern's copy is drawn under its source's node and named
+ *  there by `userData.copy`, so it is found by that name -- and a source's
+ *  outline stays off its copies, which may well be clear. */
+function outlineOverlaps(objectIds) {
+  const added = [];
+  const wanted = new Set(objectIds);
+  if (!wanted.size) return added;
+  const hang = hanger(added);
+  for (const [objectId, node] of byObjectId) {
+    if (!node.visible) continue;
+    for (const trace of node.children) {
+      if (!trace.userData.trace) continue;
+      if (wanted.has(trace.userData.copy ?? objectId)) {
+        outlineTrace(trace, 1, hang, OVERLAP_COLOUR, false); // a path is not what overlaps
       }
     }
   }
   return added;
+}
+
+/** How an outline's parts are hung on what they mark, and kept in `added`
+ *  to take off again. */
+function hanger(added) {
+  return (on, part) => {
+    part.raycast = () => {}; // an indicator, not a target
+    part.renderOrder = 1; // drawn over what it marks
+    part.userData.outline = true;
+    on.add(part);
+    added.push({ on, part });
+  };
+}
+
+/** One trace outlined in `colour`: a shape by its edges; a scatter's lines
+ *  in the colour, and its markers too where it is a path and `markers`
+ *  says so. A sensor's markers can be its pixels, coloured by the field
+ *  they read. */
+function outlineTrace(trace, opacity, hang, colour, markers) {
+  if (trace.isMesh) {
+    outlineShape(trace, opacity, hang, colour);
+    return;
+  }
+  for (const part of trace.children) {
+    if (part.isLine) {
+      const pairs = segmentsOf(part.geometry.getAttribute("position").array);
+      if (pairs.length) {
+        hang(part, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
+      }
+    } else if (markers && trace.userData.path && part.isPoints) {
+      hang(part, pathMarkers(part, opacity));
+    }
+  }
 }
 
 /** A shape's edges, wide in front where they show and faint through the
@@ -902,7 +959,7 @@ function outline(objectIds, opacity, copyOpacity = opacity) {
  *  edges to draw -- a sphere, smooth all over -- and one coloured face by
  *  face, which is a sensor's: its axes, or its arrows coloured by the field,
  *  every small part of which would be outlined on its own. */
-function outlineShape(mesh, opacity, hang) {
+function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
   let pairs;
   if (!mesh.userData.faceColoured) {
     const edges = new THREE.EdgesGeometry(mesh.geometry, EDGE_ANGLE);
@@ -913,8 +970,8 @@ function outlineShape(mesh, opacity, hang) {
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     pairs = boxEdges(mesh.geometry.boundingBox);
   }
-  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true));
-  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false));
+  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
+  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
 }
 
 /** Lines from `pairs` -- each six numbers, a segment's two ends -- `width`
@@ -922,7 +979,7 @@ function outlineShape(mesh, opacity, hang) {
  *  hidden by what stands in front, and drawn a little toward the eye, so
  *  that an edge is not lost in the faces it bounds; otherwise they show
  *  through everything. */
-function wideSegments(pairs, width, opacity, shown) {
+function wideSegments(pairs, width, opacity, shown, colour = SELECTION_COLOUR) {
   const material = new LineMaterial({
     linewidth: width,
     transparent: opacity < 1,
@@ -932,7 +989,7 @@ function wideSegments(pairs, width, opacity, shown) {
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -4,
   });
-  material.color = new THREE.Color(SELECTION_COLOUR);
+  material.color = new THREE.Color(colour);
   if (renderer) renderer.getSize(material.resolution);
   wideMaterials.add(material);
   return new LineSegments2(
@@ -1289,6 +1346,8 @@ function drawOutlines() {
   takeOff(outlines);
   outlines = [
     ...outline(selectedIds, 1, COPY_OUTLINE),
+    // the selection's green wins where an overlapping object is selected
+    ...outlineOverlaps(overlapIds.filter((id) => !selectedIds.includes(id))),
     ...patternTraces(selectedIds),
   ];
 }
@@ -2160,6 +2219,7 @@ function renderFrame(payload) {
   changes = [];
   changing = [];
   luts = payload.luts ?? [];
+  overlapIds = overlapsAt(payload.frame, payload.frames);
   for (const item of drawnItems(payload)) {
     const node = nodeFor(item.object_id, null);
     node.quaternion.identity(); // the geometry already holds the pose
@@ -2200,8 +2260,16 @@ function poseFrame(index) {
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
   }
+  const frames = Math.max(
+    1,
+    ...Object.values(tracks ?? {}).map((steps) => steps.length),
+    ...Object.values(changes ?? {}).map((steps) => steps.length),
+  );
+  const shown = overlapsAt(index, frames);
+  const turned = shown !== overlapIds;
+  overlapIds = shown;
   // What moved carries its outline; what was built again needs a new one.
-  if (changing.length) {
+  if (changing.length || turned) {
     drawOutlines();
     drawHints();
   }
@@ -2372,6 +2440,11 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   orientations = payload.orientations || {};
   anchors = payload.anchors || {};
   paths = payload.paths || {};
+  endOverlapIds = [...new Set((payload.overlaps ?? []).flat())];
+  stepOverlapIds = payload.overlaps_by_step
+    ? payload.overlaps_by_step.map((pairs) => [...new Set(pairs.flat())])
+    : null;
+  overlapIds = endOverlapIds;
   // Where the handles stand in each object's own frame. The payload's poses
   // are the last frame of a path -- which is the pose the geometry is drawn
   // at -- so this is what lets playback put a node back at any other one.

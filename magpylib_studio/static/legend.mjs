@@ -17,6 +17,12 @@
  * is told them (`sync`) and says what a click would make them (`onSelect`,
  * `onHide`), what it would look at (`onFrame`), or what the pointer is on
  * (`onHint`); the widget decides.
+ *
+ * What overlaps is marked: a warning at the end of each overlapping row,
+ * passed up to a folded collection, and above the list a count that steps
+ * through the pairs. The payload says which (`overlaps`), by the ids the view
+ * draws, a pattern's copies among them; a copy is not listed, so it is
+ * marked on its source's row.
  */
 
 /** Every node, parents before their children. */
@@ -147,7 +153,10 @@ function part(className, title) {
   return el;
 }
 
-export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
+export function createLegend(
+  container,
+  { onSelect, onHide, onFrame, onHint, onIntend, onMeasure, canEdit },
+) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
   let holds = {}; // the collections the view can select, as the payload says
@@ -172,6 +181,16 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
   // depth starts folded like the ones that were there.
   let foldDepth = Infinity;
   const folds = new Map(); // path -> what folds or opens that collection
+  let pairs = []; // the overlapping pairs, as the payload lists them
+  let depths = []; // how deep each goes, in metres, or null
+  let intended = []; // the pairs that overlap on purpose
+  let units = null; // how the scene shows a length, when it says
+  let sourceOf = new Map(); // a pattern's copy -> the source it is listed as
+  let labels = new Map(); // id -> its row's label
+  let stepped = null; // the pair the header last showed: { list, index }
+  let header = null; // what the header holds, to fill again
+  let measured = null; // the gap between the two selected: { key, text }
+  let shownPayload = null; // the payload the gap was measured in
 
   container.classList.add("magpy-legend");
   // A shift-click extends whatever text selection the page already has, and
@@ -278,6 +297,8 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
       count.textContent = `×${drawn}`;
       row.append(count);
     }
+    const warning = overlapMark(node);
+    if (warning) row.append(warning);
     // At the end of the row, as Figma's layers and VS Code's trees put a
     // row's actions: most of the time it is not showing, and a column kept
     // for it at the start pushed every name away from its caret.
@@ -330,6 +351,228 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     });
   }
 
+  /** The row an id is listed on: its own, or its source's for a copy. */
+  const rowOf = (id) => sourceOf.get(id) ?? id;
+
+  /** What an id is called: its row's label, and which copy for a copy. */
+  function nameOf(id) {
+    const row = rowOf(id);
+    const label = labels.get(row) ?? row;
+    return row === id
+      ? label
+      : `${label} (copy ${id.slice(id.lastIndexOf("#") + 1)})`;
+  }
+
+  /** A length as the scene shows one: in its unit, else in millimetres. */
+  function lengthOf(metres) {
+    const shown = units ?? { symbol: "mm", scale: 1000 };
+    const value = metres * shown.scale;
+    const text =
+      value === 0 || Math.abs(value) >= 0.01
+        ? value.toFixed(2)
+        : value.toPrecision(2);
+    return `${text} ${shown.symbol}`;
+  }
+
+  /** How deep an overlapping pair goes, or null where nobody knows. */
+  function overlapDepth(pair) {
+    const at = pairs.findIndex(([a, b]) => a === pair[0] && b === pair[1]);
+    return at < 0 ? null : (depths[at] ?? null);
+  }
+
+  /** Of `list`, the pairs `node` is in: its own, its copies', and -- for a
+   *  collection -- everything beneath it. */
+  function pairsOf(node, list) {
+    const mine = new Set(
+      node.children.length ? inTreeOrder([node]).map((n) => n.id) : [node.id],
+    );
+    return list.filter(([a, b]) => mine.has(rowOf(a)) || mine.has(rowOf(b)));
+  }
+
+  /** Whether a pair is the row's own: its, or its copies'. */
+  const ownBy = (node) => (pair) => pair.some((id) => rowOf(id) === node.id);
+
+  /** What a row says about one of its pairs. */
+  function describe(node, [a, b], meant) {
+    const [mine, other] = rowOf(a) === node.id ? [a, b] : [b, a];
+    const who =
+      mine === node.id
+        ? "Overlaps"
+        : `Copy ${mine.slice(mine.lastIndexOf("#") + 1)} overlaps`;
+    const depth = meant ? null : overlapDepth([a, b]);
+    return `${who} ${nameOf(other)}${depth == null ? "" : ` by ${lengthOf(depth)}`}${meant ? ", on purpose" : ""}`;
+  }
+
+  /** The warning at the end of an overlapping row, or nothing. Resting on it
+   *  shows the others; a click looks at them all. A row whose overlaps are
+   *  all meant gets it faint, and a click warns about them again. */
+  function overlapMark(node) {
+    const active = pairsOf(node, pairs);
+    const meant = pairsOf(node, intended).filter(ownBy(node));
+    if (!active.length && !meant.length) return null;
+    const mark = part("magpy-legend-overlap");
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", "overlaps");
+    // Its own pairs -- its copies', for a patterned collection -- always; those
+    // of the rows beneath it only while it is folded and they are not shown.
+    const own = active.filter(ownBy(node));
+    const lines = [
+      ...own.map((pair) => describe(node, pair, false)),
+      ...meant.map((pair) => describe(node, pair, true)),
+    ];
+    const inside = active.length - own.length;
+    if (inside) {
+      lines.push(`${inside} overlapping pair${inside === 1 ? "" : "s"} inside`);
+    }
+    if (!own.length && inside) mark.classList.add("inside");
+    const involved = [...new Set([...active, ...meant].flat().map(rowOf))];
+    if (!active.length) {
+      mark.classList.add("intended");
+      if (canEdit?.()) lines.push("Click to warn about it again.");
+    }
+    mark.title = lines.join("\n");
+    mark.addEventListener("mouseenter", () => onHint?.(involved));
+    mark.addEventListener("mouseleave", () => onHint?.(leaves.get(node.id)));
+    mark.addEventListener("click", (event) => {
+      event.stopPropagation(); // looking, not choosing
+      if (active.length) onFrame?.(involved);
+      else if (canEdit?.()) for (const pair of meant) onIntend?.(pair, false);
+    });
+    return mark;
+  }
+
+  /** A button-like piece of the header. */
+  function chip(className, text, title, act) {
+    const el = document.createElement("span");
+    el.className = className;
+    el.textContent = text;
+    el.title = title;
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    el.addEventListener("click", act);
+    el.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        act();
+      }
+    });
+    return el;
+  }
+
+  /** Above the list: how many pairs overlap, and a click to step through
+   *  them, each selected and looked at in turn -- in a scene of hundreds, or
+   *  with a magnet inside a ring, the one place to find them -- with, for
+   *  the one shown, a way to say it is meant; how many are meant, likewise;
+   *  and, with two objects selected, how far apart they are. */
+  function overlapHeader() {
+    header = document.createElement("div");
+    header.className = "magpy-legend-header";
+    const lists = { active: pairs, intended };
+    const step = (list) => () => {
+      const at =
+        stepped?.list === list ? (stepped.index + 1) % lists[list].length : 0;
+      stepped = { list, index: at };
+      const pair = [...new Set(lists[list][at].map(rowOf))];
+      propose(pair);
+      onFrame?.(pair);
+      fillHeader();
+    };
+    header.step = step;
+    fillHeader();
+    return header;
+  }
+
+  function fillHeader() {
+    if (!header) return;
+    header.replaceChildren();
+    const editing = canEdit?.() ?? false;
+    const showing = (list, all) =>
+      stepped?.list === list && stepped.index < all.length
+        ? all[stepped.index]
+        : null;
+    if (pairs.length) {
+      const pair = showing("active", pairs);
+      header.append(
+        chip(
+          "magpy-legend-overlaps",
+          `${pairs.length} overlap${pairs.length === 1 ? "" : "s"}`,
+          pair
+            ? `${pairs.map(([a, b]) => `${nameOf(a)} and ${nameOf(b)}`)[stepped.index]}${overlapDepth(pair) == null ? "" : `, ${lengthOf(overlapDepth(pair))} deep`}. Click for the next.`
+            : "Magnets that overlap: magpylib adds their magnetizations where they do, so the field there is wrong. Click to look at each pair in turn.",
+          header.step("active"),
+        ),
+      );
+      if (pair && editing) {
+        header.append(
+          chip(
+            "magpy-legend-act",
+            "On purpose",
+            `${nameOf(pair[0])} and ${nameOf(pair[1])} overlap on purpose, as a cut-out does: stop warning about it`,
+            () => onIntend?.(pair, true),
+          ),
+        );
+      }
+    }
+    if (intended.length) {
+      const pair = showing("intended", intended);
+      header.append(
+        chip(
+          "magpy-legend-intended",
+          `${intended.length} on purpose`,
+          "Overlaps marked as meant: not warned about. Click to look at each in turn.",
+          header.step("intended"),
+        ),
+      );
+      if (pair && editing) {
+        header.append(
+          chip(
+            "magpy-legend-act",
+            "Warn again",
+            `Warn about ${nameOf(pair[0])} and ${nameOf(pair[1])} overlapping again`,
+            () => onIntend?.(pair, false),
+          ),
+        );
+      }
+    }
+    if (measured?.text) {
+      const line = document.createElement("div");
+      line.className = "magpy-legend-measure";
+      line.textContent = measured.text;
+      header.append(line);
+    }
+    header.hidden = !header.childElementCount;
+  }
+
+  /** With exactly two objects selected, ask how far apart they are, and
+   *  say it in the header: once per pair and scene, not per repaint. */
+  function measure() {
+    const chosen = selected;
+    if (!onMeasure || chosen.length !== 2) {
+      if (measured) {
+        measured = null;
+        fillHeader();
+      }
+      return;
+    }
+    const key = `${chosen[0]}|${chosen[1]}`;
+    if (measured?.key === key && measured.payload === shownPayload) return;
+    measured = { key, payload: shownPayload, text: measured?.text ?? "" };
+    const asked = measured;
+    Promise.resolve(onMeasure(chosen[0], chosen[1]))
+      .then((answer) => {
+        if (measured !== asked || !answer || answer.ok === false) return;
+        const names = `${nameOf(chosen[0])} – ${nameOf(chosen[1])}`;
+        asked.text =
+          answer.state === "gap"
+            ? `${names}: ${lengthOf(answer.distance)} apart`
+            : answer.state === "touch"
+              ? `${names}: touching`
+              : `${names}: overlap${answer.depth == null ? "" : `, ${lengthOf(answer.depth)} deep`}`;
+        fillHeader();
+      })
+      .catch(() => {});
+  }
+
   /** Draw `tree`, for a view drawing `payload`. */
   function update({ tree, payload }) {
     const drawn = drawnIn(payload);
@@ -340,10 +583,27 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     pathOf = new Map();
     for (const node of tree) collectLeaves(node, drawn);
     swatches = swatchesOf(payload);
+    pairs = payload.overlaps ?? [];
+    depths = payload.overlap_depths ?? [];
+    intended = payload.intended_overlaps ?? [];
+    units = payload.units?.length ?? null;
+    shownPayload = payload;
+    if (
+      stepped &&
+      stepped.index >= (stepped.list === "active" ? pairs : intended).length
+    ) {
+      stepped = null;
+    }
+    sourceOf = new Map(
+      Object.entries(payload.copies ?? {}).flatMap(([source, made]) =>
+        made.map((copy) => [copy, source]),
+      ),
+    );
+    labels = new Map(order.map((node) => [node.id, node.label]));
     if (!order.some((node) => node.id === anchor)) anchor = null;
     rows.clear();
     folds.clear();
-    container.replaceChildren();
+    container.replaceChildren(overlapHeader());
     tree.forEach((node, i) => addRow(node, String(i), container));
     paint();
   }
@@ -353,6 +613,7 @@ export function createLegend(container, { onSelect, onHide, onFrame, onHint }) {
     selected = state.selected;
     hidden = new Set(state.hidden);
     paint();
+    measure();
     // A selection made here is already in view; one made in the view or in
     // a cell may be off the bottom of the list. Compared by place, not by
     // id: a rebuild carries the selection to new ids in the same places, and

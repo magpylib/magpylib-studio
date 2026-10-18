@@ -61,6 +61,11 @@ the scene cannot take fails at its line and says why.
   never with a loop over a variable. The object must sit in a collection.
 - Read the field with `s = ring.build()` and `s.session.get_field(...)`; try
   other values with `s.session.sweep(...)`. Both return plain data, in SI.
+- Before handing a design over, check `s.session.get_overlaps()` is empty:
+  magpylib adds the magnetizations of magnets that overlap, so their field is
+  wrong without a word. Touching is fine. `s.session.get_gap(a, b)` says how far
+  apart two objects are; an overlap meant as a cut-out is marked with
+  `s.session.set_overlap_intended(a, b)`.
 - Search a design in one script, in a loop over `set_variable` and `get_field`,
   not one run per guess. See [Search a design](#search-a-design).
 - To change a saved scene, write it out as a scene function, edit that, and run

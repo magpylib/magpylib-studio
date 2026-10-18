@@ -68,6 +68,16 @@
         }
       ]
     },
+    "intended_overlaps": {
+      "description": "Pairs of objects that overlap on purpose -- a magnet of opposite polarization inside another, to cut a hole -- and are not warned about. Each pair is two object ids, in order.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
     "events": {
       "type": "array",
       "description": "What built the scene, in order. Folding it from the start reproduces the scene exactly, ids included.",

@@ -37,8 +37,37 @@ export interface SceneObject {
    *  disconnected mesh computes a field, and the number is wrong — so the
    *  row says so rather than waiting to be clicked. */
   mesh?: MeshStatus;
+  /** The objects this one overlaps, by id. magpylib adds the magnetizations
+   *  of two magnets where they overlap, so the field there is wrong — and,
+   *  as for a broken mesh, the row says so rather than waiting to be
+   *  clicked. Pairs marked as meant are left out. */
+  overlaps?: string[];
   /** The scene the row is in, set by the tree. */
   scene?: SceneDocument;
+}
+
+/** Say on a row that its object overlaps others: the warning a broken
+ *  mesh gets, for the same reason — its field is wrong and looks right —
+ *  and whom it overlaps, in the description and the tooltip. */
+function markOverlaps(item: vscode.TreeItem, obj: SceneObject): void {
+  if (!obj.overlaps?.length || !obj.visible) return;
+  const others = obj.overlaps.join(', ');
+  item.iconPath = new vscode.ThemeIcon(
+    'warning',
+    new vscode.ThemeColor('problemsWarningIcon.foreground'),
+  );
+  item.description = `${item.description ?? obj.type} · overlaps ${others}`;
+  const said =
+    typeof item.tooltip === 'string'
+      ? item.tooltip
+      : (item.tooltip?.value ?? `${obj.id} — ${obj.type}`);
+  const tooltip = new vscode.MarkdownString(
+    `${said}\n\n$(warning) Overlaps **${others}**. magpylib adds their ` +
+      `magnetizations where they overlap, so the field there is wrong. ` +
+      `If it is meant — a cut-out — mark it so in the view's legend.`,
+  );
+  tooltip.supportThemeIcons = true;
+  item.tooltip = tooltip;
 }
 
 /** The engine's verdict on one mesh; see `magpylib_studio/meshes.py`. */
@@ -510,6 +539,7 @@ export class SceneTreeProvider
       // the one thing the tree is for — what the scene is made of. That it
       // is a copy is said in words, in the row it is said about.
       item.iconPath = iconFor(obj.type, this.extensionUri);
+      markOverlaps(item, obj);
       return item;
     }
     const fault = obj.mesh && meshFault(obj.mesh);
@@ -557,6 +587,7 @@ export class SceneTreeProvider
       );
       item.description = `${obj.mesh?.source ?? obj.type} · ${fault}`;
     }
+    markOverlaps(item, obj);
     item.command = {
       command: 'magpylib-studio.selectObject',
       title: 'Select in Studio',

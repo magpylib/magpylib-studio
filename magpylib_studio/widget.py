@@ -291,6 +291,10 @@ class SceneWidget(anywidget.AnyWidget):
             "get_values",
             "apply_edit",
             "reset_style",
+            # the legend: an overlap marked as meant, and the gap between two
+            # objects selected
+            "set_overlap_intended",
+            "get_gap",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
@@ -305,6 +309,8 @@ class SceneWidget(anywidget.AnyWidget):
     _VARIABLE_EDITS = frozenset({"set_variable", "restore_variable"})
     #: A variant used from the panel: its values set as one edit, settled.
     _VARIANT_EDITS = frozenset({"use_variant"})
+    #: An overlap marked as meant, or warned about again: settled.
+    _OVERLAP_EDITS = frozenset({"set_overlap_intended"})
 
     def __init__(self, *objects, animation=False, **kwargs):
         """A view of `objects` -- or of nothing yet, to `update` later.
@@ -551,10 +557,16 @@ class SceneWidget(anywidget.AnyWidget):
                     out.append(key)
             return out
 
+        # What overlaps, keyed as the payload draws them: a view nobody edits
+        # -- a notebook's `show()` -- still says that a magnet sits in another.
+        found = _overlaps_of(objects)
         with self.hold_sync():
             self.tree = tree
             self.selected = carried(self.selected)
             self.hidden = carried(self.hidden)
+            payload = self.payload or {}
+            if any(payload.get(key) != value for key, value in found.items()):
+                self.payload = {**payload, **found}
         self._objects = objects
         self._given = given
         return self
@@ -1031,6 +1043,12 @@ class SceneWidget(anywidget.AnyWidget):
                 edit["value"] = params.get("value")
         elif method in self._VARIANT_EDITS:
             edit = {"by": method, "variant": params.get("name")}
+        elif method in self._OVERLAP_EDITS:
+            edit = {
+                "by": method,
+                "objects": [params.get("a"), params.get("b")],
+                "intended": params.get("intended", True),
+            }
         elif method in self._OBJECT_EDITS:
             target = params.get("object_id")
             if method == "set_param":
@@ -1061,6 +1079,7 @@ class SceneWidget(anywidget.AnyWidget):
             method in self._SETTLES
             or method in self._OBJECT_EDITS
             or method in self._VARIANT_EDITS
+            or method in self._OVERLAP_EDITS
             or (method in self._VARIABLE_EDITS and not preview)
         )
         return answer, edit, settles
@@ -1272,3 +1291,34 @@ def display(widget):
     except ImportError:
         pass
     return False
+
+
+def _overlaps_of(objects):
+    """The overlaps among a read-only view's objects, keyed as its payload
+    is: ``{"overlaps", "overlap_depths"}``, and the pairs at each step where
+    something moves. Nothing when the check fails: a picture is not refused
+    for a warning it could not work out."""
+    import magpylib as magpy
+
+    from magpylib_studio import collisions
+
+    leaves = [
+        (key, obj)
+        for key, obj in objects.items()
+        if not isinstance(obj, magpy.Collection)
+    ]
+    plain = [obj for _, obj in leaves]
+    try:
+        found = collisions.find_overlaps(plain, depths=True)
+        out = {
+            "overlaps": [[leaves[i][0], leaves[j][0]] for i, j, _ in found],
+            "overlap_depths": [None if d is None else float(d) for _, _, d in found],
+        }
+        if collisions.path_length(plain) > 1:
+            out["overlaps_by_step"] = [
+                [[leaves[i][0], leaves[j][0]] for i, j in step]
+                for step in collisions.overlaps_along(plain)
+            ]
+    except Exception:  # noqa: BLE001 - an optional check must not cost the picture
+        return {}
+    return out

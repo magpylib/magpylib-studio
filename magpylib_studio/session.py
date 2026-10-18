@@ -110,7 +110,14 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import expressions, meshes, style_compat, threejs, units
+from magpylib_studio import (
+    collisions,
+    expressions,
+    meshes,
+    style_compat,
+    threejs,
+    units,
+)
 
 
 def example_scene():
@@ -3166,6 +3173,13 @@ class MagpylibStudioSession:
             for e in self.doc.get("events") or []
             if e.get("op") == "create"
         }
+        # What each object overlaps: its field is wrong, as a broken mesh's
+        # is, and the row says so as it says that. A check that fails costs
+        # the listing nothing.
+        try:
+            partners = self._overlap_partners(counted=copies == "count")
+        except Exception:  # noqa: BLE001 - an optional check must not cost the listing
+            partners = {}
         # what is built, which is the whole document unless it is rolled back
         for spec, parent in self._iter_specs(self._objects_view):
             objects.append(
@@ -3207,6 +3221,11 @@ class MagpylibStudioSession:
                         if copies == "count" and self._derived.get(spec["id"])
                         else {}
                     ),
+                    **(
+                        {"overlaps": partners[spec["id"]]}
+                        if spec["id"] in partners
+                        else {}
+                    ),
                 }
             )
             # copies made by a duplicate event: real objects in the field and
@@ -3221,9 +3240,32 @@ class MagpylibStudioSession:
                             "parent": parent["id"] if parent else None,
                             "visible": spec.get("visible", True),
                             "derived": spec["id"],
+                            **(
+                                {"overlaps": partners[copy_id]}
+                                if copy_id in partners
+                                else {}
+                            ),
                         }
                     )
         return objects
+
+    def _overlap_partners(self, counted=False):
+        """For each object that overlaps others -- marked pairs left out --
+        the ids it overlaps. `counted`, as copies are counted rather than
+        listed: a copy is named by its source, once, so a ring of sixty
+        crowded magnets costs the listing what a ring of six does."""
+        source_of = {
+            copy: source for source, made in self._derived.items() for copy in made
+        }
+        named = (lambda key: source_of.get(key, key)) if counted else (lambda key: key)
+        partners = {}
+        for a, b in self.get_overlaps():
+            a, b = named(a), named(b)
+            for one, other in ((a, b), (b, a)):
+                found = partners.setdefault(one, [])
+                if other not in found:
+                    found.append(other)
+        return partners
 
     @staticmethod
     def _pixel_shape(obj):
@@ -3592,7 +3634,186 @@ class MagpylibStudioSession:
             kind: self._shown(kind) for kind in ("length", "angle", "field")
         }
         scene["expressions"] = self._written_fields()
+        # Carried with every scene, a drag's preview frames included, so an
+        # overlap shows while the magnet is still under the pointer. A check
+        # that fails costs the scene nothing but its outlines, and says why.
+        try:
+            scene.update(self._overlap_payload())
+        except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
+            scene["overlaps"] = []
+            scene["overlaps_error"] = f"{type(e).__name__}: {e}"
         return scene
+
+    def _overlap_payload(self):
+        """What a view draws of the overlaps: the pairs to warn about and how
+        deep each goes, the pairs marked intended, and -- where something
+        moves along a path -- the pairs to warn about at each step."""
+        found = self.get_overlaps(details=True)
+        out = {
+            "overlaps": [[o["a"], o["b"]] for o in found if not o["intended"]],
+            "overlap_depths": [o["depth"] for o in found if not o["intended"]],
+            "intended_overlaps": [[o["a"], o["b"]] for o in found if o["intended"]],
+        }
+        leaves = self._overlap_leaves()
+        if collisions.path_length([obj for _, obj in leaves]) > 1:
+            marked = self._intended_pairs()
+            out["overlaps_by_step"] = [
+                [
+                    pair
+                    for pair in self._named_pairs(leaves, step_pairs)
+                    if frozenset(pair) not in marked
+                ]
+                for step_pairs in collisions.overlaps_along([obj for _, obj in leaves])
+            ]
+        return out
+
+    def get_overlaps(self, intended=False, details=False):
+        """The objects that overlap, as pairs of ids: ``[["r1", "r2"]]``.
+
+        Magpylib adds the magnetizations of two magnets wherever they overlap,
+        so the field of an overlapping pair looks plausible and is wrong.
+        Touching is not overlapping -- a Halbach ring touches on purpose -- so
+        a pair is listed only when it interpenetrates by more than a
+        nanometre (`collisions.TOL`). Sensors and dipoles never overlap, and
+        neither do two wires. Each object is taken where its path ends.
+
+        Every magnet is checked, copies a pattern made included. One inside a
+        copied group has no id of its own, and is named by the copy that holds
+        it: the id the view draws it under.
+
+        A pair marked as overlapping on purpose (`set_overlap_intended`) is
+        left out; with `intended`, only those are listed. With `details`,
+        every pair comes as ``{"a", "b", "depth", "intended"}``: how deep it
+        goes, in metres -- None where it is not known, through a mesh's
+        surface -- and whether it was marked.
+        """
+        leaves = self._overlap_leaves()
+        marked = self._intended_pairs()
+        found = collisions.find_overlaps([obj for _, obj in leaves], depths=True)
+        pairs, seen = [], set()
+        for i, j, depth in found:
+            pair = [leaves[i][0], leaves[j][0]]
+            if (key := tuple(pair)) in seen:
+                continue
+            seen.add(key)
+            meant = frozenset(pair) in marked
+            if details:
+                pairs.append(
+                    {
+                        "a": pair[0],
+                        "b": pair[1],
+                        "depth": None if depth is None else float(depth),
+                        "intended": meant,
+                    }
+                )
+            elif meant == bool(intended):
+                pairs.append(pair)
+        return pairs
+
+    def _overlap_leaves(self):
+        """Every magnet, wire and sensor, with the id it is drawn under: its
+        own, or that of the innermost copied group holding it."""
+        named = {id(obj): key for key, obj in self._objs.items()}
+        # the innermost group with an id, as `threejs._key_map` finds it
+        holder = {}
+        for key, obj in sorted(
+            self._objs.items(), key=lambda kv: -len(getattr(kv[1], "children_all", ()))
+        ):
+            for child in getattr(obj, "children_all", ()):
+                holder[id(child)] = key
+        leaves, seen = [], set()
+        for obj in self._objs.values():
+            for each in (obj, *getattr(obj, "children_all", ())):
+                if isinstance(each, magpy.Collection) or id(each) in seen:
+                    continue
+                seen.add(id(each))
+                leaves.append((named.get(id(each)) or holder[id(each)], each))
+        return leaves
+
+    @staticmethod
+    def _named_pairs(leaves, index_pairs):
+        out = []
+        for i, j in index_pairs:
+            pair = [leaves[i][0], leaves[j][0]]
+            if pair not in out:
+                out.append(pair)
+        return out
+
+    def _intended_pairs(self):
+        return {frozenset(pair) for pair in self.doc.get("intended_overlaps") or []}
+
+    def set_overlap_intended(self, a, b, intended=True):
+        """Say that objects `a` and `b` overlap on purpose -- a magnet of
+        opposite polarization inside another, to cut a hole, as magpylib's
+        superposition example does -- so that their overlap is no longer
+        warned about; with `intended=False`, warn about it again. Kept in the
+        document, as one step to undo, and carried through the script tab."""
+        for key in (a, b):
+            if key not in self._objs:
+                return {"ok": False, "error": f"no object {key!r} in the scene"}
+        if a == b:
+            return {"ok": False, "error": "an overlap is between two objects"}
+        pair = sorted([a, b])
+        pairs = [sorted(p) for p in self.doc.get("intended_overlaps") or []]
+        if (pair in pairs) == bool(intended):
+            return {"ok": True, "unchanged": True}
+
+        def mutate(doc):
+            kept = sorted(
+                [p for p in pairs if p != pair] + ([pair] if intended else [])
+            )
+            if kept:
+                doc["intended_overlaps"] = kept
+            else:
+                doc.pop("intended_overlaps", None)
+
+        verb = "overlap on purpose" if intended else "warn about the overlap of"
+        return self._edit_unbuilt(mutate, f"{verb} {a} and {b}")
+
+    def get_gap(self, a, b):
+        """How objects `a` and `b` stand to each other, each where its path
+        ends: ``{"state": "gap", "distance": m}``, ``{"state": "touch"}`` or
+        ``{"state": "overlap", "depth": m}`` -- depth None where it is not
+        known -- with how a length is `shown` in this scene. A group is
+        measured by the magnets in it: its nearest, or its deepest."""
+        for key in (a, b):
+            if key not in self._objs:
+                return {"ok": False, "error": f"no object {key!r} in the scene"}
+        leaves = self._overlap_leaves()
+        mine = {
+            key: [obj for owner, obj in leaves if owner == key or self._holds(key, obj)]
+            for key in (a, b)
+        }
+        best = None
+        for x in mine[a]:
+            for y in mine[b]:
+                found = collisions.separation(x, y)
+                if found is None:
+                    continue
+                state, value = found
+                rank = {"overlap": 0, "touch": 1, "gap": 2}[state]
+                if (
+                    best is None
+                    or rank < best[0]
+                    or (rank == best[0] == 0 and (value or 0) > (best[2] or 0))
+                    or (rank == best[0] == 2 and value < best[2])
+                ):
+                    best = (rank, state, value)
+        if best is None:
+            return {"ok": False, "error": "nothing there to measure"}
+        _, state, value = best
+        out = {"ok": True, "state": state, "shown": self._shown("length")}
+        if state == "gap":
+            out["distance"] = float(value)
+        elif state == "overlap":
+            out["depth"] = None if value is None else float(value)
+        return out
+
+    def _holds(self, key, obj):
+        group = self._objs.get(key)
+        return isinstance(group, magpy.Collection) and any(
+            child is obj for child in group.children_all
+        )
 
     def _written_fields(self):
         """The expression each element of a drag-editable field was written
@@ -6560,6 +6781,12 @@ class MagpylibStudioSession:
         No rebuild: nothing in the scene follows a variant until it is used,
         and a rebuild would throw away a run captured for the view's frames
         for nothing."""
+        return self._edit_unbuilt(mutate, label)
+
+    def _edit_unbuilt(self, mutate, label):
+        """Apply `mutate(doc)` to what the document says about the scene
+        rather than what builds it -- its variants, the overlaps it means --
+        as one step to undo, with no rebuild."""
         snapshot = json.loads(json.dumps(self.doc))
         mutate(self.doc)
         _canonical(self.doc)
