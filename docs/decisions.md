@@ -39,6 +39,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251)                                  | marimo's slow answers were its own, fixed in 0.25.1          | accepted 2026-10-17                                                  |
 | [0029](#0029-overlapping-magnets-are-found-and-said-as-you-edit)                               | Overlapping magnets are found, and said, as you edit         | accepted 2026-10-18, as built (#47)                                  |
 | [0030](#0030-the-view-cube-is-the-default-scale)                                               | The view cube is the default scale                           | accepted 2026-10-18                                                  |
+| [0031](#0031-the-legends-eye-fades-as-a-view-setting)                                          | The legend's eye fades, as a view setting                    | accepted 2026-10-18, as built                                        |
 
 ---
 
@@ -1635,3 +1636,50 @@ its edge. Alex chose the cube as the default instead.
 - **Reading `True` as the cube**: `True` is what a view held when the box was
   the only scale there was, so it says the box, and a cell or a saved page from
   then still draws what it drew.
+
+---
+
+## 0031. The legend's eye fades, as a view setting
+
+**Status:** accepted 2026-10-18, as built, after trying it in a saved page.
+
+### Context
+
+To see a sensor inside a Halbach ring, the ring had to be hidden, and then it
+was gone. Its opacity is in the Inspector's style tree
+([0023](#0023-the-inspector-is-the-widgets-object-panel-compact)), but set there
+it is an edit of the scene, made to look inside.
+
+### Decision
+
+- **Press the eye and slide sideways.** Left fades what the row holds, right
+  brings it back, 100 pixels from a tenth to whole. A press that does not slide
+  is the click, which hides as before. While it slides a thin bar along the
+  row's foot shows the level; at rest the eye is filled to it and stays in
+  sight, as a hidden row's does. A collection's row fades what it holds.
+- **A share of the object's own opacity, kept by id**: the widget's `faded`,
+  beside `hidden`, carried over a rebuild and kept by a saved page. The renderer
+  draws each step of a slide; the model is told once, at the release.
+- **A view setting in every host.** In the studio the panel's model keeps it and
+  does not tell the host: not saved, not undone. The scene's opacity stays the
+  Inspector's.
+- **A faded object is looked through.** It stops writing depth, so what is
+  inside it shows whole, and a click in the view goes on to the first object
+  behind it that is not faded, taking the faded one only where nothing else is.
+
+### Rejected
+
+- **An opacity gizmo among the handles**: one number, with no direction in space
+  to drag along, and the handles edit what is in the scene and where
+  ([0022](#0022-what-the-widget-is-and-is-not)).
+- **A slide on the row**: the row selects three ways, frames on a double click
+  and points on hover, and a select click that wobbled would fade.
+- **Both the eye and the row**: two gestures for one thing.
+- **A see-through key** that fades all but the selection: sliding the outer
+  collection's eye does it, on the thing to look through.
+- **An edit in the studio, as hiding is there** ([0011](#0011-one-view)): a look
+  inside would be an undo step and a line in the script and the file, and a
+  written opacity would replace the object's own, which a fade multiplies.
+- **The level as a percentage beside the eye**: it covered the end of the row.
+- **Sliding to nothing hides**: hiding stays the click's, so faded and hidden do
+  not blur.

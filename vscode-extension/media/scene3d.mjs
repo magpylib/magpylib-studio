@@ -29,6 +29,9 @@ const byObjectId = new Map();
 // every redraw and every frame of a run rebuilds those, and a visibility set
 // on one from outside would last only until the next.
 let hiddenIds = new Set();
+// How faintly the host has each object drawn, as a share of its own opacity.
+// By id and held here, as hiding is, for the same reason.
+let fades = new Map();
 let framed = false;
 // What marks the selection, each `{ on, part }`: a part hung on the trace it
 // marks, so a drag or a step of a run carries it along. See `outline`.
@@ -696,10 +699,22 @@ function pick(event) {
   // whatever is behind it.
   const drawn = [...byObjectId.values()].filter((node) => node.visible);
   const hits = raycaster.intersectObjects(drawn, true);
+  // A faded object is one being looked through: the click goes on to what
+  // it shows, and takes the faded one only where nothing else is there.
+  let through;
   for (const hit of hits) {
-    for (let node = hit.object; node; node = node.parent) {
-      if (node.userData.objectId) return node.userData.objectId;
-    }
+    const objectId = ownerOf(hit.object);
+    if (objectId === undefined) continue;
+    if ((fades.get(objectId) ?? 1) >= 1) return objectId;
+    through ??= objectId;
+  }
+  return through;
+}
+
+/** The studio id of the object `part` was drawn for. */
+function ownerOf(part) {
+  for (let node = part; node; node = node.parent) {
+    if (node.userData.objectId) return node.userData.objectId;
   }
   return undefined;
 }
@@ -805,6 +820,36 @@ function setHidden(objectIds) {
   }
   highlight(selectedIds); // an outline round nothing reads as a bug
   drawHints();
+}
+
+/** Draw each object `levels` names at that share of its own opacity, and
+ *  every other at its own. */
+function setFades(levels) {
+  fades = new Map(Object.entries(levels ?? {}));
+  for (const [objectId, node] of byObjectId) {
+    fade(node, fades.get(objectId) ?? 1);
+  }
+}
+
+/** Draw what `part` carries at `level` of its own opacity. Only what was
+ *  built for the scene, which remembers that opacity (`buildItem`): an
+ *  outline hung on it keeps its own. Faded, it stops writing depth, so what
+ *  stands behind it or inside it shows through whole. Not into another
+ *  object's node, which a collection's carries while it is dragged. */
+function fade(part, level) {
+  const material = part.material;
+  if (material?.userData.own !== undefined) {
+    material.opacity = material.userData.own * level;
+    const transparent = material.opacity < 1;
+    // three compiles an opaque material's alpha away: the program changes
+    // when this does, once, and not on every step of a slide
+    if (material.transparent !== transparent) material.needsUpdate = true;
+    material.transparent = transparent;
+    material.depthWrite = level >= 1;
+  }
+  for (const child of part.children) {
+    if (child.userData.objectId === undefined) fade(child, level);
+  }
 }
 
 /** Say the scene's scale with the view cube and a scale bar, with the
@@ -1170,6 +1215,10 @@ function buildItem(item) {
         ? buildPixels(item)
         : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
+  built.traverse((part) => {
+    if (part.material) part.material.userData.own = part.material.opacity;
+  });
+  fade(built, fades.get(item.object_id) ?? 1);
   return built;
 }
 
@@ -2557,6 +2606,7 @@ export const scene3d = drawingAfter({
   setAxes,
   keepClear,
   setHidden,
+  setFades,
   setGizmoMode,
   constrainAxis,
   setSnapping,

@@ -24,6 +24,18 @@ outlines what overlaps at each of its steps. From code: `get_overlaps`,
 
 </details>
 
+<details>
+<summary>Fade an object from the legend, to see what is inside it</summary>
+
+Press an object's eye in the view's legend and slide sideways: left fades it,
+right brings it back, and a click still hides it. A thin bar under the row shows
+how far while you slide. A click in the view goes through what is faded, so the
+sensor inside a faded Halbach ring can be picked. It changes the view, not the
+scene: nothing is saved or undone, and the scene's opacity stays the
+Inspector's. In a notebook it is the widget's `faded`, beside `hidden` (#52).
+
+</details>
+
 ### Changed
 
 <details>

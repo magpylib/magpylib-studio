@@ -38,8 +38,8 @@ millimetres too.
 A `SceneWidget` is read only, like the panel — what a view can offer to edit is
 what its host can put back, and a cell has already run (for a view you can edit,
 see [Editing a scene in the notebook](#editing-a-scene-in-the-notebook)).
-Selecting and hiding are the exceptions, because they are values rather than
-edits:
+Selecting, hiding and fading are the exceptions, because they are values rather
+than edits:
 
 ```python
 scene = mo.ui.anywidget(SceneWidget(height=460))  # one cell: the view
@@ -61,15 +61,19 @@ sliders.
 caret to fold a collection, an eye to hide it and everything in it — shown on
 the row under the pointer, and always on one that is hidden — a swatch in the
 colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
-range in tree order, a double click frames it. It writes `selected` and
-`hidden`, the traitlets a click in the view and a notebook cell write too. It
+range in tree order, a double click frames it. Press the eye and slide sideways
+to fade instead: left to look through it, right to bring it back. A click in the
+view goes through what is faded to what is behind it. It writes `selected`,
+`hidden` and `faded`, the traitlets a click in the view and a notebook cell
+write too; `faded` maps an id to the share of its opacity it is drawn at. It
 needs the objects, because the payload cannot say how they nest: it comes with
 `SceneWidget(...)` and `update()`, and with a bare `magpy.show()` only where
 magpylib hands its backends the objects (`Panel.objects`).
 
-What is selected, hidden or folded survives `update()`: an object passed again
-keeps it, and a rebuilt one inherits it from whatever sat in its place in the
-tree — "the lower ring" is still the one below after a slider has remade both.
+What is selected, hidden, faded or folded survives `update()`: an object passed
+again keeps it, and a rebuilt one inherits it from whatever sat in its place in
+the tree — "the lower ring" is still the one below after a slider has remade
+both.
 
 **Keys**, once the view has focus, are the panel's: **F** frames the selection
 and **Home** everything, **1**/**3**/**7** look from the front, right and top,
