@@ -902,7 +902,7 @@ async function heldReadings(port, base) {
 /** The studio panel: the notebook widget, run by the panel's own
  *  studioView.mjs against a stub of VS Code. What it tells the host is what
  *  the old panel told it -- a pick, a drag's start, one pose in flight with
- *  the newest waiting and the scene redrawn between, the release -- and
+ *  the newest waiting and the newest scene drawn, the release -- and
  *  hiding goes to the host as an edit, Cmd+Z is left to VS Code's keybinding,
  *  a refresh asks the engine again, and Chart mode draws the chart. */
 async function studioDrag(port, base) {
@@ -940,6 +940,8 @@ async function studioDrag(port, base) {
       if (xs.join() !== "1,10,11,15") {
         return `previews at ${xs.join(", ")}, not 1, 10, 11, 15: ${shown}`;
       }
+      // one pose in flight: each answered before the next is sent, and the
+      // engine's answer to the last drawn before the release
       for (let i = 1; i < dragged.length; i++) {
         if (dragged[i].type !== "previewTransform") continue;
         const since = dragged
@@ -947,9 +949,13 @@ async function studioDrag(port, base) {
           .map((m) => m.type)
           .lastIndexOf("previewTransform");
         if (since < 0) continue;
-        if (!dragged.slice(since + 1, i).some((m) => m.type === "redraw")) {
-          return `two previews with no redraw between them: ${shown}`;
+        if (!dragged.slice(since + 1, i).some((m) => m.type === "answered")) {
+          return `two previews in flight at once: ${shown}`;
         }
+      }
+      const types = dragged.map((m) => m.type);
+      if (!types.slice(types.lastIndexOf("answered")).includes("redraw")) {
+        return `the last answer was not drawn: ${shown}`;
       }
       // one trip a step: the pose asks for the scene, which comes back with
       // the answer, and the view never asks for it on its own
@@ -960,7 +966,9 @@ async function studioDrag(port, base) {
       if (dragged.some((m) => m.method === "get_scene")) {
         return `the view asked for the scene mid-drag: ${shown}`;
       }
-      const last = dragged.filter((m) => m.type !== "redraw").at(-1);
+      const last = dragged
+        .filter((m) => m.type !== "redraw" && m.type !== "answered")
+        .at(-1);
       if (last?.type !== "transformObjects" || last.x !== 16) {
         return `it ended: ${shown}`;
       }

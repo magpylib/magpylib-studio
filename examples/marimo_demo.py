@@ -534,7 +534,7 @@ def _(mo):
     mo.md("""
     ## More of the view
 
-    The three below are the same widget on scenes of their own, loaded when
+    The four below are the same widget on scenes of their own, loaded when
     opened. The view takes the keys once clicked, as the studio's panel
     does: **F** frames the selection and **Home** everything, **1** **3**
     **7** look from the front, the right and the top, **5** switches the
@@ -627,11 +627,74 @@ def _(SceneWidget, magpy, mo, np):
             ]
         )
 
+    def _overlaps():
+        mm = 1e-3
+        # A Halbach ring of eight segments, each touching its neighbours
+        ring = [
+            magpy.magnet.CylinderSegment(
+                dimension=(10 * mm, 16 * mm, 8 * mm, 45 * i, 45 * (i + 1)),
+                polarization=(0, 0, 1),
+                style_label=f"segment {i + 1}",
+            )
+            for i in range(8)
+        ]
+        # a shaft that fits its bore exactly
+        shaft = magpy.magnet.Cylinder(
+            dimension=(20 * mm, 30 * mm), polarization=(0, 0, 1), style_label="shaft"
+        )
+        # two cubes side by side, and a third pushed 1 mm into the second
+        a, b, c = (
+            magpy.magnet.Cuboid(
+                dimension=(10 * mm,) * 3,
+                polarization=polarization,
+                position=position,
+                style_label=label,
+            )
+            for label, polarization, position in (
+                ("a", (1, 0, 0), (30 * mm, 0, 0)),
+                ("b", (1, 0, 0), (40 * mm, 0, 0)),
+                ("c", (0, 1, 0), (40 * mm, 9 * mm, 0)),
+            )
+        )
+        # a coil wound on its core
+        core = magpy.magnet.Cylinder(
+            dimension=(12 * mm, 20 * mm),
+            polarization=(0, 0, 1),
+            position=(0, 40 * mm, 0),
+            style_label="core",
+        )
+        coil = magpy.current.Circle(
+            diameter=12 * mm, current=1, position=(0, 40 * mm, 0), style_label="coil"
+        )
+        return mo.vstack(
+            [
+                mo.md(
+                    "Magpylib adds the magnetizations of two magnets wherever they "
+                    "overlap, so a magnet pushed into its neighbour computes a field "
+                    "that looks right and is not. The view outlines every magnet "
+                    "that overlaps another in amber, frame by frame while one is "
+                    "dragged; the legend marks its row, and the count above the "
+                    "legend steps through the pairs. Touching does not count: the "
+                    "ring, the shaft in its bore, the cubes **a** and **b** and the "
+                    "coil on its core all touch on purpose. Only **c**, pushed 1 mm "
+                    "into **b**, overlaps: select it and drag it out (**W** moves). "
+                    "From code, `widget.payload['overlaps']` holds the pairs the "
+                    "view outlines, and `session.get_overlaps()` the document's. "
+                    "The stack at the top is checked too: pull its `radius` below "
+                    "22.6 mm and its rings overlap."
+                ),
+                SceneWidget(
+                    *ring, shaft, a, b, c, core, coil, editable=True, height=420
+                ),
+            ]
+        )
+
     mo.accordion(
         {
             "Paths, played in the browser": mo.lazy(_played_in_the_browser),
             "Properties along a path": mo.lazy(_properties_along_a_path),
             "Editing a scene with the handles": mo.lazy(_editing),
+            "Overlapping magnets, found as you drag": mo.lazy(_overlaps),
         },
         lazy=True,
     )
