@@ -20,6 +20,18 @@ the notebook widget and the VS Code panel alike (#46).
 
 </details>
 
+<details>
+<summary>Resize a cylinder segment, or spread a sensor's pixels, with the handles</summary>
+
+R now resizes a CylinderSegment: its radii across, its height along, its angles
+kept, about its axis, so segments of one ring stay on it. On a Sensor with
+pixels it spreads the pixel array about its centre, the pixels and the sensor's
+axes keeping their size. The engine draws both as the drag goes. A sensor with
+one pixel, or more than 256, keeps the Inspector. The readout shows a segment's
+angles in degrees.
+
+</details>
+
 ### Changed
 
 <details>
@@ -31,6 +43,17 @@ drew it, and is drawn whole again when the drag ends. Whether two magnets
 overlap is decided once per pair while neither moves. A drag of 96 magnets in
 marimo went from 18 to 24 scenes a second, and the demo with field lines from 53
 to 59, its frame rate (#58).
+
+</details>
+
+### Fixed
+
+<details>
+<summary>An aim let go after a pause is its own undo step</summary>
+
+Aiming a polarization, or resizing a patterned source, then pausing before
+letting go sent nothing at the release: the drag stayed open, and the edits
+after it joined its undo step.
 
 </details>
 

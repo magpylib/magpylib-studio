@@ -234,7 +234,7 @@ function constrainScale(node, constraint) {
       Math.abs(b - 1) > Math.abs(a - 1) ? b : a,
     );
     node.scale.setScalar(pulled);
-  } else if (constraint === "xy") {
+  } else if (constraint === "xy" || constraint === "segment") {
     const radial = Math.abs(x - 1) > Math.abs(y - 1) ? x : y;
     node.scale.set(radial, radial, z);
   }
@@ -245,16 +245,29 @@ function resized(scale, shape, centre) {
   if (shape.constraint === "uniform") return shape.value * scale.x;
   if (shape.constraint === "xy")
     return [shape.value[0] * scale.x, shape.value[1] * scale.z];
+  if (shape.constraint === "segment") {
+    // (inner radius, outer radius, height, start angle, end angle): the
+    // radii go across and the height along; the angles are not a size
+    const [inner, outer, height, ...angles] = shape.value;
+    return [inner * scale.x, outer * scale.x, height * scale.z, ...angles];
+  }
+  const about = ([x, y, z]) => [
+    centre.x + (x - centre.x) * scale.x,
+    centre.y + (y - centre.y) * scale.y,
+    centre.z + (z - centre.z) * scale.z,
+  ];
   if (shape.constraint === "vertices") {
     // A mesh has no dimension; the array is the parameter. It scales about
     // the centroid, because that is the point the handles are on -- for a
     // shape whose position is already its centre that is the origin, and
     // this is the plain multiplication it looks like.
-    return shape.value.map(([x, y, z]) => [
-      centre.x + (x - centre.x) * scale.x,
-      centre.y + (y - centre.y) * scale.y,
-      centre.z + (z - centre.z) * scale.z,
-    ]);
+    return shape.value.map(about);
+  }
+  if (shape.constraint === "pixels") {
+    // A sensor's pixels the same way, nested as they came: a list or a grid.
+    const spread = (value) =>
+      Array.isArray(value[0]) ? value.map(spread) : about(value);
+    return spread(shape.value);
   }
   return [
     shape.value[0] * scale.x,
@@ -445,9 +458,15 @@ function makeGizmo() {
                 .applyQuaternion(orientation) // stored local, turned in world
             : null,
       };
+      // `redrawn`: the handles are on the stand-in, so the object's own node
+      // is drawn again from the engine as the drag goes, not kept
       host.dispatchEvent(
         new CustomEvent("dragstart", {
-          detail: { objectIds: from.objectIds, mode: gizmoMode },
+          detail: {
+            objectIds: from.objectIds,
+            mode: gizmoMode,
+            redrawn: node === proxy,
+          },
         }),
       );
     } else {
@@ -501,6 +520,21 @@ function releasePaths(held) {
   }
 }
 
+/** The resizes the engine draws as they go. A CylinderSegment's is about its
+ *  axis, not the handles on its centroid; a Sensor's spreads its pixels and
+ *  stretches nothing, where its whole drawing would stretch with the node. */
+const REDRAWN_RESIZES = new Set(["segment", "pixels"]);
+
+/** Whether the handles go on the stand-in: see `setGizmoMode`. */
+function standsIn() {
+  const objectId = primaryId();
+  return (
+    gizmoMode === "polarization" ||
+    patterned.has(objectId) ||
+    (gizmoMode === "scale" && REDRAWN_RESIZES.has(shapes[objectId]?.constraint))
+  );
+}
+
 /** Which handles to show, or "none" to put them away. Also how the handles
  *  find their way back onto an object that a re-render has just replaced.
  *
@@ -541,9 +575,14 @@ function setGizmoMode(mode) {
   // nothing local is honest about a patterned source: its copies hang on this
   // very node, but a move of the source moves them by the mirror of it, and a
   // turn turns them about somewhere else entirely -- only the rebuild knows
-  // where they go. A node that is going to be rebuilt cannot be the one the
-  // handles are on, so they go here instead.
-  if (gizmoMode === "polarization" || patterned.has(primaryId())) {
+  // where they go. Nor about some resizes (`REDRAWN_RESIZES`). A node that is
+  // going to be rebuilt cannot be the one the handles are on, so they go here
+  // instead.
+  if (standsIn()) {
+    // A redraw mid-drag comes back through here (`highlight`), and the drag
+    // is read off the stand-in: placed afresh, a release before the pointer
+    // moved again would find no turn and no resize, and send nothing.
+    if (gizmo.dragging && gizmo.object === proxy) return gizmoMode;
     // The handles sit on the object and turn the stand-in. Two things have to
     // line up for them to follow a turned magnet: the stand-in must carry the
     // object's rotation, *and* the handles must be drawn against it -- three

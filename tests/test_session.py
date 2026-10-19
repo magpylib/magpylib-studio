@@ -636,20 +636,29 @@ def _drawn(session, object_id):
 
 
 @pytest.mark.parametrize(
-    ("kind", "params", "attr", "scale"),
+    ("kind", "params", "attr", "grown", "scale"),
     [
-        ("magnet.Cuboid", {"dimension": [1, 2, 3]}, "dimension", 2.0),
-        ("magnet.Cylinder", {"dimension": [1, 2]}, "dimension", 1.5),
-        ("magnet.Sphere", {"diameter": 2}, "diameter", 3.0),
+        ("magnet.Cuboid", {"dimension": [1, 2, 3]}, "dimension", [2, 4, 6], 2.0),
+        ("magnet.Cylinder", {"dimension": [1, 2]}, "dimension", [1.5, 3], 1.5),
+        ("magnet.Sphere", {"diameter": 2}, "diameter", 6, 3.0),
+        # the radii across, the height along, the angles kept
+        (
+            "magnet.CylinderSegment",
+            {"dimension": [1, 2, 1, -30, 120]},
+            "dimension",
+            [1.5, 3, 2.5, -30, 120],
+            [1.5, 1.5, 2.5],
+        ),
     ],
 )
-def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
+def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, grown, scale):
     """What the resize gizmo relies on, per class it offers to resize.
 
-    The drag scales the drawn mesh and tells the engine only the value it came
-    to. That is only honest if the mesh magpylib draws for the new value *is*
-    the old mesh scaled -- true for these three and false for the classes the
-    table leaves out, whose angles or vertices do not follow their size.
+    The drag tells the engine only the value it came to, and the view draws
+    the old mesh scaled about the object's position until the engine answers.
+    That is only honest if the mesh magpylib draws for the new value *is* the
+    old mesh scaled -- true for these, and for a segment only with its angles
+    kept and x and y scaled together.
     """
     session = MagpylibStudioSession()
     session.add_object("o", kind, params=params)
@@ -657,8 +666,7 @@ def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
     before = _drawn(session, "o")
     anchor = np.asarray(session.get_scene()["anchors"]["o"])
 
-    value = session.get_scene()["shapes"]["o"]["value"]
-    grown = [v * scale for v in value] if isinstance(value, list) else value * scale
+    assert session.get_scene()["shapes"]["o"]["attr"] == attr
     session.set_param("o", attr, grown)
 
     assert _drawn(session, "o") - anchor == pytest.approx(
@@ -684,20 +692,32 @@ def test_a_cylinder_resizes_across_then_along():
     assert extent() / base == pytest.approx([1, 1, 2])
 
 
-def test_only_shapes_that_scale_are_offered(session):
-    """A resize is offered for a Cuboid and refused for a Sensor, whose pixels
-    sit at real coordinates while its cross is styled -- scaling the drawing
-    would move the pixels somewhere the object never put them."""
-    session.add_object("probe", "Sensor")
+@pytest.mark.parametrize(
+    ("pixel", "offered"),
+    [
+        (None, False),
+        ([0.01, 0, 0], False),  # one point spreads nowhere
+        ([[[0, 0, 0], [0.02, 0, 0]], [[0, 0.01, 0], [0.02, 0.01, 0]]], True),
+    ],
+)
+def test_a_sensor_resizes_its_pixel_array(session, pixel, offered):
+    """A Sensor's resize spreads its pixels, nested as they are -- its cross
+    and its pixels' size are styled, and scaling the drawing would stretch
+    both -- and is offered only where there are pixels to spread."""
+    params = {} if pixel is None else {"pixel": pixel}
+    session.add_object("probe", "Sensor", params=params)
 
     shapes = session.get_scene()["shapes"]
 
-    assert shapes["cube"] == {
-        "attr": "dimension",
-        "value": [1, 1, 1],
-        "constraint": "free",
-    }
-    assert "probe" not in shapes
+    assert shapes["cube"]["constraint"] == "free"
+    if offered:
+        assert shapes["probe"] == {
+            "attr": "pixel",
+            "value": pixel,
+            "constraint": "pixels",
+        }
+    else:
+        assert "probe" not in shapes
 
 
 def test_a_played_frame_recomputes_what_the_field_decides():
@@ -873,8 +893,9 @@ def test_a_mesh_is_resized_by_its_vertices(session):
 
 def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     """The array rides in every payload, so past a point it is a lot of
-    numbers to ship on the chance that someone resizes it. Those meshes keep
-    the Inspector, which edits the value in place.
+    numbers to ship on the chance that someone resizes it. Those meshes, and
+    sensors with that many pixels, keep the Inspector, which edits the value
+    in place.
 
     Only a TriangularMesh can reach the cap: a Tetrahedron is four vertices by
     definition, which magpylib enforces.
@@ -885,10 +906,13 @@ def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     session.add_object(
         "mesh", "magnet.TriangularMesh", params={"vertices": corners, "faces": faces}
     )
+    session.add_object("probe", "Sensor", params={"pixel": corners})
     assert session.get_scene()["shapes"]["mesh"]["attr"] == "vertices"
+    assert session.get_scene()["shapes"]["probe"]["attr"] == "pixel"
 
     monkeypatch.setattr(threejs, "MAX_DRAGGABLE_VERTICES", 3)
     assert "mesh" not in session.get_scene()["shapes"]
+    assert "probe" not in session.get_scene()["shapes"]
     assert "cube" in session.get_scene()["shapes"]  # a dimension is unaffected
 
 

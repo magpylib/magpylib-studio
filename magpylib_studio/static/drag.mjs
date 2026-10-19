@@ -68,8 +68,6 @@ export const REDRAW_BUDGET_MS = 8;
  *   where there were two, for a host whose every message costs.
  * - `render(payload, { keep })`: draw it, keeping the nodes of `keep`, the
  *   objects the handles hold, which are already where the pointer put them.
- * - `patterned()`: the sources whose copies would not follow an edit, as a
- *   Set. A lone one of those is rebuilt from the scene rather than kept.
  * - `drawing()`: whether the 3D view is what is on screen (default: yes).
  * - `showPose(pose)`: optional, the numbers at pointer rate.
  *
@@ -151,22 +149,21 @@ export function watchDrags(host, view) {
   }
 
   function onStart(event) {
-    const { objectIds, mode } = event.detail;
+    const { objectIds, mode, redrawn } = event.detail;
     // Nothing is kept where the picture has to come from the engine to be
-    // right: aiming a polarization redraws the magnet's colours, and a
-    // patterned source's copies move by the mirror or the pitch of the drag
-    // rather than with it, which only a rebuild knows. Neither has the
-    // handles on that node, so there is nothing to swap out from under them.
+    // right: aiming a polarization redraws the magnet's colours, a patterned
+    // source's copies move by the mirror or the pitch of the drag rather than
+    // with it, which only a rebuild knows, a segment resized grows about its
+    // axis and a sensor spreads its pixels without stretching them. The
+    // renderer says which (`redrawn`): none has the handles on that node, so
+    // there is nothing to swap out from under them.
     //
-    // Several objects at once is the exception: they are hung on the rig for
-    // the length of the drag, and a rebuild that took their nodes away would
+    // Several objects at once never are: they are hung on the rig for the
+    // length of the drag, and a rebuild that took their nodes away would
     // leave them drawn twice, once on the rig and once from the payload. They
     // keep their nodes, and a pattern among them catches up at the release.
-    const rebuilt =
-      mode === "polarization" ||
-      (objectIds.length === 1 && view.patterned().has(objectIds[0]));
     dragging = {
-      keep: rebuilt ? null : objectIds,
+      keep: redrawn ? null : objectIds,
       tooSlow: false,
       redraws: 0, // redraws in this drag, and slow ones in a row
       slow: 0,

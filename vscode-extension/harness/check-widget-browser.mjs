@@ -1729,7 +1729,101 @@ async function selection(port, base) {
       }
     },
   );
+
+  await check(
+    "a drag on the stand-in ends where it went, redrawn before the release",
+    async () => {
+      // The segment's radii grow and its angles stay; the sensor's pixels
+      // spread about their centroid, x doubled; the aim turns.
+      const cases = [
+        ["arc", "scale", "proxy.scale.set(1.5, 1.5, 1)"],
+        ["probe", "scale", "proxy.scale.set(2, 1, 1)"],
+        ["aimed", "polarization", "proxy.rotateX(0.5)"],
+      ];
+      const want = {
+        arc: [0.015, 0.03, 0.01, 0, 90],
+        probe: [
+          [
+            [-0.01, 0, 0],
+            [0.03, 0, 0],
+          ],
+          [
+            [-0.01, 0.01, 0],
+            [0.03, 0.01, 0],
+          ],
+        ],
+      };
+      const near = (a, b) =>
+        Array.isArray(a)
+          ? Array.isArray(b) &&
+            a.length === b.length &&
+            a.every((each, i) => near(each, b[i]))
+          : Math.abs(a - b) < 1e-9;
+      const wrong = [];
+      for (const [objectId, mode, act] of cases) {
+        const tab = await openTab(port);
+        try {
+          await tab.navigate(
+            `${base}/pages/outline.html?scene=standin#${objectId}`,
+          );
+          if (!(await tab.until("return window.shown", 20_000))) {
+            wrong.push(`${objectId}: never drew`);
+            continue;
+          }
+          const held = await tab.evaluate(STOOD_IN(objectId, mode, act));
+          if (held) {
+            wrong.push(`${objectId}: ${held}`);
+            continue;
+          }
+          // the preview's answer, then the scene drawn again round the drag
+          const redrawn = await tab.until(
+            `return window.scene3d.byObjectId.get(${JSON.stringify(objectId)}) !== window.held.node`,
+            5_000,
+          );
+          if (!redrawn) {
+            wrong.push(`${objectId}: no redraw came before the release`);
+            continue;
+          }
+          await wait(100);
+          const sent = await tab.evaluate(`
+            window.held.controls.dragging = false;
+            return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits);`);
+          const edit = sent.at(-1)?.[0];
+          if (!edit) {
+            wrong.push(`${objectId}: the release sent nothing`);
+          } else if (
+            mode === "polarization"
+              ? !edit.polarization
+              : !near(edit.shape?.value, want[objectId]) || edit.position
+          ) {
+            wrong.push(`${objectId}: the release sent ${JSON.stringify(edit)}`);
+          }
+          const problem = thrown(tab);
+          if (problem) wrong.push(`${objectId}: ${problem}`);
+        } finally {
+          await tab.close();
+        }
+      }
+      return wrong.length ? wrong.join("; ") : null;
+    },
+  );
 }
+
+/** Page code: take hold of `objectId`'s handles in `mode`, which must be on
+ *  the stand-in, and `act` on it as the pointer would, the drag left held;
+ *  say what is wrong, if anything. */
+const STOOD_IN = (objectId, mode, act) => `
+  window.scene3d.setGizmoMode(${JSON.stringify(mode)});
+  const node = window.scene3d.byObjectId.get(${JSON.stringify(objectId)});
+  const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+  const proxy = controls.object;
+  if (!proxy || proxy === node) return "the handles are not on the stand-in";
+  window.held = { node, controls };
+  controls.dragging = true;
+  ${act};
+  proxy.updateMatrixWorld(true);
+  controls.dispatchEvent({ type: "objectChange" });
+  return null;`;
 
 /** Page code: drag the magnet on a path through the handles' own events --
  *  `act` moving its node in between, as the pointer would -- and say whether

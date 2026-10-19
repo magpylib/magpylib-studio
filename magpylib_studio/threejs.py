@@ -63,10 +63,15 @@ _BACKEND = "_studio_scene"
 #: numbers to ship on the chance that someone resizes it. Those keep the
 #: Inspector, which edits the value in place.
 #:
-#: Excluded, and why:
-#:  * `CylinderSegment` -- its angles do not scale with its radii.
-#:  * `Sensor` -- a composite. Its pixels sit at real coordinates while the
-#:    cross is styled, so `style.size` scales only part of the mesh.
+#: Two are resized without scaling their drawing: the view hands the handles
+#: a stand-in and the engine draws each step of the drag (`segment`, `pixels`).
+#:  * A `CylinderSegment` scales exactly with x and y locked, its angles kept,
+#:    but about its own position -- the axis, which segments of one ring share
+#:    -- not about the handles on its centroid.
+#:  * A `Sensor` resizes its pixel array, about its centroid. Its cross is
+#:    styled and its pixels have a styled size, so scaling the drawing would
+#:    stretch both. One pixel, or none, has nothing to spread; a big array
+#:    stays with the Inspector, as a big mesh does.
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -76,12 +81,14 @@ SCALE_COVARIANT = {
     "Cuboid": ("dimension", "free"),
     "Sphere": ("diameter", "uniform"),
     "Cylinder": ("dimension", "xy"),
+    "CylinderSegment": ("dimension", "segment"),
     "Dipole": ("style.size", "uniform"),
     "Tetrahedron": ("vertices", "vertices"),
     "TriangularMesh": ("vertices", "vertices"),
+    "Sensor": ("pixel", "pixels"),
 }
 
-#: Above this many points a mesh keeps its vertices to itself; see above.
+#: Above this many points a mesh or a sensor keeps them to itself; see above.
 MAX_DRAGGABLE_VERTICES = 256
 
 #: And above this many frames a path is not carried either. A drag has to
@@ -118,6 +125,10 @@ def shape_of(obj):
     attr, constraint = entry
     value = _resolve(obj, attr)
     if constraint == "vertices" and len(value) > MAX_DRAGGABLE_VERTICES:
+        return None
+    if constraint == "pixels" and (
+        value is None or not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES
+    ):
         return None
     return {
         "attr": attr,
