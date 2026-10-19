@@ -29,7 +29,7 @@ pixels it spreads the pixel array about its centre, the pixels and the sensor's
 axes keeping their size; a grid written over a variable, such as its density,
 is stretched as that formula, so the variable still decides it. The engine
 draws both as the drag goes. A sensor with one pixel, or more than 256, keeps
-the Inspector. The readout shows a segment's angles in degrees.
+the Inspector. The readout shows a segment's angles in degrees (#59).
 
 </details>
 
@@ -54,7 +54,7 @@ to 59, its frame rate (#58).
 
 Aiming a polarization, or resizing a patterned source, then pausing before
 letting go sent nothing at the release: the drag stayed open, and the edits
-after it joined its undo step.
+after it joined its undo step (#59).
 
 </details>
 
