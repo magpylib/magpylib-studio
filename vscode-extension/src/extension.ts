@@ -2274,7 +2274,8 @@ async function transformFromPanel(
     // refused one has nothing new to draw, and a failed request leaves the
     // view to ask for the scene itself, as it did before.
     if (previewFor && message.scene && result.ok !== false) {
-      scene = await engine.request('get_scene', {});
+      // past the gesture's first step, only what it moves (`partial`)
+      scene = await engine.request('get_scene', { partial: true });
     }
   } catch (err) {
     if (!previewFor) {

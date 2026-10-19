@@ -32,7 +32,9 @@
       import * as THREE from "three";
       import { scene3d } from "/media/scene3d.mjs";
 
-      const [before, after] = await (await fetch("/out/readings.json")).json();
+      const [before, after, whole, later] = await (
+        await fetch("/out/readings.json")
+      ).json();
       const el = document.getElementById("view");
       const node = (id) => scene3d.byObjectId.get(id);
       const drawn = (id) => node(id).children.map((child) => child.uuid);
@@ -120,7 +122,28 @@
         sameNode: node("magnet") === magnetNode,
         untouched: drawn("magnet").join() === magnetWas.join(),
       };
-      window.result = { sensor, magnet };
+      // a drag's later step, which draws only what it moves: the magnet
+      // standing by keeps its node and its drawing, the rest is redrawn
+      scene3d.render(el, whole);
+      const was = {
+        still: [node("still"), drawn("still")],
+        magnet: drawn("magnet"),
+        field: drawn("field"),
+      };
+      scene3d.render(el, later);
+      const fresh = (id, before) =>
+        drawn(id).length > 0 &&
+        drawn(id).every((uuid) => !before.includes(uuid));
+      const partial = {
+        stillKept:
+          node("still") === was.still[0] &&
+          drawn("still").join() === was.still[1].join(),
+        magnetRedrawn:
+          fresh("magnet", was.magnet) &&
+          near(meshesOnScreen("magnet"), meshesFromEngine(later, "magnet")),
+        fieldRedrawn: fresh("field", was.field),
+      };
+      window.result = { sensor, magnet, partial };
     </script>
   </body>
 </html>

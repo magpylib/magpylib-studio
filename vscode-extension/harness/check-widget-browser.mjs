@@ -914,7 +914,7 @@ async function heldReadings(port, base) {
         await tab.navigate(`${base}/pages/held-reading.html`);
         const result = await tab.until("return window.result", 20_000);
         if (!result) return "never finished";
-        const { sensor, magnet } = result;
+        const { sensor, magnet, partial } = result;
         if (!sensor.sameNode) return "the dragged sensor's node was replaced";
         if (!sensor.redrawn)
           return "the dragged sensor's arrows were not redrawn";
@@ -922,6 +922,11 @@ async function heldReadings(port, base) {
           return "the redrawn arrows are not where the engine put them";
         if (!magnet.sameNode || !magnet.untouched) {
           return "a dragged magnet was redrawn, which would end its drag";
+        }
+        // a drag's later step draws only what it moves
+        if (!partial.stillKept) return "a magnet standing by was redrawn";
+        if (!partial.magnetRedrawn || !partial.fieldRedrawn) {
+          return `what the step moved was not redrawn: ${JSON.stringify(partial)}`;
         }
         return thrown(tab);
       } finally {

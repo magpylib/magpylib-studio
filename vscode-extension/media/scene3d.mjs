@@ -2923,6 +2923,14 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   centroids = payload.centroids || {};
   copies = payload.copies || {};
 
+  // A gesture's later steps draw only what it moves (`partial`): every other
+  // node stands as its first step drew it, held as the dragged ones are.
+  if (payload.partial) {
+    const redrawn = new Set(payload.partial);
+    for (const objectId of byObjectId.keys()) {
+      if (!redrawn.has(objectId)) held.add(objectId);
+    }
+  }
   discard(held);
   const readings = new Set(payload.readings ?? []);
   for (const objectId of held) {

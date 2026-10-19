@@ -23,7 +23,8 @@ Writes into OUT:
   of turning rings and a probe, as the widget's state, with its legend;
 * ``readings.json`` -- the studio's quiver example as its panel draws it, then
   again with the sensor moved: a sensor whose arrows are its own reading, for
-  the panel's renderer to redraw while it is dragged;
+  the panel's renderer to redraw while it is dragged; then, with a magnet
+  standing by, whole and as a drag's later step draws it, only what moves;
 * ``edit.json`` -- an editable view's model, a ring and a probe to edit, and
   the scene its session answers `get_scene` with;
 * ``studio.json`` -- what the studio panel's engine answers for that scene:
@@ -253,7 +254,27 @@ def main(out):
     after = session.get_scene()
     if before["readings"] != ["field"]:
         raise SystemExit("readings.json: the quiver's sensor should be a reading")
-    (out / "readings.json").write_text(json.dumps([before, after]))
+    # A drag's later step draws only what it moves (`partial`): the magnet,
+    # and the sensor whose arrows read its field -- not a magnet standing by.
+    session.set_transform("field", position=[0, 0, 0.012])
+    session.add_object(
+        "still",
+        "magnet.Cuboid",
+        params={
+            "dimension": [0.005, 0.005, 0.005],
+            "polarization": [0, 0, 1],
+            "position": [0.03, 0, 0],
+        },
+    )
+    whole = session.get_scene()
+    session.begin_interaction()
+    for x in (0.001, 0.002):
+        session.apply_edits([{"objectId": "magnet", "position": [x, 0, 0]}])
+        later = session.get_scene(partial=True)
+    session.end_interaction()
+    if later.get("partial") != ["field", "magnet"]:
+        raise SystemExit(f"readings.json: a drag's step drew {later.get('partial')}")
+    (out / "readings.json").write_text(json.dumps([before, after, whole, later]))
 
     # a scene to edit: the model a studio holds, and its session's answer
     studio = scene_to_edit()

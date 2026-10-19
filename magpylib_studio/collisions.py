@@ -1264,7 +1264,7 @@ def find_overlaps(objects, tol=TOL, step=None, depths=False):
     found = {}
     for a, b in zip(*_candidates(lo, hi), strict=True):
         i, j = sorted((index[a], index[b]))
-        proof = _overlap(bodies[i], bodies[j], tol)
+        proof = _decided(bodies[i], bodies[j], tol)
         if proof:
             found[(i, j)] = (
                 _measured(bodies[i], bodies[j], proof, tol) if depths else None
@@ -1272,6 +1272,23 @@ def find_overlaps(objects, tol=TOL, step=None, depths=False):
     if depths:
         return [(i, j, found[i, j]) for i, j in sorted(found)]
     return sorted(found)
+
+
+# Whether each pair of bodies near enough to ask overlaps, by what the two are
+# made of, as `_depths` keeps how deep: a drag moves one magnet, and every
+# pair it is not in stands. Asked again each step, the touching pairs of a
+# ring of 96 were a fifth of the step.
+_verdicts: OrderedDict = OrderedDict()
+
+
+def _decided(A, B, tol):
+    key = (A.key, B.key, tol)
+    if key not in _verdicts:
+        _verdicts[key] = _overlap(A, B, tol)
+        if len(_verdicts) > _CACHE_SIZE:
+            _verdicts.popitem(last=False)
+    _verdicts.move_to_end(key)
+    return _verdicts[key]
 
 
 # How deep each overlapping pair goes, by what its two bodies are made of: a
