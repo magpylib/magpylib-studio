@@ -1334,9 +1334,8 @@ const FIELD_LINE_BANDS = [
  *  - As far apart as the pixels: a pixel already on a line starts none, and
  *    a line stops within half a spacing of another (Jobard and Lefer's
  *    evenly spaced streamlines), so a uniform field draws a line per row.
- *  - A line also stops leaving the grid, closing on itself, or where the
- *    field is under a twenty-fifth of the sensor's; in a plane, also at a
- *    magnet the plane cuts.
+ *  - A line also stops leaving the grid, closing on itself, where the
+ *    field is under a twenty-fifth of the sensor's, or at a magnet.
  *  - Coloured by |field| from the table python sends, which magpylib made
  *    from the sensor's colorscaling and colormap over what its pixels read:
  *    a line and an arrow where they meet are one colour. Fainter where the
@@ -1378,10 +1377,15 @@ function buildFieldLines(item) {
     const i = Math.min(Math.floor(fx), nx - 2);
     const j = Math.min(Math.floor(fy), ny - 2);
     const k = flat ? 0 : Math.min(Math.floor(fz), nz - 2);
-    // A line in a plane stops at a magnet, which its plane cuts; in 3D it
-    // goes through, as the field does, hidden by the magnet while inside,
-    // and closes its loop round the far side.
-    if (flat && within(Math.round(fx), Math.round(fy), 0)) return -1;
+    // A line stops at a magnet, in a plane as in 3D: the lines are of the
+    // field in the air, where the sensor reads it. Let through, a 3D line
+    // from the demo's bore wandered for most of a metre in and out of the
+    // magnets, turning 75 degrees a cell, on a path no tracing can trust --
+    // half the step moved it 17 mm. Stopped, the lines turn 8 degrees a cell
+    // and keep to the exact field within 0.1 mm.
+    if (within(Math.round(fx), Math.round(fy), flat ? 0 : Math.round(fz))) {
+      return -1;
+    }
     const tx = fx - i;
     const ty = fy - j;
     const tz = flat ? 0 : fz - k;
@@ -1528,11 +1532,10 @@ function buildFieldLines(item) {
     ];
   const ds = 0.5;
   const longest = Math.ceil((2 * (nx + ny + nz)) / ds);
-  // How near another line a line may run. In a plane, half a spacing: the
-  // even look of a streamplot. In 3D lines crowd where the field does --
-  // into the gaps between magnets -- and that crowding is the picture: a line
-  // stops only on running into another.
-  const nearest = (flat ? 0.5 : 0.15) * spacing;
+  // How near another line a line may run: half a spacing, the even look of
+  // a streamplot, in a plane as in 3D. Let closer in 3D, the lines bunched
+  // into the gaps between magnets and drew hair there.
+  const nearest = 0.5 * spacing;
   // where a flat grid's lines may start next: beside a line, a spacing off
   const frontier = [];
   let lines = 0;

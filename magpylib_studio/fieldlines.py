@@ -17,10 +17,11 @@ the view needs to draw lines nobody has to tune:
 - **How many.** As far apart as the pixels: a line stops where it comes
   within half a spacing of another, and a pixel already on a line starts
   none, so a uniform field shows a line per row and not one per pixel.
-- **Where they end.** Leaving the grid, closing on itself, or where the field
-  fades out; a line in a plane also at a magnet the plane cuts -- the grid
-  points inside one, from magpylib's own polarization (`getJ`), so every
-  shape it knows. A line in 3D goes through a magnet, as the field does.
+- **Where they end.** Leaving the grid, closing on itself, where the field
+  fades out, or at a magnet -- the grid points inside one, from magpylib's
+  own polarization (`getJ`), so every shape it knows. The lines are of the
+  field in the air: let through the magnets, 3D lines wandered on paths too
+  unstable to trace.
 
 During a gesture the grid is coarser and kept for its length, unless the
 sensor itself moves: the field of what does not move is computed once and
@@ -46,9 +47,11 @@ LUT_STEPS = 64
 #: Pixels offered as starts at most; the spacing keeps far fewer of them.
 MAX_SEEDS = 400
 #: How much of B may cross a sensor's plane, over the plane, for its lines to
-#: be drawn in it: a plane of symmetry has none, and the Halbach demo's bore,
-#: whose rings are turned half a step apart, has 40 % -- its lines leave it.
-ACROSS = 0.02
+#: be drawn in it. A plane of symmetry has none, so this is room for rounding
+#: only: at 2 %, a sensor tilted by a degree (1.7 %) kept lines in its plane
+#: that the field does not have. The Halbach demo's bore, whose rings are
+#: turned half a step apart, has 40 %: its lines leave it.
+ACROSS = 0.001
 #: Points of the coarse look at the plane that decides it, before its grid.
 PROBE_POINTS = 600
 

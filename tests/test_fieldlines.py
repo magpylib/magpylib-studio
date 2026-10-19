@@ -13,16 +13,17 @@ from magpylib_studio.widget import SceneWidget
 PIXELS = np.linspace(-0.02, 0.02, 5)
 
 
-def view(plane="y=0", source="B", colormap=None):
+def view(plane="y=0", source="B", colormap=None, tilt=0):
     """A cube polarized along z and a sensor of 5 x 5 pixels: in y = 0, a
-    plane of the cube's symmetry, or 12 mm above it, which the field
-    crosses."""
+    plane of the cube's symmetry -- or tilted out of it by `tilt` degrees --
+    or 12 mm above it, which the field crosses."""
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
     if plane == "y=0":
         pixel = [(x, 0, z) for x in PIXELS for z in PIXELS]
     else:
         pixel = [(x, y, 0.012) for x in PIXELS for y in PIXELS]
     probe = magpy.Sensor(pixel=pixel, style_label="probe")
+    probe.rotate_from_angax(tilt, "x")
     probe.style.pixel.field.source = source
     if colormap:
         probe.style.pixel.field.colormap = colormap
@@ -30,16 +31,17 @@ def view(plane="y=0", source="B", colormap=None):
 
 
 @pytest.mark.parametrize(
-    ("plane", "source", "drawn"),
+    ("plane", "source", "tilt", "drawn"),
     [
-        ("y=0", "B", "flat"),  # a symmetry plane: the lines keep to it
-        ("z=12mm", "B", "3d"),  # the field crosses it: the lines leave it
-        ("y=0", "H", "flat"),  # H lines for an H sensor
-        ("y=0", "J", None),  # J is nothing outside a magnet: no lines
+        ("y=0", "B", 0, "flat"),  # a symmetry plane: the lines keep to it
+        ("y=0", "B", 1, "3d"),  # a degree out of it is not one
+        ("z=12mm", "B", 0, "3d"),  # the field crosses it: the lines leave it
+        ("y=0", "H", 0, "flat"),  # H lines for an H sensor
+        ("y=0", "J", 0, None),  # J is nothing outside a magnet: no lines
     ],
 )
-def test_where_the_lines_are_drawn(plane, source, drawn):
-    items = view(plane, source).payload.get("fieldlines") or []
+def test_where_the_lines_are_drawn(plane, source, tilt, drawn):
+    items = view(plane, source, tilt=tilt).payload.get("fieldlines") or []
     if drawn is None:
         assert items == []
         return
