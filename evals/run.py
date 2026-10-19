@@ -111,14 +111,13 @@ def environments(rebuild=False):
     plain = ENVS / "plain"
     if rebuild or not (plain / "bin" / "python").exists():
         _uv("venv", "--clear", "--python", "3.13", str(plain))
-        # the magpylib the studio condition gets, named: a pre-release is
-        # not what a bare `magpylib` resolves to
+        # the magpylib the studio condition gets
         _uv(
             "pip",
             "install",
             "--python",
             str(plain / "bin" / "python"),
-            "magpylib>=6.0.0rc0",
+            "magpylib>=6.0",
         )
     studio = ENVS / "studio"
     wheels = ENVS / "wheel"

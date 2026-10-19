@@ -31,8 +31,8 @@ what is next is in [roadmap.md](roadmap.md)._
 
 ## The engine and magpylib's versions
 
-The engine needs magpylib 6 (`magpylib>=6.0.0rc0`), the first release with what
-it is built on: the style property tree it reads and writes styles through
+The engine needs magpylib 6 (`magpylib>=6.0`), the first release with what it is
+built on: the style property tree it reads and writes styles through
 (`schema()`, `set`, `set_values()`), path-valued physics properties
 (`current=[100, 200, 300]`), the display-backend API the 3D view draws through,
 with its pixel helpers, and `Panel.objects`, which gives a bare `magpy.show()` a
