@@ -1288,6 +1288,38 @@ function buildPixels(item) {
   return group;
 }
 
+/** `hex` (six digits, sRGB), lightened on a dark `paper` or darkened on a
+ *  light one just as far as it takes to stand 3:1 against it -- the contrast
+ *  a line needs to read as one. Its hue stays, and a colour that already
+ *  stands out comes back as it was, so lines and arrows still agree there. */
+function legible(hex, paper) {
+  const rgb = (h) =>
+    [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const linear = (c) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const luminance = ([r, g, b]) =>
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const back = luminance(rgb(paper));
+  const ink = rgb(hex);
+  if (contrast(luminance(ink), back) >= 3) return `#${hex}`;
+  // towards white on a page darker than the luminance where white and black
+  // stand out from it equally, towards black on a lighter one
+  const toward = back < 0.18 ? 1 : 0;
+  const mix = (t) => ink.map((c) => c + (toward - c) * t);
+  let [low, high] = [0, 1];
+  for (let n = 0; n < 12; n++) {
+    const t = (low + high) / 2;
+    if (contrast(luminance(mix(t)), back) >= 3) high = t;
+    else low = t;
+  }
+  const byte = (c) =>
+    Math.round(c * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(high).map(byte).join("")}`;
+}
+
 /** One material per opacity for every field line drawn: shared and never
  *  disposed, so its program is compiled once -- a material per frame would
  *  also grow `wideMaterials` without end, since a discarded node's are not
@@ -1298,7 +1330,7 @@ function fieldLineMaterial(opacity) {
   if (!material) {
     material = new LineMaterial({
       vertexColors: true,
-      linewidth: 1.25,
+      linewidth: 1.75,
       transparent: true,
       opacity,
       depthWrite: false, // lines behind lines still show through
@@ -1362,7 +1394,16 @@ function buildFieldLines(item) {
     const n = (i * ny + j) * nz + k;
     return (bits.charCodeAt(n >> 3) >> (n & 7)) & 1;
   };
-  const lut = item.lut.map((hex) => new THREE.Color(hex));
+  // Each colour at least 3:1 against what the view is drawn on (`legible`):
+  // a colormap's end -- viridis's purple on a dark page, its yellow on a
+  // white one -- left its lines all but gone.
+  const paper = new THREE.Color(
+    cssColor("--vscode-editor-background", "#1e1e1e"),
+  ).getHexString();
+  const lut = item.lut.map(
+    (colour) =>
+      new THREE.Color(legible(new THREE.Color(colour).getHexString(), paper)),
+  );
 
   // Everything below in grid units, along the grid's axes: a step of half a
   // cell, and positions turned back into the world only when written.
