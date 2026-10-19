@@ -45,7 +45,7 @@ A view now says its scale with the view cube and a scale bar in its corner, in a
 notebook and in the VS Code panel alike, rather than with the graduated box
 round the scene. The axes button goes round the cube, the box and none, in that
 order. `axes="box"` still asks for the box, and a page saved with a choice keeps
-it.
+it (#49).
 
 </details>
 
@@ -57,7 +57,7 @@ pip takes the pre-release), and nothing needs installing from magpylib's git any
 more. What kept the engine working on 5.2 is gone: the style shim and its copy
 of the style schema, the check that turned the 3D view off without the
 display-backend API, and the panel falling back to the chart when it did.
-Nothing a scene file or a script holds changes.
+Nothing a scene file or a script holds changes (#49).
 
 </details>
 
