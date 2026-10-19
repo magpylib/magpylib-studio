@@ -374,6 +374,9 @@ function makeGizmo() {
           attr: from.shape.attr,
           value: resized(node.scale, from.shape, from.centre),
           scale: node.scale.toArray(), // a mesh has no size worth printing
+          // and about where, in the object's frame: pixels a variable
+          // decides are stretched there as a formula (`apply_edits`)
+          about: from.centre.toArray(),
         };
       }
       if (edit.position || edit.orientation || edit.shape) edits.push(edit);

@@ -26,9 +26,10 @@ the notebook widget and the VS Code panel alike (#46).
 R now resizes a CylinderSegment: its radii across, its height along, its angles
 kept, about its axis, so segments of one ring stay on it. On a Sensor with
 pixels it spreads the pixel array about its centre, the pixels and the sensor's
-axes keeping their size. The engine draws both as the drag goes. A sensor with
-one pixel, or more than 256, keeps the Inspector. The readout shows a segment's
-angles in degrees.
+axes keeping their size; a grid written over a variable, such as its density,
+is stretched as that formula, so the variable still decides it. The engine
+draws both as the drag goes. A sensor with one pixel, or more than 256, keeps
+the Inspector. The readout shows a segment's angles in degrees.
 
 </details>
 

@@ -720,6 +720,42 @@ def test_a_sensor_resizes_its_pixel_array(session, pixel, offered):
         assert "probe" not in shapes
 
 
+def test_a_pixel_resize_keeps_the_formula_a_variable_writes():
+    """A grid sampled over `density` is stretched as a formula, not replaced
+    by the numbers the view sends: the resize spreads the pixels, and how
+    many there are is still the density's. Every step of the drag is
+    stretched from where it began, so two steps do not compound."""
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    pixels = np.asarray(session.get_scene()["shapes"]["field"]["value"])
+    centre = pixels.mean(axis=0)
+
+    session.begin_interaction()
+    for factor in (1.5, 2.0):  # each relative to where the drag began
+        spread = centre + (pixels - centre) * [factor, 1, 1]
+        session.apply_edits(
+            [
+                {
+                    "objectId": "field",
+                    "shape": {
+                        "attr": "pixel",
+                        "value": spread.tolist(),
+                        "scale": [factor, 1, 1],
+                        "about": centre.tolist(),
+                    },
+                }
+            ]
+        )
+    session.end_interaction()
+
+    drawn = np.asarray(session._objs["field"].pixel)
+    assert drawn == pytest.approx(spread)
+    session.set_variable("density", 6)
+    regrid = np.asarray(session._objs["field"].pixel).reshape(-1, 3)
+    assert len(regrid) == 36
+    assert np.ptp(regrid, axis=0)[:2] == pytest.approx(np.ptp(spread, axis=0)[:2])
+
+
 def test_a_played_frame_recomputes_what_the_field_decides():
     """Why playback asks for frames rather than moving meshes about.
 
