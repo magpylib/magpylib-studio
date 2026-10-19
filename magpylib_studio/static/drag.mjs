@@ -153,10 +153,10 @@ export function watchDrags(host, view) {
     // Nothing is kept where the picture has to come from the engine to be
     // right: aiming a polarization redraws the magnet's colours, a patterned
     // source's copies move by the mirror or the pitch of the drag rather than
-    // with it, which only a rebuild knows, a segment resized grows about its
-    // axis and a sensor spreads its pixels without stretching them. The
-    // renderer says which (`redrawn`): none has the handles on that node, so
-    // there is nothing to swap out from under them.
+    // with it, which only a rebuild knows, and a sensor resized spreads its
+    // pixels without stretching them. The renderer says which (`redrawn`):
+    // none has the handles on that node, so there is nothing to swap out
+    // from under them.
     //
     // Several objects at once never are: they are hung on the rig for the
     // length of the drag, and a rebuild that took their nodes away would

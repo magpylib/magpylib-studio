@@ -636,29 +636,20 @@ def _drawn(session, object_id):
 
 
 @pytest.mark.parametrize(
-    ("kind", "params", "attr", "grown", "scale"),
+    ("kind", "params", "attr", "scale"),
     [
-        ("magnet.Cuboid", {"dimension": [1, 2, 3]}, "dimension", [2, 4, 6], 2.0),
-        ("magnet.Cylinder", {"dimension": [1, 2]}, "dimension", [1.5, 3], 1.5),
-        ("magnet.Sphere", {"diameter": 2}, "diameter", 6, 3.0),
-        # the radii across, the height along, the angles kept
-        (
-            "magnet.CylinderSegment",
-            {"dimension": [1, 2, 1, -30, 120]},
-            "dimension",
-            [1.5, 3, 2.5, -30, 120],
-            [1.5, 1.5, 2.5],
-        ),
+        ("magnet.Cuboid", {"dimension": [1, 2, 3]}, "dimension", 2.0),
+        ("magnet.Cylinder", {"dimension": [1, 2]}, "dimension", 1.5),
+        ("magnet.Sphere", {"diameter": 2}, "diameter", 3.0),
     ],
 )
-def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, grown, scale):
+def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
     """What the resize gizmo relies on, per class it offers to resize.
 
-    The drag tells the engine only the value it came to, and the view draws
-    the old mesh scaled about the object's position until the engine answers.
-    That is only honest if the mesh magpylib draws for the new value *is* the
-    old mesh scaled -- true for these, and for a segment only with its angles
-    kept and x and y scaled together.
+    The drag scales the drawn mesh and tells the engine only the value it came
+    to. That is only honest if the mesh magpylib draws for the new value *is*
+    the old mesh scaled -- true for these three and false for the classes the
+    table leaves out, whose angles or vertices do not follow their size.
     """
     session = MagpylibStudioSession()
     session.add_object("o", kind, params=params)
@@ -666,7 +657,8 @@ def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, grown, sc
     before = _drawn(session, "o")
     anchor = np.asarray(session.get_scene()["anchors"]["o"])
 
-    assert session.get_scene()["shapes"]["o"]["attr"] == attr
+    value = session.get_scene()["shapes"]["o"]["value"]
+    grown = [v * scale for v in value] if isinstance(value, list) else value * scale
     session.set_param("o", attr, grown)
 
     assert _drawn(session, "o") - anchor == pytest.approx(

@@ -1733,15 +1733,13 @@ async function selection(port, base) {
   await check(
     "a drag on the stand-in ends where it went, redrawn before the release",
     async () => {
-      // The segment's radii grow and its angles stay; the sensor's pixels
-      // spread about their centroid, x doubled; the aim turns.
+      // The sensor's pixels spread about their centroid, x doubled; the
+      // aim turns.
       const cases = [
-        ["arc", "scale", "proxy.scale.set(1.5, 1.5, 1)"],
         ["probe", "scale", "proxy.scale.set(2, 1, 1)"],
         ["aimed", "polarization", "proxy.rotateX(0.5)"],
       ];
       const want = {
-        arc: [0.015, 0.03, 0.01, 0, 90],
         probe: [
           [
             [-0.01, 0, 0],

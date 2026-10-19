@@ -234,7 +234,7 @@ function constrainScale(node, constraint) {
       Math.abs(b - 1) > Math.abs(a - 1) ? b : a,
     );
     node.scale.setScalar(pulled);
-  } else if (constraint === "xy" || constraint === "segment") {
+  } else if (constraint === "xy") {
     const radial = Math.abs(x - 1) > Math.abs(y - 1) ? x : y;
     node.scale.set(radial, radial, z);
   }
@@ -245,12 +245,6 @@ function resized(scale, shape, centre) {
   if (shape.constraint === "uniform") return shape.value * scale.x;
   if (shape.constraint === "xy")
     return [shape.value[0] * scale.x, shape.value[1] * scale.z];
-  if (shape.constraint === "segment") {
-    // (inner radius, outer radius, height, start angle, end angle): the
-    // radii go across and the height along; the angles are not a size
-    const [inner, outer, height, ...angles] = shape.value;
-    return [inner * scale.x, outer * scale.x, height * scale.z, ...angles];
-  }
   const about = ([x, y, z]) => [
     centre.x + (x - centre.x) * scale.x,
     centre.y + (y - centre.y) * scale.y,
@@ -523,18 +517,15 @@ function releasePaths(held) {
   }
 }
 
-/** The resizes the engine draws as they go. A CylinderSegment's is about its
- *  axis, not the handles on its centroid; a Sensor's spreads its pixels and
- *  stretches nothing, where its whole drawing would stretch with the node. */
-const REDRAWN_RESIZES = new Set(["segment", "pixels"]);
-
-/** Whether the handles go on the stand-in: see `setGizmoMode`. */
+/** Whether the handles go on the stand-in: see `setGizmoMode`. A sensor's
+ *  resize spreads its pixels and stretches nothing, where its whole drawing
+ *  would stretch with the node. */
 function standsIn() {
   const objectId = primaryId();
   return (
     gizmoMode === "polarization" ||
     patterned.has(objectId) ||
-    (gizmoMode === "scale" && REDRAWN_RESIZES.has(shapes[objectId]?.constraint))
+    (gizmoMode === "scale" && shapes[objectId]?.constraint === "pixels")
   );
 }
 
@@ -578,9 +569,8 @@ function setGizmoMode(mode) {
   // nothing local is honest about a patterned source: its copies hang on this
   // very node, but a move of the source moves them by the mirror of it, and a
   // turn turns them about somewhere else entirely -- only the rebuild knows
-  // where they go. Nor about some resizes (`REDRAWN_RESIZES`). A node that is
-  // going to be rebuilt cannot be the one the handles are on, so they go here
-  // instead.
+  // where they go. Nor about a sensor's resize. A node that is going to be
+  // rebuilt cannot be the one the handles are on, so they go here instead.
   if (standsIn()) {
     // A redraw mid-drag comes back through here (`highlight`), and the drag
     // is read off the stand-in: placed afresh, a release before the pointer
