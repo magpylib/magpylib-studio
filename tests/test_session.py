@@ -433,6 +433,46 @@ def test_a_whole_drag_is_one_thing_to_undo(session):
     assert np.ravel(session._objs["cube"].position) == pytest.approx(start)
 
 
+def test_a_drags_later_steps_draw_only_what_it_moves():
+    """Past a drag's first step, the scene a view asks for (`partial`) holds
+    what the drag moves and the sensors whose arrows read the field; the rest
+    stands as the first step drew it, and the axes still reach all of it."""
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    s.add_object(
+        "still",
+        "magnet.Cuboid",
+        params={
+            "dimension": [0.005] * 3,
+            "polarization": [0, 0, 1],
+            "position": [0.03, 0, 0],
+        },
+    )
+    whole = s.get_scene()
+    s.begin_interaction()
+    steps = []
+    for x in (0.001, 0.002):
+        s.apply_edits([{"objectId": "magnet", "position": [x, 0, 0]}])
+        steps.append(s.get_scene(partial=True))
+    s.end_interaction()
+    first, later = steps
+    assert "partial" not in first  # the first step is drawn whole
+    assert later["partial"] == ["field", "magnet"]
+    drawn = {
+        item["object_id"]
+        for kind in ("meshes", "scatters", "pixels")
+        for item in later[kind]
+    }
+    assert drawn == {"field", "magnet"}
+    assert set(later["anchors"]) == set(whole["anchors"])  # what is said of all of it
+    # the axes reach as far as the first step's, drawn whole, at least
+    for (low, high), (was_low, was_high) in zip(
+        later["ranges"], first["ranges"], strict=True
+    ):
+        assert low <= was_low and high >= was_high
+    assert "partial" not in s.get_scene(partial=True)  # out of a drag, whole
+
+
 def test_a_gesture_that_ends_where_it_began_leaves_nothing_behind(session):
     """A slider taken somewhere and released at the value it started from.
 

@@ -2497,6 +2497,10 @@ class MagpylibStudioSession:
         #: what stays, computed once for the gesture. See `_field_lines`.
         self._moving: set | None = set()
         self._field_cache: dict = {}
+        #: Inside a gesture: the ``ranges`` and ``labels`` of its first frame,
+        #: drawn whole -- which a later frame, drawing only what the gesture
+        #: moves, extends rather than recomputes. See `get_scene`.
+        self._drawn_whole: dict | None = None
         #: Per object, the motion the steps after its edit replay over it —
         #: measured once per gesture. See `_replay_frame`.
         self._replay_frames: dict = {}
@@ -3577,7 +3581,7 @@ class MagpylibStudioSession:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
 
-    def get_scene(self, frame=None):
+    def get_scene(self, frame=None, partial=False):
         """The scene as buffers for a scene-graph view, keyed by studio ids.
 
         With `frame`, one step of the scene's paths instead: the same shape,
@@ -3595,11 +3599,20 @@ class MagpylibStudioSession:
         which does not survive `_build`, whereas these are what the editing
         methods already take. Selecting a mesh therefore names an object the
         protocol understands.
+
+        With `partial`, as a view asks for each step of a drag: past the
+        drag's first step, only what it moves is drawn -- its objects, a
+        moved pattern source's copies, and the sensors whose arrows read the
+        field -- and ``partial`` names them. The rest stands as the view drew
+        it at that first step: nothing else moves while a hand is on the
+        handles. On the demo's 96 magnets a step was 38 ms of python and
+        127 KB, all but 19 KB of it the magnets that stood still. A variable
+        moves anything, so its steps are drawn whole.
         """
         with threejs.pinned_scene_units():
-            return self._scene_as_drawn(frame)
+            return self._scene_as_drawn(frame, partial)
 
-    def _scene_as_drawn(self, frame=None):
+    def _scene_as_drawn(self, frame=None, partial=False):
         """`get_scene`, with the units pinned by the caller."""
         if frame is not None:
             # One step of the paths, whole: what a pose cannot express is a
@@ -3625,9 +3638,24 @@ class MagpylibStudioSession:
             from magpylib.graphics.backend import pixel_fields
 
             readings = pixel_fields(self.scene)
+        only = None
+        if partial and self._interaction is not None and self._drawn_whole:
+            names = self._moving_names()
+            if names is not None:
+                # the nodes they are drawn on: a copy is drawn on its source's
+                source_of = {c: s for s, made in self._derived.items() for c in made}
+                only = {source_of.get(name, name) for name in names}
         scene = threejs.scene_payload(
-            self.scene, live=self._objs, derived=self._derived, fields=readings
+            self.scene,
+            live=self._objs,
+            derived=self._derived,
+            fields=readings,
+            only=only,
+            whole=self._drawn_whole if only is not None else None,
         )
+        if partial and self._interaction is not None and only is None:
+            # the gesture's first frame, drawn whole
+            self._drawn_whole = {"ranges": scene["ranges"], "labels": scene["labels"]}
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
         scene["parametric"] = self._parametric_fields()
@@ -3862,9 +3890,10 @@ class MagpylibStudioSession:
         else:
             self._moving.update(ids)
 
-    def _forget_field(self):
+    def _forget_gesture(self):
         self._moving = set()
         self._field_cache = {}
+        self._drawn_whole = None
 
     def _field_lines(self, readings=None):
         """Prototype (#45): a ``fieldlines`` item per sensor that reads the
@@ -3885,7 +3914,7 @@ class MagpylibStudioSession:
 
         gesture = self._interaction is not None
         if not gesture:
-            self._forget_field()
+            self._forget_gesture()
         sources = fieldlines.sources_of(self.scene)
         names = self._moving_names() if gesture else None
         key_of = {id(obj): key for key, obj in self._objs.items()}
@@ -5432,7 +5461,7 @@ class MagpylibStudioSession:
         self._interaction = False
         self._interaction_redo = list(self._redo)
         self._replay_frames = {}
-        self._forget_field()
+        self._forget_gesture()
         return {"ok": True}
 
     def end_interaction(self):
@@ -5450,7 +5479,7 @@ class MagpylibStudioSession:
             self._redo = self._interaction_redo
         self._interaction = None
         self._interaction_redo = []
-        self._forget_field()
+        self._forget_gesture()
 
     def apply_edits(self, edits, define=False):
         """Record what a 3D view's handles did.

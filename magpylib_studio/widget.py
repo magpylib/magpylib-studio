@@ -1126,7 +1126,8 @@ class SceneWidget(anywidget.AnyWidget):
         # wait on a host whose every message costs (marimo's, measured in
         # decision 0010). Not a trait: nothing is told per frame.
         if content.get("scene") and isinstance(answer.get("result"), dict):
-            answer["result"]["scene"] = self._session.get_scene()
+            # a step of a gesture: past its first, only what it moves
+            answer["result"]["scene"] = self._session.get_scene(partial=True)
         settles = (
             method in self._SETTLES
             or method in self._OBJECT_EDITS

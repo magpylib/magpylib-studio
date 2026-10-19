@@ -1192,7 +1192,7 @@ def view_payload(scene, index=None, traces=None):
     }
 
 
-def scene_payload(objects, live=None, derived=None, fields=None):
+def scene_payload(objects, live=None, derived=None, fields=None, only=None, whole=None):
     """Everything a three.js view needs to build the scene once.
 
     `live` is the session's ``{studio id: magpylib object}`` map, and
@@ -1240,18 +1240,47 @@ def scene_payload(objects, live=None, derived=None, fields=None):
 
     `fields` is what `magpylib.graphics.backend.pixel_fields` gives for
     `objects`, where the caller has it already: computed here otherwise.
+
+    `only`, a set of ids, draws just those nodes -- each with its copies --
+    and the sensors whose drawing is their reading, which `partial` names;
+    the rest of the payload is whole. `whole`, then, is the ``ranges`` and
+    ``labels`` of the whole scene, which what is drawn extends: a drag's
+    later steps, against its first (`MagpylibStudioSession.get_scene`).
     """
     live = live or {}
     derived = derived or {}
     pixels, restore = _instanced_pixels(
         objects, _key_map(live, derived) if live else None, fields
     )
+    redrawn = None
+    if only is not None:
+        redrawn = sorted(
+            {*only, *(key for key, obj in live.items() if _reads_the_field(obj))}
+        )
+        # a collection draws nothing of its own, and captured it would draw
+        # everything it holds
+        drawn = [
+            live[key]
+            for node in redrawn
+            for key in (node, *derived.get(node, ()))
+            if key in live and not isinstance(live[key], magpy.Collection)
+        ]
     try:
-        scene = _capture(objects, on_behalf_of="studio")
+        scene = None
+        if only is None:
+            scene = _capture(objects, on_behalf_of="studio")
+        elif drawn:
+            scene = _capture(drawn, on_behalf_of="studio")
     finally:
         restore()
-    panel = scene.panel(1, 1)
-    traces = [t for frame in scene.frames for t in frame.traces]
+    panel = scene.panel(1, 1) if scene is not None else None
+    traces = [] if scene is None else [t for f in scene.frames for t in f.traces]
+    reach = None if panel is None or panel.ranges is None else panel.ranges.tolist()
+    labels = panel.labels if panel is not None else None
+    if whole is not None:
+        kept = whole["ranges"]
+        reach = kept if reach is None or kept is None else _spanning(kept, reach)
+        labels = whole["labels"]
 
     source_of = {copy: src for src, copies in derived.items() for copy in copies}
     anchors, centroids, orientations, shapes, polarizations = {}, {}, {}, {}, {}
@@ -1298,10 +1327,8 @@ def scene_payload(objects, live=None, derived=None, fields=None):
     collections, split = _collections(live, derived, source_of)
     return {
         **_by_kind([*_keyed(traces, live, derived), *pixels]),
-        "ranges": _ranges_with_pixels(
-            None if panel.ranges is None else panel.ranges.tolist(), pixels
-        ),
-        "labels": panel.labels,
+        "ranges": _ranges_with_pixels(reach, pixels),
+        "labels": labels,
         "anchors": anchors,
         "centroids": centroids,
         "orientations": orientations,
@@ -1314,7 +1341,15 @@ def scene_payload(objects, live=None, derived=None, fields=None):
         "copies": {source: list(made) for source, made in derived.items()},
         "readings": sorted(readings),
         "collections": collections,
+        **({} if redrawn is None else {"partial": redrawn}),
     }
+
+
+def _spanning(*ranges):
+    """The ranges, ``[[low, high]] * 3``, that reach as far as all of `ranges`."""
+    lows = np.min([[r[0] for r in each] for each in ranges], axis=0)
+    highs = np.max([[r[1] for r in each] for each in ranges], axis=0)
+    return np.stack([lows, highs], axis=1).tolist()
 
 
 def _collections(live, derived, source_of):
