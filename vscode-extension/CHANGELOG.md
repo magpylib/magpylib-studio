@@ -30,7 +30,7 @@ sensors whose arrows read the field; the rest of the scene stays as the view
 drew it, and is drawn whole again when the drag ends. Whether two magnets
 overlap is decided once per pair while neither moves. A drag of 96 magnets in
 marimo went from 18 to 24 scenes a second, and the demo with field lines from 53
-to 59, its frame rate.
+to 59, its frame rate (#58).
 
 </details>
 
