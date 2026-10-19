@@ -262,6 +262,9 @@ class SceneWidget(anywidget.AnyWidget):
     #: and the two move together; the view's model is the one that owns the
     #: numbers. A name the scene has no variable of is refused.
     variables = traitlets.Dict().tag(sync=True)
+    #: Prototype (#45): lines of the field through the pixels of each sensor
+    #: that reads it, drawn while a drag moves the magnets. An editable view's.
+    field_lines = traitlets.Bool(False).tag(sync=True)
 
     #: What an editable view may ask of its session: a drag, and undoing one;
     #: the variables, to list and to set, with a typed value read through
@@ -437,6 +440,9 @@ class SceneWidget(anywidget.AnyWidget):
             raise TypeError(f"no objects to draw with {', '.join(kwargs)}")
         if editable is None and self._session is None:
             self.editable = None  # never: a session's view said so in `_edit`
+        if self.field_lines and self._session is None:
+            # asked for when the view was made, before there were objects
+            self._field_lines_asked_for({"new": True})
 
     @classmethod
     def _split(cls, kwargs):
@@ -514,6 +520,14 @@ class SceneWidget(anywidget.AnyWidget):
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
+            # the sensors that read the field, which the lines' button is
+            # shown for -- keyed as this payload keys objects, by magpylib's id
+            from magpylib_studio import fieldlines
+
+            reading = fieldlines.sensors_of(objects)
+            if reading:
+                readings = [str(id(sensor)) for sensor in reading]
+                self.payload = {**self.payload, "readings": readings}
             self.identify(*objects)
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
@@ -854,6 +868,10 @@ class SceneWidget(anywidget.AnyWidget):
         self._shown = None
         #: The edits of the drag in progress, as the view last sent them.
         self._dragged = None
+        # Lines asked for when the view was made are part of where editing
+        # starts, not an edit; a document that has them on shows them.
+        if self.field_lines and not session.field_lines:
+            session.set_field_lines(True)
         # Where editing starts: undo stops here, and `reset` comes back here.
         # What the session did before the view -- a scene function's build,
         # steps made from code -- is its starting point, not edits.
@@ -861,6 +879,27 @@ class SceneWidget(anywidget.AnyWidget):
         self._start = json.dumps(session.doc, sort_keys=True, default=str)
         self.editable = handles
         self._show(None)
+
+    @traitlets.observe("field_lines")
+    def _field_lines_asked_for(self, change):
+        """The lines asked for, or put away: the view's button, or
+        ``view.field_lines``. The document keeps the choice, as one step to
+        undo (`set_field_lines`), and the trait follows the document back --
+        see `_show`. They are computed by a session, so a view of the cell's
+        own objects copies them into one now, as the pencil does, with the
+        handles left away -- the view stays one to look at."""
+        session = getattr(self, "_session", None)
+        if session is not None:
+            if bool(change["new"]) != session.field_lines:
+                session.set_field_lines(change["new"])
+                self._show({"by": "field_lines", "on": bool(change["new"])})
+        elif change["new"] and getattr(self, "_given", None):
+            if self.editable is None:
+                return  # made for looking only: no session, so no lines
+            with self.hold_sync():
+                self._scene = None
+                self.frames = 1
+                self._edit(_session_of(self._given, self._named), handles=False)
 
     def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected,
@@ -882,6 +921,8 @@ class SceneWidget(anywidget.AnyWidget):
             self.hidden = [key for key in self.hidden if key in ids]
             self.faded = {k: v for k, v in self.faded.items() if k in ids}
             self.variables = _values_of(self._session)
+            # an undo or a redo can turn the lines on or off
+            self.field_lines = self._session.field_lines
             if not first:
                 self.last_edit = edit or {}
                 self.revision += 1

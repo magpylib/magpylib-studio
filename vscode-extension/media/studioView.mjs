@@ -68,7 +68,8 @@ function take(key, value) {
   values[key] = value;
   emit(`change:${key}`, value);
 }
-const told = { selected: [], hidden: [] }; // what the host last heard from here
+// what the host last heard from here
+const told = { selected: [], hidden: [], field_lines: false };
 let inSidebar = null; // the object the sidebar shows
 
 let previewTaken = null; // settles the pose the host has not yet answered
@@ -148,6 +149,12 @@ function tell() {
   if (hide.length || show.length) {
     vscodeApi.postMessage({ type: "setVisible", hide, show });
   }
+  // the lines are the document's too: an edit, saved and undoable
+  const lines = Boolean(values.field_lines);
+  if (lines !== told.field_lines) {
+    told.field_lines = lines;
+    vscodeApi.postMessage({ type: "setFieldLines", on: lines });
+  }
 }
 
 /** A step of the run, asked of the engine as the view asks it of a kernel. */
@@ -210,9 +217,12 @@ async function drawScene() {
   if (charting()) return; // switched while the engine was answering
   const hidden = hiddenIn(tree);
   told.hidden = hidden;
+  // the document's switch, which the engine's scene says (#45)
+  told.field_lines = Boolean(payload.field_lines);
   take("tree", tree);
   take("hidden", hidden);
   take("frames", framesOf(payload));
+  take("field_lines", told.field_lines);
   take("payload", payload);
   say("");
 }

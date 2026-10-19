@@ -42,6 +42,7 @@ _PUBLIC = {
     "get_overlaps",
     "set_overlap_intended",
     "get_gap",
+    "set_field_lines",
     "get_field",
     "get_field_figure",
     "get_field_map",

@@ -1048,24 +1048,30 @@ def _resolve_all(recorder, *values):
     return tuple(recorder.resolved(value) if recorder else value for value in values)
 
 
-def grid(half, count, *, plane="xy", at=0):
+def grid(half, count, *, plane="xy", at=0, layers=1):
     """A square of `count` by `count` points across ±`half` in `plane` (xy,
     xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
     the variables, `pixel=grid(reach, density)`, so the grid follows a slider
-    as `sampled` does; `count` is two or more. Called plainly, it is the
+    as `sampled` does; `count` is two or more. `layers` stacks that many
+    squares along the third axis, as far apart as the points of one and
+    centred on `at`, for a block of pixels. Called plainly, it is the
     points."""
     axes = {"xy": (0, 1, 2), "xz": (0, 2, 1), "yz": (1, 2, 0)}[plane]
+    pitch = 2 * half / (count - 1)
 
     def point(t):
-        across = -half + 2 * half * (t % count) / (count - 1)
-        up = -half + 2 * half * (t // count) / (count - 1)
+        across = -half + pitch * (t % count)
+        up = -half + pitch * (t // count % count)
         coordinates = [None, None, None]
         coordinates[axes[0]] = across
         coordinates[axes[1]] = up
-        coordinates[axes[2]] = at
+        # a layer's offset from the middle one: no division by `layers - 1`,
+        # so a single layer is the square at `at`
+        coordinates[axes[2]] = at + pitch * (t // (count * count) - (layers - 1) / 2)
         return tuple(coordinates)
 
-    return sampled(point, count=count**2, over=(0, count**2 - 1))
+    points = count * count * layers
+    return sampled(point, count=points, over=(0, points - 1))
 
 
 def duplicate_around(obj, count, axis="z", anchor=0, spin=0):

@@ -864,7 +864,7 @@ def _reading_sensors(objects):
     return found
 
 
-def _instanced_pixels(objects, key_of):
+def _instanced_pixels(objects, key_of, fields=None):
     """The ``pixels`` items for the sensors `_reading_sensors` finds, and a
     function that puts their styles back.
 
@@ -880,9 +880,10 @@ def _instanced_pixels(objects, key_of):
     sensors = [] if key_of is None else _reading_sensors(objects)
     if not sensors:
         return [], lambda: None
-    from magpylib.graphics.backend import pixel_fields
+    if fields is None:
+        from magpylib.graphics.backend import pixel_fields
 
-    fields = pixel_fields(_given(objects))
+        fields = pixel_fields(_given(objects))
     items = []
     for sensor in sensors:
         key = key_of(id(sensor))
@@ -1191,7 +1192,7 @@ def view_payload(scene, index=None, traces=None):
     }
 
 
-def scene_payload(objects, live=None, derived=None):
+def scene_payload(objects, live=None, derived=None, fields=None):
     """Everything a three.js view needs to build the scene once.
 
     `live` is the session's ``{studio id: magpylib object}`` map, and
@@ -1236,11 +1237,14 @@ def scene_payload(objects, live=None, derived=None):
     `collections` gives each Collection what it holds, by the ids above: a
     collection draws nothing of its own, so a view that puts handles on one
     makes it a node, and carries these on it while it is dragged.
+
+    `fields` is what `magpylib.graphics.backend.pixel_fields` gives for
+    `objects`, where the caller has it already: computed here otherwise.
     """
     live = live or {}
     derived = derived or {}
     pixels, restore = _instanced_pixels(
-        objects, _key_map(live, derived) if live else None
+        objects, _key_map(live, derived) if live else None, fields
     )
     try:
         scene = _capture(objects, on_behalf_of="studio")

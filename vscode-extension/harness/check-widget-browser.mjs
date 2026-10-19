@@ -492,6 +492,38 @@ async function firstLook(port, base, expected) {
   });
 }
 
+/** A saved page draws a sensor's field lines (#45): the page integrates them
+ *  itself, from the field on the grid it carries -- no python behind it. A
+ *  line part is the one with an empty box, kept out of what the view frames. */
+async function savedLines(port, base) {
+  await check("a saved page draws a sensor's field lines", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/lines.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const segments = await tab.evaluate(`
+        let count = 0;
+        for (const node of window.scene3d.byObjectId.values()) {
+          node.traverse((part) => {
+            const box = part.geometry?.boundingBox;
+            if (part.isLineSegments2 && box?.isEmpty()) {
+              count += part.geometry.attributes.instanceStart.count;
+            }
+          });
+        }
+        return count;
+      `);
+      return segments > 100 ? thrown(tab) : `${segments} line segments drawn`;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 async function room(port, base, expected) {
   const all = expected.rows;
   const rings = ["stack", "upper", "lower", "probe"];
@@ -904,7 +936,8 @@ async function heldReadings(port, base) {
  *  the old panel told it -- a pick, a drag's start, one pose in flight with
  *  the newest waiting and the newest scene drawn, the release -- and
  *  hiding goes to the host as an edit, Cmd+Z is left to VS Code's keybinding,
- *  a refresh asks the engine again, and Chart mode draws the chart. */
+ *  a refresh asks the engine again, the lines' button is an edit too, and
+ *  Chart mode draws the chart. */
 async function studioDrag(port, base) {
   let seen = null;
   const page = async () => {
@@ -983,7 +1016,8 @@ async function studioDrag(port, base) {
     async () => {
       const { result, problem } = await page();
       if (!result) return problem;
-      const { editing, picked, keyed, isolated, refreshed, chart } = result;
+      const { editing, picked, keyed, isolated, refreshed, lined, chart } =
+        result;
       if (!editing) return "the panel shows no editing column";
       const picks = picked.filter((m) => m.type === "selectObject");
       if (picks.length !== 1 || picks[0].objectId !== "probe") {
@@ -1004,6 +1038,10 @@ async function studioDrag(port, base) {
       const undos = keyed.filter((m) => m.type === "undo").length;
       if (undos !== 1) {
         return `${undos} undos for Cmd+Z and the button -- Cmd+Z is VS Code's: ${said(keyed)}`;
+      }
+      const switched = lined.filter((m) => m.type === "setFieldLines");
+      if (switched.length !== 1 || switched[0].on !== true) {
+        return `the lines' button told the host: ${said(lined)}`;
       }
       const asked = refreshed.map((m) => m.method);
       if (!asked.includes("get_scene") || !asked.includes("object_tree")) {
@@ -2248,6 +2286,7 @@ try {
   await selection(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
+  await savedLines(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {
   browser.proc.kill("SIGKILL"); // a renderer that is locked up ignores less

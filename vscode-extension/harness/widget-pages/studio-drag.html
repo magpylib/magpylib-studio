@@ -31,12 +31,16 @@
           window.posted.push(message);
           if (message.type === "rpcRequest") {
             window.scenes.then(({ scene, tree }) => {
+              // from the lines' step on, the probe reads the field (#45)
+              const shown = window.reading
+                ? { ...scene, readings: ["probe"] }
+                : scene;
               const result =
                 message.method === "object_tree"
                   ? tree
                   : message.method === "get_figure"
                     ? { data: [], layout: {} }
-                    : scene;
+                    : shown;
               answer({ type: "rpcResult", reqId: message.reqId, result });
             });
           } else if (message.type === "previewTransform") {
@@ -97,6 +101,7 @@
           hide: m.hide,
           show: m.show,
           scene: m.scene,
+          on: m.on,
           x: m.edits?.[0]?.position?.[0],
         }));
       const view = document.querySelector(".magpy-scene-view");
@@ -166,6 +171,18 @@
       await wait(300);
       const refreshed = since(at);
 
+      // the lines' button, once a sensor reads the field: an edit, told
+      // to the host, which the engine keeps in the document
+      window.reading = true;
+      postMessage({ type: "refresh" }, "*");
+      await wait(300);
+      at = from();
+      [...document.querySelectorAll(".magpy-icon")]
+        .find((b) => b.title.startsWith("Field lines"))
+        ?.click();
+      await wait(100);
+      const lined = since(at);
+
       // Chart mode
       document.getElementById("modeChart").click();
       await until(() => window.charted > 0);
@@ -181,6 +198,7 @@
         keyed,
         isolated,
         refreshed,
+        lined,
         chart,
       };
     </script>

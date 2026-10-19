@@ -1278,9 +1278,9 @@ def test_a_script_cannot_take_the_engine_with_it(tmp_path, monkeypatch, script, 
 
 
 def test_a_grid_of_pixels_is_a_formula_of_the_variables():
-    """`grid(half, count)` is a sensor's square of pixels as `sampled` keeps
-    it: a formula of the variables, so the grid follows a slider; called
-    plainly, the points."""
+    """`grid(half, count, layers=...)` is a sensor's square of pixels, or a
+    stack of them, as `sampled` keeps it: a formula of the variables, so the
+    grid follows a slider; called plainly, the points."""
     from typing import Annotated
 
     from magpylib_studio import Count, Length, grid, scene
@@ -1289,8 +1289,11 @@ def test_a_grid_of_pixels_is_a_formula_of_the_variables():
     def design(
         reach: Annotated[float, Length(0.005, 0.05)] = 0.02,
         density: Annotated[int, Count(2, 9)] = 3,
+        layers: Annotated[int, Count(1, 5)] = 1,
     ):
-        return magpy.Sensor(pixel=grid(reach, density), style_label="probe")
+        return magpy.Sensor(
+            pixel=grid(reach, density, layers=layers), style_label="probe"
+        )
 
     s = design.build()
     probe = s.session._objs["probe"]
@@ -1299,7 +1302,16 @@ def test_a_grid_of_pixels_is_a_formula_of_the_variables():
     assert probe.pixel[-1].tolist() == pytest.approx([0.02, 0.02, 0])
     assert s.session.set_variable("density", 4)["ok"]
     assert s.session._objs["probe"].pixel.shape == (16, 3)
+    # three squares, as far apart as their points and centred on the first's
+    assert s.session.set_variable("layers", 3)["ok"]
+    pixel = s.session._objs["probe"].pixel
+    assert pixel.shape == (48, 3)
+    pitch = 0.04 / 3
+    assert sorted(set(np.round(pixel[:, 2], 9))) == pytest.approx([-pitch, 0, pitch])
     assert design(reach=0.01, density=2).pixel.shape == (4, 3)
+    assert design(reach=0.01, density=2, layers=2).pixel[
+        :, 2
+    ].tolist() == pytest.approx([-0.01] * 4 + [0.01] * 4)
 
 
 # --- variants -----------------------------------------------------------------

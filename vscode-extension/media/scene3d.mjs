@@ -1213,7 +1213,9 @@ function buildItem(item) {
       ? buildMesh(item)
       : item.kind === "pixels"
         ? buildPixels(item)
-        : buildScatter(item);
+        : item.kind === "fieldlines"
+          ? buildFieldLines(item)
+          : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
   built.traverse((part) => {
     if (part.material) part.material.userData.own = part.material.opacity;
@@ -1283,6 +1285,411 @@ function buildPixels(item) {
     part.userData.trace = true;
     group.add(part);
   }
+  return group;
+}
+
+/** `hex` (six digits, sRGB), lightened on a dark `paper` or darkened on a
+ *  light one just as far as it takes to stand 3:1 against it -- the contrast
+ *  a line needs to read as one. Its hue stays, and a colour that already
+ *  stands out comes back as it was, so lines and arrows still agree there. */
+function legible(hex, paper) {
+  const rgb = (h) =>
+    [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const linear = (c) =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const luminance = ([r, g, b]) =>
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const back = luminance(rgb(paper));
+  const ink = rgb(hex);
+  if (contrast(luminance(ink), back) >= 3) return `#${hex}`;
+  // towards white on a page darker than the luminance where white and black
+  // stand out from it equally, towards black on a lighter one
+  const toward = back < 0.18 ? 1 : 0;
+  const mix = (t) => ink.map((c) => c + (toward - c) * t);
+  let [low, high] = [0, 1];
+  for (let n = 0; n < 12; n++) {
+    const t = (low + high) / 2;
+    if (contrast(luminance(mix(t)), back) >= 3) high = t;
+    else low = t;
+  }
+  const byte = (c) =>
+    Math.round(c * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(high).map(byte).join("")}`;
+}
+
+/** One material per opacity for every field line drawn: shared and never
+ *  disposed, so its program is compiled once -- a material per frame would
+ *  also grow `wideMaterials` without end, since a discarded node's are not
+ *  taken out of it. */
+const fieldLineMaterials = new Map();
+function fieldLineMaterial(opacity) {
+  let material = fieldLineMaterials.get(opacity);
+  if (!material) {
+    material = new LineMaterial({
+      vertexColors: true,
+      linewidth: 1.75,
+      transparent: true,
+      opacity,
+      depthWrite: false, // lines behind lines still show through
+    });
+    if (renderer) renderer.getSize(material.resolution);
+    wideMaterials.add(material);
+    fieldLineMaterials.set(opacity, material);
+  }
+  return material;
+}
+
+/** How strongly a stretch of line shows, by where its |B| falls on the
+ *  colour scale: the field the sensor reads in full, a fringe a tenth of it
+ *  faint -- so what the eye lands on is what the sensor is about. */
+/** Lines in one plane at most: past it the plane is as full as it gets. */
+const FIELD_LINES_MOST = 400;
+
+const FIELD_LINE_BANDS = [
+  { below: 0.2, opacity: 0.18 },
+  { below: 0.4, opacity: 0.45 },
+  { below: Infinity, opacity: 0.85 },
+];
+
+/** Field lines through a sensor's pixels (#45, a prototype), integrated here
+ *  from the field python sends on a grid round the sensor -- in numpy the
+ *  same lines cost several times as long, and weigh more than the field they
+ *  come from. Nothing to tune; python says where and how far apart:
+ *
+ *  - In the grid's own frame: a flat grid, the sensor's plane when its
+ *    pixels lie in one, keeps the lines in it; a box lets them run in 3D.
+ *  - RK4 along B/|B| (its part in the plane, for a flat grid), interpolated
+ *    linearly, both ways from each pixel, nearest the middle first.
+ *  - As far apart as the pixels: a pixel already on a line starts none, and
+ *    a line stops within half a spacing of another (Jobard and Lefer's
+ *    evenly spaced streamlines), so a uniform field draws a line per row.
+ *  - A line also stops leaving the grid, closing on itself, where the
+ *    field is under a twenty-fifth of the sensor's, or at a magnet.
+ *  - Coloured by |field| from the table python sends, which magpylib made
+ *    from the sensor's colorscaling and colormap over what its pixels read:
+ *    a line and an arrow where they meet are one colour. Fainter where the
+ *    field is weaker, on a log scale a decade either way of the field at the
+ *    pixels (`FIELD_LINE_BANDS`) -- a fringe falls off as the cube of the
+ *    distance.
+ *
+ *  Not a trace: nothing outlines or picks it, and it is the sensor's
+ *  drawing, rebuilt with its readings. */
+function buildFieldLines(item) {
+  const [nx, ny, nz] = item.shape;
+  const flat = nz === 1;
+  const [ox, oy, oz] = item.origin;
+  const axes = item.axes; // three rows: the grid's axes in the world
+  const h = item.step;
+  const raw = window.atob(item.values);
+  const field = new Float32Array(raw.length / 2);
+  for (let i = 0; i < field.length; i++) {
+    const quantum = raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8);
+    field[i] = ((quantum << 16) >> 16) * item.scale; // little-endian int16
+  }
+  const bits = window.atob(item.inside);
+  const within = (i, j, k) => {
+    const n = (i * ny + j) * nz + k;
+    return (bits.charCodeAt(n >> 3) >> (n & 7)) & 1;
+  };
+  // Each colour at least 3:1 against what the view is drawn on (`legible`):
+  // a colormap's end -- viridis's purple on a dark page, its yellow on a
+  // white one -- left its lines all but gone.
+  const paper = new THREE.Color(
+    cssColor("--vscode-editor-background", "#1e1e1e"),
+  ).getHexString();
+  const lut = item.lut.map(
+    (colour) =>
+      new THREE.Color(legible(new THREE.Color(colour).getHexString(), paper)),
+  );
+
+  // Everything below in grid units, along the grid's axes: a step of half a
+  // cell, and positions turned back into the world only when written.
+  let strength = 0; // |B| where `sample` last looked
+  const b = new Float64Array(3); // B there, along the grid's axes
+  /** B at a point into `b` and `strength`; the length of the part a line
+   *  follows, or -1 outside the grid or inside a magnet. */
+  function sample(fx, fy, fz) {
+    // written so that NaN, which compares false with everything, is outside
+    if (!(fx >= 0 && fy >= 0 && fx <= nx - 1 && fy <= ny - 1)) return -1;
+    if (!flat && !(fz >= 0 && fz <= nz - 1)) return -1;
+    const i = Math.min(Math.floor(fx), nx - 2);
+    const j = Math.min(Math.floor(fy), ny - 2);
+    const k = flat ? 0 : Math.min(Math.floor(fz), nz - 2);
+    // A line stops at a magnet, in a plane as in 3D: the lines are of the
+    // field in the air, where the sensor reads it. Let through, a 3D line
+    // from the demo's bore wandered for most of a metre in and out of the
+    // magnets, turning 75 degrees a cell, on a path no tracing can trust --
+    // half the step moved it 17 mm. Stopped, the lines turn 8 degrees a cell
+    // and keep to the exact field within 0.1 mm.
+    if (within(Math.round(fx), Math.round(fy), flat ? 0 : Math.round(fz))) {
+      return -1;
+    }
+    const tx = fx - i;
+    const ty = fy - j;
+    const tz = flat ? 0 : fz - k;
+    b[0] = b[1] = b[2] = 0;
+    for (let dx = 0; dx < 2; dx++) {
+      const wx = dx ? tx : 1 - tx;
+      for (let dy = 0; dy < 2; dy++) {
+        const wxy = wx * (dy ? ty : 1 - ty);
+        for (let dz = 0; dz < (flat ? 1 : 2); dz++) {
+          const w = flat ? wxy : wxy * (dz ? tz : 1 - tz);
+          const at = (((i + dx) * ny + (j + dy)) * nz + (k + dz)) * 3;
+          b[0] += w * field[at];
+          b[1] += w * field[at + 1];
+          b[2] += w * field[at + 2];
+        }
+      }
+    }
+    strength = Math.hypot(b[0], b[1], b[2]);
+    if (flat) b[2] = 0; // the part in the plane is what a line in it follows
+    return flat ? Math.hypot(b[0], b[1]) : strength;
+  }
+  const toGrid = (x, y, z, row) =>
+    ((x - ox) * axes[row] +
+      (y - oy) * axes[row + 1] +
+      (z - oz) * axes[row + 2]) /
+    h;
+  const seeds = [];
+  for (let s = 0; s < item.seeds.length; s += 3) {
+    const [x, y, z] = item.seeds.slice(s, s + 3);
+    seeds.push([toGrid(x, y, z, 0), toGrid(x, y, z, 3), toGrid(x, y, z, 6)]);
+  }
+  // the middle of the colour scale, and where a line gives up on the field
+  const atSeeds = seeds
+    .map(([x, y, z]) => (sample(x, y, z) > 0 ? strength : 0))
+    .filter((m) => m > 0)
+    .sort((p, q) => p - q);
+  const middle = atSeeds[Math.floor(atSeeds.length / 2)];
+  if (!middle) return new THREE.Group();
+  // where a line ends for want of field: a twenty-fifth of what the sensor
+  // reads, past the faintest band -- a fringe drawn to the edge of the grid
+  // was hair round the scene, and said nothing the faint band does not
+  const fade = middle / 25;
+
+  // What is drawn so far, for the distance test: points in cells half a
+  // spacing across, each cell a linked list in flat arrays. A point carries
+  // its line and how far along it it is, so a line is kept off its own older
+  // stretch as off any other -- which is what ends a loop that comes round
+  // near, but not onto, where it began -- and not off the stretch just drawn.
+  const spacing = item.spacing / h;
+  const cell = spacing / 2;
+  const [cx, cy, cz] = [nx, ny, flat ? 1 : nz].map(
+    (n) => Math.ceil(n / cell) + 1,
+  );
+  const head = new Int32Array(cx * cy * cz).fill(-1);
+  let capacity = 1 << 14;
+  let px = new Float32Array(capacity);
+  let py = new Float32Array(capacity);
+  let pz = new Float32Array(capacity);
+  let owner = new Int32Array(capacity);
+  let along = new Int32Array(capacity);
+  let link = new Int32Array(capacity);
+  let stored = 0;
+  const lag = Math.ceil((2 * spacing) / 0.5); // steps of a line's own wake
+  const cellIndex = (i, j, k) => (i * cy + j) * cz + k;
+  function claim(x, y, z, line, step) {
+    if (stored === capacity) {
+      capacity *= 2;
+      const grow = (old, Kind) => {
+        const bigger = new Kind(capacity);
+        bigger.set(old);
+        return bigger;
+      };
+      px = grow(px, Float32Array);
+      py = grow(py, Float32Array);
+      pz = grow(pz, Float32Array);
+      owner = grow(owner, Int32Array);
+      along = grow(along, Int32Array);
+      link = grow(link, Int32Array);
+    }
+    const c = cellIndex(
+      Math.floor(x / cell),
+      Math.floor(y / cell),
+      flat ? 0 : Math.floor(z / cell),
+    );
+    px[stored] = x;
+    py[stored] = y;
+    pz[stored] = z;
+    owner[stored] = line;
+    along[stored] = step;
+    link[stored] = head[c];
+    head[c] = stored++;
+  }
+  /** Whether a point drawn is within `apart` -- one of another line, or of
+   *  `line` itself more than its wake back from `step`. */
+  function crowded(x, y, z, line, step, apart) {
+    const reach = Math.ceil(apart / cell);
+    const i0 = Math.floor(x / cell);
+    const j0 = Math.floor(y / cell);
+    const k0 = flat ? 0 : Math.floor(z / cell);
+    for (
+      let i = Math.max(i0 - reach, 0);
+      i <= Math.min(i0 + reach, cx - 1);
+      i++
+    ) {
+      for (
+        let j = Math.max(j0 - reach, 0);
+        j <= Math.min(j0 + reach, cy - 1);
+        j++
+      ) {
+        const k1 = flat ? 0 : Math.min(k0 + reach, cz - 1);
+        for (let k = flat ? 0 : Math.max(k0 - reach, 0); k <= k1; k++) {
+          for (let p = head[cellIndex(i, j, k)]; p !== -1; p = link[p]) {
+            if (owner[p] === line && Math.abs(along[p] - step) < lag) continue;
+            const dx = px[p] - x;
+            const dy = py[p] - y;
+            const dz = pz[p] - z;
+            if (dx * dx + dy * dy + dz * dz < apart * apart) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  const bands = FIELD_LINE_BANDS.map(() => ({ positions: [], colours: [] }));
+  const world = (x, y, z, out) => {
+    for (let c = 0; c < 3; c++) {
+      out.push(
+        item.origin[c] + h * (x * axes[c] + y * axes[3 + c] + z * axes[6 + c]),
+      );
+    }
+  };
+  // how strongly it shows, by the field against the sensor's
+  const tone = (magnitude) =>
+    Math.min(Math.max(0.5 + 0.5 * Math.log10(magnitude / middle), 0), 1);
+  // its colour, from the table, past the readings the end colour
+  const [low, high] = item.levels;
+  const colourOf = (magnitude) =>
+    lut[
+      Math.round(
+        Math.min(Math.max((magnitude - low) / (high - low), 0), 1) *
+          (lut.length - 1),
+      )
+    ];
+  const ds = 0.5;
+  const longest = Math.ceil((2 * (nx + ny + nz)) / ds);
+  // How near another line a line may run: half a spacing, the even look of
+  // a streamplot, in a plane as in 3D. Let closer in 3D, the lines bunched
+  // into the gaps between magnets and drew hair there.
+  const nearest = 0.5 * spacing;
+  // where a flat grid's lines may start next: beside a line, a spacing off
+  const frontier = [];
+  let lines = 0;
+  /** A line from (sx, sy, sz) both ways, unless it would start on one. */
+  function trace(sx, sy, sz, apart) {
+    if (crowded(sx, sy, sz, -1, 0, apart)) return;
+    if (sample(sx, sy, sz) <= fade) return;
+    const line = lines++;
+    claim(sx, sy, sz, line, 0);
+    for (const sign of [1, -1]) {
+      let x = sx;
+      let y = sy;
+      let z = sz;
+      let m = sample(x, y, z);
+      if (m <= fade) break;
+      let shown = strength;
+      for (let n = 0; n < longest; n++) {
+        const k1x = (sign * b[0]) / m;
+        const k1y = (sign * b[1]) / m;
+        const k1z = (sign * b[2]) / m;
+        const m2 = sample(
+          x + 0.5 * ds * k1x,
+          y + 0.5 * ds * k1y,
+          z + 0.5 * ds * k1z,
+        );
+        if (m2 <= fade) break;
+        const k2x = (sign * b[0]) / m2;
+        const k2y = (sign * b[1]) / m2;
+        const k2z = (sign * b[2]) / m2;
+        const m3 = sample(
+          x + 0.5 * ds * k2x,
+          y + 0.5 * ds * k2y,
+          z + 0.5 * ds * k2z,
+        );
+        if (m3 <= fade) break;
+        const k3x = (sign * b[0]) / m3;
+        const k3y = (sign * b[1]) / m3;
+        const k3z = (sign * b[2]) / m3;
+        const m4 = sample(x + ds * k3x, y + ds * k3y, z + ds * k3z);
+        if (m4 <= fade) break;
+        const tx =
+          x + (ds / 6) * (k1x + 2 * k2x + 2 * k3x + (sign * b[0]) / m4);
+        const ty =
+          y + (ds / 6) * (k1y + 2 * k2y + 2 * k3y + (sign * b[1]) / m4);
+        const tz = flat
+          ? 0
+          : z + (ds / 6) * (k1z + 2 * k2z + 2 * k3z + (sign * b[2]) / m4);
+        const next = sample(tx, ty, tz); // leaves `b` at the new point
+        const step = sign * (n + 1);
+        if (next <= fade || crowded(tx, ty, tz, line, step, nearest)) {
+          break;
+        }
+        const t = tone(shown);
+        const band =
+          bands[FIELD_LINE_BANDS.findIndex((each) => t < each.below)];
+        world(x, y, z, band.positions);
+        world(tx, ty, tz, band.positions);
+        const c0 = colourOf(shown);
+        const c1 = colourOf(strength);
+        band.colours.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+        claim(tx, ty, tz, line, step);
+        // a start beside the line every spacing or so along it
+        if (flat && n % Math.max(Math.round(spacing / ds), 1) === 0) {
+          frontier.push(tx, ty, tx - x, ty - y);
+        }
+        x = tx;
+        y = ty;
+        z = tz;
+        m = next;
+        shown = strength;
+      }
+    }
+  }
+  // the pixels' own lines first, a pixel on a line already starting none
+  for (const [sx, sy, sz] of seeds) trace(sx, sy, sz, 0.75 * spacing);
+  // then, in a plane, the rest of it, beside the lines drawn -- Jobard and
+  // Lefer's seeding, as matplotlib's streamplot fills its plane; capped by
+  // count rather than by time, so a frame's lines do not depend on how fast
+  // the machine was
+  for (
+    let p = 0;
+    flat && p < frontier.length && lines < FIELD_LINES_MOST;
+    p += 4
+  ) {
+    const x = frontier[p];
+    const y = frontier[p + 1];
+    const dx = frontier[p + 2];
+    const dy = frontier[p + 3];
+    const across = spacing / Math.hypot(dx, dy);
+    if (!Number.isFinite(across)) continue;
+    trace(x - dy * across, y + dx * across, 0, 0.99 * spacing);
+    trace(x + dy * across, y - dx * across, 0, 0.99 * spacing);
+  }
+  const group = new THREE.Group();
+  group.name = item.name;
+  bands.forEach((band, i) => {
+    if (!band.positions.length) return;
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions(band.positions);
+    geometry.setColors(band.colours);
+    // Not part of what the view frames: the lines run to the edge of their
+    // grid, a quarter wider than the scene, and framing them shrank it. An
+    // empty box is what `expandByObject` adds nothing for; and so nothing
+    // culls them by it either.
+    geometry.boundingBox = new THREE.Box3();
+    const part = new LineSegments2(
+      geometry,
+      fieldLineMaterial(FIELD_LINE_BANDS[i].opacity),
+    );
+    part.frustumCulled = false;
+    part.raycast = () => {};
+    group.add(part);
+  });
   return group;
 }
 
@@ -2229,7 +2636,11 @@ function clearNode(node) {
  *  the engine drew -- its sensors' pixels. A frame of a run has no pixels
  *  of its own; its sensors came as meshes. */
 function drawnItems(payload) {
-  return payload.meshes.concat(payload.scatters, payload.pixels ?? []);
+  return payload.meshes.concat(
+    payload.scatters,
+    payload.pixels ?? [],
+    payload.fieldlines ?? [],
+  );
 }
 
 /** Drop every node but the ones held, freeing what they hold on the GPU.

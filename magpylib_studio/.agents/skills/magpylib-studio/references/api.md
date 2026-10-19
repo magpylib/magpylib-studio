@@ -122,12 +122,14 @@ A run of points as a formula: `of(t)` for `t` running across `over`
 variables, count included, which `np.linspace` over a variable cannot.
 Called plainly, it is the points.
 
-### `grid(half, count, *, plane='xy', at=0)`
+### `grid(half, count, *, plane='xy', at=0, layers=1)`
 
 A square of `count` by `count` points across ±`half` in `plane` (xy,
 xz or yz), `at` the third coordinate: a sensor's pixels as a formula of
 the variables, `pixel=grid(reach, density)`, so the grid follows a slider
-as `sampled` does; `count` is two or more. Called plainly, it is the
+as `sampled` does; `count` is two or more. `layers` stacks that many
+squares along the third axis, as far apart as the points of one and
+centred on `at`, for a block of pixels. Called plainly, it is the
 points.
 
 ### `hide(obj)`

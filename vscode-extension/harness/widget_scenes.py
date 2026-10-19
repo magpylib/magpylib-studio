@@ -36,6 +36,8 @@ Writes into OUT:
 * ``inspector.json`` -- the same view, with what its session answers
   `list_objects`, `get_params`, `get_transform`, `get_schema` and `get_values`
   with, per object: for the view's own object panel;
+* ``lines.html`` -- a cube and a sensor in its plane of symmetry, saved with
+  its field lines, which the page integrates from the grid it carries;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -337,6 +339,14 @@ def main(out):
         raise SystemExit("small.html: a view never drawn, with the box on")
     small.write_html(out / "small.html")
     span = max(high - low for low, high in small.payload["ranges"])
+
+    # A sensor in a plane of the cube's symmetry, with its field lines (#45):
+    # integrated by the page itself, from the field on a grid it carries.
+    cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    across = np.linspace(-0.02, 0.02, 5)
+    plane = magpy.Sensor(pixel=[(x, 0, z) for x in across for z in across])
+    plane.style.pixel.field.source = "B"
+    SceneWidget(cube, plane, field_lines=True).write_html(out / "lines.html")
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows, "small_span": span}

@@ -2032,6 +2032,7 @@ const ACTS = new Set([
   'transformObjects',
   'previewTransform',
   'setVisible',
+  'setFieldLines',
   'undo',
   'redo',
   'dragStart',
@@ -2067,6 +2068,8 @@ function adoptScenePanel(
       void transformFromPanel(context, message, panel);
     } else if (message.type === 'setVisible') {
       void setVisibleFromPanel(context, message.hide, message.show);
+    } else if (message.type === 'setFieldLines') {
+      void setFieldLinesFromPanel(context, message.on === true);
     } else if (message.type === 'undo' || message.type === 'redo') {
       // the view's buttons: the same commands the keys and the tree run
       void vscode.commands.executeCommand(`magpylib-studio.${message.type}`);
@@ -2353,6 +2356,23 @@ async function setVisibleFromPanel(
         5000,
       );
     }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+  broadcastMutation();
+}
+
+/** The view's field-lines button: the document's switch, so an edit -- saved
+ *  with the scene and undone like one (#45). */
+async function setFieldLinesFromPanel(
+  context: vscode.ExtensionContext,
+  on: boolean,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    await engine.request('set_field_lines', { on });
   } catch (err) {
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,

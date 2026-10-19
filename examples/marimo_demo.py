@@ -67,7 +67,7 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # A Halbach stack, as one function
+    # Concentric Halbach rings, as one function
 
     The function below is plain magpylib under `@scene`. Its parameters
     are the design's variables; the controls above the view are rendered
@@ -84,7 +84,6 @@ def _(
     Angle,
     Count,
     Length,
-    derived,
     duplicate_around,
     magpy,
     np,
@@ -98,33 +97,37 @@ def _(
         n: Annotated[int, Count(4, 48, slider=(6, 24))] = 12,
         radius: Annotated[float, Length(0.01, 0.1, slider=(0.018, 0.04))] = 0.025,
         gap: Annotated[float, Length(0.006, 0.05, slider=(0.009, 0.03))] = 0.012,
+        twist: Annotated[float, Angle(-180, 180, slider=(-180, 180))] = 0.0,
         tilt: Annotated[float, Angle(-180, 180, slider=(-90, 90))] = 0.0,
         tilt_axis: Literal["x", "y", "z"] = "z",
         density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
+        layers: Annotated[int, Count(1, 9, slider=(1, 5))] = 1,
     ):
-        """Two rings of magnets whose polarization turns twice per revolution,
-        the upper ring half a step round from the lower, and a grid of field
-        arrows across the bore."""
-        stagger = derived("stagger", 180 / n, unit="angle")
-        stack = magpy.Collection(style_label="Halbach stack")
-        rings = {}
-        for number, z in ((1, -gap / 2), (2, gap / 2)):  # a loop over literals
-            rings[number] = magpy.Collection(style_label=f"Ring {number}")
-            stack.add(rings[number])
+        """Two concentric rings of magnets in one plane, the outer `gap`
+        further out, each with its polarization turning twice per revolution:
+        in step their fields add up across the bore, and `twist` turns the
+        inner ring against the outer -- half a turn and they work against
+        each other. A grid of field arrows across the bore, `layers` of it
+        stacked up the axis."""
+        rings = magpy.Collection(style_label="Halbach rings")
+        ring = {}
+        for name, r in (("Inner", radius), ("Outer", radius + gap)):  # literals
+            ring[name] = magpy.Collection(style_label=f"{name} ring")
+            rings.add(ring[name])
             magnet = magpy.magnet.Cuboid(
                 dimension=(0.008, 0.008, 0.008),
                 polarization=(1, 0, 0),
-                position=(radius, 0, z),
-                style_label=f"Magnet {number}",
+                position=(r, 0, 0),
+                style_label=f"{name} magnet",
             )
-            rings[number].add(magnet)
+            ring[name].add(magnet)
             duplicate_around(magnet, count=n, axis="z", spin=360 / n)
-        rings[2].rotate_from_angax(stagger, "z", anchor=0)
-        stack.rotate_from_angax(tilt, tilt_axis, anchor=0)
+        ring["Inner"].rotate_from_angax(twist, "z", anchor=0)
+        rings.rotate_from_angax(tilt, tilt_axis, anchor=0)
 
         reach = radius / 2
         bore = magpy.Sensor(
-            pixel=grid(reach, density),
+            pixel=grid(reach, density, layers=layers),
             style={
                 "label": "bore",
                 "size": 0.004,
@@ -137,7 +140,7 @@ def _(
                 },
             },
         )
-        return stack, bore
+        return rings, bore
 
     _ = np  # the grid above is a formula of the sample, not an array: see `sampled`
     return (halbach,)
@@ -199,9 +202,12 @@ def _(halbach):
 def _(SceneWidget, mo, s):
     # The view of the document itself -- its own session, nothing copied --
     # made once, so the camera stays where you left it. Editable from the
-    # start: the handles, and the sliders toggle under them. The widget
-    # has a name of its own beside the element around it, for the cell below.
-    view3d = SceneWidget(s, editable=True, height=560)
+    # start: the handles, and the sliders toggle under them. With the field
+    # lines through the bore's pixels, which follow a drag as its arrows do;
+    # the lines button among the view's tools puts them away (#45). The
+    # widget has a name of its own beside the element around it, for the
+    # cell below.
+    view3d = SceneWidget(s, editable=True, height=560, field_lines=True)
     view = mo.ui.anywidget(view3d)
     # The settled edits, counted, as state: a cell that names `view` re-runs
     # on its every change -- a click, a hide -- and the field map, the sweep
@@ -256,8 +262,8 @@ def _(halbach, magpy, mo, np, session, values, view):
     # does not.
     _ = view.value["revision"]  # re-run after each edit
     _centre = np.linalg.norm(session.get_field(points=[[0, 0, 0]])["values"][0]) * 1e3
-    _stack, _ = halbach(**values)
-    _plain = np.linalg.norm(magpy.getB(_stack, (0, 0, 0))) * 1e3
+    _rings, _ = halbach(**values)
+    _plain = np.linalg.norm(magpy.getB(_rings, (0, 0, 0))) * 1e3
     _bore = np.asarray(session.get_field(sensor_id="bore")["values"], dtype=float)
     _magnitude = np.linalg.norm(_bore.reshape(-1, 3), axis=1)
     _spread = np.ptp(_magnitude) / _magnitude.mean() * 100
@@ -336,7 +342,9 @@ def _(edited, go, mo, np, s, session):
     mo.ui.tabs(
         {
             "Field map": mo.lazy(
-                lambda: mo.ui.plotly(_figure(session.get_field_map()))
+                # on a log scale: the plane runs through the magnets, whose
+                # insides would leave the bore one pale shade
+                lambda: mo.ui.plotly(_figure(session.get_field_map(log=True)))
             ),
             "Along the axis": mo.lazy(_profile),
             "Sweep the radius": mo.lazy(_sweep),
@@ -619,7 +627,7 @@ def _(SceneWidget, magpy, mo, np):
                     "The widget's `objects` are the scene as edited, `to_script()` "
                     "what was done. These are this cell's own objects, so the "
                     "session holds copies and `rotor` and `pickup` stay as made; "
-                    "the pencil would copy them the same way later. The stack's "
+                    "the pencil would copy them the same way later. The rings' "
                     "view above is of a document, so its pencil only puts the "
                     "handles out, and a drag there is a step in the document."
                 ),
@@ -680,8 +688,8 @@ def _(SceneWidget, magpy, mo, np):
                     "into **b**, overlaps: select it and drag it out (**W** moves). "
                     "From code, `widget.payload['overlaps']` holds the pairs the "
                     "view outlines, and `session.get_overlaps()` the document's. "
-                    "The stack at the top is checked too: pull its `radius` below "
-                    "22.6 mm and its rings overlap."
+                    "The rings at the top are checked too: pull their `radius` "
+                    "below 18.9 mm or their `gap` below 9.2 mm and magnets overlap."
                 ),
                 SceneWidget(
                     *ring, shaft, a, b, c, core, coil, editable=True, height=420
