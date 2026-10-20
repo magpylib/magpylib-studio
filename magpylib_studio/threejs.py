@@ -53,11 +53,11 @@ _BACKEND = "_studio_scene"
 #: and tell the engine only the value it came to -- honest only where the
 #: mesh magpylib draws for the new value *is* the old one scaled, which the
 #: prototype checked for each by rendering twice and comparing vertices. A
-#: Cuboid's three numbers are the three axes (`free`). A mesh has no
-#: dimension, but its vertices scale exactly, so the parameter dragged there
-#: is the whole array, about its centroid (`vertices`) -- only while it is
-#: small enough to be worth sending: the array rides in every payload, and a
-#: mesh of thousands of points keeps the Inspector, which edits it in place.
+#: Dipole's one size, uniform (`uniform`); a mesh, which has no dimension but
+#: whose vertices scale exactly, by the whole array about its centroid
+#: (`vertices`) -- only while it is small enough to be worth sending: the
+#: array rides in every payload, and a mesh of thousands of points keeps the
+#: Inspector, which edits it in place.
 #:
 #: Some drawings do not scale with what they draw, because part of them is
 #: styled: a sensor's cross and its pixels' size, a current's arrows, a
@@ -67,12 +67,17 @@ _BACKEND = "_studio_scene"
 #: spread. A `Polyline`, a `TriangleStrip`, a `TriangleSheet` and a
 #: `Triangle` scale their vertices as a mesh does (`points`).
 #:
-#: And where the gizmo's axes are not the shape's numbers, the view gives the
-#: shape handles of its own, one per number, standing out of the face it
-#: moves, and the engine draws each step: a `CylinderSegment`'s two radii,
-#: height and two angles (`segment`); a `Cylinder`'s radius and height
-#: (`cylinder`), where the gizmo had two handles for one diameter; a
-#: `Sphere`'s or a `Circle`'s radius (`diameter`), where it had three.
+#: And a shape with faces has handles of its own, one per face, standing out
+#: of it, and the engine draws each step. A face moves alone, the one
+#: opposite staying put, so the position moves half the way, or with the
+#: one opposite (⌥) and the position stays: a `Cuboid`'s six (`free`); a
+#: `Cylinder`'s top and bottom and a radius all round (`cylinder`); a
+#: `CylinderSegment`'s top and bottom, two radii and two angles (`segment`);
+#: a `Sphere`'s or a `Circle`'s radius (`diameter`), where the gizmo gave
+#: one number three handles.
+#:
+#: The points of a shape written as points, few enough to tell apart, also
+#: move one at a time (`pointwise`, see `POINTWISE`).
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -96,6 +101,13 @@ SCALE_COVARIANT = {
 
 #: Above this many points a mesh or a sensor keeps them to itself; see above.
 MAX_DRAGGABLE_VERTICES = 256
+
+#: The shapes whose points are moved one at a time as well, a dot on each to
+#: pick one up -- a tetrahedron's corners, a wire's path -- while there are
+#: few enough to tell apart. A TriangularMesh is not among them: a vertex
+#: moved on its own can open the mesh or turn it inside out.
+POINTWISE = {"Tetrahedron", "Triangle", "Polyline", "TriangleStrip", "TriangleSheet"}
+MAX_POINTWISE = 32
 
 #: And above this many frames a path is not carried either. A drag has to
 #: move the whole path or it replaces it -- a single position where a path
@@ -136,11 +148,14 @@ def shape_of(obj):
         return None
     if constraint == "pixels" and not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES:
         return None
-    return {
+    shape = {
         "attr": attr,
         "value": value.tolist() if hasattr(value, "tolist") else float(value),
         "constraint": constraint,
     }
+    if type(obj).__name__ in POINTWISE and len(value) <= MAX_POINTWISE:
+        shape["pointwise"] = True
+    return shape
 
 
 #: How big a sensor, or a dipole, is drawn when its style says no size, in

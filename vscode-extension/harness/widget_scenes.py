@@ -45,10 +45,11 @@ Writes into OUT:
 * ``pathed.json`` -- a magnet on a path, as the studio panel's engine
   answers it: what a drag of its handles must leave the path where the edit
   leaves it;
-* ``standin.json`` -- a sensor with pixels, a wire and a cuboid, and a
-  cylinder segment, a cylinder, a sphere and a loop, as the studio panel's
-  engine answers them: the drags whose handles are on a stand-in -- a sensor
-  or a wire resized, a polarization aimed -- and the shapes' own grips;
+* ``standin.json`` -- a sensor with pixels, a wire and a cuboid, a cylinder
+  segment, a cylinder, a sphere, a loop, a box and a tetrahedron, as the
+  studio panel's engine answers them: the drags whose handles are on a
+  stand-in -- a sensor or a wire resized, a polarization aimed -- the
+  shapes' own grips, and a point picked up and moved;
 * ``small.html`` -- a ring of centimetre magnets, edited (so drawn in metres,
   as a session draws), saved never drawn: the page frames it itself, as a
   notebook's first look does;
@@ -299,10 +300,22 @@ def main(out):
     )
 
     pathed = MagpylibStudioSession()
+    # A tetrahedron centred on its position: its resize still scales the
+    # drawing with the handles, as a cuboid's no longer does, and a turn
+    # about its middle is a turn where it stands.
+    corner = 0.005
     pathed.add_object(
         "mover",
-        "magnet.Cuboid",
-        {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]},
+        "magnet.Tetrahedron",
+        {
+            "polarization": [0, 0, 1],
+            "vertices": [
+                [corner, corner, corner],
+                [corner, -corner, -corner],
+                [-corner, corner, -corner],
+                [-corner, -corner, corner],
+            ],
+        },
     )
     pathed.move("mover", [[0.01 * i, 0, 0] for i in range(1, 6)], start=0)
     (out / "pathed.json").write_text(
@@ -337,6 +350,12 @@ def main(out):
         ("ball", "magnet.Sphere", {"diameter": 0.01}),
         ("loop", "current.Circle", {"current": 1, "diameter": 0.01}),
         ("wire", "current.Polyline", {"current": 1}),
+        ("box", "magnet.Cuboid", {"dimension": [0.01, 0.01, 0.01]}),
+        (
+            "tet",
+            "magnet.Tetrahedron",
+            {"vertices": [[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0], [0, 0, 0.01]]},
+        ),
     ):
         if "current" not in params:
             params["polarization"] = [0, 0, 1]
@@ -346,6 +365,8 @@ def main(out):
     standin.move("loop", [0.05, -0.05, 0])
     standin.set_param("wire", "vertices", [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0]])
     standin.move("wire", [-0.05, 0.05, 0])
+    standin.move("box", [0, 0.05, 0])
+    standin.move("tet", [0.05, 0.05, 0])
     (out / "standin.json").write_text(
         json.dumps({"scene": standin.get_scene(), "tree": standin.object_tree()})
     )

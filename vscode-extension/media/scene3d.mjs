@@ -297,6 +297,27 @@ function makeGizmo() {
   const report = (preview) => {
     const node = gizmo.object;
     if (!node || !from) return;
+    if (from.point) {
+      // One point of a shape written as points, where the handles took it:
+      // in the object's own frame, as magpylib keeps its vertices.
+      const [objectId] = from.objectIds;
+      const at = node
+        .getWorldPosition(new THREE.Vector3())
+        .sub(from.placed[objectId])
+        .applyQuaternion(from.orientations[objectId].clone().invert());
+      const value = from.point.value.map((p, i) =>
+        i === from.point.index ? at.toArray() : p,
+      );
+      host.dispatchEvent(
+        new CustomEvent("objecttransform", {
+          detail: {
+            preview,
+            edits: [{ objectId, shape: { attr: from.point.attr, value } }],
+          },
+        }),
+      );
+      return;
+    }
     const turned = node.quaternion
       .clone()
       .multiply(from.quaternion.clone().invert());
@@ -447,6 +468,15 @@ function makeGizmo() {
           .sub(placed[primary])
           .applyQuaternion(orientation.clone().invert()),
         shape: gizmo.mode === "scale" ? shapes[primary] : null,
+        // a point picked up, and the points as they were
+        point:
+          node === pointProxy
+            ? {
+                index: node.userData.index,
+                attr: shapes[primary].attr,
+                value: shapes[primary].value.map((p) => [...p]),
+              }
+            : null,
         polarization:
           gizmoMode === "polarization"
             ? new THREE.Vector3()
@@ -454,14 +484,14 @@ function makeGizmo() {
                 .applyQuaternion(orientation) // stored local, turned in world
             : null,
       };
-      // `redrawn`: the handles are on the stand-in, so the object's own node
+      // `redrawn`: the handles are on a stand-in, so the object's own node
       // is drawn again from the engine as the drag goes, not kept
       host.dispatchEvent(
         new CustomEvent("dragstart", {
           detail: {
             objectIds: from.objectIds,
             mode: gizmoMode,
-            redrawn: node === proxy,
+            redrawn: node === proxy || node === pointProxy,
           },
         }),
       );
@@ -555,6 +585,11 @@ function setGizmoMode(mode) {
     gizmo.detach();
     return gizmoMode;
   }
+  // and one written as points has a dot on each, a picked one the move
+  // handles; a point stays picked only while its object is resized
+  if (!alone || chosenPoint?.objectId !== primaryId()) chosenPoint = null;
+  placeDots(alone ? primaryId() : null);
+  if (placePointHandles()) return gizmoMode;
   if (together && gizmoMode !== "none") {
     const centre = selectionCentre();
     if (centre) {
@@ -648,50 +683,132 @@ function setSpaces(chosen = {}) {
 
 // --- grips --------------------------------------------------------------
 //
-// A resize where the handles' three axes are not the shape's numbers. A
-// CylinderSegment has five -- two radii, a height, two angles -- of which
-// the axes say two, both radii at once and the height; a Cylinder has two,
-// where the axes give its diameter two handles; a Sphere or a Circle one,
-// where they give it three. So these have a grip per number instead, drawn
-// as the handles are and standing out of the face that number moves: a
-// radius out of its curved face, the height out of the top, an angle out of
-// its flat end. A radius or a height is dragged along the grip, an angle
-// round the axis; a height grows both ways and a diameter all round, so the
-// shape keeps its position. A drag is one edit of the parameter, through
-// the handles' own events (`dragstart`, `objecttransform`), and the engine
+// A resize by the shape's own numbers rather than by the handles' three
+// axes. A grip per number, drawn as the handles are and standing out of the
+// face that number moves: a Cuboid's six faces, a cylinder's curved face and
+// its top and bottom, a segment's two radii and its flat ends, a sphere's or
+// a loop's rim. A face is dragged along the grip and moves alone, the one
+// opposite staying where it is, so the shape's middle -- its position --
+// goes half the way; with ⌥ both move, and the position stays. A radius
+// grows all round, and an angle is dragged round the axis. A drag is one
+// edit -- the parameter, and the position where it moves -- through the
+// handles' own events (`dragstart`, `objecttransform`), and the engine
 // draws the shape as it goes.
+//
+// A shape written as points -- a tetrahedron, a triangle, a wire -- has a
+// dot on each in the resize as well, and a click on one gives it the move
+// handles: that point alone moves, along their axes.
 
 const grips = new THREE.Group(); // in the shape's own frame
 grips.name = "grips";
 grips.visible = false;
 grips.matrixAutoUpdate = false;
 let guide = null; // the line the dragged grip moves along
-let gripped = null; // { objectId, kind, value, scalar, frame } while shown
+let gripped = null; // { objectId, attr, kind, scalar, value, frame } while shown
 let gripping = null; // the drag in progress: see `watchGrips`
 let gripHovered = null; // the grip under the pointer, by index
-let gripPressed = false; // a press on a grip, which no pick may take
-const MOST_GRIPS = 5;
+let gripPressed = false; // a press on a grip or a dot, which no pick may take
+const MOST_GRIPS = 6;
 
-/** What a grip moves, by colour: red for a radius, blue for a height, green
- *  for an angle -- r, z and phi, as the handles colour x, y and z. And the
- *  colour of the one in hand, the handles' own. */
-const RADIUS = 0xff0000;
-const HEIGHT = 0x0000ff;
-const ANGLE = 0x00ff00;
+/** The points' dots, in the same frame; and the stand-in the move handles
+ *  go on when one is picked up. */
+const dots = new THREE.Group();
+dots.name = "dots";
+dots.visible = false;
+dots.matrixAutoUpdate = false;
+let dotted = null; // { objectId, value, frame } while the dots are shown
+let dotHovered = null;
+let chosenPoint = null; // { objectId, index }: the point the handles are on
+const pointProxy = new THREE.Object3D();
+
+/** What a grip moves, by colour: x, y and z as the handles colour them, and
+ *  r, phi and z for the round shapes -- red for a radius, green for an
+ *  angle, blue for a height. And the colour of the one in hand, the
+ *  handles' own. */
+const RED = 0xff0000;
+const GREEN = 0x00ff00;
+const BLUE = 0x0000ff;
 const GRIP_ACTIVE = 0xffff00;
+const DOT = 0xcccccc;
+
+/** A grip on a face, which moves the length `k` measures across the shape:
+ *  out along `normal` from `foot`, the shape's middle on that line. Alone,
+ *  the face moves and the middle goes half the way (`shift`); with `both`,
+ *  the face opposite moves too and the middle stays. */
+function face(k, at, normal, foot, colour, kept = (value) => value) {
+  return {
+    at,
+    normal,
+    colour,
+    line: { foot, along: normal },
+    to(from, moved, both) {
+      const grown = snapped(from[k] + moved * (both ? 2 : 1), false);
+      const value = kept(changed(from, k, grown));
+      const shift = both
+        ? null
+        : normal.clone().multiplyScalar((value[k] - from[k]) / 2);
+      return { value, shift };
+    },
+  };
+}
+
+/** A grip on a rim, which moves a diameter (`times` 2) or a radius (1) at
+ *  `k`, all round: the middle stays. Read out from the axis (`outward`),
+ *  whichever way the grip points: an inner radius's points in. */
+function rim(
+  k,
+  at,
+  normal,
+  colour,
+  times,
+  kept = (value) => value,
+  outward = normal,
+) {
+  return {
+    at,
+    normal,
+    colour,
+    line: { foot: new THREE.Vector3(), along: outward },
+    to: (from, moved) => ({
+      value: kept(changed(from, k, snapped(from[k] + moved * times, false))),
+    }),
+  };
+}
 
 /** Each shape's grips, by its constraint, for its value -- an array, a
- *  diameter as one number in one -- in its own frame: its axis along z
- *  through the origin, its middle at z = 0. Each says where it stands, the
- *  way it points, its colour, its motion -- a `line` through `foot` along
- *  `along`, or `round` the axis at `radius` -- and `to`, the value a drag
- *  comes to `moved` that far from where it began: a length, or degrees. */
+ *  diameter as one number in one -- in its own frame: its middle at the
+ *  origin, a round shape's axis along z. Each says where it stands, the way
+ *  it points, its colour, its motion -- a `line` through `foot` along
+ *  `along`, or `round` the axis at that radius -- and `to`, what a drag
+ *  `moved` that far from where it began comes to: a length, or degrees. */
 const GRIPS = {
+  free([a, b, c]) {
+    const least = 1e-3 * Math.max(a, b, c);
+    const kept = (value) => value.map((v) => Math.max(v, least));
+    const origin = new THREE.Vector3();
+    const axes = [
+      [0, new THREE.Vector3(1, 0, 0), RED, a],
+      [1, new THREE.Vector3(0, 1, 0), GREEN, b],
+      [2, new THREE.Vector3(0, 0, 1), BLUE, c],
+    ];
+    return axes.flatMap(([k, axis, colour, size]) =>
+      [axis, axis.clone().negate()].map((normal) =>
+        face(
+          k,
+          normal.clone().multiplyScalar(size / 2),
+          normal,
+          origin,
+          colour,
+          kept,
+        ),
+      ),
+    );
+  },
   segment([inner, outer, height, start, end]) {
     const rad = THREE.MathUtils.degToRad;
     const middle = (inner + outer) / 2;
     const across = flat(rad((start + end) / 2));
-    const origin = new THREE.Vector3();
+    const foot = across.clone().multiplyScalar(middle);
     const up = new THREE.Vector3(0, 0, 1);
     const round = (angle) =>
       new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0);
@@ -705,51 +822,41 @@ const GRIPS = {
       value[4] = Math.max(Math.min(value[4], value[3] + 360), value[3] + 1);
       return value;
     };
-    const length =
-      (k, times = 1) =>
-      (from, moved) =>
-        kept(changed(from, k, snapped(from[k] + moved * times, false)));
-    const angle = (k) => (from, moved) =>
-      kept(changed(from, k, snapped(from[k] + moved, true)));
+    const angle = (k, at, normal) => ({
+      at,
+      normal,
+      colour: GREEN,
+      round: middle,
+      to: (from, moved) => ({
+        value: kept(changed(from, k, snapped(from[k] + moved, true))),
+      }),
+    });
     return [
-      {
-        at: across.clone().multiplyScalar(inner),
-        normal: across.clone().negate(),
-        colour: RADIUS,
-        line: { foot: origin, along: across },
-        to: length(0),
-      },
-      {
-        at: across.clone().multiplyScalar(outer),
-        normal: across,
-        colour: RADIUS,
-        line: { foot: origin, along: across },
-        to: length(1),
-      },
-      {
-        at: across
-          .clone()
-          .multiplyScalar(middle)
-          .setZ(height / 2),
-        normal: up,
-        colour: HEIGHT,
-        line: { foot: across.clone().multiplyScalar(middle), along: up },
-        to: length(2, 2), // both ends: the segment keeps its position
-      },
-      {
-        at: flat(rad(start)).multiplyScalar(middle),
-        normal: round(rad(start)).negate(),
-        colour: ANGLE,
-        round: middle,
-        to: angle(3),
-      },
-      {
-        at: flat(rad(end)).multiplyScalar(middle),
-        normal: round(rad(end)),
-        colour: ANGLE,
-        round: middle,
-        to: angle(4),
-      },
+      rim(
+        0,
+        across.clone().multiplyScalar(inner),
+        across.clone().negate(),
+        RED,
+        1,
+        kept,
+        across,
+      ),
+      rim(1, across.clone().multiplyScalar(outer), across, RED, 1, kept),
+      face(2, foot.clone().setZ(height / 2), up, foot, BLUE, kept),
+      face(
+        2,
+        foot.clone().setZ(-height / 2),
+        up.clone().negate(),
+        foot,
+        BLUE,
+        kept,
+      ),
+      angle(
+        3,
+        flat(rad(start)).multiplyScalar(middle),
+        round(rad(start)).negate(),
+      ),
+      angle(4, flat(rad(end)).multiplyScalar(middle), round(rad(end))),
     ];
   },
   cylinder([diameter, height]) {
@@ -757,42 +864,25 @@ const GRIPS = {
     const up = new THREE.Vector3(0, 0, 1);
     const origin = new THREE.Vector3();
     const least = 1e-3 * Math.max(diameter, height);
+    const kept = (value) => value.map((v) => Math.max(v, least));
     return [
-      {
-        at: out.clone().multiplyScalar(diameter / 2),
-        normal: out,
-        colour: RADIUS,
-        line: { foot: origin, along: out },
-        // a radius dragged, a diameter written: both sides move
-        to: (from, moved) => [
-          Math.max(snapped(from[0] + 2 * moved, false), least),
-          from[1],
-        ],
-      },
-      {
-        at: up.clone().multiplyScalar(height / 2),
-        normal: up,
-        colour: HEIGHT,
-        line: { foot: origin, along: up },
-        to: (from, moved) => [
-          from[0],
-          Math.max(snapped(from[1] + 2 * moved, false), least),
-        ],
-      },
+      rim(0, out.clone().multiplyScalar(diameter / 2), out, RED, 2, kept),
+      face(1, up.clone().multiplyScalar(height / 2), up, origin, BLUE, kept),
+      face(
+        1,
+        up.clone().multiplyScalar(-height / 2),
+        up.clone().negate(),
+        origin,
+        BLUE,
+        kept,
+      ),
     ];
   },
   diameter([diameter]) {
     const out = new THREE.Vector3(1, 0, 0);
+    const kept = (value) => [Math.max(value[0], 1e-3 * diameter)];
     return [
-      {
-        at: out.clone().multiplyScalar(diameter / 2),
-        normal: out,
-        colour: RADIUS,
-        line: { foot: new THREE.Vector3(), along: out },
-        to: (from, moved) => [
-          Math.max(snapped(from[0] + 2 * moved, false), 1e-3 * from[0]),
-        ],
-      },
+      rim(0, out.clone().multiplyScalar(diameter / 2), out, RED, 2, kept),
     ];
   },
 };
@@ -809,9 +899,19 @@ function changed(from, k, value) {
   return next;
 }
 
+/** The look of everything here: the handles', drawn over what they are on. */
+const HANDLE_LOOK = {
+  depthTest: false, // a grip behind the shape is still a grip
+  depthWrite: false,
+  fog: false,
+  toneMapped: false,
+  transparent: true,
+};
+
 /** The most grips a shape has, each one of the scale handles' own handle --
  *  a shaft, a cube at its end and a wider picker no one sees -- drawn as
- *  `TransformControls` draws them, standing up along its own y. */
+ *  `TransformControls` draws them, standing up along its own y. And the
+ *  points' dots, a cube each, made as they are needed. */
 function makeGrips() {
   const shaft = new THREE.CylinderGeometry(0.0075, 0.0075, 0.5, 3);
   shaft.translate(0, 0.25, 0);
@@ -819,15 +919,8 @@ function makeGrips() {
   head.translate(0, 0.54, 0);
   const picker = new THREE.CylinderGeometry(0.2, 0, 0.6, 4);
   picker.translate(0, 0.3, 0);
-  const look = {
-    depthTest: false, // a grip behind the shape is still a grip
-    depthWrite: false,
-    fog: false,
-    toneMapped: false,
-    transparent: true,
-  };
   for (let index = 0; index < MOST_GRIPS; index++) {
-    const material = new THREE.MeshBasicMaterial(look);
+    const material = new THREE.MeshBasicMaterial(HANDLE_LOOK);
     const grip = new THREE.Group();
     const reach = new THREE.Mesh(picker, material);
     reach.visible = false; // raycast all the same: a wide target, unseen
@@ -844,12 +937,12 @@ function makeGrips() {
   }
   guide = new THREE.Line(
     new THREE.BufferGeometry(),
-    new THREE.LineBasicMaterial({ ...look, opacity: 0.5 }),
+    new THREE.LineBasicMaterial({ ...HANDLE_LOOK, opacity: 0.5 }),
   );
   guide.renderOrder = 999;
   guide.frustumCulled = false;
   grips.add(guide);
-  scene.add(grips);
+  scene.add(grips, dots, pointProxy);
 }
 
 /** The grips the shape shown has, without the guide. Raycasting reaches
@@ -858,6 +951,19 @@ function gripObjects() {
   return grips.children.filter(
     (child) => child.userData.grip !== undefined && child.visible,
   );
+}
+
+/** Where `objectId`'s own frame is: its node stands on its centroid, turned
+ *  with it, and the frame's origin is `pivot` back, at its position. */
+function frameOf(objectId) {
+  const node = byObjectId.get(objectId);
+  const pivot = pivots[objectId] ?? new THREE.Vector3();
+  node.updateMatrixWorld(true);
+  return node.matrixWorld
+    .clone()
+    .multiply(
+      new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z),
+    );
 }
 
 /** Show the grips on `objectId`, if it has them, or put them away. */
@@ -870,14 +976,7 @@ function placeGrips(objectId) {
     grips.visible = false;
     return;
   }
-  // its node stands on its centroid, turned with it: the axis is `pivot` back
-  const pivot = pivots[objectId] ?? new THREE.Vector3();
-  node.updateMatrixWorld(true);
-  const frame = node.matrixWorld
-    .clone()
-    .multiply(
-      new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z),
-    );
+  const frame = frameOf(objectId);
   gripped = {
     objectId,
     attr: shape.attr,
@@ -892,9 +991,10 @@ function placeGrips(objectId) {
   setGrips(gripped.value);
 }
 
-/** Stand the grips where `value` has them, the one in hand or under the
- *  pointer lit; and while one is dragged, the line it moves along. */
-function setGrips(value) {
+/** Stand the grips where `value` has them -- `shift` off, where a face
+ *  moving alone has moved the shape's middle -- the one in hand or under
+ *  the pointer lit; and while one is dragged, the line it moves along. */
+function setGrips(value, shift = null) {
   const specs = GRIPS[gripped.kind](value);
   const up = new THREE.Vector3(0, 1, 0);
   const lit = gripping?.index ?? gripHovered;
@@ -905,6 +1005,7 @@ function setGrips(value) {
     grip.visible = Boolean(spec);
     if (!spec) continue;
     grip.position.copy(spec.at);
+    if (shift) grip.position.add(shift);
     grip.quaternion.setFromUnitVectors(up, spec.normal);
     grip.children[0].material.color.setHex(
       index === lit ? GRIP_ACTIVE : spec.colour,
@@ -929,18 +1030,84 @@ function setGrips(value) {
       flat((k / 96) * 2 * Math.PI).multiplyScalar(spec.round),
     );
   }
+  if (shift) for (const point of points) point.add(shift);
   guide.geometry.dispose();
   guide.geometry = new THREE.BufferGeometry().setFromPoints(points);
 }
 
-/** Keep each grip the size of the handles on screen, whatever the zoom:
- *  `TransformControls`' own measure, at the grip's distance. */
+/** Show a dot on each of `objectId`'s points, if they move one at a time,
+ *  or put them away. */
+function placeDots(objectId) {
+  const node = objectId ? byObjectId.get(objectId) : null;
+  const shape = objectId ? shapes[objectId] : null;
+  if (!node?.visible || !shape?.pointwise) {
+    dotted = null;
+    dots.visible = false;
+    return;
+  }
+  dotted = { objectId, value: shape.value, frame: frameOf(objectId) };
+  dots.matrix.copy(dotted.frame);
+  dots.matrixWorldNeedsUpdate = true;
+  dots.visible = true;
+  while (dots.children.length < shape.value.length) {
+    const dot = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 0.08, 0.08),
+      new THREE.MeshBasicMaterial(HANDLE_LOOK),
+    );
+    dot.renderOrder = 1000;
+    dots.add(dot);
+  }
+  dots.children.forEach((dot, index) => {
+    dot.visible = index < shape.value.length;
+    if (!dot.visible) return;
+    dot.position.fromArray(shape.value[index]);
+    dot.userData.dot = index;
+    const lit =
+      index === dotHovered ||
+      (chosenPoint?.objectId === objectId && chosenPoint.index === index);
+    dot.material.color.setHex(lit ? GRIP_ACTIVE : DOT);
+  });
+}
+
+/** The dots in use. */
+function dotObjects() {
+  return dots.children.filter((dot) => dot.visible);
+}
+
+/** Put the move handles on the point chosen, through a stand-in at it,
+ *  turned with the object for "local". Returns whether they went there. */
+function placePointHandles() {
+  if (!chosenPoint || !dotted || dotted.objectId !== chosenPoint.objectId) {
+    return false;
+  }
+  // a redraw mid-drag comes back through here: the stand-in is the drag
+  if (gizmo.dragging && gizmo.object === pointProxy) return true;
+  const point = dotted.value[chosenPoint.index];
+  if (!point) return false;
+  pointProxy.position.fromArray(point).applyMatrix4(dotted.frame);
+  pointProxy.quaternion.copy(quaternionOf(orientations[chosenPoint.objectId]));
+  pointProxy.scale.set(1, 1, 1);
+  pointProxy.userData.objectId = chosenPoint.objectId;
+  pointProxy.userData.index = chosenPoint.index;
+  gizmo.setSpace(SPACES.translate ?? "world");
+  gizmo.mode = "translate";
+  gizmo.attach(pointProxy);
+  return true;
+}
+
+/** Keep each grip and dot the size of the handles on screen, whatever the
+ *  zoom: `TransformControls`' own measure, at its distance. */
 function sizeGrips() {
-  if (!grips.visible) return;
+  const shown = [
+    ...(grips.visible ? gripObjects() : []),
+    ...(dots.visible ? dotObjects() : []),
+  ];
+  if (!shown.length) return;
   grips.updateMatrixWorld(true);
+  dots.updateMatrixWorld(true);
   const at = new THREE.Vector3();
-  for (const grip of gripObjects()) {
-    grip.getWorldPosition(at);
+  for (const handle of shown) {
+    handle.getWorldPosition(at);
     const factor = camera.isOrthographicCamera
       ? (camera.top - camera.bottom) / camera.zoom
       : at.distanceTo(camera.position) *
@@ -948,7 +1115,8 @@ function sizeGrips() {
           (1.9 * Math.tan((Math.PI * camera.fov) / 360)) / camera.zoom,
           7,
         );
-    grip.scale.setScalar((factor * (gizmo?.size ?? 1)) / 4);
+    // in the frame's own scale, which is the world's: the frames are rigid
+    handle.scale.setScalar((factor * (gizmo?.size ?? 1)) / 4);
   }
 }
 
@@ -960,8 +1128,36 @@ function snapped(value, angle) {
   return step ? Math.round(value / step) * step : value;
 }
 
-/** The grips' pointer: lit under it, dragged by it. Bound after the picks,
- *  whose release looks at `gripPressed` before this clears it. */
+/** Where `objectId` stood when a drag began: its position, its turn and
+ *  its path. Each step is measured from there -- the scene redrawn mid-drag
+ *  says where the last step left it, and adding to that would add the shift
+ *  again every step. */
+function poseOf(objectId) {
+  return JSON.parse(
+    JSON.stringify({
+      anchor: anchors[objectId] ?? [0, 0, 0],
+      turn: orientations[objectId] ?? [0, 0, 0],
+      path: paths[objectId] ?? null,
+    }),
+  );
+}
+
+/** Where a shift of the shape's middle, in its own frame, puts it from
+ *  `pose`: every step of its path, where it has one, each turned its way. */
+function shiftedPosition(pose, shift) {
+  const moved = (position, turn) =>
+    new THREE.Vector3()
+      .fromArray(position)
+      .add(shift.clone().applyQuaternion(quaternionOf(turn)))
+      .toArray();
+  return pose.path
+    ? pose.path.position.map((p, i) => moved(p, pose.path.orientation[i]))
+    : moved(pose.anchor, pose.turn);
+}
+
+/** The grips' and the dots' pointer: lit under it, dragged or picked by
+ *  it. Bound after the picks, whose release looks at `gripPressed` before
+ *  this clears it. */
 function watchGrips() {
   const element = renderer.domElement;
   const aim = (event) => {
@@ -979,6 +1175,12 @@ function watchGrips() {
     aim(event);
     const hit = raycaster.intersectObjects(gripObjects(), true)[0];
     return hit ? hit.object.parent.userData.grip : null;
+  };
+  const dotAt = (event) => {
+    if (!dots.visible) return null;
+    aim(event);
+    const hit = raycaster.intersectObjects(dotObjects(), false)[0];
+    return hit ? hit.object.userData.dot : null;
   };
   /** Where the pointer is along a grip's motion, in the shape's own frame:
    *  how far along its line, or the angle round the axis in degrees. Null
@@ -1006,26 +1208,36 @@ function watchGrips() {
     if (!hit || Math.hypot(hit.x, hit.y) < 1e-12) return null;
     return THREE.MathUtils.radToDeg(Math.atan2(hit.y, hit.x));
   };
-  const send = (drag, preview) =>
+  const send = (drag, preview) => {
+    const edit = {
+      objectId: drag.objectId,
+      shape: {
+        attr: drag.attr,
+        value: drag.scalar ? drag.value[0] : drag.value,
+      },
+    };
+    if (drag.shift?.lengthSq() > 0) {
+      edit.position = shiftedPosition(drag.pose, drag.shift);
+    }
     host.dispatchEvent(
       new CustomEvent("objecttransform", {
-        detail: {
-          preview,
-          edits: [
-            {
-              objectId: drag.objectId,
-              shape: {
-                attr: drag.attr,
-                value: drag.scalar ? drag.value[0] : drag.value,
-              },
-            },
-          ],
-        },
+        detail: { preview, edits: [edit] },
       }),
     );
+  };
+  let dotPress = null; // a press on a dot: a pick of it, if it stays put
 
   element.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || !gripped) return;
+    if (event.button !== 0) return;
+    if (gizmo?.axis) return; // the move handles of a point already have it
+    const dot = dotted ? dotAt(event) : null;
+    if (dot !== null) {
+      gripPressed = true;
+      dotPress = { dot, x: event.clientX, y: event.clientY };
+      controls.enabled = false;
+      return;
+    }
+    if (!gripped) return;
     const index = gripAt(event);
     if (index === null) return;
     gripPressed = true;
@@ -1039,8 +1251,10 @@ function watchGrips() {
       scalar: gripped.scalar,
       spec: GRIPS[gripped.kind](from)[index],
       inverse: gripped.frame.clone().invert(),
+      pose: poseOf(gripped.objectId),
       from,
       value: [...from],
+      shift: null,
       moved: false,
       turned: 0, // degrees, unwrapped: an angle can go round past ±180
     };
@@ -1052,10 +1266,13 @@ function watchGrips() {
     if (!gripping) {
       if (event.buttons) return; // orbiting
       const index = gripAt(event);
-      if (index === gripHovered) return;
+      const dot = dotAt(event);
+      if (index === gripHovered && dot === dotHovered) return;
       gripHovered = index;
-      element.style.cursor = index === null ? "" : "grab";
+      dotHovered = dot;
+      element.style.cursor = index === null && dot === null ? "" : "grab";
       if (gripped) setGrips(gripped.value);
+      if (dotted) placeDots(dotted.objectId);
       redraw();
       return;
     }
@@ -1068,9 +1285,14 @@ function watchGrips() {
       gripping.last = now;
       moved = gripping.turned;
     }
-    const value = spec.to(from, moved);
-    if (value.every((v, k) => v === gripping.value[k])) return;
+    // ⌥ while dragging grows both ways, and lets go of it again
+    const { value, shift = null } = spec.to(from, moved, event.altKey);
+    const same =
+      value.every((v, k) => v === gripping.value[k]) &&
+      (shift?.equals(gripping.shift ?? new THREE.Vector3()) ?? !gripping.shift);
+    if (same) return;
     gripping.value = value;
+    gripping.shift = shift;
     if (!gripping.moved) {
       gripping.moved = true;
       element.style.cursor = "grabbing";
@@ -1084,23 +1306,41 @@ function watchGrips() {
         }),
       );
     }
-    setGrips(value);
+    setGrips(value, shift);
     send(gripping, true);
     redraw();
   });
 
   const letGo = (event) => {
     gripPressed = false;
+    controls.enabled = true;
+    if (dotPress) {
+      // a click on a dot picks its point up, and on the one picked puts it
+      // down again: the handles go back to the whole shape
+      const stayed =
+        Math.hypot(event.clientX - dotPress.x, event.clientY - dotPress.y) <= 4;
+      if (stayed && dotted) {
+        const same =
+          chosenPoint?.objectId === dotted.objectId &&
+          chosenPoint.index === dotPress.dot;
+        chosenPoint = same
+          ? null
+          : { objectId: dotted.objectId, index: dotPress.dot };
+        setGizmoMode(gizmoMode);
+        redraw();
+      }
+      dotPress = null;
+      return;
+    }
     if (!gripping) return;
     const drag = gripping;
     gripping = null;
-    controls.enabled = true;
     element.releasePointerCapture?.(event.pointerId);
     element.style.cursor = gripHovered === null ? "" : "grab";
     // where it was let go, until the engine's scene puts the grips back
     if (gripped) {
       gripped.value = drag.value;
-      setGrips(drag.value);
+      setGrips(drag.value, drag.shift);
     }
     if (drag.moved) send(drag, false);
     redraw();
@@ -1108,10 +1348,12 @@ function watchGrips() {
   element.addEventListener("pointerup", letGo);
   element.addEventListener("pointercancel", letGo);
   element.addEventListener("pointerleave", () => {
-    if (gripping || gripHovered === null) return;
+    if (gripping || (gripHovered === null && dotHovered === null)) return;
     gripHovered = null;
+    dotHovered = null;
     element.style.cursor = "";
     if (gripped) setGrips(gripped.value);
+    if (dotted) placeDots(dotted.objectId);
     redraw();
   });
 }

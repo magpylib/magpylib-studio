@@ -310,6 +310,10 @@ const DRAG_WRITES = {
   polarization: "polarization",
 };
 
+/** The resizes whose faces move one at a time: the shape's middle moves
+ *  with them, which is its position (`scene3d`'s grips). */
+const FACED = new Set(["free", "cylinder", "segment"]);
+
 /** How each field a drag writes reads in the readout: what it is in, how
  *  much of it is worth showing, how wide its box is -- what the widest value
  *  of that kind needs, "-0.0100" or "-180.0" -- and where the scene says
@@ -1793,7 +1797,15 @@ function render({ model, el }) {
     // by a drag, and the variable stops deciding it.
     const chosen = model.get("selected") || [];
     const parametric = model.get("payload")?.parametric?.[chosen[0]] || {};
-    const names = (editable() && parametric[DRAG_WRITES[inEffect]]) || [];
+    const fields = [DRAG_WRITES[inEffect]];
+    // a face moved alone moves the shape's middle too, which is its position
+    const shape = model.get("payload")?.shapes?.[chosen[0]];
+    if (inEffect === "scale" && FACED.has(shape?.constraint)) {
+      fields.push("position");
+    }
+    const names = editable()
+      ? [...new Set(fields.flatMap((field) => parametric[field] ?? []))]
+      : [];
     const decide = names.length > 1 ? "decide" : "decides";
     readoutTakes.textContent = names.length
       ? `${names.join(", ")} ${decide} this — a drag takes it over`

@@ -614,24 +614,125 @@ def _(SceneWidget, magpy, mo, np):
         )
 
     def _editing():
-        rotor = magpy.magnet.Cuboid(
-            dimension=(0.01, 0.01, 0.01), polarization=(0, 0, 1), style_label="rotor"
-        )
-        pickup = magpy.Sensor(position=(0, 0, 0.02), style_label="pickup")
+        mm = 1e-3
+        z = (0, 0, 1)
+
+        def at(column, row):
+            """A place on a grid 30 mm apart, so that nothing overlaps."""
+            return np.array((30 * (column - 1.5), 30 * (1.5 - row), 0)) * mm
+
+        # one of each kind of object magpylib has, but a CustomSource, which
+        # has no shape to drag
+        objects = [
+            magpy.magnet.Cuboid(
+                polarization=z,
+                dimension=(10 * mm,) * 3,
+                position=at(0, 0),
+                style_label="cuboid",
+            ),
+            magpy.magnet.Cylinder(
+                polarization=z,
+                dimension=(10 * mm, 10 * mm),
+                position=at(1, 0),
+                style_label="cylinder",
+            ),
+            magpy.magnet.CylinderSegment(
+                polarization=z,
+                dimension=(6 * mm, 12 * mm, 8 * mm, 0, 120),
+                position=at(2, 0) - (4 * mm, 4 * mm, 0),
+                style_label="segment",
+            ),
+            magpy.magnet.Sphere(
+                polarization=z,
+                diameter=10 * mm,
+                position=at(3, 0),
+                style_label="sphere",
+            ),
+            magpy.magnet.Tetrahedron(
+                polarization=z,
+                vertices=np.array([(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]) * mm,
+                position=at(0, 1) - 3 * mm,
+                style_label="tetrahedron",
+            ),
+            magpy.magnet.TriangularMesh.from_ConvexHull(
+                polarization=z,
+                points=np.vstack([np.eye(3), -np.eye(3)]) * 6 * mm,
+                position=at(1, 1),
+                style_label="mesh",
+            ),
+            magpy.misc.Triangle(
+                polarization=z,
+                vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * mm,
+                position=at(2, 1),
+                style_label="triangle",
+            ),
+            magpy.misc.Dipole(
+                moment=(0, 0, 0.1), position=at(3, 1), style_label="dipole"
+            ),
+            magpy.current.Circle(
+                current=1, diameter=10 * mm, position=at(0, 2), style_label="loop"
+            ),
+            magpy.current.Polyline(
+                current=1,
+                vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
+                * mm,
+                position=at(1, 2),
+                style_label="wire",
+            ),
+            magpy.current.TriangleStrip(
+                current=1,
+                vertices=np.array(
+                    [
+                        (-6, -3, 0),
+                        (-6, 3, 0),
+                        (0, -3, 0),
+                        (0, 3, 0),
+                        (6, -3, 0),
+                        (6, 3, 0),
+                    ]
+                )
+                * mm,
+                position=at(2, 2),
+                style_label="strip",
+            ),
+            magpy.current.TriangleSheet(
+                current_densities=[(1, 0, 0), (1, 0, 0)],
+                vertices=np.array([(-5, -5, 0), (5, -5, 0), (5, 5, 0), (-5, 5, 0)])
+                * mm,
+                faces=[(0, 1, 2), (0, 2, 3)],
+                position=at(3, 2),
+                style_label="sheet",
+            ),
+            magpy.Sensor(
+                pixel=[
+                    [(x, y, 0) for x in (-4 * mm, 0, 4 * mm)]
+                    for y in (-4 * mm, 0, 4 * mm)
+                ],
+                position=at(1.5, 3),
+                style_label="sensor",
+            ),
+        ]
         return mo.vstack(
             [
                 mo.md(
                     "`editable=True` puts out the studio's handles from the start, "
                     "over a studio session in this kernel: **W** moves, **E** turns, "
                     "**R** resizes, **P** aims, and ⌘Z / ctrl-Z undoes a whole drag. "
-                    "The widget's `objects` are the scene as edited, `to_script()` "
-                    "what was done. These are this cell's own objects, so the "
-                    "session holds copies and `rotor` and `pickup` stay as made; "
-                    "the pencil would copy them the same way later. The rings' "
-                    "view above is of a document, so its pencil only puts the "
-                    "handles out, and a drag there is a step in the document."
+                    "One of each kind of object, to try what **R** does with each: "
+                    "the cuboid, the cylinder and the segment have a handle on each "
+                    "face, and a face dragged moves alone, the one opposite staying "
+                    "put, or both with ⌥; the sphere and the loop have one on the "
+                    "rim; the tetrahedron, the triangle, the wire, the strip and the "
+                    "sheet have a dot on each point, and a click on one gives that "
+                    "point the move handles; the mesh and the dipole scale, and the "
+                    "sensor's pixels spread. The widget's `objects` are the scene as "
+                    "edited, `to_script()` what was done. These are this cell's own "
+                    "objects, so the session holds copies and they stay as made; the "
+                    "pencil would copy them the same way later. The rings' view "
+                    "above is of a document, so its pencil only puts the handles "
+                    "out, and a drag there is a step in the document."
                 ),
-                SceneWidget(rotor, pickup, editable=True, height=380),
+                SceneWidget(*objects, editable=True, height=460),
             ]
         )
 
