@@ -40,7 +40,7 @@ curved face, the height on the top, a segment's angles on its flat ends. A drag
 changes that number alone; a height grows both ways and a diameter all round, so
 the shape keeps its position. A Polyline, a TriangleStrip, a TriangleSheet and a
 Triangle now resize too, about their centre. The readout shows a segment's
-angles in degrees (#59).
+angles in degrees (#59, #60).
 
 </details>
 
