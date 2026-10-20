@@ -719,6 +719,9 @@
   margin-bottom: 2px;
   background: inherit;
   border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  /* A layer of its own: without one Safari 26 paints the sticky header's
+     masked triangle and nothing else -- no count, no line, no buttons. */
+  transform: translateZ(0);
 }
 .magpy-legend-header[hidden] {
   display: none;

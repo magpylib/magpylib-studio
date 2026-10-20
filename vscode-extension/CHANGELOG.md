@@ -67,6 +67,14 @@ after it joined its undo step (#59).
 
 </details>
 
+<details>
+<summary>The overlap count shows in Safari</summary>
+
+Safari 26 drew the legend's overlap header as its warning triangle alone: no
+count, no line under it, no buttons.
+
+</details>
+
 ## [0.6.0]
 
 ### Added
