@@ -1805,7 +1805,86 @@ async function selection(port, base) {
       return wrong.length ? wrong.join("; ") : null;
     },
   );
+
+  await check("a segment's grips each change their own number", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/outline.html?scene=standin#arc`);
+      if (!(await tab.until("return window.shown", 20_000))) {
+        return "never drew";
+      }
+      // (inner, outer, height, start, end), and which way each goes when its
+      // grip is pulled out along its handle: the inner radius in, the start
+      // angle back
+      const before = [0.01, 0.02, 0.01, 0, 90];
+      const goes = [-1, 1, 1, -1, 1];
+      const mouse = (type, [x, y], buttons) =>
+        tab.send("Input.dispatchMouseEvent", {
+          type,
+          x,
+          y,
+          button: "left",
+          buttons,
+          clickCount: 1,
+        });
+      const wrong = [];
+      for (let index = 0; index < 5; index++) {
+        await wait(400); // the redraw after the last one's release
+        const spots = await tab.evaluate(GRIP_SPOTS);
+        if (!spots) return "no grips on the segment";
+        const { from, to } = spots[index];
+        await mouse("mouseMoved", from, 0);
+        await mouse("mousePressed", from, 1);
+        for (let step = 1; step <= 6; step++) {
+          const along = (k) => from[k] + ((to[k] - from[k]) * step) / 6;
+          await mouse("mouseMoved", [along(0), along(1)], 1);
+          await wait(30);
+        }
+        await mouse("mouseReleased", to, 0);
+        await wait(200);
+        const sent = await tab.evaluate(
+          `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits)`,
+        );
+        const value = sent.at(-1)?.[0]?.shape?.value;
+        const moved = value?.map((v, k) =>
+          Math.sign(Math.round((v - before[k]) * 1e9)),
+        );
+        const want = before.map((_, k) => (k === index ? goes[index] : 0));
+        if (moved?.join() !== want.join()) {
+          wrong.push(`grip ${index} sent ${JSON.stringify(value)}`);
+        }
+      }
+      return wrong.length ? wrong.join("; ") : thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
+
+/** Page code: the segment's grips in the resize, each as where its cube is on
+ *  the page and a point further out along its handle. */
+const GRIP_SPOTS = `
+  window.scene3d.setGizmoMode("scale");
+  // a frame, which is when the grips take their size on screen
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const node = window.scene3d.byObjectId.get("arc");
+  const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
+  const grips = node.parent.getObjectByName("grips");
+  if (!grips?.visible) return null;
+  grips.updateMatrixWorld(true);
+  const rect = document.querySelector("#view canvas").getBoundingClientRect();
+  const Vector3 = grips.position.constructor;
+  const onPage = (local) => {
+    const p = local.clone().applyMatrix4(grips.matrixWorld).project(camera);
+    return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];
+  };
+  const spots = {};
+  for (const grip of grips.children) {
+    if (grip.userData.grip === undefined) continue;
+    const at = (y) => onPage(grips.worldToLocal(grip.localToWorld(new Vector3(0, y, 0))));
+    spots[grip.userData.grip] = { from: at(0.54), to: at(2) };
+  }
+  return spots;`;
 
 /** Page code: take hold of `objectId`'s handles in `mode`, which must be on
  *  the stand-in, and `act` on it as the pointer would, the drag left held;

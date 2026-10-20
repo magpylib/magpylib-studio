@@ -31,6 +31,17 @@ or more than 256, keeps the Inspector (#59).
 
 </details>
 
+<details>
+<summary>Resize a cylinder segment by handles on its faces</summary>
+
+R on a CylinderSegment shows a handle for each number of its dimension, standing
+out of the face it moves: each radius on its curved face, the height on the top,
+each angle on its flat end. A drag changes that number alone; the height grows
+both ways, so the segment keeps its position. The readout shows the angles in
+degrees (#59).
+
+</details>
+
 ### Changed
 
 <details>

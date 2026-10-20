@@ -45,9 +45,10 @@ Writes into OUT:
 * ``pathed.json`` -- a magnet on a path, as the studio panel's engine
   answers it: what a drag of its handles must leave the path where the edit
   leaves it;
-* ``standin.json`` -- a sensor with pixels and a cuboid, as the studio
-  panel's engine answers them: the drags whose handles are on a stand-in, a
-  sensor resized and a polarization aimed;
+* ``standin.json`` -- a sensor with pixels, a cuboid and a cylinder segment,
+  as the studio panel's engine answers them: the drags whose handles are on
+  a stand-in, a sensor resized and a polarization aimed, and the segment's
+  grips;
 * ``small.html`` -- a ring of centimetre magnets, edited (so drawn in metres,
   as a session draws), saved never drawn: the page frames it itself, as a
   notebook's first look does;
@@ -325,6 +326,11 @@ def main(out):
             "dimension": [0.01, 0.01, 0.01],
             "position": [-0.05, 0, 0],
         },
+    )
+    standin.add_object(
+        "arc",
+        "magnet.CylinderSegment",
+        {"polarization": [0, 0, 1], "dimension": [0.01, 0.02, 0.01, 0, 90]},
     )
     (out / "standin.json").write_text(
         json.dumps({"scene": standin.get_scene(), "tree": standin.object_tree()})

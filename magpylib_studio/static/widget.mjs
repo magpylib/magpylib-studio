@@ -1766,22 +1766,25 @@ function render({ model, el }) {
     const numbers = field === "shape" ? value.value : value;
     if (!Array.isArray(numbers) || Array.isArray(numbers[0])) return null;
     const attr = field === "shape" ? value.attr : field;
-    // in the scene's unit, as the Inspector and the variables show it
-    const unit = model.get("payload")?.units?.[read.kind] || SI[read.kind];
+    // Each number in the scene's unit for its kind, as the Inspector and the
+    // variables show it. One kind per field, but for a CylinderSegment's
+    // dimension: three lengths, then two angles.
+    const segment = field === "shape" && value.constraint === "segment";
+    const boxes = numbers.map((_, index) => {
+      const kind = segment && index > 2 ? "angle" : read.kind;
+      const unit = model.get("payload")?.units?.[kind] || SI[kind];
+      return {
+        kind,
+        unit: unit.symbol,
+        scale: unit.scale,
+        decimals: DECIMALS[unit.symbol] ?? 4,
+        width: kind === "angle" ? FIELD_READS.orientation.width : read.width,
+      };
+    });
     // and the expression written where a number is, where one was
     const expressions =
       model.get("payload")?.expressions?.[chosen[0]]?.[attr] || null;
-    return {
-      objectId: chosen[0],
-      field,
-      attr,
-      numbers,
-      expressions,
-      unit: unit.symbol,
-      scale: unit.scale,
-      decimals: DECIMALS[unit.symbol] ?? 4,
-      ...read,
-    };
+    return { objectId: chosen[0], field, attr, numbers, expressions, boxes };
   }
 
   function showReadout() {
@@ -1812,12 +1815,16 @@ function render({ model, el }) {
     const key = `${shown.objectId}/${shown.attr}/${shown.numbers.length}`;
     if (key !== readoutKey) {
       readoutKey = key;
-      const unit = document.createElement("span");
-      unit.className = "unit";
-      unit.textContent = shown.unit;
+      // each run of one kind followed by its unit
       readoutFields.replaceChildren(
-        ...shown.numbers.map((_, index) => numberBox(index, shown.width)),
-        unit,
+        ...shown.boxes.flatMap((box, index) => {
+          const input = numberBox(index, box.width);
+          if (shown.boxes[index + 1]?.kind === box.kind) return [input];
+          const unit = document.createElement("span");
+          unit.className = "unit";
+          unit.textContent = box.unit;
+          return [input, unit];
+        }),
       );
     }
     fillReadout(shown);
@@ -1861,10 +1868,9 @@ function render({ model, el }) {
       if (expression) {
         box.value = expression;
       } else {
-        const value = values[index] * shown.scale;
-        box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(
-          shown.decimals,
-        );
+        const { scale, decimals } = shown.boxes[index];
+        const value = values[index] * scale;
+        box.value = (Math.abs(value) < 1e-12 ? 0 : value).toFixed(decimals);
       }
       box.classList.toggle("expr", Boolean(expression));
       box.dataset.shown = box.value; // to tell a typed value from a shown one
@@ -1914,7 +1920,7 @@ function render({ model, el }) {
         const text = box.value.trim();
         if (!text || box.value === box.dataset.shown) return current[index];
         if (QUANTITY.test(text)) {
-          const read = await editor.quantity(text, shown.kind);
+          const read = await editor.quantity(text, shown.boxes[index].kind);
           if (read?.ok) return read.value;
           refused = read?.error || `${text} is not a value`;
           return current[index];

@@ -70,8 +70,10 @@ _BACKEND = "_studio_scene"
 #: or none, has nothing to spread; a big array stays with the Inspector, as a
 #: big mesh does.
 #:
-#: Excluded: `CylinderSegment`, whose five numbers the three axes of the
-#: handles do not say.
+#: A `CylinderSegment` has five numbers, which no three axes say: the view
+#: gives it grips of its own instead of the handles, one per number --
+#: each radius, the height, each angle -- and the engine draws each step
+#: (`segment`).
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -81,6 +83,7 @@ SCALE_COVARIANT = {
     "Cuboid": ("dimension", "free"),
     "Sphere": ("diameter", "uniform"),
     "Cylinder": ("dimension", "xy"),
+    "CylinderSegment": ("dimension", "segment"),
     "Dipole": ("style.size", "uniform"),
     "Tetrahedron": ("vertices", "vertices"),
     "TriangularMesh": ("vertices", "vertices"),

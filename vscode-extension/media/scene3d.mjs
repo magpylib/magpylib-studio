@@ -177,6 +177,8 @@ function ensureRenderer(canvasEl) {
   renderer.domElement.addEventListener("webglcontextrestored", redraw);
   watchPicks();
   makeGizmo();
+  makeGrips();
+  watchGrips();
 }
 
 /** Draw the view at the next frame, once however many ask before then.
@@ -193,6 +195,7 @@ function redraw() {
   frameAsked = true;
   requestAnimationFrame(() => {
     frameAsked = false;
+    sizeGrips();
     renderer.render(scene, camera);
     drawCorner(true);
   });
@@ -546,6 +549,13 @@ function setGizmoMode(mode) {
     (mode === "polarization" && (together || !polarizations[primaryId()]));
   gizmoMode = missing ? "translate" : mode;
   if (!gizmo) return gizmoMode;
+  // a segment's resize is its grips, which take the place of the handles
+  const segment = gizmoMode === "scale" && !together;
+  placeGrips(segment ? primaryId() : null);
+  if (gripped) {
+    gizmo.detach();
+    return gizmoMode;
+  }
   if (together && gizmoMode !== "none") {
     const centre = selectionCentre();
     if (centre) {
@@ -636,6 +646,369 @@ function setSpaces(chosen = {}) {
   setGizmoMode(gizmoMode);
 }
 
+// --- grips --------------------------------------------------------------
+//
+// A CylinderSegment's resize. Its dimension is five numbers -- inner and
+// outer radius, height, start and end angle -- and the handles' three axes
+// say two of them, both radii at once and the height. So it has a grip per
+// number, on the shape where that number shows: each radius on its curved
+// face at mid-angle, dragged out from the axis; the height on the top face,
+// dragged along the axis, both ends moving so the segment keeps its
+// position; each angle on its flat end, dragged round the axis. A drag is
+// one edit of the dimension, through the handles' own events (`dragstart`,
+// `objecttransform`), and the engine draws the segment as it goes.
+
+const grips = new THREE.Group(); // in the segment's own frame
+grips.name = "grips";
+grips.visible = false;
+grips.matrixAutoUpdate = false;
+let guide = null; // the line the dragged grip moves along
+let gripped = null; // { objectId, value, frame } while the grips are shown
+let gripping = null; // the drag in progress: see `watchGrips`
+let gripHovered = null; // the grip under the pointer, by index
+let gripPressed = false; // a press on a grip, which no pick may take
+
+/** Each grip's colour: red for a radius, blue for the height and green for
+ *  an angle -- r, z and phi, as the handles colour x, y and z. And the
+ *  colour of the one in hand, the handles' own. */
+const GRIP_COLOURS = [0xff0000, 0xff0000, 0x0000ff, 0x00ff00, 0x00ff00];
+const GRIP_ACTIVE = 0xffff00;
+
+/** Where each grip stands, in the segment's own frame -- its axis through
+ *  the origin, its middle at z = 0 -- for a `dimension`, and the way it
+ *  points: out of the face it moves, along that face's normal. */
+function gripSpots([inner, outer, height, start, end]) {
+  const rad = THREE.MathUtils.degToRad;
+  const mid = rad((start + end) / 2);
+  const middle = (inner + outer) / 2;
+  const at = (r, angle, z = 0) =>
+    new THREE.Vector3(r * Math.cos(angle), r * Math.sin(angle), z);
+  const out = (angle) => new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+  const round = (angle) =>
+    new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0);
+  return [
+    [at(inner, mid), out(mid).negate()],
+    [at(outer, mid), out(mid)],
+    [at(middle, mid, height / 2), new THREE.Vector3(0, 0, 1)],
+    [at(middle, rad(start)), round(rad(start)).negate()],
+    [at(middle, rad(end)), round(rad(end))],
+  ];
+}
+
+/** Five of the scale handles' own handle -- a shaft, a cube at its end and
+ *  a wider picker no one sees -- drawn as `TransformControls` draws them,
+ *  each standing up along its own y. */
+function makeGrips() {
+  const shaft = new THREE.CylinderGeometry(0.0075, 0.0075, 0.5, 3);
+  shaft.translate(0, 0.25, 0);
+  const head = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+  head.translate(0, 0.54, 0);
+  const picker = new THREE.CylinderGeometry(0.2, 0, 0.6, 4);
+  picker.translate(0, 0.3, 0);
+  const look = {
+    depthTest: false, // a grip behind the segment is still a grip
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+    transparent: true,
+  };
+  for (let index = 0; index < 5; index++) {
+    const material = new THREE.MeshBasicMaterial({
+      ...look,
+      color: GRIP_COLOURS[index],
+    });
+    const grip = new THREE.Group();
+    const reach = new THREE.Mesh(picker, material);
+    reach.visible = false; // raycast all the same: a wide target, unseen
+    for (const part of [
+      new THREE.Mesh(shaft, material),
+      new THREE.Mesh(head, material),
+      reach,
+    ]) {
+      part.renderOrder = 1000;
+      grip.add(part);
+    }
+    grip.userData.grip = index;
+    grips.add(grip);
+  }
+  guide = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ ...look, opacity: 0.5 }),
+  );
+  guide.renderOrder = 999;
+  guide.frustumCulled = false;
+  grips.add(guide);
+  scene.add(grips);
+}
+
+/** The grips, without the guide. */
+function gripObjects() {
+  return grips.children.filter((child) => child.userData.grip !== undefined);
+}
+
+/** Show the grips on `objectId`, if it is a segment, or put them away. */
+function placeGrips(objectId) {
+  if (gripping) return; // a drag carries its own dimension: see `watchGrips`
+  const node = objectId ? byObjectId.get(objectId) : null;
+  if (!node?.visible || shapes[objectId]?.constraint !== "segment") {
+    gripped = null;
+    grips.visible = false;
+    return;
+  }
+  // its node stands on its centroid, turned with it: the axis is `pivot` back
+  const pivot = pivots[objectId] ?? new THREE.Vector3();
+  node.updateMatrixWorld(true);
+  const frame = node.matrixWorld
+    .clone()
+    .multiply(
+      new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z),
+    );
+  gripped = { objectId, value: [...shapes[objectId].value], frame };
+  grips.matrix.copy(frame);
+  grips.matrixWorldNeedsUpdate = true;
+  grips.visible = true;
+  setGrips(gripped.value);
+}
+
+/** Stand the grips where `value` has them, the one in hand or under the
+ *  pointer lit; and while one is dragged, the line it moves along. */
+function setGrips(value) {
+  const spots = gripSpots(value);
+  const up = new THREE.Vector3(0, 1, 0);
+  const lit = gripping?.index ?? gripHovered;
+  for (const grip of gripObjects()) {
+    const index = grip.userData.grip;
+    const [at, normal] = spots[index];
+    grip.position.copy(at);
+    grip.quaternion.setFromUnitVectors(up, normal);
+    const material = grip.children[0].material;
+    material.color.setHex(index === lit ? GRIP_ACTIVE : GRIP_COLOURS[index]);
+  }
+  guide.visible = Boolean(gripping);
+  if (!gripping) return;
+  const { index } = gripping;
+  guide.material.color.setHex(GRIP_COLOURS[index]);
+  const [inner, outer, height, start, end] = value;
+  const mid = THREE.MathUtils.degToRad((start + end) / 2);
+  const middle = (inner + outer) / 2;
+  const across = new THREE.Vector3(Math.cos(mid), Math.sin(mid), 0);
+  let points;
+  if (index <= 1) {
+    // out from the axis, past the outer face
+    points = [new THREE.Vector3(), across.multiplyScalar(outer * 1.5)];
+  } else if (index === 2) {
+    const foot = across.multiplyScalar(middle);
+    points = [foot.clone().setZ(-height), foot.clone().setZ(height)];
+  } else {
+    // round the axis, all the way
+    points = Array.from({ length: 97 }, (_, k) => {
+      const angle = (k / 96) * 2 * Math.PI;
+      return new THREE.Vector3(
+        middle * Math.cos(angle),
+        middle * Math.sin(angle),
+        0,
+      );
+    });
+  }
+  guide.geometry.dispose();
+  guide.geometry = new THREE.BufferGeometry().setFromPoints(points);
+}
+
+/** Keep each grip the size of the handles on screen, whatever the zoom:
+ *  `TransformControls`' own measure, at the grip's distance. */
+function sizeGrips() {
+  if (!grips.visible) return;
+  grips.updateMatrixWorld(true);
+  const at = new THREE.Vector3();
+  for (const grip of gripObjects()) {
+    grip.getWorldPosition(at);
+    const factor = camera.isOrthographicCamera
+      ? (camera.top - camera.bottom) / camera.zoom
+      : at.distanceTo(camera.position) *
+        Math.min(
+          (1.9 * Math.tan((Math.PI * camera.fov) / 360)) / camera.zoom,
+          7,
+        );
+    grip.scale.setScalar((factor * (gizmo?.size ?? 1)) / 4);
+  }
+}
+
+/** Snap a length to the move's step, an angle to the turn's, when on. */
+function snapped(value, angle) {
+  const step = angle
+    ? gizmo?.rotationSnap && THREE.MathUtils.radToDeg(gizmo.rotationSnap)
+    : gizmo?.translationSnap;
+  return step ? Math.round(value / step) * step : value;
+}
+
+/** The grips' pointer: lit under it, dragged by it. Bound after the picks,
+ *  whose release looks at `gripPressed` before this clears it. */
+function watchGrips() {
+  const element = renderer.domElement;
+  const aim = (event) => {
+    const rect = element.getBoundingClientRect();
+    raycaster.setFromCamera(
+      new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ),
+      camera,
+    );
+  };
+  const gripAt = (event) => {
+    if (!grips.visible) return null;
+    aim(event);
+    const hit = raycaster.intersectObjects(gripObjects(), true)[0];
+    return hit ? hit.object.parent.userData.grip : null;
+  };
+  /** Where the pointer is along grip `index`'s motion, in the segment's own
+   *  frame: a length out from the axis or along it, or an angle round it in
+   *  degrees. Null where the view cannot say -- looking edge-on at the plane
+   *  an angle turns in. */
+  const reading = (event, index, value) => {
+    aim(event);
+    const ray = raycaster.ray.clone().applyMatrix4(gripping.inverse);
+    const [inner, outer, height, start, end] = value;
+    if (index <= 2) {
+      const mid = THREE.MathUtils.degToRad((start + end) / 2);
+      const across = new THREE.Vector3(Math.cos(mid), Math.sin(mid), 0);
+      const foot =
+        index === 2
+          ? across.clone().multiplyScalar((inner + outer) / 2)
+          : new THREE.Vector3();
+      const along = index === 2 ? new THREE.Vector3(0, 0, 1) : across;
+      const reach = 1000 * Math.max(outer, height);
+      const onLine = new THREE.Vector3();
+      ray.distanceSqToSegment(
+        foot.clone().addScaledVector(along, -reach),
+        foot.clone().addScaledVector(along, reach),
+        undefined,
+        onLine,
+      );
+      return onLine.sub(foot).dot(along);
+    }
+    const hit = ray.intersectPlane(
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+      new THREE.Vector3(),
+    );
+    if (!hit || Math.hypot(hit.x, hit.y) < 1e-12) return null;
+    return THREE.MathUtils.radToDeg(Math.atan2(hit.y, hit.x));
+  };
+  const send = (drag, preview) =>
+    host.dispatchEvent(
+      new CustomEvent("objecttransform", {
+        detail: {
+          preview,
+          edits: [
+            {
+              objectId: drag.objectId,
+              shape: { attr: "dimension", value: drag.value },
+            },
+          ],
+        },
+      }),
+    );
+
+  element.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !gripped) return;
+    const index = gripAt(event);
+    if (index === null) return;
+    gripPressed = true;
+    controls.enabled = false; // the press is the grip's, not the orbit's
+    element.setPointerCapture(event.pointerId);
+    gripping = {
+      index,
+      objectId: gripped.objectId,
+      inverse: gripped.frame.clone().invert(),
+      from: [...gripped.value],
+      value: [...gripped.value],
+      moved: false,
+      turned: 0, // degrees, unwrapped: an angle can go round past ±180
+    };
+    gripping.at = reading(event, index, gripping.from);
+    gripping.last = gripping.at;
+  });
+
+  element.addEventListener("pointermove", (event) => {
+    if (!gripping) {
+      if (event.buttons) return; // orbiting
+      const index = gripAt(event);
+      if (index === gripHovered) return;
+      gripHovered = index;
+      element.style.cursor = index === null ? "" : "grab";
+      if (gripped) setGrips(gripped.value);
+      redraw();
+      return;
+    }
+    const { index, from } = gripping;
+    const now = reading(event, index, from);
+    if (now === null || gripping.at === null) return;
+    const value = [...from];
+    if (index <= 2) {
+      // the height moves both ends, so the segment keeps its position
+      const moved = (now - gripping.at) * (index === 2 ? 2 : 1);
+      value[index] = snapped(from[index] + moved, false);
+    } else {
+      gripping.turned += ((now - gripping.last + 540) % 360) - 180;
+      gripping.last = now;
+      value[index] = snapped(from[index] + gripping.turned, true);
+    }
+    // and it stays a segment: radii in order, some height, some angle
+    const least = 1e-3 * Math.max(value[1], value[2]);
+    value[0] = Math.min(Math.max(value[0], 0), value[1] - least);
+    value[1] = Math.max(value[1], value[0] + least);
+    value[2] = Math.max(value[2], least);
+    if (index === 3) {
+      value[3] = Math.min(Math.max(value[3], value[4] - 360), value[4] - 1);
+    }
+    if (index === 4) {
+      value[4] = Math.max(Math.min(value[4], value[3] + 360), value[3] + 1);
+    }
+    if (value.every((v, k) => v === gripping.value[k])) return;
+    gripping.value = value;
+    if (!gripping.moved) {
+      gripping.moved = true;
+      element.style.cursor = "grabbing";
+      host.dispatchEvent(
+        new CustomEvent("dragstart", {
+          detail: {
+            objectIds: [gripping.objectId],
+            mode: "scale",
+            redrawn: true, // the engine draws the segment as it goes
+          },
+        }),
+      );
+    }
+    setGrips(value);
+    send(gripping, true);
+    redraw();
+  });
+
+  const letGo = (event) => {
+    gripPressed = false;
+    if (!gripping) return;
+    const drag = gripping;
+    gripping = null;
+    controls.enabled = true;
+    element.releasePointerCapture?.(event.pointerId);
+    element.style.cursor = gripHovered === null ? "" : "grab";
+    // where it was let go, until the engine's scene puts the grips back
+    if (gripped) gripped.value = drag.value;
+    setGrips(drag.value);
+    if (drag.moved) send(drag, false);
+    redraw();
+  };
+  element.addEventListener("pointerup", letGo);
+  element.addEventListener("pointercancel", letGo);
+  element.addEventListener("pointerleave", () => {
+    if (gripping || gripHovered === null) return;
+    gripHovered = null;
+    element.style.cursor = "";
+    if (gripped) setGrips(gripped.value);
+    redraw();
+  });
+}
+
 /** Look from `x, y, z` -- along an axis, or from an edge or a corner of the
  *  view cube -- at the distance the camera already is. */
 function axisView(x, y, z) {
@@ -702,7 +1075,7 @@ function watchPicks() {
     }
     // a handle under the pointer was the target of the press, not the object
     // behind it -- otherwise letting go of a gizmo selects whatever it covers
-    if (gizmo?.axis) return;
+    if (gizmo?.axis || gripPressed) return;
     const objectId = pick(event);
     if (objectId) {
       host.dispatchEvent(
