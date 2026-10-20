@@ -684,20 +684,68 @@ def test_a_cylinder_resizes_across_then_along():
     assert extent() / base == pytest.approx([1, 1, 2])
 
 
-def test_only_shapes_that_scale_are_offered(session):
-    """A resize is offered for a Cuboid and refused for a Sensor, whose pixels
-    sit at real coordinates while its cross is styled -- scaling the drawing
-    would move the pixels somewhere the object never put them."""
-    session.add_object("probe", "Sensor")
+@pytest.mark.parametrize(
+    ("pixel", "offered"),
+    [
+        (None, False),
+        ([0.01, 0, 0], False),  # one point spreads nowhere
+        ([[[0, 0, 0], [0.02, 0, 0]], [[0, 0.01, 0], [0.02, 0.01, 0]]], True),
+    ],
+)
+def test_a_sensor_resizes_its_pixel_array(session, pixel, offered):
+    """A Sensor's resize spreads its pixels, nested as they are -- its cross
+    and its pixels' size are styled, and scaling the drawing would stretch
+    both -- and is offered only where there are pixels to spread."""
+    params = {} if pixel is None else {"pixel": pixel}
+    session.add_object("probe", "Sensor", params=params)
 
     shapes = session.get_scene()["shapes"]
 
-    assert shapes["cube"] == {
-        "attr": "dimension",
-        "value": [1, 1, 1],
-        "constraint": "free",
-    }
-    assert "probe" not in shapes
+    assert shapes["cube"]["constraint"] == "free"
+    if offered:
+        assert shapes["probe"] == {
+            "attr": "pixel",
+            "value": pixel,
+            "constraint": "pixels",
+        }
+    else:
+        assert "probe" not in shapes
+
+
+def test_a_pixel_resize_keeps_the_formula_a_variable_writes():
+    """A grid sampled over `density` is stretched as a formula, not replaced
+    by the numbers the view sends: the resize spreads the pixels, and how
+    many there are is still the density's. Every step of the drag is
+    stretched from where it began, so two steps do not compound."""
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    pixels = np.asarray(session.get_scene()["shapes"]["field"]["value"])
+    centre = pixels.mean(axis=0)
+
+    session.begin_interaction()
+    for factor in (1.5, 2.0):  # each relative to where the drag began
+        spread = centre + (pixels - centre) * [factor, 1, 1]
+        session.apply_edits(
+            [
+                {
+                    "objectId": "field",
+                    "shape": {
+                        "attr": "pixel",
+                        "value": spread.tolist(),
+                        "scale": [factor, 1, 1],
+                        "about": centre.tolist(),
+                    },
+                }
+            ]
+        )
+    session.end_interaction()
+
+    drawn = np.asarray(session._objs["field"].pixel)
+    assert drawn == pytest.approx(spread)
+    session.set_variable("density", 6)
+    regrid = np.asarray(session._objs["field"].pixel).reshape(-1, 3)
+    assert len(regrid) == 36
+    assert np.ptp(regrid, axis=0)[:2] == pytest.approx(np.ptp(spread, axis=0)[:2])
 
 
 def test_a_played_frame_recomputes_what_the_field_decides():
@@ -873,8 +921,9 @@ def test_a_mesh_is_resized_by_its_vertices(session):
 
 def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     """The array rides in every payload, so past a point it is a lot of
-    numbers to ship on the chance that someone resizes it. Those meshes keep
-    the Inspector, which edits the value in place.
+    numbers to ship on the chance that someone resizes it. Those meshes, and
+    sensors with that many pixels, keep the Inspector, which edits the value
+    in place.
 
     Only a TriangularMesh can reach the cap: a Tetrahedron is four vertices by
     definition, which magpylib enforces.
@@ -885,10 +934,13 @@ def test_a_big_mesh_keeps_its_vertices_to_itself(session, monkeypatch):
     session.add_object(
         "mesh", "magnet.TriangularMesh", params={"vertices": corners, "faces": faces}
     )
+    session.add_object("probe", "Sensor", params={"pixel": corners})
     assert session.get_scene()["shapes"]["mesh"]["attr"] == "vertices"
+    assert session.get_scene()["shapes"]["probe"]["attr"] == "pixel"
 
     monkeypatch.setattr(threejs, "MAX_DRAGGABLE_VERTICES", 3)
     assert "mesh" not in session.get_scene()["shapes"]
+    assert "probe" not in session.get_scene()["shapes"]
     assert "cube" in session.get_scene()["shapes"]  # a dimension is unaffected
 
 

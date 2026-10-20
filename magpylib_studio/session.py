@@ -1297,6 +1297,49 @@ def _skipped_note(skipped):
     return f" — without {', '.join(skipped)}, which cannot compute a field"
 
 
+def _stretched(pixel, scale, about):
+    """A sensor's pixel array, as the document writes it, spread by `scale`
+    about `about` -- both per axis, in the sensor's frame -- formula and all:
+    a coordinate written as an expression becomes ``about + scale * (it -
+    about)``, so the variables it names go on deciding it. A grid sampled
+    over its `density` keeps its density. None where the array is written in
+    a form that has no coordinate to stretch one by one."""
+    # the view's centre, measured off the drawing: a symmetric grid's is 0
+    # give or take the last bits of a float, which is not worth writing down
+    about = [0.0 if abs(c) < 1e-12 else float(c) for c in about]
+
+    def number(x):
+        return repr(float(f"{x:.12g}"))
+
+    def coordinate(item, axis):
+        s, c = scale[axis], about[axis]
+        if s == 1:
+            return item
+        if expressions.is_expression(item):
+            source = expressions.source_of(item)
+            if c == 0:
+                return f"={number(s)} * ({source})"
+            return f"={number(c)} + {number(s)} * ({source} - {number(c)})"
+        if isinstance(item, (int, float)):
+            return c + s * (item - c)
+        raise ValueError(item)
+
+    def point(item):
+        if expressions.is_sampled(item):
+            spec = item[expressions.SAMPLED]
+            return {expressions.SAMPLED: {**spec, "of": point(spec.get("of"))}}
+        if not isinstance(item, list):
+            raise ValueError(item)
+        if len(item) == 3 and not any(isinstance(v, (list, dict)) for v in item):
+            return [coordinate(v, axis) for axis, v in enumerate(item)]
+        return [point(v) for v in item]
+
+    try:
+        return point(pixel)
+    except ValueError:
+        return None
+
+
 # Operations allowed inside batch() — mutating, per-object (plus clear).
 def _calls_for(edit):
     """The engine calls one edit from a view's handles comes to -- see
@@ -2501,6 +2544,9 @@ class MagpylibStudioSession:
         #: drawn whole -- which a later frame, drawing only what the gesture
         #: moves, extends rather than recomputes. See `get_scene`.
         self._drawn_whole: dict | None = None
+        #: Inside a gesture: each sensor's pixels as the document wrote them
+        #: when it began, for every step to stretch. See `_kept_formula`.
+        self._pixels_at_start: dict = {}
         #: Per object, the motion the steps after its edit replay over it —
         #: measured once per gesture. See `_replay_frame`.
         self._replay_frames: dict = {}
@@ -3894,6 +3940,7 @@ class MagpylibStudioSession:
         self._moving = set()
         self._field_cache = {}
         self._drawn_whole = None
+        self._pixels_at_start = {}
 
     def _field_lines(self, readings=None):
         """Prototype (#45): a ``fieldlines`` item per sensor that reads the
@@ -5497,6 +5544,7 @@ class MagpylibStudioSession:
         dragged together were one gesture -- and, if one of them is refused,
         none of them moves.
         """
+        edits = [self._kept_formula(edit) for edit in edits]
         calls = [call for edit in edits for call in _calls_for(edit)]
         made = []
         if define:
@@ -5515,6 +5563,39 @@ class MagpylibStudioSession:
         if made and result.get("ok"):
             result = {**result, "defined": made}
         return result
+
+    def _kept_formula(self, edit):
+        """`edit`, with a resize of pixels that a variable decides -- a grid
+        over its `density` -- written as that formula stretched, not as the
+        numbers the view sends: the resize changes how far apart the pixels
+        are, not how many there are, and the numbers would take the density
+        over with the spacing. Stretched from the formula as the gesture
+        found it, since the view's `scale` and `about` are from where the
+        drag began."""
+        shape = edit.get("shape")
+        if (
+            not shape
+            or shape.get("attr") != "pixel"
+            or shape.get("scale") is None
+            or shape.get("about") is None
+        ):
+            return edit
+        object_id = edit["objectId"]
+        start = self._pixels_at_start.get(object_id)
+        if start is None:
+            try:
+                create = self._create_event(object_id)
+            except KeyError:
+                return edit  # refused by name with the rest of the edit
+            start = json.loads(json.dumps(create.get("params", {}).get("pixel")))
+            if self._interaction is not None:
+                self._pixels_at_start[object_id] = start
+        if not expressions.referenced_names([start]):
+            return edit
+        stretched = _stretched(start, shape["scale"], shape["about"])
+        if stretched is None:
+            return edit
+        return {**edit, "shape": {**shape, "value": stretched}}
 
     def _with_definitions(self, definitions, call, label):
         """`call`, with the variables `definitions` make before it, as one
