@@ -47,33 +47,32 @@ LUT_SIZE = 256
 
 _BACKEND = "_studio_scene"
 
-#: Classes whose mesh is *exactly* the base mesh scaled, so a resize can be
-#: dragged with `node.scale` and the engine told only the value it came to.
-#: Ported from the prototype, where every entry was checked by rendering twice
-#: and comparing vertices.
+#: What a resize drags, per class: the parameter, and how the view drags it.
 #:
-#: `constraint` records which scale axes are independent, which follows from
-#: how many numbers the parameter has: a Cylinder's `dimension` is
-#: (diameter, height), so x and y are locked together and z is free.
+#: Most are the gizmo's handles, which scale the drawn mesh with `node.scale`
+#: and tell the engine only the value it came to -- honest only where the
+#: mesh magpylib draws for the new value *is* the old one scaled, which the
+#: prototype checked for each by rendering twice and comparing vertices. A
+#: Cuboid's three numbers are the three axes (`free`). A mesh has no
+#: dimension, but its vertices scale exactly, so the parameter dragged there
+#: is the whole array, about its centroid (`vertices`) -- only while it is
+#: small enough to be worth sending: the array rides in every payload, and a
+#: mesh of thousands of points keeps the Inspector, which edits it in place.
 #:
-#: A mesh has no dimension, but its vertices scale exactly -- checked the same
-#: way -- so the parameter dragged there is the whole array, multiplied
-#: row by row. Only while it is small enough to be worth sending: the array
-#: rides in every payload, and a mesh of thousands of points is a lot of
-#: numbers to ship on the chance that someone resizes it. Those keep the
-#: Inspector, which edits the value in place.
+#: Some drawings do not scale with what they draw, because part of them is
+#: styled: a sensor's cross and its pixels' size, a current's arrows, a
+#: triangle's magnetization arrow. Their handles go on a stand-in and the
+#: engine draws each step of the drag. A `Sensor` spreads its pixel array
+#: about its centroid (`pixels`) -- one pixel, or none, has nothing to
+#: spread. A `Polyline`, a `TriangleStrip`, a `TriangleSheet` and a
+#: `Triangle` scale their vertices as a mesh does (`points`).
 #:
-#: A `Sensor` resizes its pixel array, about its centroid, without scaling
-#: its drawing: its cross is styled and its pixels have a styled size, so
-#: scaling the drawing would stretch both. The view hands the handles a
-#: stand-in and the engine draws each step of the drag (`pixels`). One pixel,
-#: or none, has nothing to spread; a big array stays with the Inspector, as a
-#: big mesh does.
-#:
-#: A `CylinderSegment` has five numbers, which no three axes say: the view
-#: gives it grips of its own instead of the handles, one per number --
-#: each radius, the height, each angle -- and the engine draws each step
-#: (`segment`).
+#: And where the gizmo's axes are not the shape's numbers, the view gives the
+#: shape handles of its own, one per number, standing out of the face it
+#: moves, and the engine draws each step: a `CylinderSegment`'s two radii,
+#: height and two angles (`segment`); a `Cylinder`'s radius and height
+#: (`cylinder`), where the gizmo had two handles for one diameter; a
+#: `Sphere`'s or a `Circle`'s radius (`diameter`), where it had three.
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -81,13 +80,18 @@ _BACKEND = "_studio_scene"
 #: (`pinned_scene_units`); `shape_of` is read while it draws.
 SCALE_COVARIANT = {
     "Cuboid": ("dimension", "free"),
-    "Sphere": ("diameter", "uniform"),
-    "Cylinder": ("dimension", "xy"),
+    "Sphere": ("diameter", "diameter"),
+    "Cylinder": ("dimension", "cylinder"),
     "CylinderSegment": ("dimension", "segment"),
     "Dipole": ("style.size", "uniform"),
     "Tetrahedron": ("vertices", "vertices"),
     "TriangularMesh": ("vertices", "vertices"),
     "Sensor": ("pixel", "pixels"),
+    "Circle": ("diameter", "diameter"),
+    "Polyline": ("vertices", "points"),
+    "TriangleStrip": ("vertices", "points"),
+    "TriangleSheet": ("vertices", "points"),
+    "Triangle": ("vertices", "points"),
 }
 
 #: Above this many points a mesh or a sensor keeps them to itself; see above.
@@ -126,11 +130,11 @@ def shape_of(obj):
         return None
     attr, constraint = entry
     value = _resolve(obj, attr)
-    if constraint == "vertices" and len(value) > MAX_DRAGGABLE_VERTICES:
+    if value is None:  # a sensor with no pixels, a wire with no vertices yet
         return None
-    if constraint == "pixels" and (
-        value is None or not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES
-    ):
+    if constraint in ("vertices", "points") and len(value) > MAX_DRAGGABLE_VERTICES:
+        return None
+    if constraint == "pixels" and not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES:
         return None
     return {
         "attr": attr,

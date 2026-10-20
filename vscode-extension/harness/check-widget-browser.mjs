@@ -1733,10 +1733,11 @@ async function selection(port, base) {
   await check(
     "a drag on the stand-in ends where it went, redrawn before the release",
     async () => {
-      // The sensor's pixels spread about their centroid, x doubled; the
-      // aim turns.
+      // The sensor's pixels and the wire's vertices spread about their
+      // centroids, x doubled; the aim turns.
       const cases = [
         ["probe", "scale", "proxy.scale.set(2, 1, 1)"],
+        ["wire", "scale", "proxy.scale.set(2, 1, 1)"],
         ["aimed", "polarization", "proxy.rotateX(0.5)"],
       ];
       const want = {
@@ -1749,6 +1750,11 @@ async function selection(port, base) {
             [-0.01, 0.01, 0],
             [0.03, 0.01, 0],
           ],
+        ],
+        wire: [
+          [-0.04 / 3, 0, 0],
+          [0.08 / 3, 0, 0],
+          [0.08 / 3, 0.01, 0],
         ],
       };
       const near = (a, b) =>
@@ -1806,18 +1812,22 @@ async function selection(port, base) {
     },
   );
 
-  await check("a segment's grips each change their own number", async () => {
+  await check("a shape's grips each change their own number", async () => {
     const tab = await openTab(port);
     try {
-      await tab.navigate(`${base}/pages/outline.html?scene=standin#arc`);
+      await tab.navigate(`${base}/pages/outline.html?scene=standin`);
       if (!(await tab.until("return window.shown", 20_000))) {
         return "never drew";
       }
-      // (inner, outer, height, start, end), and which way each goes when its
-      // grip is pulled out along its handle: the inner radius in, the start
-      // angle back
-      const before = [0.01, 0.02, 0.01, 0, 90];
-      const goes = [-1, 1, 1, -1, 1];
+      // Each shape's numbers, and which way each goes when its grip is pulled
+      // out along its handle: a segment's inner radius in and its start angle
+      // back, everything else up.
+      const shapes = {
+        arc: { before: [0.01, 0.02, 0.01, 0, 90], goes: [-1, 1, 1, -1, 1] },
+        can: { before: [0.01, 0.01], goes: [1, 1] },
+        ball: { before: [0.01], goes: [1] },
+        loop: { before: [0.01], goes: [1] },
+      };
       const mouse = (type, [x, y], buttons) =>
         tab.send("Input.dispatchMouseEvent", {
           type,
@@ -1828,30 +1838,40 @@ async function selection(port, base) {
           clickCount: 1,
         });
       const wrong = [];
-      for (let index = 0; index < 5; index++) {
-        await wait(400); // the redraw after the last one's release
-        const spots = await tab.evaluate(GRIP_SPOTS);
-        if (!spots) return "no grips on the segment";
-        const { from, to } = spots[index];
-        await mouse("mouseMoved", from, 0);
-        await mouse("mousePressed", from, 1);
-        for (let step = 1; step <= 6; step++) {
-          const along = (k) => from[k] + ((to[k] - from[k]) * step) / 6;
-          await mouse("mouseMoved", [along(0), along(1)], 1);
-          await wait(30);
-        }
-        await mouse("mouseReleased", to, 0);
-        await wait(200);
-        const sent = await tab.evaluate(
-          `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits)`,
-        );
-        const value = sent.at(-1)?.[0]?.shape?.value;
-        const moved = value?.map((v, k) =>
-          Math.sign(Math.round((v - before[k]) * 1e9)),
-        );
-        const want = before.map((_, k) => (k === index ? goes[index] : 0));
-        if (moved?.join() !== want.join()) {
-          wrong.push(`grip ${index} sent ${JSON.stringify(value)}`);
+      for (const [objectId, { before, goes }] of Object.entries(shapes)) {
+        for (let index = 0; index < before.length; index++) {
+          await wait(400); // the redraw after the last one's release
+          const spots = await tab.evaluate(GRIP_SPOTS(objectId));
+          if (!spots?.[index]) {
+            wrong.push(`${objectId}: no grip ${index}`);
+            continue;
+          }
+          const { from, to } = spots[index];
+          await mouse("mouseMoved", from, 0);
+          await mouse("mousePressed", from, 1);
+          for (let step = 1; step <= 6; step++) {
+            const along = (k) => from[k] + ((to[k] - from[k]) * step) / 6;
+            await mouse("mouseMoved", [along(0), along(1)], 1);
+            await wait(30);
+          }
+          await mouse("mouseReleased", to, 0);
+          await wait(200);
+          const sent = await tab.evaluate(
+            `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits)`,
+          );
+          const edit = sent.at(-1)?.[0];
+          // a diameter goes back as the one number it is
+          const value =
+            edit?.objectId === objectId ? edit.shape?.value : undefined;
+          const moved = []
+            .concat(value ?? [])
+            .map((v, k) => Math.sign(Math.round((v - before[k]) * 1e9)));
+          const want = before.map((_, k) => (k === index ? goes[index] : 0));
+          if (moved.join() !== want.join()) {
+            wrong.push(
+              `${objectId} grip ${index} sent ${JSON.stringify(value)}`,
+            );
+          }
         }
       }
       return wrong.length ? wrong.join("; ") : thrown(tab);
@@ -1861,13 +1881,14 @@ async function selection(port, base) {
   });
 }
 
-/** Page code: the segment's grips in the resize, each as where its cube is on
- *  the page and a point further out along its handle. */
-const GRIP_SPOTS = `
+/** Page code: `objectId` selected and resized, its grips each as where its
+ *  cube is on the page and a point further out along its handle. */
+const GRIP_SPOTS = (objectId) => `
+  window.scene3d.highlight([${JSON.stringify(objectId)}]);
   window.scene3d.setGizmoMode("scale");
   // a frame, which is when the grips take their size on screen
   await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-  const node = window.scene3d.byObjectId.get("arc");
+  const node = window.scene3d.byObjectId.get(${JSON.stringify(objectId)});
   const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
   const grips = node.parent.getObjectByName("grips");
   if (!grips?.visible) return null;
@@ -1880,7 +1901,7 @@ const GRIP_SPOTS = `
   };
   const spots = {};
   for (const grip of grips.children) {
-    if (grip.userData.grip === undefined) continue;
+    if (grip.userData.grip === undefined || !grip.visible) continue;
     const at = (y) => onPage(grips.worldToLocal(grip.localToWorld(new Vector3(0, y, 0))));
     spots[grip.userData.grip] = { from: at(0.54), to: at(2) };
   }

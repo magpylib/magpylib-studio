@@ -45,10 +45,10 @@ Writes into OUT:
 * ``pathed.json`` -- a magnet on a path, as the studio panel's engine
   answers it: what a drag of its handles must leave the path where the edit
   leaves it;
-* ``standin.json`` -- a sensor with pixels, a cuboid and a cylinder segment,
-  as the studio panel's engine answers them: the drags whose handles are on
-  a stand-in, a sensor resized and a polarization aimed, and the segment's
-  grips;
+* ``standin.json`` -- a sensor with pixels, a wire and a cuboid, and a
+  cylinder segment, a cylinder, a sphere and a loop, as the studio panel's
+  engine answers them: the drags whose handles are on a stand-in -- a sensor
+  or a wire resized, a polarization aimed -- and the shapes' own grips;
 * ``small.html`` -- a ring of centimetre magnets, edited (so drawn in metres,
   as a session draws), saved never drawn: the page frames it itself, as a
   notebook's first look does;
@@ -332,6 +332,20 @@ def main(out):
         "magnet.CylinderSegment",
         {"polarization": [0, 0, 1], "dimension": [0.01, 0.02, 0.01, 0, 90]},
     )
+    for name, kind, params in (
+        ("can", "magnet.Cylinder", {"dimension": [0.01, 0.01]}),
+        ("ball", "magnet.Sphere", {"diameter": 0.01}),
+        ("loop", "current.Circle", {"current": 1, "diameter": 0.01}),
+        ("wire", "current.Polyline", {"current": 1}),
+    ):
+        if "current" not in params:
+            params["polarization"] = [0, 0, 1]
+        standin.add_object(name, kind, params)
+    standin.move("can", [-0.05, -0.05, 0])
+    standin.move("ball", [0, -0.05, 0])
+    standin.move("loop", [0.05, -0.05, 0])
+    standin.set_param("wire", "vertices", [[0, 0, 0], [0.02, 0, 0], [0.02, 0.01, 0]])
+    standin.move("wire", [-0.05, 0.05, 0])
     (out / "standin.json").write_text(
         json.dumps({"scene": standin.get_scene(), "tree": standin.object_tree()})
     )

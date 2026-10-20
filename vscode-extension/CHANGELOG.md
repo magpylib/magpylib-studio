@@ -32,13 +32,15 @@ or more than 256, keeps the Inspector (#59).
 </details>
 
 <details>
-<summary>Resize a cylinder segment by handles on its faces</summary>
+<summary>Resize round shapes by handles on their faces, and currents at all</summary>
 
-R on a CylinderSegment shows a handle for each number of its dimension, standing
-out of the face it moves: each radius on its curved face, the height on the top,
-each angle on its flat end. A drag changes that number alone; the height grows
-both ways, so the segment keeps its position. The readout shows the angles in
-degrees (#59).
+R on a CylinderSegment, a Cylinder, a Sphere or a current Circle shows a handle
+for each number of its size, standing out of the face it moves: a radius on its
+curved face, the height on the top, a segment's angles on its flat ends. A drag
+changes that number alone; a height grows both ways and a diameter all round, so
+the shape keeps its position. A Polyline, a TriangleStrip, a TriangleSheet and a
+Triangle now resize too, about their centre. The readout shows a segment's
+angles in degrees (#59).
 
 </details>
 
