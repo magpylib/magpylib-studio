@@ -58,7 +58,7 @@ type over. A wire gains a point at the faint dot in a segment's middle and loses
 one to Delete. Points picked with ⌘/ctrl-click, or with a box dragged with ⌥,
 move with W, turn with E and scale with R, together. Esc during a drag takes it
 back. Each box in the readout has its unit after it, and a triangle, a current
-sheet and a strip have icons of their own (#61).
+sheet and a strip have icons of their own (#62).
 
 </details>
 
