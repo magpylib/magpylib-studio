@@ -89,13 +89,15 @@ sheet and a strip have icons of their own (#62).
 ### Changed
 
 <details>
-<summary>The style tree in a reading order</summary>
+<summary>The properties panel easier to read</summary>
 
-The object panel's style tree lists the label, colour and opacity first, then
-the groups of the object's own kind, then those every object shares, each
-group's `show` on top; an open group's rows hang on a guide line, as the
-legend's do; and an unset colour's swatch shows the colour the object is drawn
-in, not black (#63).
+The style tree lists the label, colour and opacity first, then the groups of the
+object's own kind, then those every object shares, each group's `show` on top,
+an open group's rows on a guide line. The rows line up in one column with a
+hairline between them; a property the scene sets is marked by a bar where it was
+a bold name; a bounded number's slider takes the row and steps by a tenth of its
+range; and an unset colour's swatch shows the colour the object is drawn in, not
+black (#63).
 
 </details>
 

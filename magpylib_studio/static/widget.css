@@ -925,8 +925,11 @@
   opacity: 0.5;
 }
 
-.magpy-ins-set label {
-  font-weight: 600;
+/* Set in this scene rather than left to magpylib's default: a bar at the
+   row's start, as an editor marks a setting changed, beside the reset. It
+   was a bold name, which said nothing of why. */
+.magpy-ins-set {
+  box-shadow: inset 2px 0 0 var(--vscode-focusBorder, #3987e5);
 }
 
 .magpy-ins-widget {
@@ -962,12 +965,16 @@
   flex: none;
 }
 
+/* A bounded number: the slider takes the row, the box beside it holds a
+   number. As specific as the rule that makes every input the row's width,
+   which won before, the box taking the row and the slider a sliver. */
 .magpy-ins input[type="range"] {
   padding: 0;
+  flex: 1 1 auto;
 }
 
-.magpy-ins-num {
-  width: 48px;
+.magpy-ins input[type="range"] + input.magpy-ins-num {
+  width: 52px;
   flex: none;
 }
 
@@ -1077,10 +1084,38 @@
   opacity: 0.6;
 }
 
+/* The rows read as one table: a property a row, the names in one column
+   so the values start on one line, and a hairline between rows the only
+   line. A value's underline shows on the row the pointer is on, or the one
+   being typed in: at rest it doubled the hairline, and each row sizing its
+   own name column started its value somewhere else. Room at the start for
+   the bar that marks a property set. */
 .magpy-scene-inspector .magpy-ins-row {
-  grid-template-columns: minmax(52px, auto) 1fr;
+  grid-template-columns: minmax(0, 112px) 1fr;
   gap: 5px;
-  padding: 1px 0;
+  padding: 3px 0 3px 6px;
+}
+
+.magpy-scene-inspector .magpy-ins-row + .magpy-ins-row {
+  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.magpy-scene-inspector
+  .magpy-ins-row
+  :is(input[type="text"], input[type="number"], select) {
+  border-bottom-color: transparent;
+}
+
+.magpy-scene-inspector
+  .magpy-ins-row:hover
+  :is(input[type="text"], input[type="number"], select) {
+  border-bottom-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.magpy-scene-inspector
+  .magpy-ins-row
+  :is(input[type="text"], input[type="number"], select):focus {
+  border-bottom-color: var(--vscode-focusBorder);
 }
 
 .magpy-scene-inspector .magpy-ins-row > :last-child:empty {
@@ -1096,7 +1131,7 @@
 .magpy-scene-inspector select {
   background: transparent;
   border: none;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent);
   border-radius: 0;
   padding: 0 1px;
   font-size: 11px;
@@ -1139,7 +1174,13 @@
 }
 
 .magpy-scene-inspector .magpy-ins-props .magpy-ins-row {
-  grid-template-columns: minmax(52px, auto) 1fr 14px;
+  grid-template-columns: minmax(0, 112px) 1fr 14px;
+}
+
+/* a group's rows start 8px further in, on its guide line: their names 8px
+   narrower, for the values to keep to the same line */
+.magpy-scene-inspector .magpy-ins-props details[open] > .magpy-ins-row {
+  grid-template-columns: minmax(0, 104px) 1fr 14px;
 }
 
 .magpy-scene-inspector .magpy-ins-filter {

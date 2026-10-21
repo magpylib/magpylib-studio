@@ -422,11 +422,18 @@ export function createInspector(
         else if (path in values.set) resetPath(path);
       });
       if (spec.minimum !== undefined && spec.maximum !== undefined) {
+        // the arrows step by a round tenth of the range -- 0.1 for an
+        // opacity, not the 1 that takes it from nothing to whole -- and the
+        // slider, dragged, by a hundredth
+        const span = spec.maximum - spec.minimum;
+        if (span > 0) num.step = 10 ** Math.floor(Math.log10(span / 10));
+        num.min = spec.minimum;
+        num.max = spec.maximum;
         const slider = element("input");
         slider.type = "range";
         slider.min = spec.minimum;
         slider.max = spec.maximum;
-        slider.step = (spec.maximum - spec.minimum) / 100;
+        slider.step = span / 100;
         if (value !== null && value !== undefined) slider.value = value;
         slider.addEventListener("input", () => {
           num.value = slider.value;
@@ -481,7 +488,11 @@ export function createInspector(
           ? path.slice(group.length + 1)
           : path;
         label.title =
-          path + (leafSpec.description ? " — " + leafSpec.description : "");
+          path +
+          (leafSpec.description ? " — " + leafSpec.description : "") +
+          (path in values.set
+            ? " — set in this scene; ↺ goes back to the default"
+            : "");
         const reset = element("button", "magpy-ins-reset", "↺");
         reset.type = "button";
         reset.title = "Reset to default";
