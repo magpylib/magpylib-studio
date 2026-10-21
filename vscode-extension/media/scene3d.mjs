@@ -2242,10 +2242,7 @@ function outermost(objectIds) {
 /** Hide these objects, and show every other. */
 function setHidden(objectIds) {
   hiddenIds = new Set(objectIds);
-  for (const [objectId, node] of byObjectId) {
-    // a collection's node draws nothing, and hidden would hide what it carries
-    node.visible = node.userData.collection || !hiddenIds.has(objectId);
-  }
+  for (const node of byObjectId.values()) dress(node);
   highlight(selectedIds); // an outline round nothing reads as a bug
   drawHints();
 }
@@ -2254,8 +2251,35 @@ function setHidden(objectIds) {
  *  every other at its own. */
 function setFades(levels) {
   fades = new Map(Object.entries(levels ?? {}));
-  for (const [objectId, node] of byObjectId) {
+  for (const node of byObjectId.values()) dress(node);
+}
+
+/** Show `node` and fade it as `hiddenIds` and `fades` say. A sensor drawn
+ *  as its parts -- its pixels and its field lines, marked so in the payload,
+ *  and the rest of it its axes (`threejs.PARTS`) -- shows and fades each by
+ *  the part's own id, which its legend's rows hide and fade apart. */
+function dress(node) {
+  const objectId = node.userData.objectId;
+  // a collection's node draws nothing, and hidden would hide what it carries
+  node.visible = node.userData.collection || !hiddenIds.has(objectId);
+  const built = node.children.filter((child) => child.userData.built);
+  if (!built.some((child) => child.userData.part)) {
     fade(node, fades.get(objectId) ?? 1);
+    return;
+  }
+  for (const child of built) {
+    const part = child.userData.part ?? `${objectId}/axes`;
+    child.visible = !hiddenIds.has(part);
+    fade(child, fades.get(part) ?? fades.get(objectId) ?? 1);
+  }
+  // every part hidden is the sensor hidden: not picked, walked to or framed
+  node.visible &&= built.some((child) => child.visible);
+}
+
+/** `dress` the nodes drawn as parts, once their items are on them. */
+function dressParts() {
+  for (const node of byObjectId.values()) {
+    if (node.children.some((child) => child.userData.part)) dress(node);
   }
 }
 
@@ -2268,7 +2292,8 @@ function fade(part, level) {
   const material = part.material;
   if (material?.userData.own !== undefined) {
     material.opacity = material.userData.own * level;
-    // a current's flow is see-through at any level: it is a glow on the wire
+    // a current's flow is see-through at any level: it is a glow on the wire;
+  // and a field line, which other lines show through
     const blended = Boolean(material.userData.blended);
     const transparent = material.opacity < 1 || blended;
     // three compiles an opaque material's alpha away: the program changes
@@ -2675,6 +2700,8 @@ function buildItem(item) {
           ? buildFieldLines(item)
           : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
+  built.userData.built = true; // what a node carries for its object, see `dress`
+  if (item.part) built.userData.part = item.part;
   // a current's arrows, which say what its flow says: see `setFlow`
   if (item.arrows) {
     built.userData.arrows = true;
@@ -2683,8 +2710,12 @@ function buildItem(item) {
   }
   // a field line is the field's, not a thing a drag could land on
   if (item.kind === "fieldlines") built.userData.unsnapped = true;
+  // the opacity a fade is a share of -- a field line's material, kept from
+  // build to build, knows its own already (`fieldLineMaterial`)
   built.traverse((part) => {
-    if (part.material) part.material.userData.own = part.material.opacity;
+    if (part.material && part.material.userData.own === undefined) {
+      part.material.userData.own = part.material.opacity;
+    }
   });
   fade(built, fades.get(item.object_id) ?? 1);
   return built;
@@ -2786,14 +2817,18 @@ function legible(hex, paper) {
   return `#${mix(high).map(byte).join("")}`;
 }
 
-/** One material per opacity for every field line drawn: shared and never
- *  disposed, so its program is compiled once -- a material per frame would
- *  also grow `wideMaterials` without end, since a discarded node's are not
- *  taken out of it. Its lines flow as a current does, the way the field
- *  points (`FIELD_PULSE`), while the host's flow is on. */
+/** One material per opacity for each sensor's lines (`owner`, their node):
+ *  kept across rebuilds and never disposed, so its program is compiled once
+ *  -- a material per frame would also grow `wideMaterials` without end,
+ *  since a discarded node's are not taken out of it. A sensor's own, so that
+ *  fading its lines fades no other's; the opacity a fade is a share of is the
+ *  band's, set here once (`own`), where a rebuild would take the faded one
+ *  for it and fade again. Its lines flow as a current does, the way the
+ *  field points (`FIELD_PULSE`), while the host's flow is on. */
 const fieldLineMaterials = new Map();
-function fieldLineMaterial(opacity) {
-  let material = fieldLineMaterials.get(opacity);
+function fieldLineMaterial(opacity, owner) {
+  const key = `${owner}|${opacity}`;
+  let material = fieldLineMaterials.get(key);
   if (!material) {
     material = new LineMaterial({
       vertexColors: true,
@@ -2817,9 +2852,12 @@ function fieldLineMaterial(opacity) {
         "#include <color_fragment>",
         "#include <color_fragment>\n\t\t\tdiffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * pulse * pulse );",
       );
+    material.userData.own = opacity;
+    // see-through at any fade: lines behind lines still show
+    material.userData.blended = true;
     if (renderer) renderer.getSize(material.resolution);
     wideMaterials.add(material);
-    fieldLineMaterials.set(opacity, material);
+    fieldLineMaterials.set(key, material);
   }
   return material;
 }
@@ -3191,7 +3229,7 @@ function buildFieldLines(item) {
     geometry.boundingBox = new THREE.Box3();
     const part = new LineSegments2(
       geometry,
-      fieldLineMaterial(FIELD_LINE_BANDS[i].opacity),
+      fieldLineMaterial(FIELD_LINE_BANDS[i].opacity, item.object_id),
     );
     part.frustumCulled = false;
     part.raycast = () => {};
@@ -4447,6 +4485,7 @@ function renderFrame(payload) {
     node.quaternion.identity(); // the geometry already holds the pose
     node.add(buildItem(item));
   }
+  dressParts();
   placeCollections();
   // round the nodes just built, not the ones discarded
   drawOutlines();
@@ -4481,6 +4520,10 @@ function poseFrame(index) {
     entry.built.traverse(free);
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
+    // a sensor's part, or its axes beside its parts, hidden as they were
+    if (entry.node.children.some((child) => child.userData.part)) {
+      dress(entry.node);
+    }
   }
   const frames = Math.max(
     1,
@@ -4725,6 +4768,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
       changing.push({ node, built, changes: item.changes });
     }
   }
+  dressParts();
   placeCollections();
 
   // Size first: the fit depends on the aspect ratio, and on the very first

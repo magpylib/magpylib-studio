@@ -265,10 +265,13 @@ def colours(sensor, readings):
 
 
 def item(sensor, key, grid, values, within, seeds, readings):
-    """The ``fieldlines`` item for `sensor`, drawn on its node: the grid, the
+    """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
+    part (`threejs.PARTS`): the grid, the
     field along its axes, which points are inside a magnet, the pixels to
     start from, nearest the middle first, how far apart to keep the lines,
     and the colours their |field| takes (`colours`)."""
+    from magpylib_studio.threejs import part_id
+
     lut, levels = colours(sensor, readings)
     # 16 bits a component, against the peak: a quarter of the bytes JSON
     # numbers took, and 40 uT steps for a 1.3 T peak, finer than a line shows
@@ -280,6 +283,8 @@ def item(sensor, key, grid, values, within, seeds, readings):
     return {
         "kind": "fieldlines",
         "object_id": key,
+        # a part of the sensor's drawing, hidden and faded apart from it
+        "part": part_id(key, "lines"),
         "name": f"{sensor.style.label or 'Sensor'} field lines",
         "origin": np.asarray(grid["origin"]).tolist(),
         "axes": np.asarray(grid["axes"]).ravel().tolist(),

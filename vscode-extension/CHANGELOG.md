@@ -36,13 +36,15 @@ and a saved page carries them (#63).
 <summary>Field lines through a sensor's pixels, following a drag (prototype)</summary>
 
 A sensor whose pixels read B or H can draw the field's lines through them: the
-lines button among the view's tools, `SceneWidget(..., field_lines=True)` or
-`set_field_lines` on the session. In a plane of the field's symmetry the lines
-keep to it, elsewhere they run in 3D, and they stop at magnets: they show the
-field in the air, coloured as the sensor's arrows are. They follow a drag, are
-saved with the scene and undone like an edit, and a saved page carries them. In
-the notebook widget and the VS Code panel alike (#46). The field is computed a
-slice of the grid at a time, so a meshed body of a thousand cells takes 0.6 GB
+eye on its field lines in the legend, `SceneWidget(..., field_lines=True)` or
+`set_field_lines` on the session. The legend lists such a sensor's parts beneath
+it, its axes, its pixels and its field lines, each saying the field it shows,
+and hides and fades each apart (#65). In a plane of the field's symmetry the
+lines keep to it, elsewhere they run in 3D, and they stop at magnets: they show
+the field in the air, coloured as the sensor's arrows are. They follow a drag,
+are saved with the scene and undone like an edit, and a saved page carries them.
+In the notebook widget and the VS Code panel alike (#46). The field is computed
+a slice of the grid at a time, so a meshed body of a thousand cells takes 0.6 GB
 instead of 8 (#64).
 
 </details>
@@ -127,7 +129,9 @@ five-thousandth of the way in. A path drawn in millimetres is told from the
 object on it, a path marker of size 0 is not drawn at the default size, and a
 document's field lines come back when its run ends. Framing fits the objects
 themselves rather than a sphere round them all, so a ring of magnets fills the
-view instead of sitting small in the middle of it (#63).
+view instead of sitting small in the middle of it (#63). A faded sensor's field
+lines no longer fade further at every step of a drag, nor fade every other
+sensor's, and a line behind another shows through it (#65).
 
 </details>
 

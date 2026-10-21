@@ -42,7 +42,7 @@
  */
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
-import { createLegend, drawnIn } from "./legend.mjs";
+import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
 import {
   declaredTheme,
@@ -237,17 +237,6 @@ const ICONS = {
   revert: '<path d="M2.5 3v3.5H6"/><path d="M3.2 6.5a5 5 0 1 1-.5 3.5"/>',
   pause: '<path d="M5.5 3.5v9M10.5 3.5v9" stroke-width="2"/>',
   // a bar magnet's field, three lines a side, traced and stretched to a
-  // butterfly: what field lines look like in every textbook
-  lines:
-    '<rect x="6.9" y="4.1" width="2.2" height="7.6" rx=".5" fill="currentColor" stroke="none"/>' +
-    '<path stroke-width="1" d="' +
-    "M7.9 4.2 L7.7 4.2 L7.4 4.2 L7.2 4.3 L6.9 4.4 L6.7 4.5 L6.4 4.7 L6.2 5.0 L6.0 5.3 L5.8 5.6 L5.6 6.1 L5.5 6.5 L5.4 7.1 L5.4 7.7 L5.4 8.3 L5.4 8.8 L5.5 9.4 L5.6 9.9 L5.8 10.3 L6.0 10.7 L6.2 11.0 L6.4 11.2 L6.7 11.4 L6.9 11.5 L7.2 11.6 L7.4 11.7 L7.7 11.7 L7.9 11.8 " +
-    "M8.0 4.2 L8.3 4.2 L8.5 4.2 L8.7 4.3 L9.0 4.4 L9.2 4.5 L9.5 4.7 L9.7 5.0 L9.9 5.3 L10.1 5.6 L10.3 6.1 L10.4 6.5 L10.5 7.1 L10.5 7.7 L10.5 8.3 L10.5 8.8 L10.4 9.4 L10.3 9.9 L10.1 10.3 L9.9 10.7 L9.7 11.0 L9.5 11.2 L9.2 11.4 L9.0 11.5 L8.7 11.6 L8.5 11.7 L8.3 11.7 L8.0 11.8 " +
-    "M7.9 4.1 L7.5 3.8 L7.1 3.5 L6.7 3.3 L6.3 3.2 L5.9 3.2 L5.5 3.2 L5.1 3.4 L4.7 3.8 L4.3 4.3 L4.0 4.9 L3.8 5.6 L3.6 6.5 L3.5 7.5 L3.5 8.5 L3.6 9.4 L3.8 10.3 L4.0 11.0 L4.3 11.7 L4.7 12.1 L5.1 12.5 L5.5 12.7 L5.9 12.8 L6.3 12.7 L6.7 12.6 L7.1 12.4 L7.5 12.1 L7.9 11.8 " +
-    "M8.0 4.1 L8.4 3.8 L8.8 3.5 L9.2 3.3 L9.6 3.2 L10.0 3.2 L10.4 3.2 L10.8 3.4 L11.2 3.8 L11.6 4.3 L11.9 4.9 L12.2 5.6 L12.3 6.5 L12.4 7.5 L12.4 8.5 L12.3 9.4 L12.2 10.3 L11.9 11.0 L11.6 11.7 L11.2 12.1 L10.8 12.5 L10.4 12.7 L10.0 12.8 L9.6 12.7 L9.2 12.6 L8.8 12.4 L8.4 12.1 L8.0 11.8 " +
-    "M7.9 4.1 L7.4 3.3 L6.8 2.7 L6.3 2.1 L5.7 1.7 L5.1 1.5 L4.5 1.5 L3.9 1.6 L3.3 2.0 L2.7 2.6 L2.2 3.5 L1.8 4.6 L1.5 5.8 L1.4 7.2 L1.4 8.7 L1.5 10.1 L1.8 11.4 L2.2 12.4 L2.7 13.3 L3.3 13.9 L3.9 14.3 L4.5 14.4 L5.1 14.4 L5.7 14.2 L6.3 13.8 L6.8 13.2 L7.4 12.6 L7.9 11.8 " +
-    "M8.0 4.1 L8.5 3.3 L9.1 2.7 L9.6 2.1 L10.2 1.7 L10.8 1.5 L11.4 1.5 L12.0 1.6 L12.6 2.0 L13.2 2.6 L13.7 3.5 L14.1 4.6 L14.4 5.8 L14.5 7.2 L14.5 8.7 L14.4 10.1 L14.1 11.4 L13.7 12.4 L13.2 13.3 L12.6 13.9 L12.0 14.3 L11.4 14.4 L10.8 14.4 L10.2 14.2 L9.6 13.8 L9.1 13.2 L8.5 12.6 L8.0 11.8 " +
-    '"/>',
   // streamlines, a flux: pulses run along them once as a cue, as the view
   // runs them along a current (`.magpy-flow-pulse` in widget.css)
   flow:
@@ -489,14 +478,6 @@ function render({ model, el }) {
   );
   const axesButton = iconButton("axes", "", () =>
     commit("axes", AXES[axesChoice(model.get("axes"))].next),
-  );
-  // Lines of the field through the pixels of each sensor that reads it,
-  // drawn here from the field python sends (#45). Shown where there is such
-  // a sensor and a python to compute the field for it -- see `showLines`.
-  const linesButton = iconButton(
-    "lines",
-    "Field lines through the pixels of each sensor that reads the field",
-    () => commit("field_lines", !model.get("field_lines")),
   );
   const flowButton = iconButton(
     "flow",
@@ -786,7 +767,7 @@ function render({ model, el }) {
   };
   tools.append(
     group(fitButton, projectionButton),
-    group(legendButton, axesButton, linesButton, flowButton, themeButton),
+    group(legendButton, axesButton, flowButton, themeButton),
     group(editButton),
     group(pictureButton, exportButton),
     group(keysButton, fullscreenButton),
@@ -931,7 +912,7 @@ function render({ model, el }) {
   // The legend reports what a click would make them, as the view does.
   const legend = createLegend(legendEl, {
     onSelect: (ids) => commit("selected", ids),
-    onHide: (ids) => commit("hidden", ids),
+    onHide: hideAsked,
     // Each step of a slide drawn here, and the model told once, at its end:
     // a kernel round trip a step would trail the pointer.
     onFade: (levels, { settled }) => {
@@ -959,7 +940,7 @@ function render({ model, el }) {
   /** The legend, drawn from the model. Like the transport, before anything
    *  is awaited, and for the same reason. */
   function dressLegend() {
-    const tree = model.get("tree") || [];
+    const tree = legendTree();
     const payload = model.get("payload") || {};
     const rows = rowsIn(tree);
     legendButton.hidden = rows === 0;
@@ -1123,7 +1104,13 @@ function render({ model, el }) {
 
   const stateOf = () => ({
     selected: model.get("selected") || [],
-    hidden: model.get("hidden") || [],
+    // the lines not drawn, while they are switched off, as hidden
+    hidden: [
+      ...(model.get("hidden") || []),
+      ...(linesComputed() && !model.get("field_lines")
+        ? linesIn(legendTree())
+        : []),
+    ],
     faded: model.get("faded") || {},
   });
 
@@ -1203,34 +1190,41 @@ function render({ model, el }) {
     },
     hide({ isolate }) {
       // A collection hides as what it holds: that is what is drawn, and what
-      // the legend's eye hides too.
-      const chosen = drawnFor(
-        model.get("selected") || [],
-        model.get("payload"),
+      // the legend's eye hides too -- a sensor drawn as its parts, as those.
+      // Hidden as the legend shows it, the lines switched off among it, and
+      // left so: the keys hide what is drawn, and do not switch lines on.
+      const parts = partsIn(legendTree());
+      const asParts = (ids) => ids.flatMap((id) => parts.get(id) ?? [id]);
+      const hidden = new Set(stateOf().hidden);
+      const off = linesComputed() && !model.get("field_lines");
+      const drawn = (ids) =>
+        ids.filter((id) => !(off && id.endsWith("/lines")));
+      const chosen = drawn(
+        asParts(drawnFor(model.get("selected") || [], model.get("payload"))),
       );
-      const hidden = new Set(model.get("hidden") || []);
       if (isolate) {
         // Show only the selection -- or, when it is all that shows already,
         // everything again: the one key narrows the view and restores it.
         // Whatever else is hidden stays hidden: in the studio, hiding is
         // saved with the scene, and a hidden object is not drawn at all.
-        const others = [...drawnIn(model.get("payload"))].filter(
-          (id) => !chosen.includes(id),
-        );
+        const others = drawn(
+          asParts([...drawnIn(model.get("payload"))]),
+        ).filter((id) => !chosen.includes(id));
+        const unlit = [...hidden].filter((id) => !drawn([id]).length);
         if (!chosen.length || others.every((id) => hidden.has(id))) {
-          if (!hidden.size) return false;
-          commit("hidden", []);
+          if (hidden.size === unlit.length) return false;
+          hideAsked(unlit);
           return;
         }
         const isolated = new Set([...hidden, ...others]);
         for (const id of chosen) isolated.delete(id);
-        commit("hidden", [...isolated]);
+        hideAsked([...isolated]);
         return;
       }
       if (!chosen.length) return false;
       const showing = chosen.some((id) => !hidden.has(id));
       for (const id of chosen) showing ? hidden.add(id) : hidden.delete(id);
-      commit("hidden", [...hidden]);
+      hideAsked([...hidden]);
     },
   };
 
@@ -1709,16 +1703,50 @@ function render({ model, el }) {
    *  page, nor a bare `show` that handed over no objects, nor the studio's
    *  panel, where the view is the editor. Pressed while the handles are
    *  out, as the projection button is while the view is orthographic. */
-  /** The lines' button: pressed while they are drawn; hidden with no sensor
-   *  that reads the field, and wherever nothing can compute it -- a saved
-   *  page, a view made for looking only. The studio's panel has no kernel
-   *  but an engine behind its editor, which the switch goes to as an edit. */
-  function showLines() {
-    linesButton.hidden =
-      model.get("editable") === null ||
-      (Boolean(model.get("standalone")) && model.editor === undefined) ||
-      !(model.get("payload")?.readings ?? []).length;
-    pressed(linesButton, Boolean(model.get("field_lines")));
+  /** Whether something can compute field lines (#45): not a saved page, nor
+   *  a view made for looking only. The studio's panel has no kernel but an
+   *  engine behind its editor, which the switch goes to as an edit. */
+  const linesComputed = () =>
+    model.get("editable") !== null &&
+    !(Boolean(model.get("standalone")) && model.editor === undefined);
+
+  /** The legend's tree: a sensor's field lines, a row beneath it, listed
+   *  where they can be computed, or are drawn -- a saved page keeps them. */
+  function legendTree() {
+    const tree = model.get("tree") || [];
+    if (linesComputed() || model.get("payload")?.fieldlines?.length) {
+      return tree;
+    }
+    const pruned = (nodes) =>
+      nodes
+        .filter((node) => node.kind !== "FieldLines")
+        .map((node) => ({ ...node, children: pruned(node.children) }));
+    return pruned(tree);
+  }
+
+  /** The ids of the field lines' rows in the legend. */
+  const linesIn = (tree) =>
+    [...partsIn(tree).values()].flat().filter((id) => id.endsWith("/lines"));
+
+  /** What an eye or H asks hidden. Where they are computed, a sensor's field
+   *  lines are the `field_lines` switch's: shown while it is off, one turns
+   *  it on, the others staying hidden; every one of them hidden turns it
+   *  off, and nothing computes a field nobody sees. The legend is shown them
+   *  hidden while it is off (`stateOf`). */
+  function hideAsked(ids) {
+    const lines = linesComputed() ? linesIn(legendTree()) : [];
+    const on = Boolean(model.get("field_lines"));
+    const others = ids.filter((id) => !lines.includes(id));
+    if (!lines.length) return commit("hidden", ids);
+    if (!on && lines.some((id) => !ids.includes(id))) {
+      model.set("hidden", ids);
+      model.set("field_lines", true);
+      model.save_changes();
+    } else if (on && lines.every((id) => ids.includes(id))) {
+      model.set("hidden", others);
+      model.set("field_lines", false);
+      model.save_changes();
+    } else commit("hidden", on ? ids : others);
   }
 
   /** The flow's switch, where something flows: a wire, a strip, a sheet,
@@ -2193,9 +2221,6 @@ function render({ model, el }) {
     if (now.has("axes")) showAxes();
     if (now.has("flow") && drawing()) api.setFlow(model.get("flow") !== false);
     if (now.has("payload") || now.has("flow")) showFlow();
-    if (now.has("payload") || now.has("editable") || now.has("field_lines")) {
-      showLines();
-    }
     if (now.has("theme")) retheme();
     if (now.has("editable")) dressEditing();
     if (now.has("editable") || now.has("open_panel")) openAsked();
@@ -2371,7 +2396,6 @@ function render({ model, el }) {
   dressEditing();
   openAsked();
   showAxes();
-  showLines();
   showFlow();
   draw();
 

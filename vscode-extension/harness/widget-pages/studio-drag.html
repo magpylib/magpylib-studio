@@ -31,13 +31,34 @@
           window.posted.push(message);
           if (message.type === "rpcRequest") {
             window.scenes.then(({ scene, tree }) => {
-              // from the lines' step on, the probe reads the field (#45)
+              // from the lines' step on, the probe reads the field (#45),
+              // and its field lines are a row beneath it
               const shown = window.reading
                 ? { ...scene, readings: ["probe"] }
                 : scene;
+              const lined = (nodes) =>
+                nodes.map((node) => ({
+                  ...node,
+                  children: [
+                    ...lined(node.children || []),
+                    ...(node.id === "probe"
+                      ? [
+                          {
+                            id: "probe/lines",
+                            label: "field lines (B)",
+                            kind: "FieldLines",
+                            visible: true,
+                            children: [],
+                          },
+                        ]
+                      : []),
+                  ],
+                }));
               const result =
                 message.method === "object_tree"
-                  ? tree
+                  ? window.reading
+                    ? lined(tree)
+                    : tree
                   : message.method === "get_figure"
                     ? { data: [], layout: {} }
                     : shown;
@@ -171,14 +192,15 @@
       await wait(300);
       const refreshed = since(at);
 
-      // the lines' button, once a sensor reads the field: an edit, told
-      // to the host, which the engine keeps in the document
+      // the eye on the probe's field lines, once it reads the field: their
+      // switch, an edit told to the host, which the engine keeps
       window.reading = true;
       postMessage({ type: "refresh" }, "*");
       await wait(300);
       at = from();
-      [...document.querySelectorAll(".magpy-icon")]
-        .find((b) => b.title.startsWith("Field lines"))
+      [...document.querySelectorAll(".magpy-legend-row")]
+        .find((row) => row.title.endsWith("field lines (B)"))
+        ?.querySelector(".magpy-legend-eye")
         ?.click();
       await wait(100);
       const lined = since(at);

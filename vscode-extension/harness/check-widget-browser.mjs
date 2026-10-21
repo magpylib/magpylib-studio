@@ -1019,7 +1019,7 @@ async function heldReadings(port, base) {
  *  the old panel told it -- a pick, a drag's start, one pose in flight with
  *  the newest waiting and the newest scene drawn, the release -- and
  *  hiding goes to the host as an edit, Cmd+Z is left to VS Code's keybinding,
- *  a refresh asks the engine again, the lines' button is an edit too, and
+ *  a refresh asks the engine again, the field lines' eye is an edit too, and
  *  Chart mode draws the chart. */
 async function studioDrag(port, base) {
   let seen = null;
@@ -1124,7 +1124,7 @@ async function studioDrag(port, base) {
       }
       const switched = lined.filter((m) => m.type === "setFieldLines");
       if (switched.length !== 1 || switched[0].on !== true) {
-        return `the lines' button told the host: ${said(lined)}`;
+        return `the field lines' eye told the host: ${said(lined)}`;
       }
       const asked = refreshed.map((m) => m.method);
       if (!asked.includes("get_scene") || !asked.includes("object_tree")) {

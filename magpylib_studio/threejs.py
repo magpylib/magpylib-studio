@@ -1284,6 +1284,49 @@ _PIXEL_SHAPES = {"arrow3d": "arrow3d", "cone": "cone", "none": "cube", None: "cu
 _NULL_VECTOR = 1e-12
 
 
+#: The parts a sensor's drawing splits into where the view draws its pixels
+#: apart (`_reading_sensors`), each listed beneath it in a legend, hidden and
+#: faded on its own: its axes, the RGB cross magpylib draws, then its pixels,
+#: then its field lines, where it can draw them -- whose row is their switch.
+#: A part's id is its sensor's and its name, which no object's can be -- a
+#: name in a scene has no slash.
+PARTS = (("axes", "axes", "Axes"), ("pixels", "pixels", "Pixels"))
+LINES = ("lines", "field lines", "FieldLines")
+
+
+def part_id(key, part):
+    """The id of `part` of the sensor at `key`: see `PARTS`."""
+    return f"{key}/{part}"
+
+
+def part_nodes(sensor, key, apart=False):
+    """The legend's rows for the parts of `sensor`'s drawing (`PARTS`): its
+    axes and pixels where the view draws the pixels apart -- a session's
+    scene, `apart` -- and its field lines where it can draw them
+    (`fieldlines.sensors_of`); none for a sensor without pixels. The pixels
+    say what they read, as their source does -- ``Bxy`` -- and the lines
+    what they are of: the whole of B or H, whatever the pixels show."""
+    from magpylib_studio import fieldlines
+
+    source = _resolve(sensor, "style.pixel.field.source")
+    parts = [*PARTS] if apart and _reading_sensors([sensor]) else []
+    if fieldlines.sensors_of([sensor]):
+        parts.append(LINES)
+    named = {
+        "pixels": f"pixels ({source})",
+        "lines": f"field lines ({source and source[:1]})",
+    }
+    return [
+        {
+            "id": part_id(key, part),
+            "label": named.get(part, label),
+            "kind": kind,
+            "children": [],
+        }
+        for part, label, kind in parts
+    ]
+
+
 def _reading_sensors(objects):
     """The sensors among `objects`, collections opened up, whose pixels the
     field colours or orients -- and that have pixels, drawn to a size, in a
@@ -1380,6 +1423,7 @@ def _pixels_of(sensor, field, key, path_ind=-1):
             "kind": "pixels",
             "name": label,
             "object_id": key,
+            "part": part_id(key, "pixels"),
             "opacity": opacity,
             "symbol": symbol,
             "origins": np.round(origins[chosen], 9).ravel().tolist(),
@@ -1457,7 +1501,9 @@ def object_tree(objects):
             "id": key,
             "label": getattr(obj.style, "label", None) or type(obj).__name__,
             "kind": type(obj).__name__,
-            "children": [node(child) for child in getattr(obj, "children", ())],
+            "children": [node(child) for child in getattr(obj, "children", ())]
+            # its field lines: no view of objects draws its pixels apart
+            + (part_nodes(obj, key) if isinstance(obj, magpy.Sensor) else []),
         }
 
     roots = [

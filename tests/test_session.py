@@ -117,6 +117,23 @@ def test_the_object_tree_is_what_a_legend_draws():
     assert hidden["visible"] is False
 
 
+def test_a_sensor_drawn_apart_is_its_parts_in_the_tree_and_the_scene():
+    """Beneath it its axes, pixels and field lines, which its pixels' and
+    lines' items are marked as: hidden by the view part by part."""
+    s = MagpylibStudioSession()
+    s.load_example("quiver")
+    field = next(node for node in s.object_tree() if node["id"] == "field")
+    assert [part["id"] for part in field["children"]] == [
+        "field/axes",
+        "field/pixels",
+        "field/lines",
+    ]
+    s.set_field_lines(True)
+    scene = s.get_scene()
+    assert {item["part"] for item in scene["pixels"]} == {"field/pixels"}
+    assert {item["part"] for item in scene["fieldlines"]} == {"field/lines"}
+
+
 def test_the_payload_says_what_each_collection_holds():
     """By the ids a view draws them under, nested collections too, and a
     pattern's copies as their source, whose node they are drawn on. A

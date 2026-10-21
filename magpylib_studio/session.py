@@ -3536,6 +3536,9 @@ class MagpylibStudioSession:
         its own is listed by its id, which is its name in the scene -- the
         variable it came from -- rather than by its type: two sensors are not
         both "Sensor", and the readout and the tree call it by that name.
+        A sensor holds the parts of its drawing that hide apart: its axes and
+        pixels, where the view draws them apart, and its field lines, where it
+        can draw them (`threejs.part_nodes`).
         """
         entries = self.list_objects(copies="count")
         nodes = {
@@ -3557,6 +3560,11 @@ class MagpylibStudioSession:
         for entry in entries:
             parent = nodes.get(entry["parent"])
             (parent["children"] if parent else roots).append(nodes[entry["id"]])
+        for key, node in nodes.items():
+            obj = self._objs.get(key)
+            if isinstance(obj, magpy.Sensor):
+                for part in threejs.part_nodes(obj, key, apart=True):
+                    node["children"].append({**part, "visible": True})
         return roots
 
     def get_transform(self, object_id):
