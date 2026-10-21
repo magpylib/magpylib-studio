@@ -20,6 +20,8 @@ import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 const scene = new THREE.Scene();
 let host = null; // the element the view is hung in; whose theme it wears
 let sizing = null; // watches the host for a size change, wherever it is now
+let sighting = null; // and whether it is on screen, for a current's flow
+let inSight = true;
 let camera = null;
 let controls = null;
 let renderer = null;
@@ -150,6 +152,12 @@ function ensureRenderer(canvasEl) {
     sizing ??= new ResizeObserver(() => resize(host));
     sizing.disconnect();
     sizing.observe(canvasEl);
+    sighting ??= new IntersectionObserver((entries) => {
+      inSight = entries[entries.length - 1].isIntersecting;
+      redraw(); // back in sight, a current flows on from where it is
+    });
+    sighting.disconnect();
+    sighting.observe(canvasEl);
   }
   if (renderer) {
     // switching back from plotly empties the host element, and a WebGL context
@@ -175,6 +183,8 @@ function ensureRenderer(canvasEl) {
   // A lost context comes back empty: three rebuilds what it holds, and the
   // picture has to be drawn again on top.
   renderer.domElement.addEventListener("webglcontextrestored", redraw);
+  // and a page shown again flows on, as a view back in sight does
+  document.addEventListener("visibilitychange", redraw);
   watchPicks();
   makeGizmo();
   makeGrips();
@@ -188,17 +198,35 @@ function ensureRenderer(canvasEl) {
  * loop apiece keeps the GPU drawing every one of them sixty times a second.
  * So whatever changes the picture asks for a frame -- the orbit and the
  * handles as they move, a new size, and every call a host makes (see
- * `drawingAfter`) -- and nothing else draws. */
-let frameAsked = false;
+ * `drawingAfter`) -- and nothing else draws. The one exception is a
+ * current's flow, which asks for the next frame from each one it draws, and
+ * only while it is to be seen (`flowing`). */
+let frameAsked = false; // a frame is on its way
+let frameWanted = false; // and something besides a current's flow wants it
+let lastDrawn = 0;
 function redraw() {
+  frameWanted = true;
+  askFrame();
+}
+
+function askFrame() {
   if (!renderer || frameAsked) return;
   frameAsked = true;
-  requestAnimationFrame(() => {
-    frameAsked = false;
-    sizeGrips();
-    renderer.render(scene, camera);
-    drawCorner(true);
-  });
+  requestAnimationFrame(drawFrame);
+}
+
+function drawFrame(now) {
+  frameAsked = false;
+  const flows = flowing();
+  if (flows) askFrame();
+  // the flow alone draws no faster than `FLOW_FRAME_MS`, whatever the display
+  if (!frameWanted && (!flows || now - lastDrawn < FLOW_FRAME_MS)) return;
+  frameWanted = false;
+  lastDrawn = now;
+  if (flows) flowClock.value = ((now / 1000) * FLOW_RATE) % 1;
+  sizeGrips();
+  renderer.render(scene, camera);
+  drawCorner(true);
 }
 
 /** A rotation as magpylib writes one: an axis scaled by its angle in degrees. */
@@ -1513,8 +1541,8 @@ function drawnPointsOf(node) {
   const inverse = node.matrixWorld.clone().invert();
   const seen = new Map();
   const at = new THREE.Vector3();
-  node.traverse((part) => {
-    if (!part.visible || part.userData.path || part.isInstancedMesh) return;
+  node.traverseVisible((part) => {
+    if (part.userData.path || part.isInstancedMesh) return;
     if (part.isPoints || !part.geometry?.userData.exact) return; // its own
     for (const [x, y, z] of verticesOf(part.geometry)) {
       at.set(x, y, z).applyMatrix4(part.matrixWorld).applyMatrix4(inverse);
@@ -2093,11 +2121,21 @@ function pick(event) {
   let through;
   for (const hit of hits) {
     const objectId = ownerOf(hit.object);
-    if (objectId === undefined) continue;
+    if (objectId === undefined || !shown(hit.object)) continue;
     if ((fades.get(objectId) ?? 1) >= 1) return objectId;
     through ??= objectId;
   }
   return through;
+}
+
+/** Whether `part` is drawn: it and everything above it visible, in the
+ *  scene -- a current's arrows are put away inside a node that shows. */
+function shown(part) {
+  for (let node = part; node; node = node.parent) {
+    if (!node.visible) return false;
+    if (node === scene) return true;
+  }
+  return false;
 }
 
 /** The studio id of the object `part` was drawn for. */
@@ -2118,6 +2156,7 @@ function resize(canvasEl) {
   // left quarter of the scene and calls it the whole view.
   renderer.setSize(w, h);
   for (const material of wideMaterials) material.resolution.set(w, h);
+  flowResolution.set(w, h);
   applyProjection();
   redraw(); // a canvas resized is a canvas cleared
 }
@@ -2229,12 +2268,14 @@ function fade(part, level) {
   const material = part.material;
   if (material?.userData.own !== undefined) {
     material.opacity = material.userData.own * level;
-    const transparent = material.opacity < 1;
+    // a current's flow is see-through at any level: it is a glow on the wire
+    const blended = Boolean(material.userData.blended);
+    const transparent = material.opacity < 1 || blended;
     // three compiles an opaque material's alpha away: the program changes
     // when this does, once, and not on every step of a slide
     if (material.transparent !== transparent) material.needsUpdate = true;
     material.transparent = transparent;
-    material.depthWrite = level >= 1;
+    material.depthWrite = level >= 1 && !blended;
   }
   for (const child of part.children) {
     if (child.userData.objectId === undefined) fade(child, level);
@@ -2549,6 +2590,31 @@ function buildMesh(item) {
   geometry.computeVertexNormals();
 
   const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial(options));
+  if (item.back_uv) {
+    // A triangle magnetized through it, a pole's colour on each face: this
+    // side drawn only where it faces the eye, and the other on a twin of
+    // it, so the two are never drawn over each other (`threejs._two_faced`).
+    mesh.material.side = THREE.FrontSide;
+    const under = geometry.clone();
+    under.setAttribute("uv", new THREE.Float32BufferAttribute(item.back_uv, 2));
+    mesh.add(
+      new THREE.Mesh(
+        under,
+        new THREE.MeshLambertMaterial({ ...options, side: THREE.BackSide }),
+      ),
+    );
+  }
+  if (item.streams) {
+    const flow = flowLine(withPenLifts(item.streams), {
+      colour: streamColour(item.color),
+      width: 3,
+      opacity: item.opacity,
+      flow: item.flow,
+      spacing: item.spacing,
+      onSurface: true,
+    });
+    if (flow) mesh.add(flow);
+  }
   mesh.name = item.name;
   mesh.userData.trace = true;
   // coloured face by face: a sensor's axes, or its arrows by the field
@@ -2609,6 +2675,12 @@ function buildItem(item) {
           ? buildFieldLines(item)
           : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
+  // a current's arrows, which say what its flow says: see `setFlow`
+  if (item.arrows) {
+    built.userData.arrows = true;
+    built.visible = !flowShown;
+    flowArrows.add(built);
+  }
   // a field line is the field's, not a thing a drag could land on
   if (item.kind === "fieldlines") built.userData.unsnapped = true;
   built.traverse((part) => {
@@ -3108,6 +3180,138 @@ function pixelShape(symbol) {
   return [shaft, head];
 }
 
+/** How a current's wire flows: pulses run along it the way the current
+ *  runs, which the payload says (`threejs._mark_flows`), whatever else the
+ *  view is doing -- a run playing or not. Each pulse is a bright head, its
+ *  tail narrowing and fading behind it: it says the way even standing. */
+const FLOW_RATE = 0.8; // pulses passing a point of the wire each second
+const FLOW_FRAME_MS = 15; // sixty frames a second: a faster display draws every other
+const FLOW_SPACING = 0.75; // of the wire's own radius from a pulse to the next
+const FLOW_TAIL = 0.6; // of that spacing, a pulse's tail
+const flowGlow = { value: 0 }; // how far a head is lit toward white: on a dark scene
+const UNLIT = { value: 0 };
+const flowClock = { value: 0 }; // where every pulse is in its stride, 0 to 1
+const flowResolution = new THREE.Vector2(1, 1); // one for all, see `resize`
+const flowLines = new Set(); // the wires drawn flowing, to know if any is
+const flowArrows = new Set(); // a flowing current's arrows, away while it flows
+let flowShown = true; // the host's: see `setFlow`
+// still for whoever asks the system for less motion: the pulses show the
+// way, standing
+const stillFlow = Boolean(
+  globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+);
+
+/** Where three's dashed wide line drops a gap. A pulse is drawn there
+ *  instead, at the line's distance counted in strides -- the dash scale is
+ *  the wire's direction over its spacing -- so a stride is one pulse. */
+const DASH_TEST =
+  "if ( mod( vLineDistance + dashOffset, dashSize + gapSize ) > dashSize ) discard; // todo - FIX";
+const PULSE = `
+  float stride = fract( vLineDistance - flowClock );
+  float body = smoothstep( ${(1 - FLOW_TAIL).toFixed(3)}, 1.0, stride ) * ( 1.0 - smoothstep( 0.97, 1.0, stride ) );
+  float girth = mix( 0.15, 1.0, body );
+  float edge = fwidth( vUv.x );
+  alpha *= sqrt( body ) * ( 1.0 - smoothstep( girth - edge, girth + edge, abs( vUv.x ) ) );
+  if ( alpha < 0.01 ) discard;
+  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * body * body );`;
+
+/** A pulse's material, one per wire: its colour, its width, its fade. */
+function flowMaterial(colour, width, opacity, glow = flowGlow) {
+  const material = new LineMaterial({
+    linewidth: width,
+    opacity,
+    dashed: true,
+    transparent: true,
+    depthWrite: false,
+  });
+  material.color = new THREE.Color(colour);
+  material.uniforms.flowClock = flowClock;
+  material.uniforms.flowGlow = glow;
+  material.uniforms.resolution.value = flowResolution;
+  material.fragmentShader = material.fragmentShader
+    .replace(
+      "uniform float gapSize;",
+      "uniform float gapSize;\n\t\t\tuniform float flowClock;\n\t\t\tuniform float flowGlow;",
+    )
+    .replace(DASH_TEST, PULSE);
+  material.userData.blended = true; // see `fade`
+  return material;
+}
+
+/** The pulses along a wire -- or a sheet's or a strip's streams --
+ *  `position` its points: as many as fit its length at `FLOW_SPACING` of
+ *  its radius, or at `spacing` where it says, to a whole number, so that a
+ *  loop's join is never seen. Six round a ring, three along a straight
+ *  wire. On a surface, drawn a little toward the eye, as an outline is. */
+function flowLine(
+  position,
+  { colour, width, opacity, flow, spacing, onSurface },
+) {
+  const pairs = segmentsOf(position);
+  if (!pairs.length) return null;
+  const line = new LineSegments2(
+    new LineSegmentsGeometry().setPositions(pairs),
+    // on a surface the head stands out against the surface, lit or not
+    flowMaterial(colour, width, opacity, onSurface ? UNLIT : flowGlow),
+  );
+  line.computeLineDistances();
+  line.geometry.computeBoundingSphere();
+  const radius = line.geometry.boundingSphere.radius;
+  const distances = line.geometry.attributes.instanceDistanceEnd.data.array;
+  const length = distances[distances.length - 1];
+  if (!(length > 0) || !(radius > 0)) return null;
+  const count = Math.max(
+    1,
+    Math.round(length / (spacing || FLOW_SPACING * radius)),
+  );
+  line.material.dashScale = (Math.sign(flow) * count) / length;
+  if (onSurface) {
+    line.material.polygonOffset = true;
+    line.material.polygonOffsetFactor = -2;
+    line.material.polygonOffsetUnits = -4;
+  }
+  line.raycast = () => {}; // the wire is what is picked
+  line.userData.flow = true;
+  line.userData.unsnapped = true; // a snap lands on the wire's own points
+  line.visible = flowShown;
+  flowLines.add(line);
+  return line;
+}
+
+/** What a sheet's or a strip's flow is drawn in: its own colour, lighter on
+ *  a dark one and darker on a light one, to stand out on it. */
+function streamColour(colour) {
+  const own = new THREE.Color(colour || "#2e91e5");
+  return own.getHSL({}).l < 0.75
+    ? own.lerp(new THREE.Color("#ffffff"), 0.75)
+    : own.lerp(new THREE.Color("#000000"), 0.6);
+}
+
+/** Whether a current flows where it can be seen: so whether the view asks
+ *  for its next frame. Not with the view off screen, or its page hidden, or
+ *  every wire that flows hidden, nor for whoever asked for less motion. A
+ *  wire taken off the scene is forgotten. */
+function flowing() {
+  if (!flowShown || stillFlow || !inSight || document.hidden) return false;
+  for (const line of flowLines) {
+    let node = line;
+    let shown = true;
+    for (; node && node !== scene; node = node.parent) shown &&= node.visible;
+    if (!node) flowLines.delete(line);
+    else if (shown) return true;
+  }
+  return false;
+}
+
+/** Show a current's flow along its wire, or not: the host's choice, for a
+ *  picture without it. Its arrows, which magpylib draws to say the same,
+ *  come back when it goes. */
+function setFlow(on) {
+  flowShown = on !== false;
+  for (const line of flowLines) line.visible = flowShown;
+  for (const arrows of flowArrows) arrows.visible = !flowShown;
+}
+
 function buildScatter(item) {
   const geometry = new THREE.BufferGeometry();
   geometry.userData.exact = item.position; // see `buildMesh`
@@ -3128,6 +3332,15 @@ function buildScatter(item) {
         }),
       ),
     );
+    if (item.flow) {
+      const flow = flowLine(position, {
+        colour: item.line_color,
+        width: Math.min(Math.max(item.line_width, 3), 7),
+        opacity: item.opacity,
+        flow: item.flow,
+      });
+      if (flow) group.add(flow);
+    }
   }
   if (item.markers) {
     group.add(
@@ -3154,22 +3367,52 @@ function buildScatter(item) {
  *  is drawn, round everything that is showing. */
 function sceneSphere(objectIds) {
   const box = new THREE.Box3();
+  // The corners of each drawn part's own box, turned as the part is: what
+  // `fitView` frames. A box along the world's axes round a card leaning in
+  // a ring reaches corners the card has none in, and framed by them the
+  // ring sat in the middle of the view with a margin all round.
+  const parts = [];
+  const take = (node) => {
+    box.expandByObject(node);
+    node.updateWorldMatrix(true, true);
+    node.traverse((part) => {
+      let own = null;
+      if (part.isInstancedMesh) {
+        if (!part.boundingBox) part.computeBoundingBox();
+        own = part.boundingBox;
+      } else if (part.geometry) {
+        if (!part.geometry.boundingBox) part.geometry.computeBoundingBox();
+        own = part.geometry.boundingBox;
+      }
+      if (!own || own.isEmpty()) return;
+      for (const x of [own.min.x, own.max.x]) {
+        for (const y of [own.min.y, own.max.y]) {
+          for (const z of [own.min.z, own.max.z]) {
+            parts.push(
+              new THREE.Vector3(x, y, z).applyMatrix4(part.matrixWorld),
+            );
+          }
+        }
+      }
+    });
+  };
   const chosen = drawnFor([].concat(objectIds ?? []))
     .map((objectId) => byObjectId.get(objectId))
     .filter(Boolean);
   if (chosen.length) {
-    for (const node of chosen) box.expandByObject(node);
+    for (const node of chosen) take(node);
   } else {
     // A hidden object is not part of what is being looked at.
     for (const node of byObjectId.values()) {
-      if (node.visible) box.expandByObject(node);
+      if (node.visible) take(node);
     }
     // the graduated box sits a little outside the objects, and framing the
     // scene without its scale showing would cut the numbers off
-    if (axes?.visible) box.expandByObject(axes);
+    if (axes?.visible) take(axes);
   }
   if (box.isEmpty()) return null;
   const sphere = box.getBoundingSphere(new THREE.Sphere());
+  sphere.parts = parts;
   // A box with a NaN bound is not empty, and every number taken from it is
   // NaN: better no answer than one that silently blanks the view.
   return Number.isFinite(sphere.radius) ? sphere : null;
@@ -3290,17 +3533,49 @@ function fitView(objectIds) {
       ? looking.normalize()
       : new THREE.Vector3(0.55, -0.68, 0.48).normalize();
 
+  // The corners of each part's box as the camera will see them, about the
+  // scene's centre: how far each reaches across the view and up it, and how
+  // far toward the eye. Framed by them rather than by the sphere round the
+  // whole, a ring of magnets fills the view, where the sphere -- as tall as
+  // the ring is wide, and reaching corners the ring has none in -- left
+  // half of it empty.
+  let up = camera.up.clone().projectOnPlane(direction);
+  if (up.lengthSq() < 1e-9) up = new THREE.Vector3(0, 1, 0); // looking down it
+  up.normalize();
+  const across = new THREE.Vector3().crossVectors(up, direction).normalize();
+  const corners = sphere.parts.map((corner) => {
+    const at = corner.clone().sub(sphere.center);
+    return [at.dot(across), at.dot(up), at.dot(direction)];
+  });
+  const margin = 1.08;
   let distance;
   if (camera.isOrthographicCamera) {
     // No perspective, so distance decides nothing but clipping: the frustum
     // is what frames the scene.
-    frustumHeight = sphere.radius * 2 * 1.1;
+    const aspect =
+      camera.right > camera.left
+        ? (camera.right - camera.left) / (camera.top - camera.bottom)
+        : 1;
+    // a loop, not a spread: a scene of thousands of parts has more corners
+    // than a call takes arguments
+    let tall = 0;
+    for (const [x, y] of corners) {
+      tall = Math.max(tall, Math.abs(y), Math.abs(x) / aspect);
+    }
+    frustumHeight = Math.max(tall, sphere.radius * 0.05) * 2 * margin;
     distance = sphere.radius * 4;
   } else {
     const vertical = THREE.MathUtils.degToRad(camera.fov);
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
-    distance =
-      (sphere.radius / Math.sin(Math.min(vertical, horizontal) / 2)) * 1.1;
+    let reach = 0;
+    for (const [x, y, z] of corners) {
+      reach = Math.max(
+        reach,
+        z + Math.abs(x) / Math.tan(horizontal / 2),
+        z + Math.abs(y) / Math.tan(vertical / 2),
+      );
+    }
+    distance = Math.max(reach, sphere.radius * 0.5) * margin;
   }
   camera.near = camera.isOrthographicCamera
     ? -sphere.radius * 8 // ortho may see behind itself; a box, not a cone
@@ -3310,7 +3585,31 @@ function fitView(objectIds) {
   applyProjection();
   controls.target.copy(sphere.center);
   controls.update();
+  fitClipping();
   if (snapping) setSnapping(true); // the step follows the scene's size
+}
+
+/** Where the scene is, as last drawn: what the clipping planes must take in. */
+let drawnSphere = null;
+
+/** The clipping planes, from where the camera is now: the near one a
+ *  hundredth of the way to what it looks at, the far one past the far side
+ *  of the scene. Depth is told apart in steps of about distance² / (near ·
+ *  2²⁴), so the near plane a five-thousandth of the way in, set once at the
+ *  fit, made them tens of microns at a hand's length, and faces a hair
+ *  apart -- a sheet's streams on it, an outline on a face -- fought. Kept
+ *  with the camera as the orbit moves it, so zooming in clips nothing. A
+ *  parallel projection keeps the box `fitView` gave it. */
+function fitClipping() {
+  if (!camera || !controls || camera.isOrthographicCamera) return;
+  const reach = camera.position.distanceTo(controls.target);
+  if (!(reach > 0)) return;
+  camera.near = Math.max(reach / 100, 1e-6);
+  const beyond = drawnSphere
+    ? camera.position.distanceTo(drawnSphere.center) + drawnSphere.radius
+    : reach * 20;
+  camera.far = Math.max(beyond * 1.5, camera.near * 100);
+  camera.updateProjectionMatrix();
 }
 
 /** Fit whichever camera is in use to the canvas it draws on. */
@@ -3370,6 +3669,7 @@ function toggleProjection() {
 function orbit() {
   const made = new OrbitControls(camera, renderer.domElement);
   made.addEventListener("change", () => {
+    fitClipping();
     redraw();
     cameraMoved?.();
   });
@@ -3412,6 +3712,7 @@ function setCamera(state) {
   applyProjection();
   camera.lookAt(controls.target);
   controls.update();
+  fitClipping(); // a camera saved before the planes followed it
   framed = true; // a view that was looked at, not one to frame
   return state.projection;
 }
@@ -4014,6 +4315,8 @@ function paintBar(text, pixels) {
  *  16 ms frame on an M4 Pro, measured. Left alone, a material goes with its
  *  mesh, and the program stays for the next one like it. */
 function free(part) {
+  flowLines.delete(part);
+  flowArrows.delete(part);
   if (!part.userData.borrowed) part.geometry?.dispose();
   part.material?.map?.dispose();
 }
@@ -4298,6 +4601,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   ensureRenderer(canvasEl);
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
+  // a pulse's head lit toward white where that stands out: on a dark scene
+  flowGlow.value = scene.background.getHSL({}).l < 0.5 ? 0.45 : 0;
   orientations = payload.orientations || {};
   anchors = payload.anchors || {};
   paths = payload.paths || {};
@@ -4378,6 +4683,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // units: a fixed one would miss a scene in metres and swallow one in
   // millimetres, so scale it to what is on screen.
   const sphere = sceneSphere();
+  drawnSphere = sphere;
+  fitClipping(); // the scene may reach further than it did
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
   // Mid-drag the selected object is the one that was *not* rebuilt, and
@@ -4424,6 +4731,7 @@ export const scene3d = drawingAfter({
   highlight,
   hint,
   setAxes,
+  setFlow,
   keepClear,
   setHidden,
   setFades,

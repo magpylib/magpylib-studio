@@ -66,6 +66,7 @@ export default [
         Option: "readonly",
         MutationObserver: "readonly",
         ResizeObserver: "readonly",
+        IntersectionObserver: "readonly",
         CustomEvent: "readonly",
         performance: "readonly",
         getComputedStyle: "readonly",

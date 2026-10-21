@@ -8,6 +8,30 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>Currents flow</summary>
+
+Every current shows its current flowing, in place of its arrows: pulses run
+along a Circle's or a Polyline's wire, down a TriangleStrip and over a
+TriangleSheet, the way the current runs, in the notebook widget and the VS Code
+panel, whether a run plays or not. They rest while the view is off screen and
+stand still for whoever asks the system for less motion. Arrows asked for in a
+style stay. The flow button among the view's tools, shown where something flows,
+or `SceneWidget(..., flow=False)`, puts the pulses away and the arrows back,
+which an export keeps (#63).
+
+</details>
+
+<details>
+<summary>A view that opens with its variables, and plays its paths</summary>
+
+`SceneWidget(..., open_panel="variables")` opens an editable view with its
+variables docked beside it, and `"object"` with the selection's properties. An
+editable view of a scene with paths plays them, each step served by its session,
+and a saved page carries them (#63).
+
+</details>
+
+<details>
 <summary>Field lines through a sensor's pixels, following a drag (prototype)</summary>
 
 A sensor whose pixels read B or H can draw the field's lines through them: the
@@ -67,6 +91,19 @@ sheet and a strip have icons of their own (#62).
 ### Changed
 
 <details>
+<summary>The properties panel easier to read</summary>
+
+The style tree lists the label, colour and opacity first, then the groups of the
+object's own kind, then those every object shares, each group's `show` on top,
+an open group's rows on a guide line. The rows line up in one column with a
+hairline between them; a property the scene sets is marked by a bar where it was
+a bold name; a bounded number's slider takes the row and steps by a tenth of its
+range; and an unset colour's swatch shows the colour the object is drawn in, not
+black (#63).
+
+</details>
+
+<details>
 <summary>A drag sends only what it moves</summary>
 
 Past its first step, a drag draws and sends only the objects it moves and the
@@ -79,6 +116,47 @@ to 59, its frame rate (#58).
 </details>
 
 ### Fixed
+
+<details>
+<summary>Smaller things the view drew wrong</summary>
+
+Faces a hair apart -- a sheet's streams on it, an outline on a face -- no longer
+fight: the view's clipping follows the camera rather than being set once at a
+five-thousandth of the way in. A path drawn in millimetres is told from the
+object on it, a path marker of size 0 is not drawn at the default size, and a
+document's field lines come back when its run ends. Framing fits the objects
+themselves rather than a sphere round them all, so a ring of magnets fills the
+view instead of sitting small in the middle of it (#63).
+
+</details>
+
+<details>
+<summary>A triangle magnetized through it, one colour a face</summary>
+
+A Triangle magnetized along its normal was drawn striped red and green: magpylib
+draws it as two copies a hair apart, and the view drew them in one plane. It is
+one triangle now, its north face one colour and its south the other (#63).
+
+</details>
+
+<details>
+<summary>Colours as magpylib gives them, and kept through a drag</summary>
+
+An editable view drew every object in one colour, as the one collection its
+session keeps them in: each now has the colour `magpy.show` gives it, as in a
+read-only view. And dragging a coil drew its loops in several colours until the
+release: they keep the colour they had (#63).
+
+</details>
+
+<details>
+<summary>The field map of a scene that moves</summary>
+
+The field map failed for a scene whose magnets move along a path: it maps the
+path's last step now, as the map over a moving sensor does, and says which
+(#63).
+
+</details>
 
 <details>
 <summary>An aim let go after a pause is its own undo step</summary>

@@ -202,6 +202,17 @@ function element(tag, className, text) {
 }
 
 /** The unit, kept quiet next to the name it belongs to. */
+/** `colour` -- `#2e91e5`, `rgb(...)`, `red` -- as the `#rrggbb` a colour box
+ *  takes, or null: read back from a canvas, which says each so. */
+function hexOf(colour) {
+  if (!colour) return null;
+  const pen = document.createElement("canvas").getContext("2d");
+  if (!pen) return null;
+  pen.fillStyle = "#000000";
+  pen.fillStyle = colour;
+  return /^#[0-9a-f]{6}$/i.test(pen.fillStyle) ? pen.fillStyle : null;
+}
+
 function unitTag(unit) {
   return element("span", "magpy-ins-unit", unit ? "(" + unit + ")" : "");
 }
@@ -214,6 +225,9 @@ export function createInspector(
     compact = false,
     empty = "Select an object.",
     head = null,
+    // the colour the host's view draws an object in, where it has one: what
+    // an unset colour's swatch shows, for the swatch to start from
+    drawnColor = () => null,
   } = {},
 ) {
   container.classList.add("magpy-ins");
@@ -368,7 +382,11 @@ export function createInspector(
       });
       const pick = element("input");
       pick.type = "color";
-      if (/^#[0-9a-fA-F]{6}$/.test(value || "")) pick.value = value;
+      // Unset, the colour is the one magpylib gave the object, by its place
+      // in the scene -- which the view knows, and the swatch shows, rather
+      // than the black an empty colour box shows.
+      const shown = value ?? hexOf(drawnColor(objectId));
+      if (/^#[0-9a-fA-F]{6}$/.test(shown || "")) pick.value = shown;
       pick.addEventListener("change", () => applyEdit(path, pick.value));
       wrap.append(text, pick);
     } else if (enums.length) {
@@ -404,11 +422,18 @@ export function createInspector(
         else if (path in values.set) resetPath(path);
       });
       if (spec.minimum !== undefined && spec.maximum !== undefined) {
+        // the arrows step by a round tenth of the range -- 0.1 for an
+        // opacity, not the 1 that takes it from nothing to whole -- and the
+        // slider, dragged, by a hundredth
+        const span = spec.maximum - spec.minimum;
+        if (span > 0) num.step = 10 ** Math.floor(Math.log10(span / 10));
+        num.min = spec.minimum;
+        num.max = spec.maximum;
         const slider = element("input");
         slider.type = "range";
         slider.min = spec.minimum;
         slider.max = spec.maximum;
-        slider.step = (spec.maximum - spec.minimum) / 100;
+        slider.step = span / 100;
         if (value !== null && value !== undefined) slider.value = value;
         slider.addEventListener("input", () => {
           num.value = slider.value;
@@ -445,9 +470,9 @@ export function createInspector(
     propsEl.innerHTML = "";
     if (!schema || !objectId) return;
     const filter = filterEl.value.trim().toLowerCase();
-    for (const [group, spec] of Object.entries(schema.properties)) {
+    for (const [group, spec] of inPanelOrder(schema.properties)) {
       const leaves = spec.properties
-        ? leafPaths(spec.properties, group, [])
+        ? showFirst(leafPaths(spec.properties, group, []), group)
         : [[group, spec]];
       const rows = [];
       for (const [path, leafSpec] of leaves) {
@@ -463,7 +488,11 @@ export function createInspector(
           ? path.slice(group.length + 1)
           : path;
         label.title =
-          path + (leafSpec.description ? " — " + leafSpec.description : "");
+          path +
+          (leafSpec.description ? " — " + leafSpec.description : "") +
+          (path in values.set
+            ? " — set in this scene; ↺ goes back to the default"
+            : "");
         const reset = element("button", "magpy-ins-reset", "↺");
         reset.type = "button";
         reset.title = "Reset to default";
@@ -484,6 +513,34 @@ export function createInspector(
       details.append(element("summary", "", group), ...rows);
       propsEl.appendChild(details);
     }
+  }
+
+  /** The style's properties in the order a person reaches for them, not
+   *  the order magpylib's classes declare them in, which mixes rows and
+   *  groups as inheritance left them: what every object has and is often
+   *  set first -- its label, colour and opacity -- then the groups of its
+   *  own kind -- a current's arrow, a magnet's magnetization -- and last
+   *  the groups every object shares. A stable sort: the schema's order
+   *  within each. */
+  function inPanelOrder(properties) {
+    const first = ["label", "color", "opacity"];
+    const last = ["path", "legend", "description", "model3d"];
+    const rank = ([name, spec]) =>
+      !spec.properties
+        ? first.includes(name)
+          ? first.indexOf(name)
+          : first.length
+        : last.includes(name)
+          ? 100 + last.indexOf(name)
+          : 50;
+    return Object.entries(properties).sort((a, b) => rank(a) - rank(b));
+  }
+
+  /** A group's rows with its `show` first: whether it is drawn at all
+   *  before how. */
+  function showFirst(leaves, group) {
+    const shown = (path) => (path === `${group}.show` ? 0 : 1);
+    return [...leaves].sort(([a], [b]) => shown(a) - shown(b));
   }
 
   // --- step section: the selected construction step's own values --------

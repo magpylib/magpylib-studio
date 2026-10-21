@@ -591,6 +591,148 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
     assert marked(payload) == [5, 10, 10]
 
 
+def test_an_editable_view_colours_its_objects_as_magpylib_does():
+    """Copied into a session, the objects sit under its root collection,
+    which magpylib would colour as one: drawn from the root's own, each has
+    the colour `magpy.show(*objects)` gives it, as a read-only view's do."""
+
+    def objects():
+        return [
+            magpy.current.Circle(current=1, diameter=0.01, style_label="loop"),
+            magpy.current.Polyline(
+                current=1, vertices=[(0, 0, 0), (0.01, 0, 0)], style_label="wire"
+            ),
+            magpy.misc.Dipole(moment=(0, 0, 1), style_label="dipole"),
+        ]
+
+    def colours(view):
+        return {
+            (item["name"], item.get("line_color") or item.get("color"))
+            for kind in ("meshes", "scatters")
+            for item in view.payload[kind]
+        }
+
+    plain = colours(widget.SceneWidget(*objects()))
+    assert colours(widget.SceneWidget(*objects(), editable=True)) == plain
+    assert len({colour for _, colour in plain}) == 3
+
+
+@pytest.mark.parametrize(("north", "front"), [(1, 1.0), (-1, 0.0)])
+def test_a_triangle_magnetized_through_it_is_one_triangle_two_faced(north, front):
+    """Magpylib draws it as two copies a hair apart, a pole's colour each,
+    which a view draws in one plane, striped; it arrives as one triangle,
+    the colour of the face along its normal and of the other apart."""
+    triangle = magpy.misc.Triangle(
+        polarization=(0, 0, north), vertices=[(0, 0, 0), (1e-3, 0, 0), (0, 1e-3, 0)]
+    )
+    mesh = threejs.view_payload(threejs._capture([triangle]))["meshes"][0]
+    assert (len(mesh["position"]), mesh["index"]) == (9, [0, 1, 2])
+    assert set(mesh["uv"][0::2]) == {front} and set(mesh["back_uv"][0::2]) == {
+        1 - front
+    }
+
+
+def flows(payload):
+    """What each drawn item says of its current, in the order drawn: the way
+    a wire's runs, ``("streams", +1)`` for a surface's streams running
+    toward +x, ``"arrows"`` for arrows its flow stands in for, else None."""
+
+    def said(item):
+        if item.get("streams"):
+            run = np.array(item["streams"], dtype=float).reshape(-1, 3)
+            run = run[: np.argmax(np.isnan(run[:, 0]))] if np.isnan(run).any() else run
+            return ("streams", int(np.sign(run[-1, 0] - run[0, 0])))
+        return item.get("flow") or ("arrows" if item.get("arrows") else None)
+
+    drawn = [*payload.get("meshes", ()), *payload["scatters"]]
+    return [said(item) for item in drawn if not item.get("path")]
+
+
+STRIP = [(x, y, 0) for x in (0, 1, 2) for y in (0, 1)]
+SHEET = {
+    "vertices": [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)],
+    "faces": [(0, 1, 2), (0, 2, 3)],
+}
+
+
+@pytest.mark.parametrize(
+    ("objects", "animation", "expected"),
+    [
+        # a loop's wire, its arrows put away; turned over, its wire is drawn
+        # the other way round, and the current still runs anticlockwise about
+        # its own z
+        ([magpy.current.Circle(current=2, diameter=2)], False, [["arrows", 1]]),
+        (
+            [magpy.current.Circle(current=2, diameter=2).rotate_from_angax(180, "x")],
+            False,
+            [["arrows", 1]],
+        ),
+        # a wire against its vertices, in a drawing magpylib makes in mm
+        (
+            [magpy.current.Polyline(current=-5, vertices=[(0, 0, 0), (3e-3, 0, 0)])],
+            False,
+            [["arrows", -1]],
+        ),
+        (
+            [magpy.current.Polyline(current=0, vertices=[(0, 0, 0), (1, 0, 0)])],
+            False,
+            [[None, None]],
+        ),
+        # arrows asked for stay
+        (
+            [magpy.current.Circle(current=2, diameter=2, style_arrow_show=True)],
+            False,
+            [[None, 1]],
+        ),
+        # a current that turns round along a run, the run not moving
+        (
+            [magpy.current.Circle(current=[1, -1, 1], diameter=2)],
+            True,
+            [["arrows", 1], ["arrows", -1], ["arrows", 1]],
+        ),
+        # a strip's streams run down it, against its vertices for a current
+        # against them; a sheet's along its current density
+        (
+            [magpy.current.TriangleStrip(current=-1, vertices=STRIP)],
+            False,
+            [[("streams", -1), "arrows"]],
+        ),
+        (
+            [magpy.current.TriangleSheet(current_densities=[(1, 0, 0)] * 2, **SHEET)],
+            False,
+            [[("streams", 1), "arrows"]],
+        ),
+    ],
+)
+def test_a_current_flows_the_way_it_runs(objects, animation, expected):
+    """What a current is drawn as says which way it runs, for the view to set
+    it flowing: a wire +1 along its points or -1 against them, a sheet or a
+    strip by the streams it carries. Its arrows say the same, and are marked
+    to be put away while it flows; nothing is marked for no current."""
+    scene = threejs._capture(objects, animation=animation)
+    each = [threejs.view_payload(scene, index=n) for n in range(len(scene.frames))]
+    assert [flows(payload) for payload in each] == expected
+    payload, _ = threejs.run_payload(scene)
+    # a run plays the change of direction as the wire's own frames
+    wires = [c for c in payload.get("changes", []) if c[0].get("flow")]
+    assert len(wires) == (1 if animation else 0)
+    for change in wires:
+        assert [item["flow"] for item in change] == [frame[1] for frame in expected]
+
+
+def test_a_path_is_marked_in_a_drawing_in_millimetres():
+    """Magpylib draws a small scene in mm, its objects' positions in m: the
+    path was found only in a drawing in metres. And its markers drawn at a
+    size of nothing stay so, not the default size."""
+    probe = magpy.Sensor(
+        position=np.linspace((0, 0, 0), (0.01, 0, 0), 5), style_path_marker_size=0
+    )
+    scene = threejs._capture([probe])
+    assert scene.panel(1, 1).labels["x"] == "x (mm)"
+    (path,) = [s for s in threejs.view_payload(scene)["scatters"] if s.get("path")]
+    assert path["marker_size"] == 0
+
+
 def test_a_run_that_changes_shape_carries_the_change(morphing):
     """A cube that grows is not a cube that moves, however it is fitted: its
     trace is carried as it is at every step, and the run still plays."""
@@ -735,6 +877,20 @@ def test_a_view_plays_a_moving_run_itself(swept):
     saved = view._saved()
     assert saved["run"] == []
     assert saved["state"]["payload"]["tracks"] == view.payload["tracks"]
+
+
+def test_a_view_of_a_scene_with_a_path_plays_it(monkeypatch):
+    """An editable view's scene has a path: it plays it, the session serving
+    each step asked for, and a saved page carries every one."""
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    magnet.move(np.linspace((0, 0, 0), (0.02, 0, 0), 5), start=0)
+    view = widget.SceneWidget(magnet, editable=True)
+    assert view.frames == 5
+    sent = []
+    monkeypatch.setattr(view, "send", sent.append)
+    view._on_message(view, {"kind": "frame", "index": 3, "runId": 7}, [])
+    assert [(m["frame"], m["frames"], m["runId"]) for m in sent] == [(3, 5, 7)]
+    assert [step["frame"] for step in view._saved()["run"]] == [0, 1, 2, 3, 4]
 
 
 def _unpacked(page, name):

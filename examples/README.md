@@ -1,8 +1,9 @@
 # examples
 
-The 3D view in a notebook — the studio's three.js renderer as an `anywidget` —
-on the same scene twice: two rings of magnets stacked round a probe, rebuilt
-from sliders, and a sensor sweeping past a magnet.
+The 3D view in a notebook — the studio's three.js renderer as an `anywidget`.
+The marimo demo edits two designs written as `@scene` functions, a Halbach ring
+and a coil pair, with the view, the field and the files following every edit;
+the Jupyter one rebuilds two rings of magnets from `ipywidgets` sliders.
 
 | File                 | Open with                                                          |
 | -------------------- | ------------------------------------------------------------------ |
@@ -13,7 +14,7 @@ from sliders, and a sensor sweeping past a magnet.
 Both need the widget extra:
 
 ```sh
-uv pip install -e ".[widget]" marimo wigglystuff
+uv pip install -e ".[widget]" marimo
 ```
 
 In marimo the sliders re-run the cells that read them. Jupyter re-runs nothing

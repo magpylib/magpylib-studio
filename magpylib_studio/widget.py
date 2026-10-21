@@ -209,6 +209,12 @@ class SceneWidget(anywidget.AnyWidget):
     axes = traitlets.Union(
         [traitlets.Enum(AXES), traitlets.Bool()], default_value="cube"
     ).tag(sync=True)
+    #: Whether currents flow: pulses running along a wire, down a strip or
+    #: over a sheet the way the current runs, whether a run plays or not,
+    #: and still for whoever asks the system for less motion. While they
+    #: flow, the arrows magpylib draws to say the same are away, unless a
+    #: style asked for them. Off, the arrows are back; an export keeps it.
+    flow = traitlets.Bool(True).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and
     #: the system's setting when nothing behind it says.
@@ -265,6 +271,13 @@ class SceneWidget(anywidget.AnyWidget):
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     field_lines = traitlets.Bool(False).tag(sync=True)
+    #: The panel an editable view opens with, docked beside it:
+    #: ``"variables"``, a slider per variable, or ``"object"``, the
+    #: selection's properties. None, the default, opens neither: the toggles
+    #: at the foot of the edit column do.
+    open_panel = traitlets.Enum(
+        ("variables", "object"), default_value=None, allow_none=True
+    ).tag(sync=True)
 
     #: What an editable view may ask of its session: a drag, and undoing one;
     #: the variables, to list and to set, with a typed value read through
@@ -326,8 +339,9 @@ class SceneWidget(anywidget.AnyWidget):
         Takes what `magpylib.show` takes: ``animation=True`` captures the
         paths so the view can play them, and anything else is passed through.
         And, as any widget does, the starting value of its traits --
-        ``height``, ``theme``, ``axes``. A keyword that names a trait is the
-        widget's; the rest are magpylib's, and the two share no names.
+        ``height``, ``theme``, ``axes``, ``flow``, ``open_panel``. A keyword
+        that names a trait is the widget's; the rest are magpylib's, and the
+        two share no names.
 
         Returned rather than displayed, which is what a notebook wants from
         the last line of a cell. In marimo, wrap it in ``mo.ui.anywidget(...)``
@@ -916,6 +930,8 @@ class SceneWidget(anywidget.AnyWidget):
         ids = {key for key, _ in _positions(tree)}
         with self.hold_sync():
             self.payload = payload
+            # a scene with paths plays them, a step served at a time
+            self.frames = self._session.path_steps()
             self.tree = tree
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
@@ -980,7 +996,15 @@ class SceneWidget(anywidget.AnyWidget):
         frame of it, which the page answers for itself. Past `limit`, when
         there is one, the page shows the first step, still, instead."""
         frames = self.frames
-        run = [] if self._scene is None else threejs.whole_run(self._scene, limit)
+        if self._scene is not None:
+            run = threejs.whole_run(self._scene, limit)
+        elif frames > 1 and getattr(self, "_session", None) is not None:
+            # a session's run, served a step at a time
+            run = [self._session.get_scene(frame=i) for i in range(frames)]
+            if limit is not None and len(json.dumps(run, allow_nan=False)) > limit:
+                run = None
+        else:
+            run = []
         if run is None:
             threejs.too_big_to_carry(frames)
             frames, run = 1, []
@@ -994,6 +1018,7 @@ class SceneWidget(anywidget.AnyWidget):
             hidden=self.hidden,
             faded=self.faded,
             axes=self.axes,
+            flow=self.flow,
             theme=self.theme,
             height=self.height,
             camera=self._camera,
@@ -1023,8 +1048,15 @@ class SceneWidget(anywidget.AnyWidget):
         kind = content.get("kind") if isinstance(content, dict) else None
         if kind == "rpc":
             self._answer(content)
-        elif kind == "frame" and self._scene is not None:
-            frame = threejs.frame_payload(self._scene, content.get("index", 0))
+        elif kind == "frame" and (
+            self._scene is not None or getattr(self, "_session", None) is not None
+        ):
+            index = content.get("index", 0)
+            frame = (
+                threejs.frame_payload(self._scene, index)
+                if self._scene is not None
+                else self._session.get_scene(frame=index)
+            )
             # Said back as asked: the view drops a frame of a run it has
             # since been re-pointed away from.
             self.send({"kind": "frame", **frame, "runId": content.get("runId")})

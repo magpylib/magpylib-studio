@@ -1,45 +1,38 @@
-"""The scene as a function, in a reactive notebook: `marimo edit examples/marimo_demo.py`.
+"""Magpylib Studio in a reactive notebook: `marimo edit examples/marimo_demo.py`.
 
-Needs the widget extra, marimo, and wigglystuff for the draggable call:
+Needs the widget extra and marimo:
 
-    uv pip install -e ".[widget]" marimo wigglystuff
+    uv pip install -e ".[widget]" marimo
 
-One function, three callers, in one notebook. `halbach` below is a plain
-magpylib function marked `@scene`: its parameters are the variables. Built
-once, it gives the studio's document, which the 3D view, the field, the sweep,
-the code tab and the saved file all read. Called, it is plain magpylib:
-objects to compute with, shown beside the document's numbers. The view edits
-that document: its handles move the magnets, and the sliders toggle at the foot
-of its edit column opens the variables, a slider each. The signature is also rendered as a
-call expression whose numbers drag (wigglystuff's `TangleFunction`), tied to
-the view's variables both ways with one `traitlets.link` -- the view's model
-owns the numbers, the call is one more place to drag them, and the two never
-disagree. Drag either and the view redraws, the numbers update, the field map
-follows; a drag of a magnet is a step in the same document, and the field, the
-code and the downloads carry it.
+A design is a plain magpylib function marked `@scene`, its parameters the
+variables. Built once, it is a document: the 3D view edits it, the field and
+the sweep read it, the code tab and the downloads write it. Called, it is plain
+magpylib. Two designs here, a Halbach ring to tune and a coil pair to flip, and
+then the view's other tricks.
 """
 
 import marimo
 
-__generated_with = "0.24.0"
+__generated_with = "0.25.1"
 app = marimo.App(width="full", app_title="Magpylib Studio")
 
 
 @app.cell
 def _():
     import json
+    from typing import Annotated
 
     import magpylib as magpy
     import marimo as mo
     import numpy as np
     import plotly.graph_objects as go
-    import traitlets
 
     from magpylib_studio import (
         Angle,
+        Bounds,
         Count,
         Length,
-        derived,
+        duplicate_along,
         duplicate_around,
         grid,
         scene,
@@ -48,33 +41,34 @@ def _():
 
     return (
         Angle,
+        Annotated,
+        Bounds,
         Count,
         Length,
         SceneWidget,
-        derived,
+        duplicate_along,
         duplicate_around,
         go,
+        grid,
         json,
         magpy,
         mo,
         np,
-        grid,
         scene,
-        traitlets,
     )
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    # Concentric Halbach rings, as one function
+    # Magpylib Studio
 
-    The function below is plain magpylib under `@scene`. Its parameters
-    are the design's variables; the controls above the view are rendered
-    from its signature; the 3D view draws what the function returns; and
-    the document the studio opens is what `.build()` records. Everything
-    on this page follows the controls, because marimo re-runs whatever
-    depends on them.
+    A design is a plain magpylib function marked `@scene`: its parameters
+    are the variables. Built once, it is a document that the view edits,
+    the field reads and the file saves. Every control on this page edits
+    that one document, so they never disagree.
+
+    ## A Halbach ring, tuned
     """)
     return
 
@@ -82,17 +76,24 @@ def _(mo):
 @app.cell
 def _(
     Angle,
+    Annotated,
     Count,
     Length,
     duplicate_around,
-    magpy,
-    np,
     grid,
+    magpy,
     scene,
 ):
-    from typing import Annotated, Literal
+    from typing import Literal
 
-    @scene(model_unit="mm", field_unit="mT")
+    @scene(
+        model_unit="mm",
+        field_unit="mT",
+        variants={
+            "compact": {"n": 8, "radius": 0.02, "gap": 0.012},
+            "wide": {"n": 16, "radius": 0.035, "gap": 0.014},
+        },
+    )
     def halbach(
         n: Annotated[int, Count(4, 48, slider=(6, 24))] = 12,
         radius: Annotated[float, Length(0.01, 0.1, slider=(0.018, 0.04))] = 0.025,
@@ -103,12 +104,10 @@ def _(
         density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
         layers: Annotated[int, Count(1, 9, slider=(1, 5))] = 1,
     ):
-        """Two concentric rings of magnets in one plane, the outer `gap`
-        further out, each with its polarization turning twice per revolution:
-        in step their fields add up across the bore, and `twist` turns the
-        inner ring against the outer -- half a turn and they work against
-        each other. A grid of field arrows across the bore, `layers` of it
-        stacked up the axis."""
+        """Two concentric rings of magnets, the outer `gap` further out, each
+        polarization turning twice per revolution: in step their fields add
+        up across the bore, and `twist` turns the inner ring against the
+        outer. A grid of field arrows across the bore, `layers` of it."""
         rings = magpy.Collection(style_label="Halbach rings")
         ring = {}
         for name, r in (("Inner", radius), ("Outer", radius + gap)):  # literals
@@ -125,9 +124,8 @@ def _(
         ring["Inner"].rotate_from_angax(twist, "z", anchor=0)
         rings.rotate_from_angax(tilt, tilt_axis, anchor=0)
 
-        reach = radius / 2
         bore = magpy.Sensor(
-            pixel=grid(reach, density, layers=layers),
+            pixel=grid(radius / 2, density, layers=layers),
             style={
                 "label": "bore",
                 "size": 0.004,
@@ -142,57 +140,12 @@ def _(
         )
         return rings, bore
 
-    _ = np  # the grid above is a formula of the sample, not an array: see `sampled`
     return (halbach,)
-
-
-@app.cell(hide_code=True)
-def _(halbach, mo):
-    # The call itself, as a control: wigglystuff renders the signature as a
-    # call expression whose numbers drag and whose choices click. It is tied
-    # to the view's variables below, both ways. Without it, the sliders
-    # button among the view's tools is the knobs, and nothing is missing.
-    try:
-        from wigglystuff import TangleFunction
-
-        call = TangleFunction(halbach, halbach.controls())
-        knobs = mo.ui.anywidget(call)
-        _shown = mo.vstack(
-            [
-                knobs,
-                mo.md(
-                    "_Drag a number in the call, or click a choice; the sliders "
-                    "in the view move with it, and it with them._"
-                ),
-            ]
-        )
-    except ImportError:
-        call = knobs = None
-        _shown = mo.md(
-            "_The sliders toggle at the foot of the view's edit column is the "
-            "knobs. `pip install wigglystuff` adds the call "
-            "itself as one, its numbers dragging._"
-        )
-    _shown
-    return call, knobs
-
-
-@app.cell
-def _(edited, halbach, view3d):
-    # The parameters' values as the document holds them now, read from the
-    # widget -- which owns them -- once per settled edit, from whichever
-    # control made it, and not on a click.
-    _ = edited()
-    values = {p["name"]: view3d.variables[p["name"]] for p in halbach.parameters}
-    return (values,)
 
 
 @app.cell
 def _(halbach):
-    # Built once: the document, with the parameters as its variables. The
-    # view, the field, the code and the file all read this one session, and
-    # the knobs set its variables rather than build another -- so a drag made
-    # in the view is kept, pinned on top of whatever the knobs say next.
+    # Built once: the document every control below edits.
     s = halbach.build()
     session = s.session
     return s, session
@@ -200,99 +153,167 @@ def _(halbach):
 
 @app.cell
 def _(SceneWidget, mo, s):
-    # The view of the document itself -- its own session, nothing copied --
-    # made once, so the camera stays where you left it. Editable from the
-    # start: the handles, and the sliders toggle under them. With the field
-    # lines through the bore's pixels, which follow a drag as its arrows do;
-    # the lines button among the view's tools puts them away (#45). The
-    # widget has a name of its own beside the element around it, for the
-    # cell below.
+    # The document's own view, editable from the start, the bore's field
+    # lines drawn through its pixels. Shown beside the tabs below, made here,
+    # once, so the camera stays put.
     view3d = SceneWidget(s, editable=True, height=560, field_lines=True)
     view = mo.ui.anywidget(view3d)
-    # The settled edits, counted, as state: a cell that names `view` re-runs
-    # on its every change -- a click, a hide -- and the field map, the sweep
-    # and the table are only worth remaking after an edit. They read this.
+    # A cell that names `view` re-runs on its every change, a click
+    # included. What should follow edits alone reads this count instead,
+    # and is handed the view as a picture of it, which it does not watch.
     edited, set_edited = mo.state(0)
     view3d.observe(lambda change: set_edited(change.new), names="revision")
-    view
-    return edited, view, view3d
-
-
-@app.cell
-def _(call, traitlets, view3d):
-    # The call expression, where there is one, tied to the view's variables
-    # both ways: the view's model owns the numbers, the call is one more
-    # place to drag them, and an echo of the same value is no change. Made
-    # between the widgets themselves, in a cell that names no element: a
-    # cell naming `knobs` or `view` re-runs on their every change, and would
-    # have remade the view on each drag of a number.
-    if call is not None:
-        traitlets.link((call, "values"), (view3d, "variables"))
-    return
+    shown = mo.as_html(view)
+    tab, set_tab = mo.state("Field map")
+    return edited, set_tab, shown, tab, view, view3d
 
 
 @app.cell(hide_code=True)
-def _(mo, view):
-    # Reads the view, so it re-runs once per settled edit -- a slider's
-    # release in the view or in the call above, a drag's end, an undo, a redo
-    # -- never a frame of a drag in progress.
-    _edit = view.value.get("last_edit") or {}
-    mo.vstack(
-        [
-            mo.md(
-                f"**Editing the document.** {view.value['revision']} settled edits "
-                "so far, each told once. The sliders toggle at the foot of the "
-                "edit column on the right opens the variables; **W** moves, **E** turns, **R** resizes, **P** aims; "
-                "⌘Z / ctrl-Z undoes a whole gesture, and the arrow under the undo "
-                "buttons takes every edit back to where editing started. "
-                "`view.widget.objects` are the objects as edited, to compute with."
+def _(edited, go, mo, np, session, set_tab, shown, tab):
+    _ = edited()
+    _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
+
+    def _plot(figure, **layout):
+        figure.update_layout(
+            template=_template, autosize=True, margin={"t": 40, "r": 20}, **layout
+        )
+        return mo.ui.plotly(figure, config={"responsive": True})
+
+    def _axis():
+        z = np.linspace(-0.02, 0.02, 81)
+        field = session.get_field(points=[[0, 0, v] for v in z])["values"]
+        return _plot(
+            go.Figure(go.Scatter(x=z * 1e3, y=np.linalg.norm(field, axis=1) * 1e3)),
+            xaxis_title="z (mm)",
+            yaxis_title="|B| (mT)",
+        )
+
+    def _magnets():
+        rows = []
+        for entry in session.list_objects():
+            if entry.get("type") != "magnet.Cuboid":
+                continue
+            x, y, z = (
+                round(1e3 * c, 2)
+                for c in session.get_transform(entry["id"])["position"]
+            )
+            rows.append(
+                {
+                    "label": entry["label"],
+                    "x (mm)": x,
+                    "y (mm)": y,
+                    "z (mm)": z,
+                    "made by": entry.get("derived") or "its own step",
+                }
+            )
+        return mo.ui.table(rows, selection=None, page_size=12)
+
+    # Each tab is worked out when it is opened: a sweep nobody looks at
+    # would rebuild the scene a dozen times after every edit. The one open
+    # stays open across them -- held by a name of its own, as an element
+    # only inside the layout below would be let go, and with it the call
+    # that keeps the tab.
+    tabs = mo.ui.tabs(
+        {
+            # on a log scale: the plane runs through the magnets
+            "Field map": mo.lazy(
+                lambda: _plot(go.Figure(session.get_field_map(log=True)))
             ),
-            *([mo.json(_edit, label="the last edit")] if _edit else []),
-        ]
+            "Axis": mo.lazy(_axis),
+            "Sweep": mo.lazy(
+                lambda: _plot(
+                    go.Figure(
+                        session.get_sweep_figure(
+                            "radius",
+                            np.linspace(0.018, 0.04, 12).tolist(),
+                            points=[[0, 0, 0]],
+                        )
+                    )
+                )
+            ),
+            "Magnets": mo.lazy(_magnets),
+            "Code": mo.lazy(
+                lambda: mo.ui.code_editor(
+                    session.to_builder_script(), language="python", disabled=True
+                )
+            ),
+        },
+        value=tab(),
+        on_change=set_tab,
+        lazy=True,
     )
+    # Side by side in a grid whose columns may shrink below what they hold,
+    # as a stack's do not: in a narrow window the tabs scroll, rather than
+    # run off the page.
+    mo.Html(
+        '<div style="display: grid; gap: 1rem; align-items: start; '
+        'grid-template-columns: minmax(0, 5fr) minmax(0, 4fr)">'
+        f'{shown.text}<div style="overflow-x: auto">{tabs.text}</div></div>'
+    )
+    return (tabs,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    **W** moves, **E** turns, **R** resizes, **P** aims a polarization;
+    ⌘Z / ctrl-Z undoes a whole drag, and a magnet pushed into another is
+    outlined in amber. The sliders at the foot of the edit column open the
+    variables, with the `compact` and `wide` variants a click each above
+    them.
+    """)
     return
+
+
+@app.cell
+def _(edited, halbach, view3d):
+    # The variables as the document holds them, once per settled edit.
+    _ = edited()
+    values = {p["name"]: view3d.variables[p["name"]] for p in halbach.parameters}
+    return (values,)
 
 
 @app.cell(hide_code=True)
 def _(halbach, magpy, mo, np, session, values, view):
-    # From the document, as the sliders and the handles left it -- and,
-    # beside it, from the function called plainly at the same values:
-    # magpylib objects with nothing of studio's in them. The two agree until
-    # a magnet is dragged; then the first follows the drag and the second
-    # does not.
-    _ = view.value["revision"]  # re-run after each edit
+    # From the document, drags included, and from the function called
+    # plainly at the same values: the two agree until a magnet is dragged.
+    _ = view.value["revision"]
     _centre = np.linalg.norm(session.get_field(points=[[0, 0, 0]])["values"][0]) * 1e3
     _rings, _ = halbach(**values)
     _plain = np.linalg.norm(magpy.getB(_rings, (0, 0, 0))) * 1e3
     _bore = np.asarray(session.get_field(sensor_id="bore")["values"], dtype=float)
     _magnitude = np.linalg.norm(_bore.reshape(-1, 3), axis=1)
-    _spread = np.ptp(_magnitude) / _magnitude.mean() * 100
     _picked = view.value["selected"] and view.widget.picked
     mo.hstack(
         [
             mo.stat(
                 f"{_centre:.1f} mT",
                 label="|B| at the centre",
-                caption="from the document, edits included",
+                caption="drags included",
                 bordered=True,
             ),
             mo.stat(
                 f"{_plain:.1f} mT",
                 label="the function, called plainly",
-                caption="at the variables' values, no drags",
+                caption="no drags",
                 bordered=True,
             ),
             mo.stat(
-                f"{_spread:.2f} %",
+                f"{np.ptp(_magnitude) / _magnitude.mean() * 100:.1f} %",
                 label="spread across the bore",
-                caption=f"(max − min) / mean over {len(_magnitude)} points",
+                caption=f"over {len(_magnitude)} points",
                 bordered=True,
             ),
-            mo.stat(2 * int(values["n"]), label="magnets", bordered=True),
+            mo.stat(
+                2 * int(values["n"]),
+                label="magnets",
+                caption="two rings",
+                bordered=True,
+            ),
             mo.stat(
                 ", ".join(o.style.label for o in _picked) if _picked else "—",
-                label="selected in the view",
-                caption="click a magnet, ⌘-click to add",
+                label="selected",
+                caption="click a magnet",
                 bordered=True,
             ),
         ],
@@ -302,99 +323,12 @@ def _(halbach, magpy, mo, np, session, values, view):
     return
 
 
-@app.cell(hide_code=True)
-def _(edited, go, mo, np, s, session):
-    _ = edited()  # after each edit, not each click
-    _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
-
-    def _figure(spec):
-        figure = go.Figure(spec)
-        figure.update_layout(template=_template, margin={"t": 40, "r": 20})
-        return figure
-
-    def _profile():
-        _axis = np.linspace(-0.02, 0.02, 81)
-        _along = np.asarray(
-            session.get_field(points=[[0, 0, z] for z in _axis])["values"], dtype=float
-        )
-        figure = go.Figure(
-            go.Scatter(
-                x=_axis * 1e3, y=np.linalg.norm(_along, axis=1) * 1e3, mode="lines"
-            )
-        )
-        figure.update_layout(
-            template=_template,
-            xaxis_title="z along the axis (mm)",
-            yaxis_title="|B| (mT)",
-            margin={"t": 40, "r": 20},
-        )
-        return mo.ui.plotly(figure)
-
-    def _sweep():
-        _radii = np.linspace(0.018, 0.04, 12).tolist()
-        return mo.ui.plotly(
-            _figure(session.get_sweep_figure("radius", _radii, points=[[0, 0, 0]]))
-        )
-
-    # Each tab computed when it is opened, not when the cell runs: `lazy=True`
-    # defers the rendering, `mo.lazy` the work, and a sweep nobody is looking
-    # at would otherwise rebuild the scene twelve times after every edit.
-    mo.ui.tabs(
-        {
-            "Field map": mo.lazy(
-                # on a log scale: the plane runs through the magnets, whose
-                # insides would leave the bore one pale shade
-                lambda: mo.ui.plotly(_figure(session.get_field_map(log=True)))
-            ),
-            "Along the axis": mo.lazy(_profile),
-            "Sweep the radius": mo.lazy(_sweep),
-            "The scene as code": mo.lazy(
-                lambda: mo.ui.code_editor(
-                    session.to_builder_script(), language="python", disabled=True
-                )
-            ),
-            "The document": mo.lazy(lambda: mo.json(s.to_dict())),
-        },
-        lazy=True,
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(edited, mo, session):
-    _ = edited()  # after each edit, not each click
-    _rows = []
-    for _entry in session.list_objects():
-        if _entry.get("type") != "magnet.Cuboid":
-            continue
-        _pose = session.get_transform(_entry["id"])
-        _x, _y, _z = (round(1e3 * c, 2) for c in _pose["position"])
-        _rows.append(
-            {
-                "id": _entry["id"],
-                "label": _entry["label"],
-                "x (mm)": _x,
-                "y (mm)": _y,
-                "z (mm)": _z,
-                "made by": _entry.get("derived") or "its own step",
-            }
-        )
-    mo.accordion(
-        {
-            f"Every magnet in the scene ({len(_rows)})": mo.ui.table(
-                _rows, selection=None, page_size=10
-            )
-        }
-    )
-    return
-
-
 @app.cell
 def _(mo):
     search = mo.ui.run_button(
-        label="Search n × radius for the flattest bore field",
+        label="Find the flattest bore: n × radius",
         kind="success",
-        tooltip="Rebuilds the document at every pair and reads the field, in milliseconds each",
+        tooltip="Sixteen rebuilds of the document, a field read each",
     )
     search
     return (search,)
@@ -402,21 +336,14 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(halbach, mo, np, search, values):
-    mo.stop(
-        not search.value,
-        mo.callout(
-            "Press the button: a search over the count and the radius, each try a "
-            "rebuild of the document and a read of the field, a few milliseconds each.",
-            kind="neutral",
-        ),
-    )
+    mo.stop(not search.value)
+    # A trial document at the current values, apart from the one on view.
     _trial = halbach.build(values=values).session
-    _grid = [
-        (count, r) for count in (8, 12, 16, 20) for r in (0.02, 0.025, 0.03, 0.035)
-    ]
     _results = []
     for _count, _r in mo.status.progress_bar(
-        _grid, title="Searching", remove_on_exit=True
+        [(c, r) for c in (8, 12, 16, 20) for r in (0.02, 0.025, 0.03, 0.035)],
+        title="Searching",
+        remove_on_exit=True,
     ):
         _trial.set_variable("n", _count)
         _trial.set_variable("radius", _r)
@@ -426,9 +353,9 @@ def _(halbach, mo, np, search, values):
             {
                 "n": _count,
                 "radius (mm)": _r * 1e3,
-                "|B| centre (mT)": round(float(_magnitude.mean()), 2),
+                "|B| (mT)": round(float(_magnitude.mean()) * 1e3, 1),
                 "spread (%)": round(
-                    float(np.ptp(_magnitude) / _magnitude.mean() * 100), 3
+                    float(np.ptp(_magnitude) / _magnitude.mean() * 100), 2
                 ),
             }
         )
@@ -437,9 +364,8 @@ def _(halbach, mo, np, search, values):
         [
             mo.callout(
                 mo.md(
-                    f"Flattest: **n = {_best['n']}, radius = {_best['radius (mm)']:g} mm** "
-                    f"at {_best['|B| centre (mT)']} mT, spread {_best['spread (%)']} %. "
-                    "Set those in the controls to see it."
+                    f"Flattest at **n = {_best['n']}, radius = "
+                    f"{_best['radius (mm)']:g} mm**: spread {_best['spread (%)']} %."
                 ),
                 kind="success",
             ),
@@ -450,89 +376,134 @@ def _(halbach, mo, np, search, values):
 
 
 @app.cell(hide_code=True)
-def _(mo, np, session):
-    def _answer(messages, _config):
-        """A number or three in the last message are a point, in mm: the field
-        there. Anything else: what this can do."""
-        text = messages[-1].content
-        found = [
-            float(x) for x in np.array(text.replace(",", " ").split()) if _number(x)
-        ]
-        if len(found) >= 3:
-            x, y, z = (c / 1e3 for c in found[:3])
-        elif len(found) == 1:
-            x, y, z = 0.0, 0.0, found[0] / 1e3
-        else:
-            return (
-                "Give me a point in mm, as `0, 0, 5` or just `5` for a height on the "
-                "axis, and I will read the field there from the scene as it is now."
-            )
-        field = session.get_field(points=[[x, y, z]])
-        bx, by, bz = (c * 1e3 for c in field["values"][0])
-        norm = (bx**2 + by**2 + bz**2) ** 0.5
-        return (
-            f"At ({x * 1e3:g}, {y * 1e3:g}, {z * 1e3:g}) mm: |B| = {norm:.2f} mT, "
-            f"B = ({bx:.2f}, {by:.2f}, {bz:.2f}) mT."
-        )
+def _(mo):
+    mo.md("""
+    ## A coil pair, flowing
 
-    def _number(token):
-        try:
-            float(token)
-        except ValueError:
-            return False
-        return True
-
-    mo.accordion(
-        {
-            "Ask the scene for the field at a point": mo.ui.chat(
-                _answer,
-                prompts=["0, 0, 0", "5", "10, 0, 3"],
-                max_height=320,
-            )
-        }
-    )
+    Current flows along every wire in the view, the way it runs. Two
+    coils on one axis, each current a variable: the **Helmholtz** variant
+    runs them together, for a flat field between, and **anti-Helmholtz**
+    turns the upper one round, for a field that passes through zero.
+    """)
     return
 
 
+@app.cell
+def _(Annotated, Bounds, Count, Length, duplicate_along, grid, magpy, scene):
+    _amperes = Bounds(-100, 100, slider=(-50, 50), unit="current")
+
+    @scene(
+        model_unit="mm",
+        field_unit="mT",
+        variants={
+            "Helmholtz": {"lower": 20.0, "upper": 20.0, "spacing": 0.04},
+            "anti-Helmholtz": {"lower": 20.0, "upper": -20.0, "spacing": 0.04},
+        },
+    )
+    def coils(
+        radius: Annotated[float, Length(0.01, 0.1, slider=(0.02, 0.06))] = 0.04,
+        spacing: Annotated[float, Length(0.005, 0.15, slider=(0.01, 0.1))] = 0.04,
+        lower: Annotated[float, _amperes] = 20.0,
+        upper: Annotated[float, _amperes] = 20.0,
+        turns: Annotated[int, Count(1, 20, slider=(1, 12))] = 6,
+    ):
+        """Two coils of `turns` loops, `spacing` apart centre to centre, and
+        a probe across the gap between them, in the plane of the axis."""
+        pitch = 0.002
+        pair = magpy.Collection(style_label="coil pair")
+        for name, current, centre in (
+            ("lower", lower, -spacing / 2),
+            ("upper", upper, spacing / 2),
+        ):  # literals
+            coil = magpy.Collection(style_label=f"{name} coil")
+            pair.add(coil)
+            loop = magpy.current.Circle(
+                current=current,
+                diameter=2 * radius,
+                position=(0, 0, centre - (turns - 1) * pitch / 2),
+                style_label=f"{name} loop",
+            )
+            coil.add(loop)
+            duplicate_along(loop, count=turns, step=(0, 0, pitch))
+        probe = magpy.Sensor(
+            pixel=grid(0.6 * radius, 9, plane="xz"),
+            style={
+                "label": "probe",
+                "size": 0.004,
+                "pixel": {"field": {"source": "B", "symbol": "arrow3d"}},
+            },
+        )
+        return pair, probe
+
+    return (coils,)
+
+
+@app.cell
+def _(SceneWidget, coils, mo):
+    pair = coils.build()
+    pair_session = pair.session
+    # Opened with its variables, the two variants a click each above them.
+    pair_view3d = SceneWidget(
+        pair, editable=True, height=480, field_lines=True, open_panel="variables"
+    )
+    pair_view = mo.ui.anywidget(pair_view3d)
+    pair_edited, set_pair_edited = mo.state(0)
+    pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
+    pair_view
+    return pair, pair_edited, pair_session, pair_view3d
+
+
 @app.cell(hide_code=True)
-def _(edited, json, mo, s, session):
-    # Re-run after each edit, so the files hold the scene as it is now, pins
-    # included. The data is given, not a callable: a few kilobytes, ready
-    # before the click, with no request left to go wrong on it.
-    _ = edited()  # after each edit, not each click
-    mo.sidebar(
+def _(go, mo, np, pair_edited, pair_session, pair_view3d):
+    _ = pair_edited()
+    _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
+    _radius = pair_view3d.variables["radius"]
+    _z = np.linspace(-1.5, 1.5, 121) * _radius
+    _bz = np.asarray(
+        pair_session.get_field(points=[[0, 0, z] for z in _z])["values"], dtype=float
+    )[:, 2]
+    _middle = len(_z) // 2
+    _gradient = np.gradient(_bz, _z)[_middle]
+    _probe = np.asarray(
+        pair_session.get_field(sensor_id="probe")["values"], dtype=float
+    )
+    _magnitude = np.linalg.norm(_probe.reshape(-1, 3), axis=1)
+    _figure = go.Figure(go.Scatter(x=_z * 1e3, y=_bz * 1e3))
+    _figure.update_layout(
+        template=_template,
+        margin={"t": 40, "r": 20},
+        height=300,
+        xaxis_title="z along the axis (mm)",
+        yaxis_title="Bz (mT)",
+    )
+    mo.vstack(
         [
-            mo.md("# Magpylib Studio"),
-            mo.md(
-                "_One function, one document: the controls, the view, the field "
-                "and the file all follow it._"
-            ),
-            mo.outline(),
-            mo.vstack(
+            mo.hstack(
                 [
-                    mo.download(
-                        data=json.dumps(s.to_dict(), indent=2),
-                        filename="halbach.magpy.json",
-                        mimetype="application/json",
-                        label="The scene, to open in the studio",
+                    mo.stat(
+                        f"{round(_bz[_middle] * 1e3, 2) + 0:.2f} mT",
+                        label="Bz at the centre",
+                        caption="zero when they oppose",
+                        bordered=True,
                     ),
-                    mo.download(
-                        data=session.to_builder_script(),
-                        filename="halbach_scene.py",
-                        mimetype="text/x-python",
-                        label="The scene as code, to keep",
+                    mo.stat(
+                        f"{round(_gradient, 3) + 0:.3f} T/m",
+                        label="dBz/dz at the centre",
+                        caption="zero when they agree",
+                        bordered=True,
+                    ),
+                    mo.stat(
+                        f"{np.ptp(_magnitude) / max(_magnitude.mean(), 1e-12) * 100:.1f} %",
+                        label="spread over the probe",
+                        caption="flattest near spacing = radius",
+                        bordered=True,
                     ),
                 ],
-                gap=0.5,
+                widths="equal",
+                gap=1,
             ),
-            mo.md(
-                "The `.magpy.json` opens in VS Code with **Magpylib Studio: Open "
-                "Scene…**, every parameter a slider there too; it never runs code "
-                "when opened. The script is the same function, written back from "
-                "the document."
-            ),
-        ],
-        footer=mo.md("_magpylib-studio · the 3D view is the studio's own renderer_"),
+            mo.ui.plotly(_figure),
+        ]
     )
     return
 
@@ -542,277 +513,184 @@ def _(mo):
     mo.md("""
     ## More of the view
 
-    The four below are the same widget on scenes of their own, loaded when
-    opened. The view takes the keys once clicked, as the studio's panel
-    does: **F** frames the selection and **Home** everything, **1** **3**
-    **7** look from the front, the right and the top, **5** switches the
-    projection, **H** hides the selection and **shift-H** shows only it,
-    **space** plays a run. Its tools sit in the top-right corner: legend,
-    axes, framing, projection, the pencil that opens the objects to edit,
-    theme, a PNG, an export to one HTML file that works without this
-    notebook, and full screen. The pencil is not on a saved page, which has
-    no python to copy the objects into a session.
+    Click a view to give it the keys: **F** frames the selection, **Home**
+    everything, **1** **3** **7** look from the front, the right and the
+    top, **H** hides, **space** plays a run. The tools in its top-right
+    corner export a PNG, or one HTML file that works without this notebook.
     """)
     return
 
 
 @app.cell(hide_code=True)
 def _(SceneWidget, magpy, mo, np):
-    def _played_in_the_browser():
-        rotor = magpy.magnet.Cylinder(
-            polarization=(1, 0, 0), dimension=(0.04, 0.01), style_label="rotor"
-        )
-        sweep = magpy.Sensor(
-            position=np.linspace((-0.06, 0, 0.015), (0.06, 0, 0.015), 60),
-            style_label="sweep",
-        )
-        sweep.style.arrows.x.show = True
-        sweep.style.arrows.y.show = True
-        return mo.vstack(
-            [
-                mo.md(
-                    "`animation=True` captures every step of the run. Every step here "
-                    "is the first one moved, so the view is handed the motion and "
-                    "**▶** plays it in the browser with nothing to ask python, which "
-                    "is also why it still plays in a saved page."
-                ),
-                SceneWidget(rotor, sweep, animation=True, height=380),
-            ]
-        )
+    mm = 1e-3
 
-    def _properties_along_a_path():
-        steps = 40
-        turn = np.linspace(0, 2 * np.pi, steps)
-        spinner = magpy.magnet.Cylinder(
-            polarization=np.column_stack([np.cos(turn), np.sin(turn), np.zeros(steps)]),
-            dimension=(0.02, 0.01),
-            style_label="spinner",
-        )
-        coil = magpy.current.Circle(
-            diameter=np.linspace(0.02, 0.05, steps),
-            current=np.linspace(1, 100, steps),
-            position=(0, 0, 0.015),
-            style_label="coil",
-        )
-        probe = magpy.Sensor(
-            pixel=np.linspace((-0.03, 0, 0), (0.03, 0, 0), 13),
-            position=(0, 0, -0.015),
-            style_label="probe",
-        )
-        probe.style.pixel.field.source = "B"
-        return mo.vstack(
-            [
-                mo.md(
-                    "More than the pose can vary along a path: a "
-                    "polarization turning a full circle, a coil growing while its "
-                    "current ramps, pixels coloured by the field they sit in. No "
-                    "motion can play that, so the widget serves the frames one at a "
-                    "time, each as magpylib computed it."
-                ),
-                SceneWidget(spinner, coil, probe, animation=True, height=380),
-            ]
-        )
+    def _every_kind():
+        # The centrepiece: a Möbius band, as the docs build one -- vertices
+        # from its middle line out to its edge, twice round, which covers
+        # both halves of it -- its current running over both its faces.
+        # Turned to the view's first look, which comes from 51 degrees below
+        # x, so that its twist shows.
+        round_twice = np.linspace(0, 4 * np.pi, 160)
 
-    def _editing():
-        mm = 1e-3
-        z = (0, 0, 1)
+        def band(w):
+            reach = 1 + w * np.cos(round_twice / 2)
+            return np.column_stack(
+                [
+                    reach * np.cos(round_twice),
+                    reach * np.sin(round_twice),
+                    w * np.sin(round_twice / 2),
+                ]
+            )
 
-        def at(column, row):
-            """A place on a grid 30 mm apart, so that nothing overlaps."""
-            return np.array((30 * (column - 1.5), 30 * (1.5 - row), 0)) * mm
+        strip = np.empty((320, 3))
+        strip[0::2], strip[1::2] = band(0), band(0.36)
+        moebius = magpy.current.TriangleStrip(
+            current=20, vertices=strip * 16 * mm, style_label="Möbius band"
+        )
+        moebius.rotate_from_angax(-51, "z", anchor=0)
 
-        # one of each kind of object magpylib has, but a CustomSource, which
-        # has no shape to drag
-        objects = [
-            magpy.magnet.Cuboid(
-                polarization=z,
-                dimension=(10 * mm,) * 3,
-                position=at(0, 0),
-                style_label="cuboid",
+        # a square sheet, as the docs build one: its current circulating, the
+        # stronger the further out
+        side = np.linspace(-5, 5, 11) * mm
+        sheet = np.array([(x, y, 0) for x in side for y in side])
+        sheet_faces = [
+            face
+            for i in range(10)
+            for j in range(10)
+            for face in (
+                (j + 11 * i, j + 11 * i + 11, j + 11 * i + 12),
+                (j + 11 * i, j + 11 * i + 12, j + 11 * i + 1),
+            )
+        ]
+        centres = sheet[np.array(sheet_faces)].mean(axis=1)
+        sheet_current = np.column_stack(
+            [centres[:, 1], -centres[:, 0], np.zeros(len(centres))]
+        ) / (5 * mm)
+
+        # one of every other kind, each made with its magnetization along `p`
+        kinds = {
+            "mesh": lambda p: magpy.magnet.TriangularMesh.from_ConvexHull(
+                polarization=p, points=np.vstack([np.eye(3), -np.eye(3)]) * 7.5 * mm
             ),
-            magpy.magnet.Cylinder(
-                polarization=z,
-                dimension=(10 * mm, 10 * mm),
-                position=at(1, 0),
-                style_label="cylinder",
+            "sphere": lambda p: magpy.magnet.Sphere(polarization=p, diameter=11 * mm),
+            "cuboid": lambda p: magpy.magnet.Cuboid(
+                polarization=p, dimension=(11 * mm,) * 3
             ),
-            magpy.magnet.CylinderSegment(
-                polarization=z,
-                dimension=(6 * mm, 12 * mm, 8 * mm, 0, 120),
-                position=at(2, 0) - (4 * mm, 4 * mm, 0),
-                style_label="segment",
+            "cylinder": lambda p: magpy.magnet.Cylinder(
+                polarization=p, dimension=(11 * mm, 13 * mm)
             ),
-            magpy.magnet.Sphere(
-                polarization=z,
-                diameter=10 * mm,
-                position=at(3, 0),
-                style_label="sphere",
+            "segment": lambda p: magpy.magnet.CylinderSegment(
+                polarization=p, dimension=(5 * mm, 11 * mm, 10 * mm, -42, 42)
             ),
-            magpy.magnet.Tetrahedron(
-                polarization=z,
-                vertices=np.array([(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]) * mm,
-                position=at(0, 1) - 3 * mm,
-                style_label="tetrahedron",
-            ),
-            magpy.magnet.TriangularMesh.from_ConvexHull(
-                polarization=z,
-                points=np.vstack([np.eye(3), -np.eye(3)]) * 6 * mm,
-                position=at(1, 1),
-                style_label="mesh",
-            ),
-            magpy.misc.Triangle(
-                polarization=z,
-                vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * mm,
-                position=at(2, 1),
-                style_label="triangle",
-            ),
-            magpy.misc.Dipole(
-                moment=(0, 0, 0.1), position=at(3, 1), style_label="dipole"
-            ),
-            magpy.current.Circle(
-                current=1, diameter=10 * mm, position=at(0, 2), style_label="loop"
-            ),
-            magpy.current.Polyline(
-                current=1,
-                vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
-                * mm,
-                position=at(1, 2),
-                style_label="wire",
-            ),
-            magpy.current.TriangleStrip(
-                current=1,
-                vertices=np.array(
-                    [
-                        (-6, -3, 0),
-                        (-6, 3, 0),
-                        (0, -3, 0),
-                        (0, 3, 0),
-                        (6, -3, 0),
-                        (6, 3, 0),
-                    ]
+            "tetrahedron": lambda p: magpy.magnet.Tetrahedron(
+                polarization=p,
+                vertices=(
+                    np.array([(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]) - 2.5
                 )
+                * 1.3
                 * mm,
-                position=at(2, 2),
-                style_label="strip",
             ),
-            magpy.current.TriangleSheet(
-                current_densities=[(1, 0, 0), (1, 0, 0)],
-                vertices=np.array([(-5, -5, 0), (5, -5, 0), (5, 5, 0), (-5, 5, 0)])
-                * mm,
-                faces=[(0, 1, 2), (0, 2, 3)],
-                position=at(3, 2),
-                style_label="sheet",
-            ),
-            magpy.Sensor(
-                pixel=[
-                    [(x, y, 0) for x in (-4 * mm, 0, 4 * mm)]
-                    for y in (-4 * mm, 0, 4 * mm)
-                ],
-                position=at(1.5, 3),
-                style_label="sensor",
-            ),
-        ]
-        return mo.vstack(
-            [
-                mo.md(
-                    "`editable=True` puts out the studio's handles from the start, "
-                    "over a studio session in this kernel: **W** moves, **E** turns, "
-                    "**R** resizes, **P** aims, and ⌘Z / ctrl-Z undoes a whole drag. "
-                    "One of each kind of object, to try what **R** does with each: "
-                    "the cuboid, the cylinder and the segment have a handle on each "
-                    "face, and a face dragged moves alone, the one opposite staying "
-                    "put, or both with ⌥; the sphere and the loop have one on the "
-                    "rim; the tetrahedron, the mesh, the triangle, the wire, the "
-                    "strip and the sheet have a dot on each point, which gets the "
-                    "move handles when pointed at: drag the dot to move that point "
-                    "freely, or an arrow to move it along one axis, and "
-                    "⌘/ctrl-click dots to move several together; the dipole "
-                    "scales, and the sensor's pixels spread or move one by one, as "
-                    "points do. Hold ⇧ while dragging to land on the other "
-                    "objects' corners; on the wire, the faint dot in a segment's "
-                    "middle adds a point and Delete takes one out; Esc takes a "
-                    "drag back. The widget's "
-                    "`objects` are the scene as "
-                    "edited, `to_script()` what was done. These are this cell's own "
-                    "objects, so the session holds copies and they stay as made; the "
-                    "pencil would copy them the same way later. The rings' view "
-                    "above is of a document, so its pencil only puts the handles "
-                    "out, and a drag there is a step in the document."
-                ),
-                SceneWidget(*objects, editable=True, height=460),
-            ]
-        )
-
-    def _overlaps():
-        mm = 1e-3
-        # A Halbach ring of eight segments, each touching its neighbours
-        ring = [
-            magpy.magnet.CylinderSegment(
-                dimension=(10 * mm, 16 * mm, 8 * mm, 45 * i, 45 * (i + 1)),
+            "triangle": lambda p: magpy.misc.Triangle(
                 polarization=(0, 0, 1),
-                style_label=f"segment {i + 1}",
-            )
-            for i in range(8)
-        ]
-        # a shaft that fits its bore exactly
-        shaft = magpy.magnet.Cylinder(
-            dimension=(20 * mm, 30 * mm), polarization=(0, 0, 1), style_label="shaft"
-        )
-        # two cubes side by side, and a third pushed 1 mm into the second
-        a, b, c = (
-            magpy.magnet.Cuboid(
-                dimension=(10 * mm,) * 3,
-                polarization=polarization,
-                position=position,
-                style_label=label,
-            )
-            for label, polarization, position in (
-                ("a", (1, 0, 0), (30 * mm, 0, 0)),
-                ("b", (1, 0, 0), (40 * mm, 0, 0)),
-                ("c", (0, 1, 0), (40 * mm, 9 * mm, 0)),
-            )
-        )
-        # a coil wound on its core
-        core = magpy.magnet.Cylinder(
-            dimension=(12 * mm, 20 * mm),
-            polarization=(0, 0, 1),
-            position=(0, 40 * mm, 0),
-            style_label="core",
-        )
-        coil = magpy.current.Circle(
-            diameter=12 * mm, current=1, position=(0, 40 * mm, 0), style_label="coil"
-        )
+                vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * 1.3 * mm,
+            ),
+            "loop": lambda p: magpy.current.Circle(current=10, diameter=13 * mm),
+            "sheet": lambda p: magpy.current.TriangleSheet(
+                current_densities=sheet_current, vertices=sheet, faces=sheet_faces
+            ),
+            "wire": lambda p: magpy.current.Polyline(
+                current=10,
+                vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
+                * 1.3
+                * mm,
+            ),
+            "dipole": lambda p: magpy.misc.Dipole(
+                moment=0.4 * np.array(p), style_size=12 * mm, style_sizemode="absolute"
+            ),
+        }
+        # Round the band, in this order from 47 degrees: the magnets behind it,
+        # as the view first looks, polarized round the ring; the flat ones in
+        # front, stood up to face it.
+        ring = []
+        for k, name in enumerate(kinds):
+            angle = np.deg2rad(47 + k * 360 / len(kinds))
+            outward = np.array([np.cos(angle), np.sin(angle), 0])
+            around = np.array([-np.sin(angle), np.cos(angle), 0])
+            made = kinds[name](around)
+            made.style.label = name
+            reach = 37 * mm
+            if name == "segment":
+                # its arc bulging outward, and its own y round the ring
+                made.rotate_from_angax(np.rad2deg(angle), "z", anchor=0)
+                made.polarization = (0, 1, 0)
+                reach -= 8 * mm
+            elif name in ("triangle", "loop", "sheet", "wire"):
+                # facing that first look: 51 degrees below x, 29 above the floor
+                made.rotate_from_angax(61, "x", anchor=0)
+                made.rotate_from_angax(39, "z", anchor=0)
+            made.move(reach * outward)
+            ring.append(made)
+        objects = [moebius, *ring]
         return mo.vstack(
             [
                 mo.md(
-                    "Magpylib adds the magnetizations of two magnets wherever they "
-                    "overlap, so a magnet pushed into its neighbour computes a field "
-                    "that looks right and is not. The view outlines every magnet "
-                    "that overlaps another in amber, frame by frame while one is "
-                    "dragged; the legend marks its row, and the count above the "
-                    "legend steps through the pairs. Touching does not count: the "
-                    "ring, the shaft in its bore, the cubes **a** and **b** and the "
-                    "coil on its core all touch on purpose. Only **c**, pushed 1 mm "
-                    "into **b**, overlaps: select it and drag it out (**W** moves). "
-                    "From code, `widget.payload['overlaps']` holds the pairs the "
-                    "view outlines, and `session.get_overlaps()` the document's. "
-                    "The rings at the top are checked too: pull their `radius` "
-                    "below 18.9 mm or their `gap` below 9.2 mm and magnets overlap."
+                    "Every kind of object, round a Möbius band whose current runs "
+                    "over both its faces. Each takes the handles: **R** on a "
+                    "magnet's faces resizes it, ⌥ moving the opposite one too; a "
+                    "sphere and a loop resize by the rim; a shape made of points "
+                    "has a dot on each, ⌘/ctrl-click to take several. Hold ⇧ to "
+                    "land on another object's corner; Esc takes a drag back. These "
+                    "are copies of the cell's objects, which stay as made."
                 ),
-                SceneWidget(
-                    *ring, shaft, a, b, c, core, coil, editable=True, height=420
-                ),
+                SceneWidget(*objects, editable=True, height=540),
             ]
         )
 
-    mo.accordion(
-        {
-            "Paths, played in the browser": mo.lazy(_played_in_the_browser),
-            "Properties along a path": mo.lazy(_properties_along_a_path),
-            "Editing a scene with the handles": mo.lazy(_editing),
-            "Overlapping magnets, found as you drag": mo.lazy(_overlaps),
-        },
-        lazy=True,
+    _every_kind()
+    return
+
+
+@app.cell(hide_code=True)
+def _(edited, json, mo, pair, pair_edited, pair_session, s, session):
+    # Re-run after each edit, so the files hold the scenes as they are now.
+    _ = edited(), pair_edited()
+
+    def _downloads(document, code, name):
+        return [
+            mo.download(
+                data=json.dumps(document.to_dict(), indent=2),
+                filename=f"{name}.magpy.json",
+                mimetype="application/json",
+                label=f"{name}.magpy.json",
+            ),
+            mo.download(
+                data=code.to_builder_script(),
+                filename=f"{name}_scene.py",
+                mimetype="text/x-python",
+                label=f"{name}_scene.py",
+            ),
+        ]
+
+    mo.sidebar(
+        [
+            mo.md("# Magpylib Studio"),
+            mo.outline(),
+            mo.md("**The scenes, as edited**"),
+            mo.vstack(
+                [
+                    *_downloads(s, session, "halbach"),
+                    *_downloads(pair, pair_session, "coils"),
+                ],
+                gap=0.5,
+            ),
+            mo.md(
+                "_A `.magpy.json` opens in VS Code with **Magpylib Studio: Open "
+                "Scene…**, never running code; the `.py` is the same function, "
+                "written back from the document._"
+            ),
+        ],
+        footer=mo.md("_magpylib-studio_"),
     )
     return
 
