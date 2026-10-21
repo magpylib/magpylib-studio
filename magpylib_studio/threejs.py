@@ -30,6 +30,7 @@ import contextlib
 import functools
 import json
 import math
+import re
 import warnings
 
 import magpylib as magpy
@@ -296,6 +297,18 @@ def _mesh_payload(trace):
         "lut": _colorscale_lut(colorscale) if graded else None,
         # mixes CSS names with hex, so THREE.Color parses them rather than us
         "facecolor": None if facecolor is None else [str(c) for c in facecolor],
+        # a sheet or strip of current, and the lines it flows along; or its
+        # arrows, which the flow stands in for: `_mark_flows`
+        **(
+            {
+                "flow": trace["flow"],
+                "streams": _json_coordinates(trace["streams"]),
+                **({"spacing": trace["spacing"]} if "spacing" in trace else {}),
+            }
+            if "streams" in trace
+            else {}
+        ),
+        **({"arrows": True} if trace.get("arrows") else {}),
     }
 
 
@@ -372,6 +385,9 @@ def _scatter_payload(trace):
         * SIZE_FACTORS["marker_size"],
         # an object's path, not the object: see `_mark_paths`
         **({"path": True} if trace.get("path") else {}),
+        # a current's wire, and which way the current runs: `_mark_flows`
+        **({"flow": trace["flow"]} if trace.get("flow") else {}),
+        **({"arrows": True} if trace.get("arrows") else {}),
     }
 
 
@@ -472,6 +488,7 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
         )
     scene = _captured.pop("scene")
     _mark_paths(scene, objects)
+    _mark_flows(scene, objects)
     return scene
 
 
@@ -509,6 +526,343 @@ def _mark_paths(scene, objects=None):
             trace["path"] = bool(
                 np.ptp(positions, axis=0).max() > 0 and np.allclose(points, positions)
             )
+
+
+#: How many of a drawing's length units make a metre, by the unit's prefix.
+_PER_METRE = {
+    "": 1.0,
+    "k": 1e-3,
+    "d": 1e1,
+    "c": 1e2,
+    "m": 1e3,
+    "µ": 1e6,
+    "u": 1e6,
+    "n": 1e9,
+}
+
+
+def _drawn_per_metre(scene):
+    """How many of the drawing's length units make a metre, or None when the
+    axis titles do not say. Magpylib draws a scene in the unit it reads best
+    in -- millimetres for a small one -- unless told otherwise
+    (`pinned_scene_units`), and says which only there: ``x (mm)``."""
+    labels = scene.panel(1, 1).labels if scene.panels else {}
+    unit = re.search(r"\(([^)]*)\)\s*$", (labels or {}).get("x", ""))
+    if unit is None:
+        return 1.0  # no unit said: magpylib's own, the metre
+    prefix, metre, rest = unit[1].rpartition("m")
+    return _PER_METRE.get(prefix) if metre and not rest else None
+
+
+def _at_step(values, step, ndim):
+    """`values` as they are at path step `step`: one per step when they have
+    an axis more than `ndim`, else the same at every step."""
+    values = np.asarray(values, dtype=float)
+    if values.ndim > ndim:
+        return values[min(step, len(values) - 1)]
+    return values
+
+
+def _flow_of(obj, points, step):
+    """Which way `obj`'s current runs along `points` -- in metres, as drawn
+    at path step `step` -- when they are its wire: +1 the way the points go,
+    -1 against them. 0 when they are not its wire -- its arrows, or what a
+    model of its own draws -- or when no current runs.
+
+    A positive current runs from a Polyline's first vertex to its last, and
+    about a Circle's own z, anticlockwise, which its wire may be drawn
+    either way round. What the count of points rules out is ruled out
+    first: this runs on every rebuild, a drag's frames among them."""
+    current = 0.0 if obj.current is None else float(_at_step(obj.current, step, 0))
+    if not current or not np.isfinite(current):
+        return 0
+    polyline = isinstance(obj, magpy.current.Polyline)
+    if polyline:
+        if obj.vertices is None:
+            return 0
+        vertices = _at_step(obj.vertices, step, 2)
+        if vertices.shape != points.shape or len(points) < 2:
+            return 0
+    elif obj.diameter is None or len(points) < 4:
+        return 0  # a ring is drawn in many points, its arrow in three
+    where, turn = _pose_at(obj, step)
+    local = (points - where) @ turn  # turned back into its own frame
+    slack = 1e-9 * float(np.abs(where).max())
+    if polyline:
+        tolerance = 1e-6 * float(np.ptp(vertices, axis=0).max()) + slack
+        on_it = np.abs(local - vertices).max() <= tolerance
+        return int(np.sign(current)) if on_it else 0
+    radius = float(_at_step(obj.diameter, step, 0)) / 2
+    tolerance = 1e-6 * radius + slack
+    x, y, z = local.T
+    if (
+        not radius
+        or np.abs(np.hypot(x, y) - radius).max() > tolerance
+        or np.abs(z).max() > tolerance
+    ):
+        return 0
+    winding = np.sign(np.sum(x[:-1] * y[1:] - x[1:] * y[:-1]))
+    return int(np.sign(current) * winding)
+
+
+#: How many streaks a sheet of current is drawn flowing with, about.
+SHEET_STREAKS = 24
+
+#: Across a strip, where its streams run: a sixth in from each edge, and
+#: down the middle.
+_STRIP_STREAMS = (1 / 6, 1 / 2, 5 / 6)
+
+
+def _pose_at(obj, step):
+    """`obj`'s position and rotation matrix at path step `step`."""
+    where = obj._position[min(step, len(obj._position) - 1)]
+    turns = obj._orientation.as_matrix().reshape(-1, 3, 3)
+    return where, turns[min(step, len(turns) - 1)]
+
+
+def _strip_streams(vertices, current):
+    """Lines down a strip, the way its current runs: through the same share
+    of each edge across it, which joins vertex ``2j`` to ``2j + 1`` -- the
+    current runs from each vertex to the one two on (`make_TriangleStrip`).
+    One run of points, NaN between lines; reversed for a current against
+    the vertices' order."""
+    starts, ends = vertices[0::2], vertices[1::2]
+    if len(starts) > len(ends):  # an odd vertex ends the strip in a point
+        ends = np.vstack([ends, starts[-1:]])
+    lines = [(1 - u) * starts + u * ends for u in _STRIP_STREAMS]
+    if current < 0:
+        lines = [line[::-1] for line in lines]
+    gap = np.full((1, 3), np.nan)
+    return np.vstack([part for line in lines for part in (line, gap)][:-1])
+
+
+def _sheet_streaks(vertices, faces, densities):
+    """Short streaks over a sheet, each following its faces' current density
+    as magpylib projects it onto them (`make_TriangleSheet`) from face to
+    face, spread by area, about `SHEET_STREAKS` of them: one run of points,
+    NaN between streaks, and how long a streak is. Laid out the same way
+    every time, so that a rebuild draws them where they were, and kept for
+    the sheet as it is: a drag moves it without changing it."""
+    key = tuple((a.shape, a.tobytes()) for a in (vertices, faces, densities))
+    if key not in _STREAKS:
+        if len(_STREAKS) > 64:
+            _STREAKS.clear()
+        _STREAKS[key] = _traced_streaks(vertices, faces, densities)
+    return _STREAKS[key]
+
+
+_STREAKS = {}
+
+
+def _traced_streaks(vertices, faces, densities):
+    """`_sheet_streaks`, worked out."""
+    tris = vertices[faces]
+    e1, e2 = tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0]
+    normal = np.cross(e1, e2)
+    twice_area = np.linalg.norm(normal, axis=1)
+    unit = np.divide(
+        normal,
+        twice_area[:, None],
+        out=np.zeros_like(normal),
+        where=twice_area[:, None] > 0,
+    )
+    along = densities - np.sum(densities * unit, axis=1)[:, None] * unit
+    strength = np.linalg.norm(along, axis=1)
+    live = (strength > 0) & (twice_area > 0)
+    direction = np.divide(
+        along, strength[:, None], out=np.zeros_like(along), where=live[:, None]
+    )
+    area = np.where(live, twice_area / 2, 0.0)
+    total = float(area.sum())
+    if not total:
+        return None, 0.0
+    # each face's edge opposite each corner, and the face across it
+    count = len(faces)
+    corners = np.asarray(faces)
+    edges = np.sort(
+        np.stack([corners[:, [1, 2]], corners[:, [2, 0]], corners[:, [0, 1]]], 1),
+        axis=2,
+    ).reshape(-1, 2)
+    _, pair = np.unique(edges, axis=0, return_inverse=True)
+    pair = pair.ravel()
+    across = np.full(3 * count, -1)
+    order = np.argsort(pair, kind="stable")
+    same = pair[order[1:]] == pair[order[:-1]]
+    across[order[1:][same]] = order[:-1][same] // 3
+    across[order[:-1][same]] = order[1:][same] // 3
+    across = across.reshape(count, 3)
+    # what turns a point of a face's plane into its weights on the corners
+    gram = np.stack(
+        [
+            np.stack([np.sum(e1 * e1, 1), np.sum(e1 * e2, 1)], 1),
+            np.stack([np.sum(e1 * e2, 1), np.sum(e2 * e2, 1)], 1),
+        ],
+        1,
+    )
+    solve = np.linalg.pinv(gram)
+
+    def weights(f, point):
+        rel = point - tris[f, 0]
+        a, b = solve[f] @ np.array([e1[f] @ rel, e2[f] @ rel])
+        return np.array([1 - a - b, a, b])
+
+    def rates(f, d):
+        a, b = solve[f] @ np.array([e1[f] @ d, e2[f] @ d])
+        return np.array([-a - b, a, b])
+
+    length = 1.5 * np.sqrt(total / SHEET_STREAKS)
+
+    def walk(f, point, sign):
+        """From `point` in face `f`, half a streak along the current
+        (`sign` +1) or against it, across faces: the points passed."""
+        points, left = [point], length / 2
+        for _ in range(12):
+            d = sign * direction[f]
+            w, r = weights(f, point), rates(f, d)
+            leaving = r < -1e-12
+            if not leaving.any():
+                break
+            exits = np.where(leaving, -w / np.where(leaving, r, 1), np.inf)
+            corner = int(np.argmin(exits))
+            reach = max(float(exits[corner]), 0.0)
+            if reach >= left:
+                points.append(point + left * d)
+                break
+            point = point + reach * d
+            points.append(point)
+            left -= reach
+            f = across[f, corner]
+            if f < 0 or not live[f]:
+                break
+        return points
+
+    # seeds spread by area, a face its share of them, in face order
+    shares = np.cumsum(area) * SHEET_STREAKS / total
+    counts = np.floor(shares + 0.5) - np.floor(
+        shares - area * SHEET_STREAKS / total + 0.5
+    )
+    seeded = np.repeat(np.arange(count), counts.astype(int))
+    n = np.arange(len(seeded))
+    a, b = (0.5 + n * 0.7548776662) % 1, (0.5 + n * 0.5698402910) % 1
+    folded = a + b > 1
+    a, b = np.where(folded, 1 - a, a), np.where(folded, 1 - b, b)
+    seeds = tris[seeded, 0] + a[:, None] * e1[seeded] + b[:, None] * e2[seeded]
+    runs = []
+    for f, seed in zip(seeded, seeds, strict=True):
+        back, ahead = walk(f, seed, -1), walk(f, seed, 1)
+        streak = np.array([*back[:0:-1], *ahead])
+        if np.linalg.norm(np.diff(streak, axis=0), axis=1).sum() > 0.3 * length:
+            runs += [streak, np.full((1, 3), np.nan)]
+    if not runs:
+        return None, 0.0
+    return np.vstack(runs[:-1]), length
+
+
+def _mark_wire(obj, traces, step, per_metre):
+    """Mark `obj`'s wire among its `traces` with the way its current runs:
+    the trace, or None."""
+    for trace in traces:
+        if trace.get("type") != "scatter3d":
+            continue
+        if "lines" not in str(trace.get("mode") or "lines"):
+            continue
+        points = _points(trace) / per_metre
+        if not np.isfinite(points).all():
+            continue  # a pen lifted: its arrows, never its wire
+        flow = _flow_of(obj, points, step)
+        if flow:
+            trace["flow"] = flow
+            return trace
+    return None
+
+
+def _mark_surface(obj, traces, step, per_metre):
+    """Mark the surface a sheet or a strip of current is drawn as with the
+    streams its current runs along, in the drawing's unit: the trace, or
+    None. Found by its vertices being the object's own."""
+    if obj.vertices is None:
+        return None
+    vertices = _at_step(obj.vertices, step, 2)
+    for trace in traces:
+        if trace.get("type") != "mesh3d" or len(trace.get("x", ())) != len(vertices):
+            continue
+        where, turn = _pose_at(obj, step)
+        local = (_points(trace) / per_metre - where) @ turn
+        reach = float(np.ptp(vertices, axis=0).max())
+        slack = 1e-6 * reach + 1e-9 * float(np.abs(where).max())
+        if np.abs(local - vertices).max() > slack:
+            continue
+        if isinstance(obj, magpy.current.TriangleStrip):
+            current = (
+                0.0 if obj.current is None else float(_at_step(obj.current, step, 0))
+            )
+            if not current or not np.isfinite(current) or len(vertices) < 3:
+                return None
+            streams, spacing = _strip_streams(vertices, current), None
+        else:
+            if obj.current_densities is None or obj.faces is None:
+                return None
+            densities = _at_step(obj.current_densities, step, 2)
+            streams, spacing = _sheet_streaks(
+                vertices, np.asarray(obj.faces), densities
+            )
+            if streams is None:
+                return None
+        trace["flow"] = 1
+        trace["streams"] = (streams @ turn.T + where) * per_metre
+        if spacing:
+            trace["spacing"] = spacing * per_metre
+        return trace
+    return None
+
+
+def _mark_flows(scene, objects=None):
+    """Mark what flows: each current's wire ``flow``, +1 where its current
+    runs the way the wire's points go and -1 where it runs against them, and
+    each sheet's and strip's surface with the ``streams`` its current runs
+    along -- for a view to set them flowing. A current that flows has its
+    arrows marked ``arrows``, which a view puts away while the flow says the
+    same, unless they were styled on; nothing is marked for no current.
+
+    Found as `_mark_paths` finds a path, by the one thing that makes a line
+    the wire, or a mesh the surface: its points are the conductor -- a
+    Polyline's vertices, a Circle's ring, a sheet's own vertices -- at the
+    step the frame shows, in the drawing's unit: the last, in a still scene.
+    A copy that `style.path.frames` draws at an earlier step is left still."""
+    if objects is None:
+        objects = [o for panel in scene.panels for o in panel.objects]
+    wired = (magpy.current.Circle, magpy.current.Polyline)
+    spread = (magpy.current.TriangleStrip, magpy.current.TriangleSheet)
+    known = {
+        id(each): each
+        for obj in _given(objects)
+        for each in (obj, *getattr(obj, "children_all", ()))
+        if isinstance(each, wired + spread)
+    }
+    per_metre = _drawn_per_metre(scene) if known else None
+    if not per_metre:
+        return
+    steps = scene.animation.path_indices if scene.is_animation else ()
+    for n, frame in enumerate(scene.frames):
+        drawn = {}
+        for trace in frame.traces:
+            if trace.get("object_id") in known and not trace.get("path"):
+                drawn.setdefault(trace["object_id"], []).append(trace)
+        for key, traces in drawn.items():
+            obj = known[key]
+            step = steps[n] if n < len(steps) else len(obj._position) - 1
+            if isinstance(obj, wired):
+                flowing = _mark_wire(obj, traces, step, per_metre)
+                marker, kind = obj.style.arrow, "scatter3d"
+            else:
+                flowing = _mark_surface(obj, traces, step, per_metre)
+                marker, kind = obj.style.direction, "mesh3d"
+            # its arrows, when they are magpylib's own and nobody asked for them
+            if flowing is None or marker.show is not None or obj.style.model3d.data:
+                continue
+            for trace in traces:
+                if trace is not flowing and trace.get("type") == kind:
+                    trace["arrows"] = True
 
 
 def capture_frames(objects, steps):
@@ -733,7 +1087,7 @@ def _unchanged(run):
     if any(trace.keys() != first.keys() for trace in run):
         return False
     for key, value in first.items():
-        if key in _WHERE:
+        if key in _WHERE or key == "streams":  # carried with the vertices
             continue
         values = [trace[key] for trace in run]
         if all(v is value for v in values):
@@ -1092,7 +1446,9 @@ def run_payload(scene):
     """What a view draws `scene` from, and the run kept to serve it a frame
     at a time: None when there is no run, or it plays on its own, as motion
     and carried changes -- see `played_payload`."""
-    _mark_paths(scene)  # a script's scene, which `_capture` did not make
+    # a script's scene, which `_capture` did not make
+    _mark_paths(scene)
+    _mark_flows(scene)
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
     payload = played or view_payload(scene, index=0)
@@ -1121,6 +1477,7 @@ def saved_state(
     hidden=(),
     faded=None,
     axes="cube",
+    flow=True,
     theme="auto",
     height=DEFAULT_HEIGHT,
     camera=None,
@@ -1135,6 +1492,7 @@ def saved_state(
         "hidden": list(hidden),
         "faded": dict(faded or {}),
         "axes": axes,
+        "flow": flow,
         "theme": theme,
         "height": height,
         "frames": frames,

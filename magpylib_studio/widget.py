@@ -209,6 +209,12 @@ class SceneWidget(anywidget.AnyWidget):
     axes = traitlets.Union(
         [traitlets.Enum(AXES), traitlets.Bool()], default_value="cube"
     ).tag(sync=True)
+    #: Whether currents flow: pulses running along a wire, down a strip or
+    #: over a sheet the way the current runs, whether a run plays or not,
+    #: and still for whoever asks the system for less motion. While they
+    #: flow, the arrows magpylib draws to say the same are away, unless a
+    #: style asked for them. Off, the arrows are back; an export keeps it.
+    flow = traitlets.Bool(True).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and
     #: the system's setting when nothing behind it says.
@@ -326,8 +332,9 @@ class SceneWidget(anywidget.AnyWidget):
         Takes what `magpylib.show` takes: ``animation=True`` captures the
         paths so the view can play them, and anything else is passed through.
         And, as any widget does, the starting value of its traits --
-        ``height``, ``theme``, ``axes``. A keyword that names a trait is the
-        widget's; the rest are magpylib's, and the two share no names.
+        ``height``, ``theme``, ``axes``, ``flow``. A keyword that names a
+        trait is the widget's; the rest are magpylib's, and the two share no
+        names.
 
         Returned rather than displayed, which is what a notebook wants from
         the last line of a cell. In marimo, wrap it in ``mo.ui.anywidget(...)``
@@ -994,6 +1001,7 @@ class SceneWidget(anywidget.AnyWidget):
             hidden=self.hidden,
             faded=self.faded,
             axes=self.axes,
+            flow=self.flow,
             theme=self.theme,
             height=self.height,
             camera=self._camera,

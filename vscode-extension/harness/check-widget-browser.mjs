@@ -30,6 +30,7 @@
  *   selecting and hiding from the legend, the picture tool, the view cube,
  *   full screen, and a run that plays with no python behind it;
  * - what a selection is drawn with: a shape's edges, its path apart.
+ * - a current's flow: moving on screen, resting off it, gone when off.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -486,6 +487,57 @@ async function firstLook(port, base, expected) {
       return spans < 5
         ? thrown(tab)
         : `the camera is ${spans.toFixed(0)} spans away`;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** A current's wire flows by itself, in a run that is not playing: the view
+ *  draws frame after frame while it is on screen, stops once it is scrolled
+ *  away, and flows on when it is back. Its arrows are away while it flows;
+ *  switched off, the pulses go and the arrows come back. Told apart by the
+ *  picture: it changes between two snapshots only while the pulses move. */
+async function flow(port, base) {
+  await check("a current flows on screen, and rests off it", async () => {
+    const tab = await openTab(port);
+    const moves = `
+      const before = window.scene3d.snapshot();
+      await new Promise((done) => setTimeout(done, 400));
+      return window.scene3d.snapshot() !== before;`;
+    const away = (y) => `
+      document.body.style.minHeight = "4000px";
+      scrollTo(0, ${y});
+      await new Promise((done) => setTimeout(done, 300));`;
+    try {
+      await tab.navigate(`${base}/out/ramp.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const shown = (mark) => `
+        let count = 0;
+        for (const node of window.scene3d.byObjectId.values()) {
+          node.traverse((part) => (count += part.userData.${mark} && part.visible ? 1 : 0));
+        }
+        return count;`;
+      const pulses = shown("flow");
+      const arrows = shown("arrows");
+      if (!(await tab.evaluate(pulses))) return "the coil's wire has no pulses";
+      if (await tab.evaluate(arrows)) return "its arrows showed beside the flow";
+      if (!(await tab.evaluate(moves))) return "the pulses stood still";
+      await tab.evaluate(away(3000));
+      if (await tab.evaluate(moves)) return "it kept drawing off screen";
+      await tab.evaluate(away(0));
+      if (!(await tab.evaluate(moves)))
+        return "it did not flow on, back on screen";
+      await tab.evaluate("window.scene3d.setFlow(false)");
+      if (await tab.evaluate(pulses)) return "switched off, the pulses stayed";
+      if (!(await tab.evaluate(arrows))) {
+        return "switched off, no arrows came back";
+      }
+      return thrown(tab);
     } finally {
       await tab.close();
     }
@@ -3007,6 +3059,7 @@ try {
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
+  await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {
   browser.proc.kill("SIGKILL"); // a renderer that is locked up ignores less

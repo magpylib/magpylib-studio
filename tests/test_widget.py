@@ -591,6 +591,94 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
     assert marked(payload) == [5, 10, 10]
 
 
+def flows(payload):
+    """What each drawn item says of its current, in the order drawn: the way
+    a wire's runs, ``("streams", +1)`` for a surface's streams running
+    toward +x, ``"arrows"`` for arrows its flow stands in for, else None."""
+
+    def said(item):
+        if item.get("streams"):
+            run = np.array(item["streams"], dtype=float).reshape(-1, 3)
+            run = run[: np.argmax(np.isnan(run[:, 0]))] if np.isnan(run).any() else run
+            return ("streams", int(np.sign(run[-1, 0] - run[0, 0])))
+        return item.get("flow") or ("arrows" if item.get("arrows") else None)
+
+    drawn = [*payload.get("meshes", ()), *payload["scatters"]]
+    return [said(item) for item in drawn if not item.get("path")]
+
+
+STRIP = [(x, y, 0) for x in (0, 1, 2) for y in (0, 1)]
+SHEET = {
+    "vertices": [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)],
+    "faces": [(0, 1, 2), (0, 2, 3)],
+}
+
+
+@pytest.mark.parametrize(
+    ("objects", "animation", "expected"),
+    [
+        # a loop's wire, its arrows put away; turned over, its wire is drawn
+        # the other way round, and the current still runs anticlockwise about
+        # its own z
+        ([magpy.current.Circle(current=2, diameter=2)], False, [["arrows", 1]]),
+        (
+            [magpy.current.Circle(current=2, diameter=2).rotate_from_angax(180, "x")],
+            False,
+            [["arrows", 1]],
+        ),
+        # a wire against its vertices, in a drawing magpylib makes in mm
+        (
+            [magpy.current.Polyline(current=-5, vertices=[(0, 0, 0), (3e-3, 0, 0)])],
+            False,
+            [["arrows", -1]],
+        ),
+        (
+            [magpy.current.Polyline(current=0, vertices=[(0, 0, 0), (1, 0, 0)])],
+            False,
+            [[None, None]],
+        ),
+        # arrows asked for stay
+        (
+            [magpy.current.Circle(current=2, diameter=2, style_arrow_show=True)],
+            False,
+            [[None, 1]],
+        ),
+        # a current that turns round along a run, the run not moving
+        (
+            [magpy.current.Circle(current=[1, -1, 1], diameter=2)],
+            True,
+            [["arrows", 1], ["arrows", -1], ["arrows", 1]],
+        ),
+        # a strip's streams run down it, against its vertices for a current
+        # against them; a sheet's along its current density
+        (
+            [magpy.current.TriangleStrip(current=-1, vertices=STRIP)],
+            False,
+            [[("streams", -1), "arrows"]],
+        ),
+        (
+            [magpy.current.TriangleSheet(current_densities=[(1, 0, 0)] * 2, **SHEET)],
+            False,
+            [[("streams", 1), "arrows"]],
+        ),
+    ],
+)
+def test_a_current_flows_the_way_it_runs(objects, animation, expected):
+    """What a current is drawn as says which way it runs, for the view to set
+    it flowing: a wire +1 along its points or -1 against them, a sheet or a
+    strip by the streams it carries. Its arrows say the same, and are marked
+    to be put away while it flows; nothing is marked for no current."""
+    scene = threejs._capture(objects, animation=animation)
+    each = [threejs.view_payload(scene, index=n) for n in range(len(scene.frames))]
+    assert [flows(payload) for payload in each] == expected
+    payload, _ = threejs.run_payload(scene)
+    # a run plays the change of direction as the wire's own frames
+    wires = [c for c in payload.get("changes", []) if c[0].get("flow")]
+    assert len(wires) == (1 if animation else 0)
+    for change in wires:
+        assert [item["flow"] for item in change] == [frame[1] for frame in expected]
+
+
 def test_a_run_that_changes_shape_carries_the_change(morphing):
     """A cube that grows is not a cube that moves, however it is fitted: its
     trace is carried as it is at every step, and the run still plays."""

@@ -2104,6 +2104,7 @@ function render({ model, el }) {
     "hidden",
     "faded",
     "axes",
+    "flow",
     "theme",
     "editable",
     "field_lines",
@@ -2119,6 +2120,7 @@ function render({ model, el }) {
     const now = new Set(changed);
     changed.clear(); // first, so a change made while catching up is kept
     if (now.has("axes")) showAxes();
+    if (now.has("flow") && drawing()) api.setFlow(model.get("flow") !== false);
     if (now.has("payload") || now.has("editable") || now.has("field_lines")) {
       showLines();
     }
@@ -2231,6 +2233,7 @@ function render({ model, el }) {
     api.setHidden(model.get("hidden") || []);
     api.setFades(model.get("faded") || {});
     api.setAxes(axesChoice(model.get("axes")));
+    api.setFlow(model.get("flow") !== false);
     api.watchCamera(tellCamera);
     if (!framed) {
       // A pooled renderer comes with the last widget's projection and the
