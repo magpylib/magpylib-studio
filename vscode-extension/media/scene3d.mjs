@@ -2293,7 +2293,7 @@ function fade(part, level) {
   if (material?.userData.own !== undefined) {
     material.opacity = material.userData.own * level;
     // a current's flow is see-through at any level: it is a glow on the wire;
-  // and a field line, which other lines show through
+    // and a field line, which other lines show through
     const blended = Boolean(material.userData.blended);
     const transparent = material.opacity < 1 || blended;
     // three compiles an opaque material's alpha away: the program changes
