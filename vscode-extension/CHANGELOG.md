@@ -18,7 +18,7 @@ field points. They rest while the view is off screen and stand still for whoever
 asks the system for less motion. Arrows asked for in a style stay. The flow
 button among the view's tools, shown where something flows, or
 `SceneWidget(..., flow=False)`, puts the pulses away and the arrows back, and
-stands the field lines still, which an export keeps (#63).
+stands the field lines still, which an export keeps (#63, #65).
 
 </details>
 
