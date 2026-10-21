@@ -180,8 +180,7 @@ edit — so another control is tied to it both ways with
 `traitlets.link((call, "values"), (view3d, "variables"))`, the view owning the
 numbers. `call` and `view3d` are the widgets themselves, not the
 `mo.ui.anywidget` elements around them: a marimo cell that names an element
-re-runs on its every change, and would make the link again each time;
-`examples/marimo_demo.py` does it with wigglystuff's call expression. In marimo
+re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
 `view3d.observe(..., names="revision")`, as the demo's field map does. A sensor

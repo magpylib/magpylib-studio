@@ -10,7 +10,7 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import threejs
+from magpylib_studio import scene, threejs
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     DOC_VERSION,
@@ -471,6 +471,40 @@ def test_a_drags_later_steps_draw_only_what_it_moves():
     ):
         assert low <= was_low and high >= was_high
     assert "partial" not in s.get_scene(partial=True)  # out of a drag, whole
+
+
+def test_a_drags_later_steps_keep_the_colours_of_its_first():
+    """Magpylib colours what no style colours by its place among what it
+    draws: a coil's two loops are one colour in the coil, and two drawn
+    alone, as a drag's later steps draw them. They keep the first's."""
+
+    @scene
+    def pair():
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0.05, 0, 0)
+        )
+        coil = magpy.Collection(style_label="coil")
+        for label, z in (("lower", 0), ("upper", 0.01)):
+            coil.add(
+                magpy.current.Circle(
+                    current=1, diameter=0.02, position=(0, 0, z), style_label=label
+                )
+            )
+        return magnet, coil
+
+    s = pair.build().session
+    s.begin_interaction()
+    steps = []
+    for z in (0.001, 0.002):
+        s.apply_edits([{"objectId": "coil", "position": [0, 0, z]}])
+        steps.append(s.get_scene(partial=True))
+    s.end_interaction()
+    first, later = (
+        {(item["object_id"], item["line_color"]) for item in step["scatters"]}
+        for step in steps
+    )
+    assert "partial" in steps[1] and later == first
+    assert all(s._objs[key].style.color is None for key in ("lower", "upper"))
 
 
 def test_a_gesture_that_ends_where_it_began_leaves_nothing_behind(session):
@@ -1764,21 +1798,21 @@ def _geometry(session):
 
 def test_set_visible_hides_without_disturbing_colours(session):
     """Hiding uses magpylib's own switches, so the object keeps its slot in
-    the colour sequence and the others cannot be recoloured."""
+    the colour sequence: hiding the first cannot recolour the one after."""
     baseline = _geometry(session)
-    assert session.set_visible("cyl", False) == {"ok": True}
-    assert {o["id"]: o["visible"] for o in session.list_objects()}["cyl"] is False
+    assert [t[0].split()[0] for t in baseline] == ["Cube", "Cyl"]
+    assert session.set_visible("cube", False) == {"ok": True}
+    assert {o["id"]: o["visible"] for o in session.list_objects()}["cube"] is False
 
     hidden = _geometry(session)
-    assert [t[:3] for t in hidden] == [t[:3] for t in baseline]  # same traces/colours
-    assert sum(t[3] for t in hidden) < sum(t[3] for t in baseline)  # less geometry
+    assert [t[:3] for t in hidden] == [t[:3] for t in baseline[1:]]  # cyl as it was
     # display-only: hidden sources still contribute to the field
     assert session.get_field(points=[[0, 0, 5]])["magnitude"][0] > 0
 
-    assert session.set_visible("cyl", True) == {"ok": True}
+    assert session.set_visible("cube", True) == {"ok": True}
     assert _geometry(session) == baseline
-    assert "hidden_style" not in session._spec("cyl")
-    assert "model3d.showdefault" not in session._spec("cyl").get("style", {})
+    assert "hidden_style" not in session._spec("cube")
+    assert "model3d.showdefault" not in session._spec("cube").get("style", {})
 
 
 def test_set_visible_preserves_user_style_and_paths(session):

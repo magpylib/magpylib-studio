@@ -3621,11 +3621,28 @@ class MagpylibStudioSession:
         # as in the view.
         with threejs.pinned_scene_units():
             fig = magpy.show(
-                self.scene, backend="plotly", animation=animation, return_fig=True
+                *self._drawn(), backend="plotly", animation=animation, return_fig=True
             )
         if template:
             fig.layout.template = template
         return json.loads(fig.to_json())  # to_json handles numpy/bdata
+
+    def path_steps(self):
+        """How many steps the scene's longest path has: 1 where nothing has
+        one. What a run of the scene plays through (`get_scene(frame=...)`)."""
+        return max(
+            (len(np.atleast_2d(np.asarray(o.position))) for o in self._objs.values()),
+            default=1,
+        )
+
+    def _drawn(self):
+        """What a drawing of the scene is handed: the objects at its top, not
+        the collection that holds them. Magpylib colours what no style
+        colours one colour per object it is handed, a collection's children
+        in the collection's: handed the root, everything was one colour, where
+        `magpy.show(*objects)` gives each its own. An empty scene is the root
+        still, which draws as nothing does."""
+        return list(self.scene.children) or [self.scene]
 
     def get_scene(self, frame=None, partial=False):
         """The scene as buffers for a scene-graph view, keyed by studio ids.
@@ -3666,14 +3683,9 @@ class MagpylibStudioSession:
             # the magnet that makes them turns. Only magpylib can say what
             # they are, and only per frame.
             if self._animated is None:
-                steps = max(
-                    (
-                        len(np.atleast_2d(np.asarray(obj.position)))
-                        for obj in self._objs.values()
-                    ),
-                    default=1,
+                self._animated = threejs.capture_frames(
+                    self._drawn(), self.path_steps()
                 )
-                self._animated = threejs.capture_frames(self.scene, steps)
             return threejs.frame_payload(
                 self._animated, frame, live=self._objs, derived=self._derived
             )
@@ -3692,16 +3704,22 @@ class MagpylibStudioSession:
                 source_of = {c: s for s, made in self._derived.items() for c in made}
                 only = {source_of.get(name, name) for name in names}
         scene = threejs.scene_payload(
-            self.scene,
+            self._drawn(),
             live=self._objs,
             derived=self._derived,
             fields=readings,
             only=only,
             whole=self._drawn_whole if only is not None else None,
         )
+        colors = scene.pop("colors", None)
         if partial and self._interaction is not None and only is None:
-            # the gesture's first frame, drawn whole
-            self._drawn_whole = {"ranges": scene["ranges"], "labels": scene["labels"]}
+            # the gesture's first frame, drawn whole, and the colours it drew
+            # in, which what a later frame draws alone would not get
+            self._drawn_whole = {
+                "ranges": scene["ranges"],
+                "labels": scene["labels"],
+                "colors": colors,
+            }
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
         scene["parametric"] = self._parametric_fields()
@@ -4394,7 +4412,12 @@ class MagpylibStudioSession:
         points[:, inormal] = offset
 
         data = self.get_field(points=points.tolist(), field=field)
-        values = np.array(data["values"]).reshape(len(v), len(u), 3)
+        values = np.array(data["values"], dtype=float)
+        path_note = ""
+        if values.ndim == 3:  # something moves along a path: map its last step
+            path_note = f", path step {len(values) - 1}"
+            values = values[-1]
+        values = values.reshape(len(v), len(u), 3)
         length = self._shown("length")
         model, scale = length["symbol"], length["scale"]
         return self._heatmap(
@@ -4408,6 +4431,7 @@ class MagpylibStudioSession:
             template,
             labels=(f"{plane[0]} ({model})", f"{plane[1]} ({model})"),
             subtitle=f"on {plane} at {'xyz'[inormal]} = {offset * scale:g} {model}"
+            + path_note
             + _skipped_note(data.get("skipped")),
             smooth=True,
         )
@@ -4547,7 +4571,7 @@ class MagpylibStudioSession:
         # Passed as loose arguments, not wrapped in a Collection: these
         # objects already have a parent, and magpylib refuses to re-home them.
         skipped = self._inert_sources()
-        subject = [self.scene]
+        subject = self._drawn()
         if skipped:
             sources, _ = self._sources_for_field()
             subject = [*sources, *self.scene.sensors_all]

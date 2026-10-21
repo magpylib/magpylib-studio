@@ -1650,7 +1650,11 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
     and the sensors whose drawing is their reading, which `partial` names;
     the rest of the payload is whole. `whole`, then, is the ``ranges`` and
     ``labels`` of the whole scene, which what is drawn extends: a drag's
-    later steps, against its first (`MagpylibStudioSession.get_scene`).
+    later steps, against its first (`MagpylibStudioSession.get_scene`). And
+    its ``colors``, which a scene drawn whole names as ``colors``: magpylib
+    colours what no style colours by its place among what it draws, so two
+    loops of one coil, one colour in the coil, are two colours drawn alone.
+    What is drawn here is lent the colour it had, for the drawing.
     """
     live = live or {}
     derived = derived or {}
@@ -1672,11 +1676,21 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
         ]
     try:
         scene = None
+        lent = []
         if only is None:
             scene = _capture(objects, on_behalf_of="studio")
         elif drawn:
+            colors = (whole or {}).get("colors") or {}
+            own = {id(obj): key for key, obj in live.items()}
+            for obj in drawn:
+                color = colors.get(own.get(id(obj)))
+                if color is not None and obj.style.color is None:
+                    obj.style.color = color
+                    lent.append(obj)
             scene = _capture(drawn, on_behalf_of="studio")
     finally:
+        for obj in lent:
+            obj.style.color = None
         restore()
     panel = scene.panel(1, 1) if scene is not None else None
     traces = [] if scene is None else [t for f in scene.frames for t in f.traces]
@@ -1730,6 +1744,13 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
             polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
     collections, split = _collections(live, derived, source_of)
+    colors = {}
+    if only is None and live:
+        own_key = _key_map(live, derived)
+        for trace in traces:
+            color = trace.get("line_color" if trace["type"] == "scatter3d" else "color")
+            if isinstance(color, str) and not trace.get("path"):
+                colors.setdefault(own_key(trace.get("object_id"), own=True), color)
     return {
         **_by_kind([*_keyed(traces, live, derived), *pixels]),
         "ranges": _ranges_with_pixels(reach, pixels),
@@ -1747,6 +1768,8 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
         "readings": sorted(readings),
         "collections": collections,
         **({} if redrawn is None else {"partial": redrawn}),
+        # for the session to keep, not for a view: see `whole`
+        **({"colors": colors} if colors else {}),
     }
 
 

@@ -1085,10 +1085,23 @@
   padding-left: 0;
 }
 
-/* The style tree, folded under its heading: its groups a step in, a slot
-   for the reset mark, the sliders in the view's colour. */
+/* The style tree, folded under its heading: an open group's rows a step in
+   on a guide line, as the legend draws its nesting, so a row after a deep
+   group reads as the group's parent's and not its own; a slot for the reset
+   mark, the sliders in the view's colour. The line is each row's, end to
+   end, so nothing between them may leave a gap. */
 .magpy-scene-inspector .magpy-ins-props details {
-  margin: 1px 0 1px 8px;
+  margin: 0;
+}
+
+.magpy-scene-inspector .magpy-ins-props details[open] > :not(summary) {
+  margin-left: 4px;
+  padding-left: 9px;
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-scene-inspector .magpy-ins-props summary {
+  padding: 1px 0;
 }
 
 .magpy-scene-inspector .magpy-ins-props .magpy-ins-row {

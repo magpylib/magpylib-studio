@@ -21,6 +21,16 @@ back, which an export keeps (#63).
 </details>
 
 <details>
+<summary>A view that opens with its variables, and plays its paths</summary>
+
+`SceneWidget(..., open_panel="variables")` opens an editable view with its
+variables docked beside it, and `"object"` with the selection's properties. An
+editable view of a scene with paths plays them, each step served by its session,
+and a saved page carries them (#63).
+
+</details>
+
+<details>
 <summary>Field lines through a sensor's pixels, following a drag (prototype)</summary>
 
 A sensor whose pixels read B or H can draw the field's lines through them: the
@@ -90,6 +100,25 @@ to 59, its frame rate (#58).
 </details>
 
 ### Fixed
+
+<details>
+<summary>Colours as magpylib gives them, and kept through a drag</summary>
+
+An editable view drew every object in one colour, as the one collection its
+session keeps them in: each now has the colour `magpy.show` gives it, as in a
+read-only view. And dragging a coil drew its loops in several colours until the
+release: they keep the colour they had (#63).
+
+</details>
+
+<details>
+<summary>The field map of a scene that moves</summary>
+
+The field map failed for a scene whose magnets move along a path: it maps the
+path's last step now, as the map over a moving sensor does, and says which
+(#63).
+
+</details>
 
 <details>
 <summary>An aim let go after a pause is its own undo step</summary>

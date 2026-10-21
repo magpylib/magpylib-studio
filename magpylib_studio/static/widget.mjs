@@ -1631,6 +1631,16 @@ function render({ model, el }) {
     );
   }
 
+  /** The panel python asked the view to open with -- `open_panel` -- open,
+   *  where there are panels: an editable view in a notebook. Opening only:
+   *  closed by hand, it stays closed until python asks again. */
+  function openAsked() {
+    if (!editable() || model.editor !== undefined) return;
+    const asked = model.get("open_panel");
+    if (asked === "variables" && variablesEl.hidden) showVariables(true);
+    else if (asked === "object" && inspectorEl.hidden) showInspector(true);
+  }
+
   function dressEditing() {
     editBar.hidden = !editable();
     resetButton.hidden = !editor.reset;
@@ -2108,6 +2118,7 @@ function render({ model, el }) {
     "theme",
     "editable",
     "field_lines",
+    "open_panel",
     "revision",
   ]) {
     model.on(`change:${name}`, () => {
@@ -2126,6 +2137,7 @@ function render({ model, el }) {
     }
     if (now.has("theme")) retheme();
     if (now.has("editable")) dressEditing();
+    if (now.has("editable") || now.has("open_panel")) openAsked();
     // An edit settled -- an undo, a drag, a value set from python -- and the
     // rows may say something else now. Not mid-drag: the panel declines
     // itself, and reads its rows back at the release.
@@ -2296,6 +2308,7 @@ function render({ model, el }) {
   dressLegend();
   dressTransport();
   dressEditing();
+  openAsked();
   showAxes();
   showLines();
   draw();

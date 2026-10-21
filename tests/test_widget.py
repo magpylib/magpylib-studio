@@ -591,6 +591,32 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
     assert marked(payload) == [5, 10, 10]
 
 
+def test_an_editable_view_colours_its_objects_as_magpylib_does():
+    """Copied into a session, the objects sit under its root collection,
+    which magpylib would colour as one: drawn from the root's own, each has
+    the colour `magpy.show(*objects)` gives it, as a read-only view's do."""
+
+    def objects():
+        return [
+            magpy.current.Circle(current=1, diameter=0.01, style_label="loop"),
+            magpy.current.Polyline(
+                current=1, vertices=[(0, 0, 0), (0.01, 0, 0)], style_label="wire"
+            ),
+            magpy.misc.Dipole(moment=(0, 0, 1), style_label="dipole"),
+        ]
+
+    def colours(view):
+        return {
+            (item["name"], item.get("line_color") or item.get("color"))
+            for kind in ("meshes", "scatters")
+            for item in view.payload[kind]
+        }
+
+    plain = colours(widget.SceneWidget(*objects()))
+    assert colours(widget.SceneWidget(*objects(), editable=True)) == plain
+    assert len({colour for _, colour in plain}) == 3
+
+
 def flows(payload):
     """What each drawn item says of its current, in the order drawn: the way
     a wire's runs, ``("streams", +1)`` for a surface's streams running
@@ -823,6 +849,20 @@ def test_a_view_plays_a_moving_run_itself(swept):
     saved = view._saved()
     assert saved["run"] == []
     assert saved["state"]["payload"]["tracks"] == view.payload["tracks"]
+
+
+def test_a_view_of_a_scene_with_a_path_plays_it(monkeypatch):
+    """An editable view's scene has a path: it plays it, the session serving
+    each step asked for, and a saved page carries every one."""
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    magnet.move(np.linspace((0, 0, 0), (0.02, 0, 0), 5), start=0)
+    view = widget.SceneWidget(magnet, editable=True)
+    assert view.frames == 5
+    sent = []
+    monkeypatch.setattr(view, "send", sent.append)
+    view._on_message(view, {"kind": "frame", "index": 3, "runId": 7}, [])
+    assert [(m["frame"], m["frames"], m["runId"]) for m in sent] == [(3, 5, 7)]
+    assert [step["frame"] for step in view._saved()["run"]] == [0, 1, 2, 3, 4]
 
 
 def _unpacked(page, name):
