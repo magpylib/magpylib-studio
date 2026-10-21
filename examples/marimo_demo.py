@@ -526,139 +526,128 @@ def _(SceneWidget, magpy, mo, np):
     mm = 1e-3
 
     def _every_kind():
-        z = (0, 0, 1)
+        # The centrepiece: a Möbius band, as the docs build one -- vertices
+        # from its middle line out to its edge, twice round, which covers
+        # both halves of it -- its current running over both its faces.
+        # Turned to the view's first look, which comes from 51 degrees below
+        # x, so that its twist shows.
+        round_twice = np.linspace(0, 4 * np.pi, 160)
 
-        def at(column, row):
-            """A place on a grid 30 mm apart, so that nothing overlaps."""
-            return np.array((30 * (column - 1.5), 30 * (1.5 - row), 0)) * mm
-
-        # a strip bent round half a ring, its current following the bend
-        bend = np.linspace(0, np.pi, 9)
-        strip = (
-            np.array([(r * np.cos(a), r * np.sin(a), 0) for a in bend for r in (3, 7)])
-            * mm
-        )
-        # a disc whose current circulates: two rings of points round a centre
-        turn = 2 * np.pi * np.arange(16) / 16
-        disc = (
-            np.array(
-                [(0, 0, 0)]
-                + [(r * np.cos(a), r * np.sin(a), 0) for r in (3, 6) for a in turn]
+        def band(w):
+            reach = 1 + w * np.cos(round_twice / 2)
+            return np.column_stack(
+                [
+                    reach * np.cos(round_twice),
+                    reach * np.sin(round_twice),
+                    w * np.sin(round_twice / 2),
+                ]
             )
-            * mm
+
+        strip = np.empty((320, 3))
+        strip[0::2], strip[1::2] = band(0), band(0.36)
+        moebius = magpy.current.TriangleStrip(
+            current=20, vertices=strip * 16 * mm, style_label="Möbius band"
         )
-        disc_faces = [(0, 1 + k, 1 + (k + 1) % 16) for k in range(16)] + [
+        moebius.rotate_from_angax(-51, "z", anchor=0)
+
+        # a square sheet, as the docs build one: its current circulating, the
+        # stronger the further out
+        side = np.linspace(-5, 5, 11) * mm
+        sheet = np.array([(x, y, 0) for x in side for y in side])
+        sheet_faces = [
             face
-            for k in range(16)
+            for i in range(10)
+            for j in range(10)
             for face in (
-                (1 + k, 17 + k, 17 + (k + 1) % 16),
-                (1 + k, 17 + (k + 1) % 16, 1 + (k + 1) % 16),
+                (j + 11 * i, j + 11 * i + 11, j + 11 * i + 12),
+                (j + 11 * i, j + 11 * i + 12, j + 11 * i + 1),
             )
         ]
-        centres = disc[np.array(disc_faces)].mean(axis=1)
-        disc_current = (
-            np.column_stack([-centres[:, 1], centres[:, 0], np.zeros(len(centres))])
-            / np.linalg.norm(centres[:, :2], axis=1)[:, None]
-        )
+        centres = sheet[np.array(sheet_faces)].mean(axis=1)
+        sheet_current = np.column_stack(
+            [centres[:, 1], -centres[:, 0], np.zeros(len(centres))]
+        ) / (5 * mm)
 
-        objects = [
-            magpy.magnet.Cuboid(
-                polarization=z,
-                dimension=(10 * mm,) * 3,
-                position=at(0, 0),
-                style_label="cuboid",
+        # one of every other kind, each made with its magnetization along `p`
+        kinds = {
+            "mesh": lambda p: magpy.magnet.TriangularMesh.from_ConvexHull(
+                polarization=p, points=np.vstack([np.eye(3), -np.eye(3)]) * 7.5 * mm
             ),
-            magpy.magnet.Cylinder(
-                polarization=z,
-                dimension=(10 * mm, 10 * mm),
-                position=at(1, 0),
-                style_label="cylinder",
+            "sphere": lambda p: magpy.magnet.Sphere(polarization=p, diameter=11 * mm),
+            "cuboid": lambda p: magpy.magnet.Cuboid(
+                polarization=p, dimension=(11 * mm,) * 3
             ),
-            magpy.magnet.CylinderSegment(
-                polarization=z,
-                dimension=(6 * mm, 12 * mm, 8 * mm, 0, 120),
-                position=at(2, 0) - (4 * mm, 4 * mm, 0),
-                style_label="segment",
+            "cylinder": lambda p: magpy.magnet.Cylinder(
+                polarization=p, dimension=(11 * mm, 13 * mm)
             ),
-            magpy.magnet.Sphere(
-                polarization=z,
-                diameter=10 * mm,
-                position=at(3, 0),
-                style_label="sphere",
+            "segment": lambda p: magpy.magnet.CylinderSegment(
+                polarization=p, dimension=(5 * mm, 11 * mm, 10 * mm, -42, 42)
             ),
-            magpy.magnet.Tetrahedron(
-                polarization=z,
-                vertices=np.array([(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]) * mm,
-                position=at(0, 1) - 3 * mm,
-                style_label="tetrahedron",
-            ),
-            magpy.magnet.TriangularMesh.from_ConvexHull(
-                polarization=z,
-                points=np.vstack([np.eye(3), -np.eye(3)]) * 6 * mm,
-                position=at(1, 1),
-                style_label="mesh",
-            ),
-            magpy.misc.Triangle(
-                polarization=z,
-                vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * mm,
-                position=at(2, 1),
-                style_label="triangle",
-            ),
-            magpy.misc.Dipole(
-                moment=(0, 0, 0.1), position=at(3, 1), style_label="dipole"
-            ),
-            magpy.current.Circle(
-                current=1, diameter=10 * mm, position=at(0, 2), style_label="loop"
-            ),
-            magpy.current.Polyline(
-                current=1,
-                vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
+            "tetrahedron": lambda p: magpy.magnet.Tetrahedron(
+                polarization=p,
+                vertices=(
+                    np.array([(0, 0, 0), (10, 0, 0), (0, 10, 0), (0, 0, 10)]) - 2.5
+                )
+                * 1.3
                 * mm,
-                position=at(1, 2),
-                style_label="wire",
             ),
-            magpy.current.TriangleStrip(
-                current=1,
-                vertices=strip,
-                position=at(2, 2) - (0, 3 * mm, 0),
-                style_label="strip",
+            "triangle": lambda p: magpy.misc.Triangle(
+                polarization=(0, 0, 1),
+                vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * 1.3 * mm,
             ),
-            magpy.current.TriangleSheet(
-                current_densities=disc_current,
-                vertices=disc,
-                faces=disc_faces,
-                position=at(3, 2),
-                style_label="sheet",
+            "loop": lambda p: magpy.current.Circle(current=10, diameter=13 * mm),
+            "sheet": lambda p: magpy.current.TriangleSheet(
+                current_densities=sheet_current, vertices=sheet, faces=sheet_faces
             ),
-            magpy.Sensor(
-                pixel=[
-                    [(x, y, 0) for x in (-4 * mm, 0, 4 * mm)]
-                    for y in (-4 * mm, 0, 4 * mm)
-                ],
-                position=at(1.5, 3),
-                style_label="sensor",
+            "wire": lambda p: magpy.current.Polyline(
+                current=10,
+                vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
+                * 1.3
+                * mm,
             ),
-        ]
+            "dipole": lambda p: magpy.misc.Dipole(
+                moment=0.4 * np.array(p), style_size=12 * mm, style_sizemode="absolute"
+            ),
+        }
+        # Round the band, in this order from 47 degrees: the magnets behind it,
+        # as the view first looks, polarized round the ring; the flat ones in
+        # front, stood up to face it.
+        ring = []
+        for k, name in enumerate(kinds):
+            angle = np.deg2rad(47 + k * 360 / len(kinds))
+            outward = np.array([np.cos(angle), np.sin(angle), 0])
+            around = np.array([-np.sin(angle), np.cos(angle), 0])
+            made = kinds[name](around)
+            made.style.label = name
+            reach = 37 * mm
+            if name == "segment":
+                # its arc bulging outward, and its own y round the ring
+                made.rotate_from_angax(np.rad2deg(angle), "z", anchor=0)
+                made.polarization = (0, 1, 0)
+                reach -= 8 * mm
+            elif name in ("triangle", "loop", "sheet", "wire"):
+                # facing that first look: 51 degrees below x, 29 above the floor
+                made.rotate_from_angax(61, "x", anchor=0)
+                made.rotate_from_angax(39, "z", anchor=0)
+            made.move(reach * outward)
+            ring.append(made)
+        objects = [moebius, *ring]
         return mo.vstack(
             [
                 mo.md(
-                    "One of each kind of object, to try **R** on: a magnet's faces "
-                    "each have a handle, and ⌥ moves the opposite one too; a sphere "
-                    "and a loop resize by the rim; a shape made of points has a dot "
-                    "on each, ⌘/ctrl-click to take several. Hold ⇧ to land on "
-                    "another object's corner; Esc takes a drag back. These are "
-                    "copies of the cell's objects, which stay as made."
+                    "Every kind of object, round a Möbius band whose current runs "
+                    "over both its faces. Each takes the handles: **R** on a "
+                    "magnet's faces resizes it, ⌥ moving the opposite one too; a "
+                    "sphere and a loop resize by the rim; a shape made of points "
+                    "has a dot on each, ⌘/ctrl-click to take several. Hold ⇧ to "
+                    "land on another object's corner; Esc takes a drag back. These "
+                    "are copies of the cell's objects, which stay as made."
                 ),
-                SceneWidget(*objects, editable=True, height=460),
+                SceneWidget(*objects, editable=True, height=540),
             ]
         )
 
-    mo.accordion(
-        {
-            "Every kind of object, with its handles": mo.lazy(_every_kind),
-        },
-        lazy=True,
-    )
+    _every_kind()
     return
 
 

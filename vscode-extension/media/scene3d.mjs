@@ -3367,22 +3367,52 @@ function buildScatter(item) {
  *  is drawn, round everything that is showing. */
 function sceneSphere(objectIds) {
   const box = new THREE.Box3();
+  // The corners of each drawn part's own box, turned as the part is: what
+  // `fitView` frames. A box along the world's axes round a card leaning in
+  // a ring reaches corners the card has none in, and framed by them the
+  // ring sat in the middle of the view with a margin all round.
+  const parts = [];
+  const take = (node) => {
+    box.expandByObject(node);
+    node.updateWorldMatrix(true, true);
+    node.traverse((part) => {
+      let own = null;
+      if (part.isInstancedMesh) {
+        if (!part.boundingBox) part.computeBoundingBox();
+        own = part.boundingBox;
+      } else if (part.geometry) {
+        if (!part.geometry.boundingBox) part.geometry.computeBoundingBox();
+        own = part.geometry.boundingBox;
+      }
+      if (!own || own.isEmpty()) return;
+      for (const x of [own.min.x, own.max.x]) {
+        for (const y of [own.min.y, own.max.y]) {
+          for (const z of [own.min.z, own.max.z]) {
+            parts.push(
+              new THREE.Vector3(x, y, z).applyMatrix4(part.matrixWorld),
+            );
+          }
+        }
+      }
+    });
+  };
   const chosen = drawnFor([].concat(objectIds ?? []))
     .map((objectId) => byObjectId.get(objectId))
     .filter(Boolean);
   if (chosen.length) {
-    for (const node of chosen) box.expandByObject(node);
+    for (const node of chosen) take(node);
   } else {
     // A hidden object is not part of what is being looked at.
     for (const node of byObjectId.values()) {
-      if (node.visible) box.expandByObject(node);
+      if (node.visible) take(node);
     }
     // the graduated box sits a little outside the objects, and framing the
     // scene without its scale showing would cut the numbers off
-    if (axes?.visible) box.expandByObject(axes);
+    if (axes?.visible) take(axes);
   }
   if (box.isEmpty()) return null;
   const sphere = box.getBoundingSphere(new THREE.Sphere());
+  sphere.parts = parts;
   // A box with a NaN bound is not empty, and every number taken from it is
   // NaN: better no answer than one that silently blanks the view.
   return Number.isFinite(sphere.radius) ? sphere : null;
@@ -3503,17 +3533,49 @@ function fitView(objectIds) {
       ? looking.normalize()
       : new THREE.Vector3(0.55, -0.68, 0.48).normalize();
 
+  // The corners of each part's box as the camera will see them, about the
+  // scene's centre: how far each reaches across the view and up it, and how
+  // far toward the eye. Framed by them rather than by the sphere round the
+  // whole, a ring of magnets fills the view, where the sphere -- as tall as
+  // the ring is wide, and reaching corners the ring has none in -- left
+  // half of it empty.
+  let up = camera.up.clone().projectOnPlane(direction);
+  if (up.lengthSq() < 1e-9) up = new THREE.Vector3(0, 1, 0); // looking down it
+  up.normalize();
+  const across = new THREE.Vector3().crossVectors(up, direction).normalize();
+  const corners = sphere.parts.map((corner) => {
+    const at = corner.clone().sub(sphere.center);
+    return [at.dot(across), at.dot(up), at.dot(direction)];
+  });
+  const margin = 1.08;
   let distance;
   if (camera.isOrthographicCamera) {
     // No perspective, so distance decides nothing but clipping: the frustum
     // is what frames the scene.
-    frustumHeight = sphere.radius * 2 * 1.1;
+    const aspect =
+      camera.right > camera.left
+        ? (camera.right - camera.left) / (camera.top - camera.bottom)
+        : 1;
+    // a loop, not a spread: a scene of thousands of parts has more corners
+    // than a call takes arguments
+    let tall = 0;
+    for (const [x, y] of corners) {
+      tall = Math.max(tall, Math.abs(y), Math.abs(x) / aspect);
+    }
+    frustumHeight = Math.max(tall, sphere.radius * 0.05) * 2 * margin;
     distance = sphere.radius * 4;
   } else {
     const vertical = THREE.MathUtils.degToRad(camera.fov);
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
-    distance =
-      (sphere.radius / Math.sin(Math.min(vertical, horizontal) / 2)) * 1.1;
+    let reach = 0;
+    for (const [x, y, z] of corners) {
+      reach = Math.max(
+        reach,
+        z + Math.abs(x) / Math.tan(horizontal / 2),
+        z + Math.abs(y) / Math.tan(vertical / 2),
+      );
+    }
+    distance = Math.max(reach, sphere.radius * 0.5) * margin;
   }
   camera.near = camera.isOrthographicCamera
     ? -sphere.radius * 8 // ortho may see behind itself; a box, not a cone

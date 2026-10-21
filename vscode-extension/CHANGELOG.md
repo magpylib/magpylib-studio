@@ -122,7 +122,9 @@ Faces a hair apart -- a sheet's streams on it, an outline on a face -- no longer
 fight: the view's clipping follows the camera rather than being set once at a
 five-thousandth of the way in. A path drawn in millimetres is told from the
 object on it, a path marker of size 0 is not drawn at the default size, and a
-document's field lines come back when its run ends (#63).
+document's field lines come back when its run ends. Framing fits the objects
+themselves rather than a sphere round them all, so a ring of magnets fills the
+view instead of sitting small in the middle of it (#63).
 
 </details>
 
