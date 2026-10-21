@@ -301,6 +301,33 @@
   }
 }
 
+/* The flow's button: its pulse goes once round the loop when the button is
+   pointed at, or turns the flow on -- a cue to what it is for, never on its
+   own, and not for whoever asks the system for less motion. */
+.magpy-flow-pulse {
+  stroke-dashoffset: -15;
+}
+
+.magpy-icon:hover .magpy-flow-pulse,
+.magpy-icon.magpy-cue .magpy-flow-pulse {
+  animation: magpy-flow-round 0.9s ease-in-out;
+}
+
+@keyframes magpy-flow-round {
+  from {
+    stroke-dashoffset: -15;
+  }
+  to {
+    stroke-dashoffset: -115;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .magpy-flow-pulse {
+    animation: none !important;
+  }
+}
+
 .magpy-icon {
   display: grid;
   place-items: center;
