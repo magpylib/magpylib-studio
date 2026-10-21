@@ -16,7 +16,7 @@ TriangleSheet, the way the current runs, in the notebook widget and the VS Code
 panel, whether a run plays or not. They rest while the view is off screen and
 stand still for whoever asks the system for less motion. Arrows asked for in a
 style stay. `SceneWidget(..., flow=False)` puts the pulses away and the arrows
-back, which an export keeps.
+back, which an export keeps (#63).
 
 </details>
 
