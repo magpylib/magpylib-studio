@@ -16,7 +16,9 @@ lines button among the view's tools, `SceneWidget(..., field_lines=True)` or
 keep to it, elsewhere they run in 3D, and they stop at magnets: they show the
 field in the air, coloured as the sensor's arrows are. They follow a drag, are
 saved with the scene and undone like an edit, and a saved page carries them. In
-the notebook widget and the VS Code panel alike (#46).
+the notebook widget and the VS Code panel alike (#46). The field is computed a
+slice of the grid at a time, so a meshed body of a thousand cells takes 0.6 GB
+instead of 8 (#64).
 
 </details>
 
