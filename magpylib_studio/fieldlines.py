@@ -190,12 +190,29 @@ def points_of(grid):
     return grid["origin"] + local @ grid["axes"]
 
 
+#: Source-point pairs per magpylib call. Magpylib evaluates every pair of a
+#: call at once, with about a kilobyte of temporaries each: a meshed body of
+#: a thousand cells against a grid at rest took 8 GB in one call.
+PAIRS_PER_CALL = 200_000
+
+
+def _in_chunks(get, sources, points):
+    """`get(sources, points, sumup=True)`, a slice of the points at a time so
+    that no call holds more than `PAIRS_PER_CALL` source-point pairs."""
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    step = max(1, PAIRS_PER_CALL // max(len(sources), 1))
+    parts = [
+        np.asarray(get(sources, points[i : i + step], sumup=True)).reshape(-1, 3)
+        for i in range(0, len(points), step)
+    ]
+    return np.concatenate(parts) if parts else np.zeros((0, 3))
+
+
 def field(sources, points, kind="B"):
     """B, or H, at `points` from `sources`, summed; zero for no sources."""
     if not sources:
         return np.zeros((len(points), 3))
-    get = magpy.getH if kind == "H" else magpy.getB
-    return np.asarray(get(sources, points, sumup=True)).reshape(-1, 3)
+    return _in_chunks(magpy.getH if kind == "H" else magpy.getB, sources, points)
 
 
 def inside(sources, points):
@@ -203,7 +220,7 @@ def inside(sources, points):
     zero, as magpylib knows its shape. Currents have no inside."""
     if not sources:
         return np.zeros(len(points), dtype=bool)
-    polarization = np.asarray(magpy.getJ(sources, points, sumup=True)).reshape(-1, 3)
+    polarization = _in_chunks(magpy.getJ, sources, points)
     return np.linalg.norm(polarization, axis=1) > 0
 
 

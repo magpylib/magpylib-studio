@@ -7,7 +7,7 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import rpc
+from magpylib_studio import fieldlines, rpc
 from magpylib_studio.widget import SceneWidget
 
 PIXELS = np.linspace(-0.02, 0.02, 5)
@@ -85,3 +85,22 @@ def test_the_switch_is_the_documents(tmp_path):
     answer = rpc.handle(session, {"method": "set_field_lines", "params": {"on": False}})
     assert answer["result"]["ok"]
     assert "fieldlines" not in session.get_scene()
+
+
+def test_field_in_chunks_matches_one_call(monkeypatch):
+    """B, H and the inside of many sources, a slice of the grid at a time, are
+    what one magpylib call gives."""
+    cells = [
+        magpy.magnet.Cuboid(
+            dimension=(1, 1, 1), polarization=(0, 0.3, 1), position=(i, 0, 0)
+        )
+        for i in range(7)
+    ]
+    points = np.random.default_rng(0).uniform(-2, 8, size=(50, 3))
+    monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 30)  # 4 points a call
+    for kind, get in (("B", magpy.getB), ("H", magpy.getH)):
+        np.testing.assert_allclose(
+            fieldlines.field(cells, points, kind), get(cells, points, sumup=True)
+        )
+    inside = np.linalg.norm(magpy.getJ(cells, points, sumup=True), axis=1) > 0
+    np.testing.assert_array_equal(fieldlines.inside(cells, points), inside)
