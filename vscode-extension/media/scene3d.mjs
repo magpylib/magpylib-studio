@@ -3523,7 +3523,31 @@ function fitView(objectIds) {
   applyProjection();
   controls.target.copy(sphere.center);
   controls.update();
+  fitClipping();
   if (snapping) setSnapping(true); // the step follows the scene's size
+}
+
+/** Where the scene is, as last drawn: what the clipping planes must take in. */
+let drawnSphere = null;
+
+/** The clipping planes, from where the camera is now: the near one a
+ *  hundredth of the way to what it looks at, the far one past the far side
+ *  of the scene. Depth is told apart in steps of about distance² / (near ·
+ *  2²⁴), so the near plane a five-thousandth of the way in, set once at the
+ *  fit, made them tens of microns at a hand's length, and faces a hair
+ *  apart -- a sheet's streams on it, an outline on a face -- fought. Kept
+ *  with the camera as the orbit moves it, so zooming in clips nothing. A
+ *  parallel projection keeps the box `fitView` gave it. */
+function fitClipping() {
+  if (!camera || !controls || camera.isOrthographicCamera) return;
+  const reach = camera.position.distanceTo(controls.target);
+  if (!(reach > 0)) return;
+  camera.near = Math.max(reach / 100, 1e-6);
+  const beyond = drawnSphere
+    ? camera.position.distanceTo(drawnSphere.center) + drawnSphere.radius
+    : reach * 20;
+  camera.far = Math.max(beyond * 1.5, camera.near * 100);
+  camera.updateProjectionMatrix();
 }
 
 /** Fit whichever camera is in use to the canvas it draws on. */
@@ -3583,6 +3607,7 @@ function toggleProjection() {
 function orbit() {
   const made = new OrbitControls(camera, renderer.domElement);
   made.addEventListener("change", () => {
+    fitClipping();
     redraw();
     cameraMoved?.();
   });
@@ -3625,6 +3650,7 @@ function setCamera(state) {
   applyProjection();
   camera.lookAt(controls.target);
   controls.update();
+  fitClipping(); // a camera saved before the planes followed it
   framed = true; // a view that was looked at, not one to frame
   return state.projection;
 }
@@ -4595,6 +4621,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // units: a fixed one would miss a scene in metres and swallow one in
   // millimetres, so scale it to what is on screen.
   const sphere = sceneSphere();
+  drawnSphere = sphere;
+  fitClipping(); // the scene may reach further than it did
   raycaster.params.Points.threshold = sphere ? sphere.radius / 100 : 1;
   raycaster.params.Line.threshold = raycaster.params.Points.threshold;
   // Mid-drag the selected object is the one that was *not* rebuilt, and

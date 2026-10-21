@@ -525,6 +525,10 @@ async function flow(port, base) {
       const pulses = shown("flow");
       const arrows = shown("arrows");
       if (!(await tab.evaluate(pulses))) return "the coil's wire has no pulses";
+      const offered = await tab.evaluate(
+        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Current flow")); return Boolean(b && !b.hidden);`,
+      );
+      if (!offered) return "no flow button beside a current";
       if (await tab.evaluate(arrows))
         return "its arrows showed beside the flow";
       if (!(await tab.evaluate(moves))) return "the pulses stood still";

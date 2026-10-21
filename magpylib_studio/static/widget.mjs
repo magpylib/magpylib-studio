@@ -248,6 +248,8 @@ const ICONS = {
     "M7.9 4.1 L7.4 3.3 L6.8 2.7 L6.3 2.1 L5.7 1.7 L5.1 1.5 L4.5 1.5 L3.9 1.6 L3.3 2.0 L2.7 2.6 L2.2 3.5 L1.8 4.6 L1.5 5.8 L1.4 7.2 L1.4 8.7 L1.5 10.1 L1.8 11.4 L2.2 12.4 L2.7 13.3 L3.3 13.9 L3.9 14.3 L4.5 14.4 L5.1 14.4 L5.7 14.2 L6.3 13.8 L6.8 13.2 L7.4 12.6 L7.9 11.8 " +
     "M8.0 4.1 L8.5 3.3 L9.1 2.7 L9.6 2.1 L10.2 1.7 L10.8 1.5 L11.4 1.5 L12.0 1.6 L12.6 2.0 L13.2 2.6 L13.7 3.5 L14.1 4.6 L14.4 5.8 L14.5 7.2 L14.5 8.7 L14.4 10.1 L14.1 11.4 L13.7 12.4 L13.2 13.3 L12.6 13.9 L12.0 14.3 L11.4 14.4 L10.8 14.4 L10.2 14.2 L9.6 13.8 L9.1 13.2 L8.5 12.6 L8.0 11.8 " +
     '"/>',
+  // a current flowing: dashes running into an arrowhead
+  flow: '<path d="M1.5 8h2.5M6 8h2.5M10.5 8h3"/><path d="M11.5 5.5 14 8l-2.5 2.5"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -472,6 +474,11 @@ function render({ model, el }) {
     "lines",
     "Field lines through the pixels of each sensor that reads the field",
     () => commit("field_lines", !model.get("field_lines")),
+  );
+  const flowButton = iconButton(
+    "flow",
+    "Current flow — pulses along each current, the way it runs",
+    () => commit("flow", model.get("flow") === false),
   );
   const fitButton = iconButton(
     "fit",
@@ -744,7 +751,7 @@ function render({ model, el }) {
   };
   tools.append(
     group(fitButton, projectionButton),
-    group(legendButton, axesButton, linesButton, themeButton),
+    group(legendButton, axesButton, linesButton, flowButton, themeButton),
     group(editButton),
     group(pictureButton, exportButton),
     group(keysButton, fullscreenButton),
@@ -1466,6 +1473,12 @@ function render({ model, el }) {
     shown = index;
     scrub.value = String(index);
     showStep();
+    // A document's run ends on the scene its payload draws, still, with
+    // what no frame carries: its field lines, worked out for that pose. So
+    // its last step is drawn whole again, rather than left as the frame was.
+    if (index === frames() - 1 && model.get("payload")?.fieldlines?.length) {
+      draw();
+    }
     if (playing) afterFrame();
     else if (wanted !== null && wanted !== shown) askFor(wanted);
   }
@@ -1671,6 +1684,16 @@ function render({ model, el }) {
       (Boolean(model.get("standalone")) && model.editor === undefined) ||
       !(model.get("payload")?.readings ?? []).length;
     pressed(linesButton, Boolean(model.get("field_lines")));
+  }
+
+  /** The flow's switch, where something flows: a wire, a strip, a sheet. */
+  function showFlow() {
+    const payload = model.get("payload") || {};
+    flowButton.hidden = !(
+      (payload.scatters ?? []).some((item) => item.flow) ||
+      (payload.meshes ?? []).some((item) => item.streams)
+    );
+    pressed(flowButton, model.get("flow") !== false);
   }
 
   function showEditing() {
@@ -2132,6 +2155,7 @@ function render({ model, el }) {
     changed.clear(); // first, so a change made while catching up is kept
     if (now.has("axes")) showAxes();
     if (now.has("flow") && drawing()) api.setFlow(model.get("flow") !== false);
+    if (now.has("payload") || now.has("flow")) showFlow();
     if (now.has("payload") || now.has("editable") || now.has("field_lines")) {
       showLines();
     }
@@ -2311,6 +2335,7 @@ function render({ model, el }) {
   openAsked();
   showAxes();
   showLines();
+  showFlow();
   draw();
 
   /** Hand the browser the file python wrote, as a download. */

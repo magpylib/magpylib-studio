@@ -15,8 +15,9 @@ along a Circle's or a Polyline's wire, down a TriangleStrip and over a
 TriangleSheet, the way the current runs, in the notebook widget and the VS Code
 panel, whether a run plays or not. They rest while the view is off screen and
 stand still for whoever asks the system for less motion. Arrows asked for in a
-style stay. `SceneWidget(..., flow=False)` puts the pulses away and the arrows
-back, which an export keeps (#63).
+style stay. The flow button among the view's tools, shown where something flows,
+or `SceneWidget(..., flow=False)`, puts the pulses away and the arrows back,
+which an export keeps (#63).
 
 </details>
 
@@ -110,6 +111,17 @@ to 59, its frame rate (#58).
 </details>
 
 ### Fixed
+
+<details>
+<summary>Smaller things the view drew wrong</summary>
+
+Faces a hair apart -- a sheet's streams on it, an outline on a face -- no longer
+fight: the view's clipping follows the camera rather than being set once at a
+five-thousandth of the way in. A path drawn in millimetres is told from the
+object on it, a path marker of size 0 is not drawn at the default size, and a
+document's field lines come back when its run ends (#63).
+
+</details>
 
 <details>
 <summary>A triangle magnetized through it, one colour a face</summary>

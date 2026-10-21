@@ -720,6 +720,19 @@ def test_a_current_flows_the_way_it_runs(objects, animation, expected):
         assert [item["flow"] for item in change] == [frame[1] for frame in expected]
 
 
+def test_a_path_is_marked_in_a_drawing_in_millimetres():
+    """Magpylib draws a small scene in mm, its objects' positions in m: the
+    path was found only in a drawing in metres. And its markers drawn at a
+    size of nothing stay so, not the default size."""
+    probe = magpy.Sensor(
+        position=np.linspace((0, 0, 0), (0.01, 0, 0), 5), style_path_marker_size=0
+    )
+    scene = threejs._capture([probe])
+    assert scene.panel(1, 1).labels["x"] == "x (mm)"
+    (path,) = [s for s in threejs.view_payload(scene)["scatters"] if s.get("path")]
+    assert path["marker_size"] == 0
+
+
 def test_a_run_that_changes_shape_carries_the_change(morphing):
     """A cube that grows is not a cube that moves, however it is fitted: its
     trace is carried as it is at every step, and the run still plays."""

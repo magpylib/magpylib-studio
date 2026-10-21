@@ -392,7 +392,7 @@ def _one_size(value, default):
     if isinstance(value, np.ndarray | list | tuple):
         sizes = np.asarray(value, dtype=float).ravel()
         return float(np.nanmax(sizes)) if len(sizes) else float(default)
-    return float(value or default)
+    return float(default) if value == "" else float(value)
 
 
 def _scatter_payload(trace):
@@ -546,6 +546,10 @@ def _mark_paths(scene, objects=None):
     for obj in _given(objects):
         for each in (obj, *getattr(obj, "children_all", ())):
             known[id(each)] = each
+    # the objects' positions are in metres, the drawing in its own unit
+    per_metre = _drawn_per_metre(scene)
+    if not per_metre:
+        return
     for frame in scene.frames:
         for trace in frame.traces:
             if trace.get("type") != "scatter3d" or "path" in trace:
@@ -557,6 +561,7 @@ def _mark_paths(scene, objects=None):
             if len(x) != len(positions):
                 continue
             points = np.column_stack([x, trace["y"], trace["z"]]).astype(float)
+            points /= per_metre
             trace["path"] = bool(
                 np.ptp(positions, axis=0).max() > 0 and np.allclose(points, positions)
             )
