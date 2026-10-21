@@ -63,6 +63,8 @@ export const REDRAW_BUDGET_MS = 8;
  *   `scene` says the drag will redraw from what the pose made, which the
  *   answer may carry -- see `scene()`.
  * - `commit(pose)`: the pose the drag ended on. Record it and close the group.
+ * - `cancel()`: Esc in a drag that had begun: close the group and take it
+ *   back, as if it had never been made.
  * - `scene()`: a promise of the scene as it is now, to redraw around the drag.
  *   Spared when `preview` answers with a `scene` of its own: one message
  *   where there were two, for a host whose every message costs.
@@ -182,6 +184,15 @@ export function watchDrags(host, view) {
 
   function onTransform(event) {
     const pose = event.detail;
+    if (pose.cancel) {
+      // Esc: what the drag sent is taken back, nothing more is
+      const began = dragging?.begun;
+      dragging = null;
+      pending = null;
+      toDraw = null;
+      if (began) view.cancel?.();
+      return;
+    }
     begun();
     if (pose.preview) {
       // Read out at pointer rate rather than at engine rate: the numbers are

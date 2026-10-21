@@ -48,6 +48,20 @@ readout shows a segment's angles in degrees (#59, #60).
 
 </details>
 
+<details>
+<summary>Snap onto other objects, and edit points further</summary>
+
+Hold ⇧ while dragging and what is dragged lands on what is near it, exactly: a
+point on another object's corner, a face where it touches the next object, a
+whole object corner to corner. A point held shows where it is in the readout, to
+type over. A wire gains a point at the faint dot in a segment's middle and loses
+one to Delete. Points picked with ⌘/ctrl-click, or with a box dragged with ⌥,
+move with W, turn with E and scale with R, together. Esc during a drag takes it
+back. Each box in the readout has its unit after it, and a triangle, a current
+sheet and a strip have icons of their own.
+
+</details>
+
 ### Changed
 
 <details>

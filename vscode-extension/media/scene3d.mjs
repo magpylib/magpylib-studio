@@ -298,20 +298,26 @@ function makeGizmo() {
     const node = gizmo.object;
     if (!node || !from) return;
     if (from.point) {
-      // The points held, moved as the handles moved: in the object's own
-      // frame, as magpylib keeps its vertices, each by the same offset.
+      // The points held, carried as the handles carried their stand-in --
+      // moved, or turned or scaled about their middle -- in the object's
+      // own frame, as magpylib keeps its vertices.
       const [objectId] = from.objectIds;
-      const offset = node
-        .getWorldPosition(new THREE.Vector3())
-        .sub(from.placed[objectId])
-        .applyQuaternion(from.orientations[objectId].clone().invert())
-        .sub(new THREE.Vector3().fromArray(from.point.middle));
-      if (offset.lengthSq() < 1e-24) return; // pressed, not moved
+      node.updateMatrixWorld(true);
+      const carry = from.point.frame
+        .clone()
+        .invert()
+        .multiply(node.matrixWorld)
+        .multiply(from.point.start.clone().invert())
+        .multiply(from.point.frame);
+      const still = carry.elements.every(
+        (v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-12,
+      );
+      if (still) return; // pressed, not moved
       const value = nested(
         from.point.like,
         from.point.value.map((p, i) =>
           from.point.indices.includes(i)
-            ? new THREE.Vector3().fromArray(p).add(offset).toArray()
+            ? new THREE.Vector3().fromArray(p).applyMatrix4(carry).toArray()
             : p,
         ),
       );
@@ -459,6 +465,7 @@ function makeGizmo() {
           world: trace.matrixWorld.clone(),
         });
       });
+      node.updateMatrixWorld(true);
       from = {
         objectIds,
         hung,
@@ -480,8 +487,10 @@ function makeGizmo() {
           node === pointProxy
             ? {
                 indices: node.userData.indices,
-                middle: node.userData.middle,
                 attr: shapes[primary].attr,
+                // the object's frame, and the stand-in in it, as they began
+                frame: frameOf(primary),
+                start: node.matrixWorld.clone(),
                 like: shapes[primary].value, // its nesting, to write back in
                 value: pointsOf(shapes[primary].value).map((p) => [...p]),
               }
@@ -493,6 +502,11 @@ function makeGizmo() {
                 .applyQuaternion(orientation) // stored local, turned in world
             : null,
       };
+      // What a drag with Shift snaps to, and -- moving whole objects -- the
+      // vertices of its own it snaps with, in the frame of what is dragged.
+      from.targets = snapTargets(new Set(drawnFor(objectIds)));
+      from.own =
+        node === proxy || node === pointProxy ? [] : drawnPointsOf(node);
       // `redrawn`: the handles are on a stand-in, so the object's own node
       // is drawn again from the engine as the drag goes, not kept
       host.dispatchEvent(
@@ -505,7 +519,18 @@ function makeGizmo() {
         }),
       );
     } else {
-      report(false); // the one that gets recorded and redrawn
+      showSnap(null);
+      if (dragCancelled) {
+        // Esc: the drag is taken back, not recorded -- see `cancelDrag`
+        dragCancelled = false;
+        host.dispatchEvent(
+          new CustomEvent("objecttransform", {
+            detail: { preview: false, cancel: true, edits: [] },
+          }),
+        );
+      } else {
+        report(false); // the one that gets recorded and redrawn
+      }
       for (const each of from.hung) {
         if (each.parent === node) scene.attach(each);
       }
@@ -517,6 +542,7 @@ function makeGizmo() {
   gizmo.addEventListener("change", redraw);
   gizmo.addEventListener("objectChange", () => {
     if (from?.shape) constrainScale(gizmo.object, from.shape.constraint);
+    if (from) snapDragged(gizmo.object, from);
     report(true);
   });
 }
@@ -600,6 +626,7 @@ function setGizmoMode(mode) {
   // handles; a point stays picked only while its object is resized
   if (!alone || chosenPoint?.objectId !== primaryId()) chosenPoint = null;
   if (!alone || pickedPoints?.objectId !== primaryId()) pickedPoints = null;
+  if (!pickedPoints) pointsMode = "translate";
   placeDots(alone ? primaryId() : null);
   if (placePointHandles()) return gizmoMode;
   if (together && gizmoMode !== "none") {
@@ -765,6 +792,8 @@ let dotted = null; // { objectId, value, frame } while the dots are shown
 let dotHovered = null;
 let chosenPoint = null; // { objectId, index }: the point under the pointer
 let pickedPoints = null; // { objectId, indices }: ⌘/ctrl-clicked, held
+let pointsMode = "translate"; // what the handles do to points picked
+let heldKey = ""; // the points the handles held, as last told: `announceHeld`
 const pointProxy = new THREE.Object3D();
 
 /** What a grip moves, by colour: x, y and z as the handles colour them, and
@@ -988,7 +1017,7 @@ function makeGrips() {
   guide.renderOrder = 999;
   guide.frustumCulled = false;
   grips.add(guide);
-  scene.add(grips, dots, pointProxy);
+  scene.add(grips, dots, pointProxy, snapMark);
 }
 
 /** The grips the shape shown has, without the guide. Raycasting reaches
@@ -1097,8 +1126,27 @@ function nested(like, points) {
   return fill(like);
 }
 
+const dotPool = []; // the points' dots, made as they are needed
+const ghostPool = []; // a wire's segments' middles: a point to put there
+let ghostHovered = null; // the ghost under the pointer, as where it puts one
+
+/** `pool`'s `index`th dot, made if it is not yet. */
+function dotIn(pool, index, size) {
+  while (pool.length <= index) {
+    const dot = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshBasicMaterial(HANDLE_LOOK),
+    );
+    dot.renderOrder = 1000;
+    dots.add(dot);
+    pool.push(dot);
+  }
+  return pool[index];
+}
+
 /** Show a dot on each of `objectId`'s points, if they move one at a time,
- *  or put them away. */
+ *  and on a wire a fainter one on each segment's middle, a click on which
+ *  puts a point there; or put them away. */
 function placeDots(objectId) {
   const node = objectId ? byObjectId.get(objectId) : null;
   const shape = objectId ? shapes[objectId] : null;
@@ -1112,31 +1160,81 @@ function placeDots(objectId) {
   dots.matrix.copy(dotted.frame);
   dots.matrixWorldNeedsUpdate = true;
   dots.visible = true;
-  while (dots.children.length < points.length) {
-    const dot = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 0.08, 0.08),
-      new THREE.MeshBasicMaterial(HANDLE_LOOK),
-    );
-    dot.renderOrder = 1000;
-    dots.add(dot);
-  }
-  dots.children.forEach((dot, index) => {
-    dot.visible = index < points.length;
-    if (!dot.visible) return;
-    dot.position.fromArray(points[index]);
+  const held = heldPoints();
+  points.forEach((point, index) => {
+    const dot = dotIn(dotPool, index, 0.08);
+    dot.visible = true;
+    dot.position.fromArray(point);
     dot.userData.dot = index;
-    const lit = index === dotHovered || heldPoints()?.includes(index);
+    const lit = index === dotHovered || held?.includes(index);
     dot.material.color.setHex(lit ? GRIP_ACTIVE : DOT);
   });
+  for (const dot of dotPool.slice(points.length)) dot.visible = false;
+  const middles = shape.insertable
+    ? points.slice(1).map((p, k) => p.map((v, n) => (v + points[k][n]) / 2))
+    : [];
+  middles.forEach((middle, k) => {
+    const ghost = dotIn(ghostPool, k, 0.06);
+    const lit = k + 1 === ghostHovered;
+    ghost.visible = true;
+    ghost.position.fromArray(middle);
+    ghost.userData.ghost = k + 1; // where the point it makes goes
+    ghost.material.color.setHex(lit ? GRIP_ACTIVE : DOT);
+    ghost.material.opacity = lit ? 1 : 0.45;
+  });
+  for (const ghost of ghostPool.slice(middles.length)) ghost.visible = false;
 }
 
 /** The dots in use. */
 function dotObjects() {
-  return dots.children.filter((dot) => dot.visible);
+  return dotPool.filter((dot) => dot.visible);
 }
 
-/** Put the move handles on the point chosen, through a stand-in at it,
- *  turned with the object for "local". Returns whether they went there. */
+/** The ghosts in use. */
+function ghostObjects() {
+  return ghostPool.filter((ghost) => ghost.visible);
+}
+
+/** Put `value`, a shape's points, as one edit: a point put in or taken
+ *  out is no drag, and is one step to undo. */
+function commitPoints(objectId, attr, value) {
+  host.dispatchEvent(
+    new CustomEvent("objecttransform", {
+      detail: { preview: false, edits: [{ objectId, shape: { attr, value } }] },
+    }),
+  );
+}
+
+/** A point in the middle of a wire's segment, before point `k`; the new
+ *  point is then the one under the pointer. */
+function insertPoint(k) {
+  const shape = shapes[dotted.objectId];
+  const points = pointsOf(shape.value);
+  const middle = points[k - 1].map((v, n) => (v + points[k][n]) / 2);
+  pickedPoints = null;
+  chosenPoint = { objectId: dotted.objectId, index: k };
+  commitPoints(dotted.objectId, shape.attr, [
+    ...points.slice(0, k),
+    middle,
+    ...points.slice(k),
+  ]);
+}
+
+/** Delete or Backspace: the points the handles hold, out of a wire that
+ *  keeps two at least. Answers whether it took the key. */
+function deletePoints() {
+  const indices = heldPoints();
+  const shape = dotted ? shapes[dotted.objectId] : null;
+  if (!indices?.length || !shape?.insertable) return false;
+  const points = pointsOf(shape.value).filter((_, i) => !indices.includes(i));
+  if (points.length < 2) return false; // a wire runs between two at least
+  const { objectId } = dotted;
+  pickedPoints = null;
+  chosenPoint = null;
+  commitPoints(objectId, shape.attr, points);
+  return true;
+}
+
 /** The points the move handles hold: those ⌘/ctrl-clicked, while any are,
  *  or the one under the pointer. */
 function heldPoints() {
@@ -1146,6 +1244,9 @@ function heldPoints() {
   return null;
 }
 
+/** Put the move handles on the points held, through a stand-in on their
+ *  middle, turned with the object for "local". Returns whether they went
+ *  there. */
 function placePointHandles() {
   const indices = heldPoints();
   const points = (indices ?? []).map((i) => dotted.value[i]).filter(Boolean);
@@ -1165,11 +1266,67 @@ function placePointHandles() {
   pointProxy.scale.set(1, 1, 1);
   pointProxy.userData.objectId = dotted.objectId;
   pointProxy.userData.indices = [...indices];
-  pointProxy.userData.middle = point;
-  gizmo.setSpace(SPACES.translate ?? "world");
-  gizmo.mode = "translate";
+  // points picked are moved, turned or scaled as W, E or R said; the one
+  // under the pointer, alone, only moves
+  const mode = pickedPoints ? pointsMode : "translate";
+  gizmo.setSpace(mode === "scale" ? "local" : (SPACES[mode] ?? "world"));
+  gizmo.mode = mode;
   gizmo.attach(pointProxy);
   return true;
+}
+
+/** W, E or R while points are picked: the handles move, turn or scale them
+ *  about their middle, and the object's own mode stays. Answers whether it
+ *  took the key. */
+function setPointsMode(mode) {
+  if (!pickedPoints || !["translate", "rotate", "scale"].includes(mode)) {
+    return false;
+  }
+  pointsMode = mode;
+  setGizmoMode(gizmoMode);
+  return true;
+}
+
+/** Tell the host when the points the handles hold change, for a readout
+ *  of the one held to follow. */
+function announceHeld() {
+  const indices =
+    gizmo?.object === pointProxy ? pointProxy.userData.indices : null;
+  const key = indices ? `${dotted?.objectId}:${indices.join()}` : "";
+  if (key === heldKey) return;
+  heldKey = key;
+  host?.dispatchEvent(new CustomEvent("pointheld"));
+}
+
+/** The one point the handles hold, as the readout shows it: its object,
+ *  which point, and where it is in the object's own frame. Null for none,
+ *  or for several. */
+function heldPoint() {
+  const indices =
+    gizmo?.object === pointProxy ? pointProxy.userData.indices : null;
+  if (indices?.length !== 1 || !dotted) return null;
+  const [index] = indices;
+  return {
+    objectId: dotted.objectId,
+    attr: shapes[dotted.objectId].attr,
+    index,
+    at: dotted.value[index],
+  };
+}
+
+/** The edit that puts the point held at `at`: numbers, or an expression
+ *  where one is typed in a box. */
+function pointEdit(at) {
+  const held = heldPoint();
+  if (!held) return null;
+  const shape = shapes[held.objectId];
+  const points = pointsOf(shape.value).map((p, i) =>
+    i === held.index ? at : p,
+  );
+  return {
+    objectId: held.objectId,
+    shape: { attr: shape.attr, value: nested(shape.value, points) },
+  };
 }
 
 /** Keep each grip and dot the size of the handles on screen, whatever the
@@ -1177,7 +1334,8 @@ function placePointHandles() {
 function sizeGrips() {
   const shown = [
     ...(grips.visible ? gripObjects() : []),
-    ...(dots.visible ? dotObjects() : []),
+    ...(dots.visible ? dots.children.filter((dot) => dot.visible) : []),
+    ...(snapMark.visible ? [snapMark] : []),
   ];
   if (!shown.length) return;
   grips.updateMatrixWorld(true);
@@ -1232,6 +1390,183 @@ function shiftedPosition(pose, shift) {
     : moved(pose.anchor, pose.turn);
 }
 
+// --- snapping -----------------------------------------------------------
+//
+// Shift held while dragging, what is dragged lands on what is near it on
+// screen: a point on another object's vertex, a face where its plane meets
+// one, a whole object vertex to vertex. The vertices are those the engine
+// draws, so a curved surface is snapped to at its facets' corners; a path's
+// track and a field line are not things to land on.
+
+const SNAP_PIXELS = 10;
+let shiftHeld = false; // read off the pointer as it moves: see `watchGrips`
+const snapMark = new THREE.Mesh(
+  new THREE.BoxGeometry(0.12, 0.12, 0.12),
+  new THREE.MeshBasicMaterial({ ...HANDLE_LOOK, color: GRIP_ACTIVE }),
+);
+snapMark.renderOrder = 1001;
+snapMark.visible = false;
+
+/** Where on the page `point`, in the world, is drawn; null behind the view. */
+function onScreen(point) {
+  const p = point.clone().project(camera);
+  if (p.z > 1) return null;
+  const { clientWidth: w, clientHeight: h } = renderer.domElement;
+  return [((p.x + 1) / 2) * w, ((1 - p.y) / 2) * h];
+}
+
+/** The vertices drawn for every object but those in `skip`, in the world,
+ *  each with where it is on the page, kept in cells of `SNAP_PIXELS` for a
+ *  look near the pointer: what a drag snaps to. Taken once a drag, which
+ *  the camera does not move during. */
+function snapTargets(skip) {
+  const seen = new Map();
+  const at = new THREE.Vector3();
+  const visit = (part) => {
+    if (!part.visible || part.userData.path || part.userData.unsnapped) return;
+    if (!part.isInstancedMesh && !part.isPoints) {
+      for (const [x, y, z] of verticesOf(part.geometry)) {
+        at.set(x, y, z).applyMatrix4(part.matrixWorld);
+        const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
+        if (!seen.has(key)) seen.set(key, at.clone());
+      }
+    }
+    for (const child of part.children) visit(child);
+  };
+  for (const [objectId, node] of byObjectId) {
+    if (skip.has(objectId) || !node.visible) continue;
+    node.updateMatrixWorld(true);
+    visit(node);
+  }
+  const cells = new Map();
+  for (const point of seen.values()) {
+    const page = onScreen(point);
+    if (!page) continue;
+    const key = cellOf(page);
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push({ point, page });
+  }
+  return cells;
+}
+
+function cellOf([x, y]) {
+  return `${Math.floor(x / SNAP_PIXELS)},${Math.floor(y / SNAP_PIXELS)}`;
+}
+
+/** Of `cells`, the target nearest `page` within `SNAP_PIXELS`, or null. */
+function nearestTarget(cells, page) {
+  if (!page) return null;
+  const [cx, cy] = cellOf(page).split(",").map(Number);
+  let best = null;
+  let distance = SNAP_PIXELS;
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (const target of cells.get(`${cx + dx},${cy + dy}`) ?? []) {
+        const d = Math.hypot(
+          target.page[0] - page[0],
+          target.page[1] - page[1],
+        );
+        if (d <= distance) {
+          distance = d;
+          best = { ...target, distance: d };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+/** A geometry's vertices: the engine's numbers where it kept them, the
+ *  buffer's otherwise -- a wide line's ends, an outline's. */
+function* verticesOf(geometry) {
+  const exact = geometry?.userData.exact;
+  if (exact) {
+    for (let i = 0; i + 2 < exact.length; i += 3) {
+      const [x, y, z] = [exact[i], exact[i + 1], exact[i + 2]];
+      if (x !== null && y !== null && z !== null) yield [x, y, z]; // a pen lift
+    }
+    return;
+  }
+  const attributes = geometry?.attributes;
+  const lists = attributes?.instanceStart
+    ? [attributes.instanceStart, attributes.instanceEnd]
+    : attributes?.position
+      ? [attributes.position]
+      : [];
+  for (const list of lists) {
+    for (let i = 0; i < list.count; i++) {
+      yield [list.getX(i), list.getY(i), list.getZ(i)];
+    }
+  }
+}
+
+/** Mark what was snapped to, or nothing. */
+function showSnap(point) {
+  snapMark.visible = Boolean(point);
+  if (point) snapMark.position.copy(point);
+}
+
+/** The vertices drawn under `node` -- what it carries too -- in its own
+ *  frame, for a drag of it to snap with as it moves. */
+function drawnPointsOf(node) {
+  node.updateMatrixWorld(true);
+  const inverse = node.matrixWorld.clone().invert();
+  const seen = new Map();
+  const at = new THREE.Vector3();
+  node.traverse((part) => {
+    if (!part.visible || part.userData.path || part.isInstancedMesh) return;
+    if (part.isPoints || !part.geometry?.userData.exact) return; // its own
+    for (const [x, y, z] of verticesOf(part.geometry)) {
+      at.set(x, y, z).applyMatrix4(part.matrixWorld).applyMatrix4(inverse);
+      const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
+      if (!seen.has(key)) seen.set(key, at.clone());
+    }
+  });
+  return [...seen.values()];
+}
+
+/** With Shift held and the handles moving it, land what is dragged on the
+ *  nearest target: a point picked up, on it; a whole object, the one of its
+ *  own vertices nearest a target on that target. */
+function snapDragged(node, from) {
+  if (!shiftHeld || gizmo.mode !== "translate") return showSnap(null);
+  node.updateMatrixWorld(true);
+  if (node === pointProxy) {
+    const near = nearestTarget(
+      from.targets,
+      onScreen(node.getWorldPosition(new THREE.Vector3())),
+    );
+    if (near) node.position.copy(near.point); // the stand-in is the scene's
+    return showSnap(near?.point);
+  }
+  let best = null;
+  let mine = null;
+  for (const local of from.own) {
+    const world = local.clone().applyMatrix4(node.matrixWorld);
+    const near = nearestTarget(from.targets, onScreen(world));
+    if (near && (!best || near.distance < best.distance)) {
+      best = near;
+      mine = world;
+    }
+  }
+  if (best) node.position.add(best.point.clone().sub(mine));
+  showSnap(best?.point);
+}
+
+let dragCancelled = false; // Esc in a drag of the handles: see `cancelDrag`
+let cancelGrip = () => false; // and in a grip's: see `watchGrips`
+
+/** Esc in a drag: it ends where it began and is taken back, as if never
+ *  made (`drag.mjs`). Answers whether there was one. */
+function cancelDrag() {
+  if (cancelGrip()) return true;
+  if (!gizmo?.dragging) return false;
+  dragCancelled = true;
+  gizmo.reset(); // the handles, and what they carry, back where they began
+  gizmo.dragging = false;
+  return true;
+}
+
 /** The grips' and the dots' pointer: lit under it, dragged or picked by
  *  it. Bound after the picks, whose release looks at `gripPressed` before
  *  this clears it. */
@@ -1259,6 +1594,12 @@ function watchGrips() {
     const hit = raycaster.intersectObjects(dotObjects(), false)[0];
     return hit ? hit.object.userData.dot : null;
   };
+  const ghostAt = (event) => {
+    if (!dots.visible) return null;
+    aim(event);
+    const hit = raycaster.intersectObjects(ghostObjects(), false)[0];
+    return hit ? hit.object.userData.ghost : null;
+  };
   /** Where the pointer is along a grip's motion, in the shape's own frame:
    *  how far along its line, or the angle round the axis in degrees. Null
    *  where the view cannot say -- looking edge-on at the plane an angle
@@ -1284,6 +1625,75 @@ function watchGrips() {
     );
     if (!hit || Math.hypot(hit.x, hit.y) < 1e-12) return null;
     return THREE.MathUtils.radToDeg(Math.atan2(hit.y, hit.x));
+  };
+  /** For Shift in a grip's drag: the other objects' vertices within the
+   *  shape's reach across its line, each as how far along the line it is,
+   *  where that is on the page, and the vertex itself. */
+  const lineTargets = (drag) => {
+    const { foot, along } = drag.spec.line;
+    const lengths =
+      gripped?.kind === "segment" ? drag.from.slice(0, 3) : drag.from;
+    const reach = Math.max(...lengths); // across the line: the shape's size
+    const frame = drag.inverse.clone().invert();
+    const out = [];
+    for (const cell of snapTargets(
+      new Set(drawnFor([drag.objectId])),
+    ).values()) {
+      for (const { point } of cell) {
+        const local = point.clone().applyMatrix4(drag.inverse).sub(foot);
+        const t = local.dot(along);
+        if (local.addScaledVector(along, -t).length() > reach) continue;
+        const onLine = foot
+          .clone()
+          .addScaledVector(along, t)
+          .applyMatrix4(frame);
+        out.push({ t, page: onScreen(onLine), vertex: point });
+      }
+    }
+    return out;
+  };
+  /** Where Shift lands a grip dragged `moved` along its line from where it
+   *  began: on the target nearest its own point on the page, if one is
+   *  near -- the face then meets that vertex's level. */
+  const snapAlong = (drag, moved) => {
+    drag.targets ??= lineTargets(drag);
+    const { foot, along } = drag.spec.line;
+    const t0 = drag.spec.at.clone().sub(foot).dot(along);
+    const frame = drag.inverse.clone().invert();
+    const page = onScreen(
+      foot
+        .clone()
+        .addScaledVector(along, t0 + moved)
+        .applyMatrix4(frame),
+    );
+    let best = null;
+    for (const target of drag.targets) {
+      if (!page || !target.page) continue;
+      const d = Math.hypot(target.page[0] - page[0], target.page[1] - page[1]);
+      if (d <= SNAP_PIXELS && (!best || d < best.d)) best = { d, target };
+    }
+    return best
+      ? { moved: best.target.t - t0, point: best.target.vertex }
+      : null;
+  };
+  cancelGrip = () => {
+    if (!gripping) return false;
+    const drag = gripping;
+    gripping = null;
+    gripPressed = false;
+    controls.enabled = true;
+    element.style.cursor = "";
+    showSnap(null);
+    if (gripped) setGrips(gripped.value);
+    if (drag.moved) {
+      host.dispatchEvent(
+        new CustomEvent("objecttransform", {
+          detail: { preview: false, cancel: true, edits: [] },
+        }),
+      );
+    }
+    redraw();
+    return true;
   };
   const send = (drag, preview) => {
     const edit = {
@@ -1316,6 +1726,7 @@ function watchGrips() {
     chosenPoint =
       next === null ? null : { objectId: dotted.objectId, index: next };
     setGizmoMode(gizmoMode);
+    announceHeld();
   };
 
   // ⌘/ctrl-click on a dot picks its point, or puts it back: the points
@@ -1341,7 +1752,75 @@ function watchGrips() {
           }
         : null;
       setGizmoMode(gizmoMode);
+      announceHeld();
       redraw();
+    },
+    true,
+  );
+
+  // A click on a ghost puts a point there. Taken before the handles and the
+  // orbit, as a press on a dot with ⌘ is; made on the release, if the press
+  // stayed put.
+  let ghostPress = null;
+  element.addEventListener(
+    "pointerdown",
+    (event) => {
+      // over the whole shape's handles too, which it sits in the middle
+      // of; only a point's handles in hand come before it
+      if (event.button !== 0 || !dotted) return;
+      if (gizmo?.axis && gizmo.object === pointProxy) return;
+      const ghost = ghostAt(event);
+      if (ghost === null) return;
+      event.stopImmediatePropagation();
+      gripPressed = true;
+      ghostPress = { ghost, x: event.clientX, y: event.clientY };
+    },
+    true,
+  );
+
+  // ⌥-drag over empty space draws a box: the dots in it are picked, with
+  // those picked already. The orbit and a pick of what is behind stand
+  // aside for it.
+  let boxing = null;
+  const boxRect = (event) => ({
+    left: Math.min(boxing.x, event.clientX),
+    top: Math.min(boxing.y, event.clientY),
+    right: Math.max(boxing.x, event.clientX),
+    bottom: Math.max(boxing.y, event.clientY),
+  });
+  element.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0 || !event.altKey || !dotted || gizmo?.axis) return;
+      if (dotAt(event) !== null || ghostAt(event) !== null) return;
+      if (gripped && gripAt(event) !== null) return; // ⌥ on a grip: both faces
+      event.stopImmediatePropagation();
+      gripPressed = true;
+      element.setPointerCapture(event.pointerId);
+      const overlay = document.createElement("div");
+      Object.assign(overlay.style, {
+        position: "fixed",
+        border: "1px dashed #ffcc00",
+        background: "rgba(255, 204, 0, 0.08)",
+        pointerEvents: "none",
+        zIndex: "10",
+      });
+      document.body.appendChild(overlay);
+      boxing = { x: event.clientX, y: event.clientY, overlay };
+    },
+    true,
+  );
+  element.addEventListener(
+    "pointermove",
+    (event) => {
+      if (!boxing) return;
+      const { left, top, right, bottom } = boxRect(event);
+      Object.assign(boxing.overlay.style, {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${right - left}px`,
+        height: `${bottom - top}px`,
+      });
     },
     true,
   );
@@ -1375,15 +1854,25 @@ function watchGrips() {
   });
 
   element.addEventListener("pointermove", (event) => {
+    shiftHeld = event.shiftKey; // for the handles' drags: see `snapDragged`
     if (!gripping) {
       if (event.buttons) return; // orbiting
       hoverPoints(event);
       const index = gripAt(event);
       const dot = dotAt(event);
-      if (index === gripHovered && dot === dotHovered) return;
+      const ghost = dot === null ? ghostAt(event) : null;
+      if (
+        index === gripHovered &&
+        dot === dotHovered &&
+        ghost === ghostHovered
+      ) {
+        return;
+      }
       gripHovered = index;
       dotHovered = dot;
-      element.style.cursor = index === null && dot === null ? "" : "grab";
+      ghostHovered = ghost;
+      element.style.cursor =
+        ghost !== null ? "copy" : index === null && dot === null ? "" : "grab";
       if (gripped) setGrips(gripped.value);
       if (dotted) placeDots(dotted.objectId);
       redraw();
@@ -1397,6 +1886,14 @@ function watchGrips() {
       gripping.turned += ((now - gripping.last + 540) % 360) - 180;
       gripping.last = now;
       moved = gripping.turned;
+    } else if (event.shiftKey) {
+      // Shift: where the face, or the rim, comes nearest another object's
+      // vertex along its line, it stops there -- touching, not inside
+      const landed = snapAlong(gripping, moved);
+      if (landed) moved = landed.moved;
+      showSnap(landed?.point);
+    } else {
+      showSnap(null);
     }
     // ⌥ while dragging grows both ways, and lets go of it again
     const { value, shift = null } = spec.to(from, moved, event.altKey);
@@ -1426,6 +1923,49 @@ function watchGrips() {
 
   const letGo = (event) => {
     gripPressed = false;
+    if (ghostPress) {
+      const stayed =
+        Math.hypot(
+          event.clientX - ghostPress.x,
+          event.clientY - ghostPress.y,
+        ) <= 4;
+      if (stayed && dotted) insertPoint(ghostPress.ghost);
+      ghostPress = null;
+      return;
+    }
+    if (boxing) {
+      const { left, top, right, bottom } = boxRect(event);
+      boxing.overlay.remove();
+      boxing = null;
+      element.releasePointerCapture?.(event.pointerId);
+      const canvas = element.getBoundingClientRect();
+      const inside = dotObjects()
+        .filter((dot) => {
+          const page = onScreen(dot.getWorldPosition(new THREE.Vector3()));
+          if (!page) return false;
+          const x = page[0] + canvas.left;
+          const y = page[1] + canvas.top;
+          return x >= left && x <= right && y >= top && y <= bottom;
+        })
+        .map((dot) => dot.userData.dot);
+      if (inside.length && dotted) {
+        const held = new Set([
+          ...(pickedPoints?.objectId === dotted.objectId
+            ? pickedPoints.indices
+            : []),
+          ...inside,
+        ]);
+        pickedPoints = {
+          objectId: dotted.objectId,
+          indices: [...held].sort((a, b) => a - b),
+        };
+        setGizmoMode(gizmoMode);
+        announceHeld();
+        redraw();
+      }
+      return;
+    }
+    showSnap(null);
     if (!gripping) return;
     const drag = gripping;
     gripping = null;
@@ -1961,6 +2501,9 @@ function takeOff(added) {
 
 function buildMesh(item) {
   const geometry = new THREE.BufferGeometry();
+  // the engine's own numbers, which a snap lands on: the buffer's are
+  // 32-bit, a few nanometres out at a magnet's size
+  geometry.userData.exact = item.position;
   const options = {
     transparent: item.opacity < 1,
     opacity: item.opacity,
@@ -2066,6 +2609,8 @@ function buildItem(item) {
           ? buildFieldLines(item)
           : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
+  // a field line is the field's, not a thing a drag could land on
+  if (item.kind === "fieldlines") built.userData.unsnapped = true;
   built.traverse((part) => {
     if (part.material) part.material.userData.own = part.material.opacity;
   });
@@ -2565,6 +3110,7 @@ function pixelShape(symbol) {
 
 function buildScatter(item) {
   const geometry = new THREE.BufferGeometry();
+  geometry.userData.exact = item.position; // see `buildMesh`
   const position = withPenLifts(item.position);
   geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
   boundByFinitePoints(geometry, position);
@@ -3674,7 +4220,9 @@ const VIEW_KEYS = {
   " ": "play",
   h: "hide", // shift: show only the selection, or everything again
   c: "parent", // the collection the selection is in; again, the one round it
-  Escape: "deselect",
+  Escape: "deselect", // but a drag in progress first: that is taken back
+  Delete: "deletePoints", // the points held, out of a wire
+  Backspace: "deletePoints",
 };
 
 // Where the camera stands, from what it looks at, for each axis view.
@@ -3715,7 +4263,11 @@ function viewKey(event, host = {}) {
       return ask(host.hide, { isolate: event.shiftKey });
     case "parent":
       return selectedIds.length > 0 && ask(host.parent, selectedIds[0]);
-    default: // play, deselect
+    case "deselect":
+      return cancelDrag() || ask(host.deselect);
+    case "deletePoints":
+      return deletePoints();
+    default: // play
       return ask(host[action]);
   }
 }
@@ -3899,6 +4451,9 @@ export const scene3d = drawingAfter({
   poseEdit,
   canResize: (objectId) => Boolean(shapes[objectId]),
   canAim: (objectId) => Boolean(polarizations[objectId]),
+  heldPoint,
+  pointEdit,
+  setPointsMode,
   byObjectId,
 });
 

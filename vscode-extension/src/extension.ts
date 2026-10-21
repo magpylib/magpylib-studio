@@ -2036,6 +2036,7 @@ const ACTS = new Set([
   'undo',
   'redo',
   'dragStart',
+  'cancelDrag',
 ]);
 
 /** Fill in a scene's tab: the studio's view, drawn for that scene. */
@@ -2080,6 +2081,8 @@ function adoptScenePanel(
       vscode.window.setStatusBarMessage(`Magpylib Studio: ${message.text}`, 5000);
     } else if (message.type === 'dragStart') {
       void beginDragFromPanel(context);
+    } else if (message.type === 'cancelDrag') {
+      void cancelDragFromPanel(context);
     } else if (message.type === 'ready') {
       panel.webview.postMessage({ type: 'select', objectId: doc.selected });
     }
@@ -2291,6 +2294,13 @@ async function transformFromPanel(
   // A refused drag still leaves the view showing where the object was dragged
   // to, and only a redraw from the model puts it back.
   await finishDrag(context);
+}
+
+/** Esc in a drag: close its group where it got to, then undo it, in that
+ *  order -- an undo that overtook the close would find the group open. */
+async function cancelDragFromPanel(context: vscode.ExtensionContext): Promise<void> {
+  await transformFromPanel(context, { edits: [] });
+  await vscode.commands.executeCommand('magpylib-studio.undo');
 }
 
 /** Open a drag: group what it is about to do.
