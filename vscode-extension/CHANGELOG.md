@@ -94,7 +94,8 @@ sheet and a strip have icons of their own (#62).
 The object panel's style tree lists the label, colour and opacity first, then
 the groups of the object's own kind, then those every object shares, each
 group's `show` on top; an open group's rows hang on a guide line, as the
-legend's do (#63).
+legend's do; and an unset colour's swatch shows the colour the object is drawn
+in, not black (#63).
 
 </details>
 

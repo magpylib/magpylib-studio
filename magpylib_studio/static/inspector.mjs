@@ -202,6 +202,17 @@ function element(tag, className, text) {
 }
 
 /** The unit, kept quiet next to the name it belongs to. */
+/** `colour` -- `#2e91e5`, `rgb(...)`, `red` -- as the `#rrggbb` a colour box
+ *  takes, or null: read back from a canvas, which says each so. */
+function hexOf(colour) {
+  if (!colour) return null;
+  const pen = document.createElement("canvas").getContext("2d");
+  if (!pen) return null;
+  pen.fillStyle = "#000000";
+  pen.fillStyle = colour;
+  return /^#[0-9a-f]{6}$/i.test(pen.fillStyle) ? pen.fillStyle : null;
+}
+
 function unitTag(unit) {
   return element("span", "magpy-ins-unit", unit ? "(" + unit + ")" : "");
 }
@@ -214,6 +225,9 @@ export function createInspector(
     compact = false,
     empty = "Select an object.",
     head = null,
+    // the colour the host's view draws an object in, where it has one: what
+    // an unset colour's swatch shows, for the swatch to start from
+    drawnColor = () => null,
   } = {},
 ) {
   container.classList.add("magpy-ins");
@@ -368,7 +382,11 @@ export function createInspector(
       });
       const pick = element("input");
       pick.type = "color";
-      if (/^#[0-9a-fA-F]{6}$/.test(value || "")) pick.value = value;
+      // Unset, the colour is the one magpylib gave the object, by its place
+      // in the scene -- which the view knows, and the swatch shows, rather
+      // than the black an empty colour box shows.
+      const shown = value ?? hexOf(drawnColor(objectId));
+      if (/^#[0-9a-fA-F]{6}$/.test(shown || "")) pick.value = shown;
       pick.addEventListener("change", () => applyEdit(path, pick.value));
       wrap.append(text, pick);
     } else if (enums.length) {

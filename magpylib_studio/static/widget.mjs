@@ -248,12 +248,18 @@ const ICONS = {
     "M7.9 4.1 L7.4 3.3 L6.8 2.7 L6.3 2.1 L5.7 1.7 L5.1 1.5 L4.5 1.5 L3.9 1.6 L3.3 2.0 L2.7 2.6 L2.2 3.5 L1.8 4.6 L1.5 5.8 L1.4 7.2 L1.4 8.7 L1.5 10.1 L1.8 11.4 L2.2 12.4 L2.7 13.3 L3.3 13.9 L3.9 14.3 L4.5 14.4 L5.1 14.4 L5.7 14.2 L6.3 13.8 L6.8 13.2 L7.4 12.6 L7.9 11.8 " +
     "M8.0 4.1 L8.5 3.3 L9.1 2.7 L9.6 2.1 L10.2 1.7 L10.8 1.5 L11.4 1.5 L12.0 1.6 L12.6 2.0 L13.2 2.6 L13.7 3.5 L14.1 4.6 L14.4 5.8 L14.5 7.2 L14.5 8.7 L14.4 10.1 L14.1 11.4 L13.7 12.4 L13.2 13.3 L12.6 13.9 L12.0 14.3 L11.4 14.4 L10.8 14.4 L10.2 14.2 L9.6 13.8 L9.1 13.2 L8.5 12.6 L8.0 11.8 " +
     '"/>',
-  // a current loop and a pulse on it, as the view draws the flow; the pulse
-  // goes once round as a cue (`.magpy-flow-pulse` in widget.css)
+  // streamlines, a flux: pulses run along them once as a cue, as the view
+  // runs them along a current (`.magpy-flow-pulse` in widget.css)
   flow:
-    '<ellipse cx="8" cy="8" rx="6.2" ry="3.4" stroke-width="1"/>' +
-    '<ellipse class="magpy-flow-pulse" cx="8" cy="8" rx="6.2" ry="3.4" ' +
-    'stroke-width="2.6" pathLength="100" stroke-dasharray="22 78"/>',
+    '<path d="M3 4.5c3-1.8 5.5 1.8 11.5 0" stroke-width="1.4"/>' +
+    '<path class="magpy-flow-pulse" style="--at: 10" d="M3 4.5c3-1.8 5.5 1.8 11.5 0" ' +
+    'stroke-width="2.6" pathLength="100" stroke-dasharray="16 84"/>' +
+    '<path d="M1.5 8c3.5-2 6.5 2 13 0" stroke-width="1.4"/>' +
+    '<path class="magpy-flow-pulse" style="--at: 30" d="M1.5 8c3.5-2 6.5 2 13 0" ' +
+    'stroke-width="2.6" pathLength="100" stroke-dasharray="16 84"/>' +
+    '<path d="M2.5 11.5c3-1.8 5.5 1.8 10 0" stroke-width="1.4"/>' +
+    '<path class="magpy-flow-pulse" style="--at: 18" d="M2.5 11.5c3-1.8 5.5 1.8 10 0" ' +
+    'stroke-width="2.6" pathLength="100" stroke-dasharray="16 84"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -599,6 +605,13 @@ function render({ model, el }) {
   pressed(inspectorButton, false);
   const inspector = createInspector(inspectorEl, {
     rpc: (method, params) => call(method, params),
+    // a wire's colour, or a mesh's own, as the view draws the object
+    drawnColor: (objectId) => {
+      const payload = model.get("payload") || {};
+      const own = (item) => item.object_id === objectId && !item.copy;
+      const wire = (payload.scatters ?? []).find((s) => own(s) && !s.path);
+      return wire?.line_color ?? (payload.meshes ?? []).find(own)?.color;
+    },
     onEdited: (result) => {
       if (result?.defined?.length) {
         const made = result.defined.join(", ");
