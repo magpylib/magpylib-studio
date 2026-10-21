@@ -47,33 +47,37 @@ LUT_SIZE = 256
 
 _BACKEND = "_studio_scene"
 
-#: Classes whose mesh is *exactly* the base mesh scaled, so a resize can be
-#: dragged with `node.scale` and the engine told only the value it came to.
-#: Ported from the prototype, where every entry was checked by rendering twice
-#: and comparing vertices.
+#: What a resize drags, per class: the parameter, and how the view drags it.
 #:
-#: `constraint` records which scale axes are independent, which follows from
-#: how many numbers the parameter has: a Cylinder's `dimension` is
-#: (diameter, height), so x and y are locked together and z is free.
+#: Most are the gizmo's handles, which scale the drawn mesh with `node.scale`
+#: and tell the engine only the value it came to -- honest only where the
+#: mesh magpylib draws for the new value *is* the old one scaled, which the
+#: prototype checked for each by rendering twice and comparing vertices. A
+#: Dipole's one size, uniform (`uniform`); a mesh, which has no dimension but
+#: whose vertices scale exactly, by the whole array about its centroid
+#: (`vertices`) -- only while it is small enough to be worth sending: the
+#: array rides in every payload, and a mesh of thousands of points keeps the
+#: Inspector, which edits it in place.
 #:
-#: A mesh has no dimension, but its vertices scale exactly -- checked the same
-#: way -- so the parameter dragged there is the whole array, multiplied
-#: row by row. Only while it is small enough to be worth sending: the array
-#: rides in every payload, and a mesh of thousands of points is a lot of
-#: numbers to ship on the chance that someone resizes it. Those keep the
-#: Inspector, which edits the value in place.
+#: Some drawings do not scale with what they draw, because part of them is
+#: styled: a sensor's cross and its pixels' size, a current's arrows, a
+#: triangle's magnetization arrow. Their handles go on a stand-in and the
+#: engine draws each step of the drag. A `Sensor` spreads its pixel array
+#: about its centroid (`pixels`) -- one pixel, or none, has nothing to
+#: spread. A `Polyline`, a `TriangleStrip`, a `TriangleSheet` and a
+#: `Triangle` scale their vertices as a mesh does (`points`).
 #:
-#: A `Sensor` resizes its pixel array, about its centroid, without scaling
-#: its drawing: its cross is styled and its pixels have a styled size, so
-#: scaling the drawing would stretch both. The view hands the handles a
-#: stand-in and the engine draws each step of the drag (`pixels`). One pixel,
-#: or none, has nothing to spread; a big array stays with the Inspector, as a
-#: big mesh does.
+#: And a shape with faces has handles of its own, one per face, standing out
+#: of it, and the engine draws each step. A face moves alone, the one
+#: opposite staying put, so the position moves half the way, or with the
+#: one opposite (⌥) and the position stays: a `Cuboid`'s six (`free`); a
+#: `Cylinder`'s top and bottom and a radius all round (`cylinder`); a
+#: `CylinderSegment`'s top and bottom, two radii and two angles (`segment`);
+#: a `Sphere`'s or a `Circle`'s radius (`diameter`), where the gizmo gave
+#: one number three handles.
 #:
-#: A `CylinderSegment` has five numbers, which no three axes say: the view
-#: gives it grips of its own instead of the handles, one per number --
-#: each radius, the height, each angle -- and the engine draws each step
-#: (`segment`).
+#: The points of a shape written as points, few enough to tell apart, also
+#: move one at a time (`pointwise`, see `POINTWISE`).
 #:
 #: A Dipole has no physical size at all: its arrow is styled geometry and
 #: `style.size` is one scalar, so the resize is uniform by construction. That
@@ -81,17 +85,40 @@ _BACKEND = "_studio_scene"
 #: (`pinned_scene_units`); `shape_of` is read while it draws.
 SCALE_COVARIANT = {
     "Cuboid": ("dimension", "free"),
-    "Sphere": ("diameter", "uniform"),
-    "Cylinder": ("dimension", "xy"),
+    "Sphere": ("diameter", "diameter"),
+    "Cylinder": ("dimension", "cylinder"),
     "CylinderSegment": ("dimension", "segment"),
     "Dipole": ("style.size", "uniform"),
     "Tetrahedron": ("vertices", "vertices"),
     "TriangularMesh": ("vertices", "vertices"),
     "Sensor": ("pixel", "pixels"),
+    "Circle": ("diameter", "diameter"),
+    "Polyline": ("vertices", "points"),
+    "TriangleStrip": ("vertices", "points"),
+    "TriangleSheet": ("vertices", "points"),
+    "Triangle": ("vertices", "points"),
 }
 
 #: Above this many points a mesh or a sensor keeps them to itself; see above.
 MAX_DRAGGABLE_VERTICES = 256
+
+#: The shapes whose points are moved one at a time as well, a dot on each to
+#: pick one up -- a tetrahedron's corners, a wire's path, a small mesh's
+#: vertices, a sensor's pixels -- while there are few enough to tell apart
+#: (and where the document writes them as numbers: see `get_scene`). A mesh's faces keep
+#: their vertices, so it stays closed; a vertex pushed through the far side
+#: folds it, which magpylib takes without a word, as it takes the same
+#: vertices typed in the Inspector.
+POINTWISE = {
+    "Sensor",
+    "Tetrahedron",
+    "TriangularMesh",
+    "Triangle",
+    "Polyline",
+    "TriangleStrip",
+    "TriangleSheet",
+}
+MAX_POINTWISE = 32
 
 #: And above this many frames a path is not carried either. A drag has to
 #: move the whole path or it replaces it -- a single position where a path
@@ -126,17 +153,20 @@ def shape_of(obj):
         return None
     attr, constraint = entry
     value = _resolve(obj, attr)
-    if constraint == "vertices" and len(value) > MAX_DRAGGABLE_VERTICES:
+    if value is None:  # a sensor with no pixels, a wire with no vertices yet
         return None
-    if constraint == "pixels" and (
-        value is None or not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES
-    ):
+    if constraint in ("vertices", "points") and len(value) > MAX_DRAGGABLE_VERTICES:
         return None
-    return {
+    if constraint == "pixels" and not 1 < np.size(value) // 3 <= MAX_DRAGGABLE_VERTICES:
+        return None
+    shape = {
         "attr": attr,
         "value": value.tolist() if hasattr(value, "tolist") else float(value),
         "constraint": constraint,
     }
+    if type(obj).__name__ in POINTWISE and np.size(value) // 3 <= MAX_POINTWISE:
+        shape["pointwise"] = True
+    return shape
 
 
 #: How big a sensor, or a dipole, is drawn when its style says no size, in

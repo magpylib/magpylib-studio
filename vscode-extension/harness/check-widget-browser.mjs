@@ -1733,10 +1733,11 @@ async function selection(port, base) {
   await check(
     "a drag on the stand-in ends where it went, redrawn before the release",
     async () => {
-      // The sensor's pixels spread about their centroid, x doubled; the
-      // aim turns.
+      // The sensor's pixels and the wire's vertices spread about their
+      // centroids, x doubled; the aim turns.
       const cases = [
         ["probe", "scale", "proxy.scale.set(2, 1, 1)"],
+        ["wire", "scale", "proxy.scale.set(2, 1, 1)"],
         ["aimed", "polarization", "proxy.rotateX(0.5)"],
       ];
       const want = {
@@ -1749,6 +1750,11 @@ async function selection(port, base) {
             [-0.01, 0.01, 0],
             [0.03, 0.01, 0],
           ],
+        ],
+        wire: [
+          [-0.04 / 3, 0, 0],
+          [0.08 / 3, 0, 0],
+          [0.08 / 3, 0.01, 0],
         ],
       };
       const near = (a, b) =>
@@ -1806,52 +1812,113 @@ async function selection(port, base) {
     },
   );
 
-  await check("a segment's grips each change their own number", async () => {
+  await check("a shape's grips each change their own number", async () => {
     const tab = await openTab(port);
     try {
-      await tab.navigate(`${base}/pages/outline.html?scene=standin#arc`);
+      await tab.navigate(`${base}/pages/outline.html?scene=standin`);
       if (!(await tab.until("return window.shown", 20_000))) {
         return "never drew";
       }
-      // (inner, outer, height, start, end), and which way each goes when its
-      // grip is pulled out along its handle: the inner radius in, the start
-      // angle back
-      const before = [0.01, 0.02, 0.01, 0, 90];
-      const goes = [-1, 1, 1, -1, 1];
-      const mouse = (type, [x, y], buttons) =>
+      // Each shape's numbers, and per grip: the number it moves, which way
+      // when pulled out along its handle -- a segment's inner radius in and
+      // its start angle back, everything else up -- and whether the shape's
+      // middle moves with it, as a face moved alone moves it. The last is
+      // the box's first face again, with ⌥: both faces, the middle still.
+      const shapes = {
+        arc: {
+          before: [0.01, 0.02, 0.01, 0, 90],
+          grips: [
+            [0, -1],
+            [1, 1],
+            [2, 1, "moves"],
+            [2, 1, "moves"],
+            [3, -1],
+            [4, 1],
+          ],
+        },
+        can: {
+          before: [0.01, 0.01],
+          grips: [
+            [0, 1],
+            [1, 1, "moves"],
+            [1, 1, "moves"],
+          ],
+        },
+        ball: { before: [0.01], grips: [[0, 1]] },
+        loop: { before: [0.01], grips: [[0, 1]] },
+        box: {
+          before: [0.01, 0.01, 0.01],
+          grips: [0, 0, 1, 1, 2, 2].map((k) => [k, 1, "moves"]),
+        },
+      };
+      const mouse = (type, [x, y], buttons, modifiers = 0) =>
         tab.send("Input.dispatchMouseEvent", {
           type,
           x,
           y,
           button: "left",
           buttons,
+          modifiers,
           clickCount: 1,
         });
       const wrong = [];
-      for (let index = 0; index < 5; index++) {
+      const runs = Object.entries(shapes).flatMap(([objectId, shape]) =>
+        shape.grips.map((grip, index) => [
+          objectId,
+          shape.before,
+          index,
+          grip,
+          0,
+        ]),
+      );
+      // ⌥ is modifier 1
+      runs.push(["box", shapes.box.before, 0, [0, 1], 1]);
+      for (const [objectId, before, index, [k, goes, moves], alt] of runs) {
         await wait(400); // the redraw after the last one's release
-        const spots = await tab.evaluate(GRIP_SPOTS);
-        if (!spots) return "no grips on the segment";
+        const spots = await tab.evaluate(GRIP_SPOTS(objectId));
+        if (!spots?.[index]) {
+          wrong.push(`${objectId}: no grip ${index}`);
+          continue;
+        }
         const { from, to } = spots[index];
-        await mouse("mouseMoved", from, 0);
-        await mouse("mousePressed", from, 1);
+        await mouse("mouseMoved", from, 0, alt);
+        await mouse("mousePressed", from, 1, alt);
         for (let step = 1; step <= 6; step++) {
-          const along = (k) => from[k] + ((to[k] - from[k]) * step) / 6;
-          await mouse("mouseMoved", [along(0), along(1)], 1);
+          const along = (n) => from[n] + ((to[n] - from[n]) * step) / 6;
+          await mouse("mouseMoved", [along(0), along(1)], 1, alt);
           await wait(30);
         }
-        await mouse("mouseReleased", to, 0);
+        await mouse("mouseReleased", to, 0, alt);
         await wait(200);
         const sent = await tab.evaluate(
           `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits)`,
         );
-        const value = sent.at(-1)?.[0]?.shape?.value;
-        const moved = value?.map((v, k) =>
-          Math.sign(Math.round((v - before[k]) * 1e9)),
-        );
-        const want = before.map((_, k) => (k === index ? goes[index] : 0));
-        if (moved?.join() !== want.join()) {
-          wrong.push(`grip ${index} sent ${JSON.stringify(value)}`);
+        const edit = sent.at(-1)?.[0];
+        // a diameter goes back as the one number it is
+        const value =
+          edit?.objectId === objectId ? edit.shape?.value : undefined;
+        const moved = []
+          .concat(value ?? [])
+          .map((v, n) => Math.sign(Math.round((v - before[n]) * 1e9)));
+        const want = before.map((_, n) => (n === k ? goes : 0));
+        const shifted = Boolean(edit?.position);
+        // and the box's face opposite the one dragged stays where it was:
+        // its faces go +x, -x, +y, ... and it sits at (0, 0.05, 0)
+        let stayed = true;
+        if (objectId === "box" && shifted && value) {
+          const side = index % 2 ? 1 : -1; // the face opposite's
+          const start = [0, 0.05, 0][k] + (side * before[k]) / 2;
+          stayed =
+            Math.abs(edit.position[k] + (side * value[k]) / 2 - start) < 1e-9;
+        }
+        if (
+          moved.join() !== want.join() ||
+          shifted !== Boolean(moves) ||
+          !stayed
+        ) {
+          wrong.push(
+            `${objectId} grip ${index}${alt ? " with ⌥" : ""} sent ${JSON.stringify(edit)}`,
+          );
         }
       }
       return wrong.length ? wrong.join("; ") : thrown(tab);
@@ -1859,15 +1926,216 @@ async function selection(port, base) {
       await tab.close();
     }
   });
+
+  await check("a flat shape's resize has no handle across it", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/outline.html?scene=standin`);
+      if (!(await tab.until("return window.shown", 20_000))) {
+        return "never drew";
+      }
+      // the wire and the pixel grid lie in their own xy; the tetrahedron
+      // has depth along all three
+      const want = { wire: "x,y", probe: "x,y", tet: "x,y,z" };
+      const wrong = [];
+      for (const [objectId, axes] of Object.entries(want)) {
+        const shown = await tab.evaluate(`
+          window.scene3d.highlight([${JSON.stringify(objectId)}]);
+          window.scene3d.setGizmoMode("scale");
+          const node = window.scene3d.byObjectId.get(${JSON.stringify(objectId)});
+          const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+          return ["x", "y", "z"].filter((a) => controls["show" + a.toUpperCase()]).join();`);
+        if (shown !== axes) wrong.push(`${objectId} shows ${shown}`);
+      }
+      return wrong.length ? wrong.join("; ") : thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+
+  await check(
+    "a point pointed at moves alone, and ⌘-clicked ones together",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/outline.html?scene=standin#tet`);
+        if (!(await tab.until("return window.shown", 20_000))) {
+          return "never drew";
+        }
+        const dot = await tab.evaluate(DOT_SPOT("tet", 1));
+        if (!dot) return "no dots on the tetrahedron";
+        const mouse = (type, [x, y], buttons) =>
+          tab.send("Input.dispatchMouseEvent", {
+            type,
+            x,
+            y,
+            button: type === "mouseMoved" && !buttons ? "none" : "left",
+            buttons,
+            clickCount: 1,
+          });
+        const handles = `
+        const node = window.scene3d.byObjectId.get("tet");
+        const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+        return [controls.mode, controls.object?.userData.indices?.join() ?? null];`;
+        // pointed at, the dot gets the move handles
+        await mouse("mouseMoved", dot, 0);
+        await wait(200);
+        const on = await tab.evaluate(handles);
+        if (on.join() !== "translate,1") {
+          return `pointed at, the handles are ${JSON.stringify(on)}`;
+        }
+        // pressed on the dot and dragged: that point, freely
+        await mouse("mousePressed", dot, 1);
+        for (let step = 1; step <= 6; step++) {
+          await mouse("mouseMoved", [dot[0] + step * 6, dot[1] - step * 3], 1);
+          await wait(30);
+        }
+        await mouse("mouseReleased", [dot[0] + 36, dot[1] - 18], 0);
+        await wait(300);
+        const sent = await tab.evaluate(
+          `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits)`,
+        );
+        const value = sent.at(-1)?.[0]?.shape?.value;
+        const before = [
+          [0, 0, 0],
+          [0.01, 0, 0],
+          [0, 0.01, 0],
+          [0, 0, 0.01],
+        ];
+        const moved = value?.map((p, i) =>
+          p.some((v, n) => Math.abs(v - before[i][n]) > 1e-9),
+        );
+        if (moved?.join() !== "false,true,false,false") {
+          return `the drag sent ${JSON.stringify(value)}`;
+        }
+        // away from both, the handles go back to the whole shape
+        await wait(400);
+        await mouse("mouseMoved", [dot[0] - 300, dot[1] + 200], 0);
+        await wait(200);
+        const off = await tab.evaluate(handles);
+        if (off[0] !== "scale")
+          return `away, the handles are ${JSON.stringify(off)}`;
+
+        // ⌘-clicked, two points are held together, the handles on their
+        // middle, and a drag of them moves both by the same offset. The
+        // last drag moved point 1, so the dots are found again.
+        await wait(400);
+        const metaClick = async (spot) => {
+          for (const [type, buttons] of [
+            ["mousePressed", 1],
+            ["mouseReleased", 0],
+          ]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              x: spot[0],
+              y: spot[1],
+              button: "left",
+              buttons,
+              modifiers: 4, // ⌘
+              clickCount: 1,
+            });
+          }
+          await wait(150);
+        };
+        await metaClick(await tab.evaluate(DOT_SPOT("tet", 2)));
+        await metaClick(await tab.evaluate(DOT_SPOT("tet", 3)));
+        const both = await tab.evaluate(`
+          const node = window.scene3d.byObjectId.get("tet");
+          const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+          const handle = controls.object;
+          const held = handle?.userData.indices ?? [];
+          if (held.join() !== "2,3" || controls.mode !== "translate") {
+            return "the handles hold " + JSON.stringify(held) + " in " + controls.mode;
+          }
+          controls.dragging = true;
+          handle.position.x += 0.004;
+          handle.updateMatrixWorld(true);
+          controls.dispatchEvent({ type: "objectChange" });
+          controls.dragging = false;
+          return null;`);
+        if (both) return both;
+        await wait(200);
+        const together = await tab.evaluate(
+          `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits).at(-1)?.[0]?.shape?.value`,
+        );
+        const shifted = together?.map((p, i) =>
+          Math.round((p[0] - before[i][0]) * 1e6),
+        );
+        if (shifted?.slice(2).join() !== "4000,4000") {
+          return `the two points moved by ${JSON.stringify(shifted)}`;
+        }
+
+        // a sensor's pixel the same way, its grid's rows kept
+        const pixel = await tab.evaluate(DOT_SPOT("probe", 3));
+        if (!pixel) return "no dots on the sensor's pixels";
+        await mouse("mouseMoved", pixel, 0);
+        await wait(200);
+        const onPixel = await tab.evaluate(`
+          const node = window.scene3d.byObjectId.get("probe");
+          const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;
+          const handle = controls.object;
+          if (handle?.userData.indices?.join() !== "3") return "the handles are not on pixel 3";
+          controls.dragging = true;
+          handle.position.x += 0.004;
+          handle.updateMatrixWorld(true);
+          controls.dispatchEvent({ type: "objectChange" });
+          controls.dragging = false;
+          return null;`);
+        if (onPixel) return onPixel;
+        await wait(200);
+        const grid = await tab.evaluate(
+          `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits).at(-1)?.[0]?.shape?.value`,
+        );
+        const wantGrid = [
+          [
+            [0, 0, 0],
+            [0.02, 0, 0],
+          ],
+          [
+            [0, 0.01, 0],
+            [0.024, 0.01, 0],
+          ],
+        ];
+        const sameGrid = (a, b) =>
+          Array.isArray(b)
+            ? Array.isArray(a) &&
+              a.length === b.length &&
+              a.every((each, i) => sameGrid(each, b[i]))
+            : Math.abs(a - b) < 1e-9;
+        if (!sameGrid(grid, wantGrid)) {
+          return `the pixel drag sent ${JSON.stringify(grid)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
-/** Page code: the segment's grips in the resize, each as where its cube is on
- *  the page and a point further out along its handle. */
-const GRIP_SPOTS = `
+/** Page code: `objectId` selected and resized, where its point `index`'s dot
+ *  is on the page. */
+const DOT_SPOT = (objectId, index) => `
+  window.scene3d.highlight([${JSON.stringify(objectId)}]);
+  window.scene3d.setGizmoMode("scale");
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  const node = window.scene3d.byObjectId.get(${JSON.stringify(objectId)});
+  const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
+  const dots = node.parent.getObjectByName("dots");
+  if (!dots?.visible) return null;
+  dots.updateMatrixWorld(true);
+  const rect = document.querySelector("#view canvas").getBoundingClientRect();
+  const p = dots.children[${index}].getWorldPosition(dots.position.clone()).project(camera);
+  return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];`;
+
+/** Page code: `objectId` selected and resized, its grips each as where its
+ *  cube is on the page and a point further out along its handle. */
+const GRIP_SPOTS = (objectId) => `
+  window.scene3d.highlight([${JSON.stringify(objectId)}]);
   window.scene3d.setGizmoMode("scale");
   // a frame, which is when the grips take their size on screen
   await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-  const node = window.scene3d.byObjectId.get("arc");
+  const node = window.scene3d.byObjectId.get(${JSON.stringify(objectId)});
   const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
   const grips = node.parent.getObjectByName("grips");
   if (!grips?.visible) return null;
@@ -1880,7 +2148,7 @@ const GRIP_SPOTS = `
   };
   const spots = {};
   for (const grip of grips.children) {
-    if (grip.userData.grip === undefined) continue;
+    if (grip.userData.grip === undefined || !grip.visible) continue;
     const at = (y) => onPage(grips.worldToLocal(grip.localToWorld(new Vector3(0, y, 0))));
     spots[grip.userData.grip] = { from: at(0.54), to: at(2) };
   }

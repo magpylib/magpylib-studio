@@ -32,13 +32,19 @@ or more than 256, keeps the Inspector (#59).
 </details>
 
 <details>
-<summary>Resize a cylinder segment by handles on its faces</summary>
+<summary>Resize by a handle on each face, and move single points</summary>
 
-R on a CylinderSegment shows a handle for each number of its dimension, standing
-out of the face it moves: each radius on its curved face, the height on the top,
-each angle on its flat end. A drag changes that number alone; the height grows
-both ways, so the segment keeps its position. The readout shows the angles in
-degrees (#59).
+R shows a handle on each face of a Cuboid, a Cylinder or a CylinderSegment, and
+on the rim of a Sphere or a current Circle, standing out of what it moves. A
+face moves alone, the one opposite staying put; with ⌥ both move and the
+position stays. A segment's radii and angles have handles too. A Tetrahedron, a
+small TriangularMesh, a Triangle, a Polyline, a TriangleStrip, a TriangleSheet
+or a Sensor's pixels shows a dot on each of its points, where they are numbers
+and not a formula: pointed at, one gets the move handles, and dragged by the dot
+or an arrow, that point alone moves; ⌘/ctrl-click picks several, which then move
+together. Polylines, triangle strips and sheets and Triangles now resize as a
+whole as well, and a flat shape's resize has no handle across its plane. The
+readout shows a segment's angles in degrees (#59, #60).
 
 </details>
 
