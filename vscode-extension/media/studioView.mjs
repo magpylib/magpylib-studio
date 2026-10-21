@@ -110,6 +110,12 @@ const model = {
       vscodeApi.postMessage({ type: "transformObjects", edits, define });
       return Promise.resolve({ ok: true });
     },
+    // Esc in a drag: the host closes the group, then undoes it, in turn --
+    // two messages could cross, and the undo find the group still open
+    cancel() {
+      vscodeApi.postMessage({ type: "cancelDrag" });
+      return Promise.resolve({ ok: true });
+    },
     // typed text as a number of `kind`, read by the engine as the sidebar's
     // boxes are read
     quantity: (text, kind) => rpc("quantity", { name: "", text, unit: kind }),

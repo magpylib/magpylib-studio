@@ -2113,6 +2113,281 @@ async function selection(port, base) {
   );
 }
 
+/** The mouse in `tab`, as a person drives it: a move, a press, a release,
+ *  with modifiers -- 1 ⌥, 4 ⌘, 8 ⇧. */
+const mouseIn =
+  (tab) =>
+  (type, [x, y], buttons = 0, modifiers = 0) =>
+    tab.send("Input.dispatchMouseEvent", {
+      type,
+      x,
+      y,
+      button: type === "mouseMoved" && !buttons ? "none" : "left",
+      buttons,
+      modifiers,
+      clickCount: 1,
+    });
+
+/** The edits the view last committed, as the studio panel's host got them. */
+const LAST_COMMIT = `return window.posted.filter((m) => m.type === "transformObjects").map((m) => m.edits).at(-1)?.[0]`;
+
+/** Page code: the handles' controls, and what they are on. */
+const HANDLES = `
+  const node = window.scene3d.byObjectId.get("box");
+  const controls = node.parent.children.find((c) => c.isTransformControlsRoot).controls;`;
+
+/** Page code: a key pressed in the view. */
+const KEY = (key) => `
+  document.querySelector(".magpy-scene-stage").dispatchEvent(
+    new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, bubbles: true }));`;
+
+/** Page code: where on the page a point of the world is drawn. */
+const PAGE_OF = (point) => `
+  const node = window.scene3d.byObjectId.get("box");
+  const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
+  const rect = document.querySelector("#view canvas").getBoundingClientRect();
+  const p = node.position.clone().set(...${JSON.stringify(point)}).project(camera);
+  return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];`;
+
+async function editingPoints(port, base) {
+  const near = (a, b) =>
+    Array.isArray(b)
+      ? Array.isArray(a) &&
+        a.length === b.length &&
+        a.every((each, i) => near(each, b[i]))
+      : Math.abs(a - b) < 1e-9;
+  const opened = async () => {
+    const tab = await openTab(port);
+    await tab.navigate(`${base}/pages/outline.html?scene=standin`);
+    if (!(await tab.until("return window.shown", 20_000))) {
+      await tab.close();
+      return null;
+    }
+    return tab;
+  };
+
+  await check(
+    "⇧ lands a point, a face and an object on the next one",
+    async () => {
+      const tab = await opened();
+      if (!tab) return "never drew";
+      try {
+        const mouse = mouseIn(tab);
+        // The box is a 10 mm cube at (0, 50, 0) mm, the tetrahedron's corners
+        // at (50, 50, 0) mm and 10 mm out along each axis from there.
+        // A point picked up, let go 0.3 mm off the box's corner: on it.
+        const dot = await tab.evaluate(DOT_SPOT("tet", 1));
+        await mouse("mouseMoved", dot, 0, 8);
+        await wait(200);
+        const point = await tab.evaluate(`${HANDLES}
+        const handle = controls.object;
+        if (handle?.userData.indices?.join() !== "1") return "the handles are not on point 1";
+        controls.dragging = true;
+        handle.position.set(0.0053, 0.055, 0.005);
+        handle.updateMatrixWorld(true);
+        controls.dispatchEvent({ type: "objectChange" });
+        controls.dragging = false;
+        return null;`);
+        if (point) return point;
+        await wait(200);
+        const corner = (await tab.evaluate(LAST_COMMIT))?.shape?.value?.[1];
+        if (!near(corner, [-0.045, 0.005, 0.005])) {
+          return `the point landed at ${JSON.stringify(corner)}`;
+        }
+
+        // The box's +x face dragged with ⇧ to 0.4 mm short of the
+        // tetrahedron: it stops touching it, its -x face where it was.
+        await mouse("mouseMoved", [5, 5], 0); // away, and ⇧ let go
+        await wait(400);
+        const spots = await tab.evaluate(GRIP_SPOTS("box"));
+        // the handle is held by its cube, out past the face: aim the face
+        const out = await tab.evaluate(`
+          const grips = window.scene3d.byObjectId.get("box").parent.getObjectByName("grips");
+          const grip = grips.children.find((g) => g.userData.grip === 0);
+          return grip.localToWorld(grip.position.clone().set(0, 0.54, 0)).x - 0.005;`);
+        const to = await tab.evaluate(PAGE_OF([0.0496 + out, 0.05, 0]));
+        const { from } = spots[0];
+        await mouse("mouseMoved", from, 0, 8);
+        await mouse("mousePressed", from, 1, 8);
+        for (let step = 1; step <= 8; step++) {
+          const along = (k) => from[k] + ((to[k] - from[k]) * step) / 8;
+          await mouse("mouseMoved", [along(0), along(1)], 1, 8);
+          await wait(30);
+        }
+        await mouse("mouseReleased", to, 0, 8);
+        await wait(300);
+        const face = await tab.evaluate(LAST_COMMIT);
+        if (!near(face?.shape?.value, [0.055, 0.01, 0.01])) {
+          return `the face stopped at ${JSON.stringify(face)}`;
+        }
+        if (!near(face.position, [0.0225, 0.05, 0])) {
+          return `the box moved to ${JSON.stringify(face.position)}`;
+        }
+
+        // The box moved with ⇧ to 0.3 mm off a corner of the tetrahedron's:
+        // its own corner lands on it.
+        await mouse("mouseMoved", [5, 5], 0, 8);
+        await wait(400);
+        const moved = await tab.evaluate(`
+        window.scene3d.highlight(["box"]);
+        window.scene3d.setGizmoMode("translate");
+        ${HANDLES}
+        if (controls.object !== node) return "the handles are not on the box";
+        controls.dragging = true;
+        node.position.add(node.position.clone().set(0.0447, -0.005, 0.005));
+        node.updateMatrixWorld(true);
+        controls.dispatchEvent({ type: "objectChange" });
+        controls.dragging = false;
+        return null;`);
+        if (moved) return moved;
+        await wait(200);
+        const landed = (await tab.evaluate(LAST_COMMIT))?.position;
+        if (!near(landed, [0.045, 0.045, 0.005])) {
+          return `the box landed at ${JSON.stringify(landed)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+
+  await check(
+    "a wire gains a point at a ghost and loses one to Delete",
+    async () => {
+      const tab = await opened();
+      if (!tab) return "never drew";
+      try {
+        const mouse = mouseIn(tab);
+        // the wire: (0, 0, 0), (20, 0, 0), (20, 10, 0) mm
+        await tab.evaluate(DOT_SPOT("wire", 0));
+        const ghost = await tab.evaluate(`
+        const dots = window.scene3d.byObjectId.get("wire").parent.getObjectByName("dots");
+        const ghost = dots.children.find((d) => d.visible && d.userData.ghost === 1);
+        const camera = dots.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
+        const rect = document.querySelector("#view canvas").getBoundingClientRect();
+        const p = ghost.getWorldPosition(ghost.position.clone()).project(camera);
+        return [rect.left + ((p.x + 1) / 2) * rect.width, rect.top + ((1 - p.y) / 2) * rect.height];`);
+        await mouse("mouseMoved", ghost, 0);
+        await mouse("mousePressed", ghost, 1);
+        await mouse("mouseReleased", ghost, 0);
+        await wait(300);
+        const inserted = (await tab.evaluate(LAST_COMMIT))?.shape?.value;
+        const four = [
+          [0, 0, 0],
+          [0.01, 0, 0],
+          [0.02, 0, 0],
+          [0.02, 0.01, 0],
+        ];
+        if (!near(inserted, four)) {
+          return `the ghost put in ${JSON.stringify(inserted)}`;
+        }
+        // the engine here does not take it, so the wire has its three still
+        const dot = await tab.evaluate(DOT_SPOT("wire", 1));
+        await mouse("mouseMoved", dot, 0);
+        await wait(200);
+        await tab.evaluate(KEY("Delete"));
+        await wait(300);
+        const deleted = (await tab.evaluate(LAST_COMMIT))?.shape?.value;
+        if (
+          !near(deleted, [
+            [0, 0, 0],
+            [0.02, 0.01, 0],
+          ])
+        ) {
+          return `Delete left ${JSON.stringify(deleted)}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+
+  await check(
+    "picked points turn together, a box picks them, Esc takes a drag back",
+    async () => {
+      const tab = await opened();
+      if (!tab) return "never drew";
+      try {
+        const mouse = mouseIn(tab);
+        const pick = async (index) => {
+          const dot = await tab.evaluate(DOT_SPOT("tet", index));
+          await mouse("mouseMoved", dot, 0, 4);
+          await mouse("mousePressed", dot, 1, 4);
+          await mouse("mouseReleased", dot, 0, 4);
+          await wait(150);
+        };
+        // ⌘ on corners 1 and 2, then E: they turn about their middle
+        await pick(1);
+        await pick(2);
+        await tab.evaluate(KEY("e"));
+        await wait(100);
+        const turned = await tab.evaluate(`${HANDLES}
+          const handle = controls.object;
+          if (handle?.userData.indices?.join() !== "1,2" || controls.mode !== "rotate") {
+            return "E left the handles " + controls.mode + " on " + handle?.userData.indices;
+          }
+          controls.dragging = true;
+          handle.rotateZ(Math.PI / 2);
+          handle.updateMatrixWorld(true);
+          controls.dispatchEvent({ type: "objectChange" });
+          controls.dragging = false;
+          return null;`);
+        if (turned) return turned;
+        await wait(200);
+        const value = (await tab.evaluate(LAST_COMMIT))?.shape?.value;
+        if (
+          !near(value?.slice(1, 3), [
+            [0.01, 0.01, 0],
+            [0, 0, 0],
+          ])
+        ) {
+          return `the turn sent ${JSON.stringify(value)}`;
+        }
+        // put back, then a box drawn with ⌥ round corner 3 picks it
+        await pick(1);
+        await pick(2);
+        await mouse("mouseMoved", [5, 5], 0);
+        await wait(300);
+        const dot = await tab.evaluate(DOT_SPOT("tet", 3));
+        const corner = (dx, dy) => [dot[0] + dx, dot[1] + dy];
+        await mouse("mouseMoved", corner(-14, -14), 0, 1);
+        await mouse("mousePressed", corner(-14, -14), 1, 1);
+        await mouse("mouseMoved", corner(0, 0), 1, 1);
+        await mouse("mouseMoved", corner(14, 14), 1, 1);
+        await mouse("mouseReleased", corner(14, 14), 0, 1);
+        await wait(200);
+        const boxed = await tab.evaluate(`${HANDLES}
+          return controls.object?.userData.indices?.join() ?? null;`);
+        if (boxed !== "3") return `the box picked ${boxed}`;
+        // and a drag of it, Esc mid-way: taken back, not committed
+        const before = await tab.evaluate(
+          `return window.posted.filter((m) => m.type === "transformObjects").length`,
+        );
+        await tab.evaluate(`${HANDLES}
+          const handle = controls.object;
+          controls.dragging = true;
+          handle.position.x += 0.003;
+          handle.updateMatrixWorld(true);
+          controls.dispatchEvent({ type: "objectChange" });`);
+        await wait(200);
+        await tab.evaluate(KEY("Escape"));
+        await wait(200);
+        const after = await tab.evaluate(
+          `return [window.posted.filter((m) => m.type === "transformObjects").length, window.posted.some((m) => m.type === "cancelDrag")]`,
+        );
+        if (after[0] !== before || !after[1]) {
+          return `Esc: ${after[0] - before} committed, cancelled ${after[1]}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** Page code: `objectId` selected and resized, where its point `index`'s dot
  *  is on the page. */
 const DOT_SPOT = (objectId, index) => `
@@ -2728,6 +3003,7 @@ try {
   await panelWidget(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
+  await editingPoints(browser.port, base);
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
