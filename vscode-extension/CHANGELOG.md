@@ -88,6 +88,16 @@ sheet and a strip have icons of their own (#62).
 ### Changed
 
 <details>
+<summary>The style tree in a reading order</summary>
+
+The object panel's style tree lists the label, colour and opacity first, then
+the groups of the object's own kind, then those every object shares, each
+group's `show` on top; an open group's rows hang on a guide line, as the
+legend's do (#63).
+
+</details>
+
+<details>
 <summary>A drag sends only what it moves</summary>
 
 Past its first step, a drag draws and sends only the objects it moves and the
@@ -100,6 +110,15 @@ to 59, its frame rate (#58).
 </details>
 
 ### Fixed
+
+<details>
+<summary>A triangle magnetized through it, one colour a face</summary>
+
+A Triangle magnetized along its normal was drawn striped red and green: magpylib
+draws it as two copies a hair apart, and the view drew them in one plane. It is
+one triangle now, its north face one colour and its south the other (#63).
+
+</details>
 
 <details>
 <summary>Colours as magpylib gives them, and kept through a drag</summary>

@@ -445,9 +445,9 @@ export function createInspector(
     propsEl.innerHTML = "";
     if (!schema || !objectId) return;
     const filter = filterEl.value.trim().toLowerCase();
-    for (const [group, spec] of Object.entries(schema.properties)) {
+    for (const [group, spec] of inPanelOrder(schema.properties)) {
       const leaves = spec.properties
-        ? leafPaths(spec.properties, group, [])
+        ? showFirst(leafPaths(spec.properties, group, []), group)
         : [[group, spec]];
       const rows = [];
       for (const [path, leafSpec] of leaves) {
@@ -484,6 +484,34 @@ export function createInspector(
       details.append(element("summary", "", group), ...rows);
       propsEl.appendChild(details);
     }
+  }
+
+  /** The style's properties in the order a person reaches for them, not
+   *  the order magpylib's classes declare them in, which mixes rows and
+   *  groups as inheritance left them: what every object has and is often
+   *  set first -- its label, colour and opacity -- then the groups of its
+   *  own kind -- a current's arrow, a magnet's magnetization -- and last
+   *  the groups every object shares. A stable sort: the schema's order
+   *  within each. */
+  function inPanelOrder(properties) {
+    const first = ["label", "color", "opacity"];
+    const last = ["path", "legend", "description", "model3d"];
+    const rank = ([name, spec]) =>
+      !spec.properties
+        ? first.includes(name)
+          ? first.indexOf(name)
+          : first.length
+        : last.includes(name)
+          ? 100 + last.indexOf(name)
+          : 50;
+    return Object.entries(properties).sort((a, b) => rank(a) - rank(b));
+  }
+
+  /** A group's rows with its `show` first: whether it is drawn at all
+   *  before how. */
+  function showFirst(leaves, group) {
+    const shown = (path) => (path === `${group}.show` ? 0 : 1);
+    return [...leaves].sort(([a], [b]) => shown(a) - shown(b));
   }
 
   // --- step section: the selected construction step's own values --------

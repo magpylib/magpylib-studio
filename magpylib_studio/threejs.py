@@ -280,10 +280,16 @@ def _mesh_payload(trace):
     graded = intensity is not None and colorscale is not None
     facecolor = trace.get("facecolor")
 
-    uv = None
+    uv = back_uv = None
     if graded:
         intensity = np.clip(np.asarray(intensity, dtype=float), 0, 1)
         uv = np.stack([intensity, np.full(len(position), 0.5)], axis=1)
+    two_faced = _two_faced(position, index)
+    if two_faced is not None:
+        position, front, back = two_faced
+        index = np.array([[0, 1, 2]])
+        if uv is not None:
+            uv, back_uv = uv[front], uv[back]
 
     return {
         "kind": "mesh",
@@ -294,6 +300,8 @@ def _mesh_payload(trace):
         "index": index.ravel().tolist(),
         "color": trace.get("color"),
         "uv": None if uv is None else uv.ravel().tolist(),
+        # the colours of a two-faced triangle's other face: `_two_faced`
+        **({"back_uv": back_uv.ravel().tolist()} if back_uv is not None else {}),
         "lut": _colorscale_lut(colorscale) if graded else None,
         # mixes CSS names with hex, so THREE.Color parses them rather than us
         "facecolor": None if facecolor is None else [str(c) for c in facecolor],
@@ -310,6 +318,32 @@ def _mesh_payload(trace):
         ),
         **({"arrows": True} if trace.get("arrows") else {}),
     }
+
+
+def _two_faced(position, index):
+    """A Triangle magnetized through its plane, as the one triangle it is:
+    its three corners on the middle plane, and which of magpylib's six
+    points give the colours of the face looking along its normal and of the
+    other one -- or None for any other mesh.
+
+    Magpylib draws it as two copies a hair apart, each a pole's colour (its
+    `make_Triangle`), as a renderer has no colour per face to say it with.
+    A hair is nanometres at a millimetre, and the two copies drawn in one
+    plane fight: the view showed a striped triangle. Three.js does have a
+    colour per face, a material for each side, so the view draws one."""
+    if len(position) != 6 or len(index) != 8:
+        return None
+    if index[0].tolist() != [0, 1, 2] or index[1].tolist() != [3, 4, 5]:
+        return None
+    below, above = position[:3], position[3:]
+    apart = above - below
+    if not np.allclose(apart, apart[0], rtol=1e-6, atol=0) or not apart[0].any():
+        return None
+    middle = (below + above) / 2
+    normal = np.cross(middle[1] - middle[0], middle[2] - middle[1])
+    if np.dot(apart[0], normal) > 0:  # the copy above faces along the normal
+        return middle, [3, 4, 5], [0, 1, 2]
+    return middle, [0, 1, 2], [3, 4, 5]
 
 
 def _json_coordinates(values):

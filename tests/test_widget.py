@@ -617,6 +617,21 @@ def test_an_editable_view_colours_its_objects_as_magpylib_does():
     assert len({colour for _, colour in plain}) == 3
 
 
+@pytest.mark.parametrize(("north", "front"), [(1, 1.0), (-1, 0.0)])
+def test_a_triangle_magnetized_through_it_is_one_triangle_two_faced(north, front):
+    """Magpylib draws it as two copies a hair apart, a pole's colour each,
+    which a view draws in one plane, striped; it arrives as one triangle,
+    the colour of the face along its normal and of the other apart."""
+    triangle = magpy.misc.Triangle(
+        polarization=(0, 0, north), vertices=[(0, 0, 0), (1e-3, 0, 0), (0, 1e-3, 0)]
+    )
+    mesh = threejs.view_payload(threejs._capture([triangle]))["meshes"][0]
+    assert (len(mesh["position"]), mesh["index"]) == (9, [0, 1, 2])
+    assert set(mesh["uv"][0::2]) == {front} and set(mesh["back_uv"][0::2]) == {
+        1 - front
+    }
+
+
 def flows(payload):
     """What each drawn item says of its current, in the order drawn: the way
     a wire's runs, ``("streams", +1)`` for a surface's streams running

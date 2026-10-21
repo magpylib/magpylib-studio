@@ -2590,6 +2590,20 @@ function buildMesh(item) {
   geometry.computeVertexNormals();
 
   const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial(options));
+  if (item.back_uv) {
+    // A triangle magnetized through it, a pole's colour on each face: this
+    // side drawn only where it faces the eye, and the other on a twin of
+    // it, so the two are never drawn over each other (`threejs._two_faced`).
+    mesh.material.side = THREE.FrontSide;
+    const under = geometry.clone();
+    under.setAttribute("uv", new THREE.Float32BufferAttribute(item.back_uv, 2));
+    mesh.add(
+      new THREE.Mesh(
+        under,
+        new THREE.MeshLambertMaterial({ ...options, side: THREE.BackSide }),
+      ),
+    );
+  }
   if (item.streams) {
     const flow = flowLine(withPenLifts(item.streams), {
       colour: streamColour(item.color),
