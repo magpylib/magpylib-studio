@@ -166,6 +166,10 @@ def shape_of(obj):
     }
     if type(obj).__name__ in POINTWISE and np.size(value) // 3 <= MAX_POINTWISE:
         shape["pointwise"] = True
+        # a wire's path gains a point on a segment and loses one, where a
+        # tetrahedron has four corners and a mesh's faces name theirs
+        if type(obj).__name__ == "Polyline":
+            shape["insertable"] = True
     return shape
 
 

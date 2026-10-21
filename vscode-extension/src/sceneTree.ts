@@ -158,7 +158,10 @@ const TYPE_ICON_FILES: Record<string, string> = {
   'magnet.TriangularMesh': 'mesh',
   'current.Circle': 'loop',
   'current.Polyline': 'polyline',
+  'current.TriangleSheet': 'sheet',
+  'current.TriangleStrip': 'strip',
   'misc.Dipole': 'dipole',
+  'misc.Triangle': 'triangle',
   'misc.CustomSource': 'custom',
   Sensor: 'sensor',
 };

@@ -359,6 +359,10 @@ const KEY_LIST = {
     ["L", "the world's axes, or the object's own"],
     ["C", "select the collection it is in — again: the one round that"],
     ["S", "snap to round steps"],
+    ["⇧ in a drag", "snap onto the other objects' corners"],
+    ["⌘ / Ctrl click a dot", "pick its point — ⌥ drag: the dots in a box"],
+    ["Delete", "take the point out of a wire"],
+    ["Esc in a drag", "take the drag back"],
     ["⌘Z", "undo — ⇧⌘Z: redo"],
   ],
 };
@@ -1234,8 +1238,12 @@ function render({ model, el }) {
       return true;
     }
     if (event.metaKey || event.ctrlKey || event.shiftKey) return false;
-    if (HANDLE_KEYS[key]) setHandles(HANDLE_KEYS[key], { asked: true });
-    else if (key === "x" || key === "y" || key === "z") constrain(key);
+    if (HANDLE_KEYS[key]) {
+      // points picked take W, E and R for themselves: moved, turned, scaled
+      if (!api?.setPointsMode?.(HANDLE_KEYS[key])) {
+        setHandles(HANDLE_KEYS[key], { asked: true });
+      }
+    } else if (key === "x" || key === "y" || key === "z") constrain(key);
     else if (key === "a") constrain(null);
     else if (key === "l") toggleSpace();
     else if (key === "s") toggleSnap();
@@ -1764,6 +1772,28 @@ function render({ model, el }) {
     const chosen = model.get("selected") || [];
     const field = DRAG_WRITES[inEffect];
     if (!editable() || chosen.length !== 1 || !field) return null;
+    // a point the handles hold, alone: where it is in its object's frame
+    const point = inEffect === "scale" ? api?.heldPoint?.() : null;
+    if (point?.objectId === chosen[0]) {
+      const unit = model.get("payload")?.units?.length || SI.length;
+      const box = {
+        kind: "length",
+        unit: unit.symbol,
+        scale: unit.scale,
+        decimals: DECIMALS[unit.symbol] ?? 4,
+        width: FIELD_READS.position.width,
+      };
+      return {
+        objectId: chosen[0],
+        field: "point",
+        attr: point.attr,
+        label: `point ${point.index + 1}`,
+        index: point.index,
+        numbers: point.at,
+        expressions: null,
+        boxes: [box, box, box],
+      };
+    }
     const read = FIELD_READS[field];
     const value = (model.get("payload")?.[read.from] || {})[chosen[0]];
     if (value === undefined) return null;
@@ -1823,19 +1853,19 @@ function render({ model, el }) {
       el.classList.toggle("magpy-reading", !readout.hidden);
       return;
     }
-    readoutHead.textContent = `${shown.objectId} · ${shown.attr}`;
-    const key = `${shown.objectId}/${shown.attr}/${shown.numbers.length}`;
+    const named = shown.label ?? shown.attr;
+    readoutHead.textContent = `${shown.objectId} · ${named}`;
+    const key = `${shown.objectId}/${named}/${shown.numbers.length}`;
     if (key !== readoutKey) {
       readoutKey = key;
-      // each run of one kind followed by its unit
+      // each box followed by its unit, so that one typed in another unit --
+      // `7 mm` -- reads as a value beside values, not a stray
       readoutFields.replaceChildren(
         ...shown.boxes.flatMap((box, index) => {
-          const input = numberBox(index, box.width);
-          if (shown.boxes[index + 1]?.kind === box.kind) return [input];
           const unit = document.createElement("span");
           unit.className = "unit";
           unit.textContent = box.unit;
-          return [input, unit];
+          return [numberBox(index, box.width), unit];
         }),
       );
     }
@@ -1899,7 +1929,11 @@ function render({ model, el }) {
     const last = (value) =>
       Array.isArray(value?.[0]) ? value[value.length - 1] : value;
     let live = last(edit[shown.field]);
-    if (shown.field === "shape") {
+    if (shown.field === "point") {
+      const points = (value) =>
+        Array.isArray(value?.[0]?.[0]) ? value.flatMap(points) : value;
+      live = edit.shape ? points(edit.shape.value)?.[shown.index] : null;
+    } else if (shown.field === "shape") {
       const value = edit.shape?.value;
       live = value && !Array.isArray(value[0]) ? [].concat(value) : null;
     }
@@ -1949,6 +1983,12 @@ function render({ model, el }) {
       showReadout(); // nothing said
       return;
     }
+    if (shown.field === "point") {
+      // the whole array, that one point typed: see `pointEdit`
+      const edit = api.pointEdit(typed);
+      if (edit) settle(editor.commit([edit]));
+      return;
+    }
     const edit = { objectId: shown.objectId };
     const bound = typed.some((value) => typeof value === "string");
     if (shown.field === "shape") {
@@ -1988,6 +2028,13 @@ function render({ model, el }) {
     undo: () => call("undo"),
     redo: () => call("redo"),
     reset: () => call("reset"),
+    // Esc in a drag: the group closed where the drag got to, then undone --
+    // which gives back a variable it overruled, as moving back would not.
+    // The session answers in order, so the undo finds the group closed.
+    cancel() {
+      call("end_interaction").catch(() => {});
+      return call("undo");
+    },
   };
 
   const stopDrags = watchDrags(view, {
@@ -2009,11 +2056,19 @@ function render({ model, el }) {
       if (!inspectorEl.hidden) showReadout(); // and away again
       settle(editor.commit(pose.edits));
     },
+    cancel() {
+      dragActive = false;
+      if (!inspectorEl.hidden) showReadout();
+      settle(editor.cancel());
+    },
   });
 
   // --- selection --------------------------------------------------------
   // The view reports a click; what selection *means* is the host's, which
   // here is a traitlet the notebook can read and write.
+  // the point the handles hold changed: the readout says that one's place
+  view.addEventListener("pointheld", () => showReadout());
+
   view.addEventListener("objectpick", (event) => {
     const { objectId, adding } = event.detail;
     const current = model.get("selected") || [];
