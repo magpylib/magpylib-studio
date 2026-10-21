@@ -103,10 +103,21 @@ SCALE_COVARIANT = {
 MAX_DRAGGABLE_VERTICES = 256
 
 #: The shapes whose points are moved one at a time as well, a dot on each to
-#: pick one up -- a tetrahedron's corners, a wire's path -- while there are
-#: few enough to tell apart. A TriangularMesh is not among them: a vertex
-#: moved on its own can open the mesh or turn it inside out.
-POINTWISE = {"Tetrahedron", "Triangle", "Polyline", "TriangleStrip", "TriangleSheet"}
+#: pick one up -- a tetrahedron's corners, a wire's path, a small mesh's
+#: vertices, a sensor's pixels -- while there are few enough to tell apart
+#: (and where the document writes them as numbers: see `get_scene`). A mesh's faces keep
+#: their vertices, so it stays closed; a vertex pushed through the far side
+#: folds it, which magpylib takes without a word, as it takes the same
+#: vertices typed in the Inspector.
+POINTWISE = {
+    "Sensor",
+    "Tetrahedron",
+    "TriangularMesh",
+    "Triangle",
+    "Polyline",
+    "TriangleStrip",
+    "TriangleSheet",
+}
 MAX_POINTWISE = 32
 
 #: And above this many frames a path is not carried either. A drag has to
@@ -153,7 +164,7 @@ def shape_of(obj):
         "value": value.tolist() if hasattr(value, "tolist") else float(value),
         "constraint": constraint,
     }
-    if type(obj).__name__ in POINTWISE and len(value) <= MAX_POINTWISE:
+    if type(obj).__name__ in POINTWISE and np.size(value) // 3 <= MAX_POINTWISE:
         shape["pointwise"] = True
     return shape
 

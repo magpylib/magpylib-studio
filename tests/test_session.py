@@ -707,9 +707,23 @@ def test_a_sensor_resizes_its_pixel_array(session, pixel, offered):
             "attr": "pixel",
             "value": pixel,
             "constraint": "pixels",
+            "pointwise": True,  # few, and numbers: each moves on its own too
         }
     else:
         assert "probe" not in shapes
+
+
+def test_points_written_as_a_formula_move_only_together():
+    """One pixel of a grid over its `density` moved on its own would end the
+    formula, so the grid offers no point to pick up -- only its stretch."""
+    session = MagpylibStudioSession()
+    session.load_example("quiver")
+    session.set_variable("density", 4)  # 16 pixels: few enough for dots
+
+    shape = session.get_scene()["shapes"]["field"]
+
+    assert shape["constraint"] == "pixels"
+    assert "pointwise" not in shape
 
 
 def test_a_pixel_resize_keeps_the_formula_a_variable_writes():

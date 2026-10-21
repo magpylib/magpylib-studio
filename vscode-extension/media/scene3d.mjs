@@ -298,15 +298,22 @@ function makeGizmo() {
     const node = gizmo.object;
     if (!node || !from) return;
     if (from.point) {
-      // One point of a shape written as points, where the handles took it:
-      // in the object's own frame, as magpylib keeps its vertices.
+      // The points held, moved as the handles moved: in the object's own
+      // frame, as magpylib keeps its vertices, each by the same offset.
       const [objectId] = from.objectIds;
-      const at = node
+      const offset = node
         .getWorldPosition(new THREE.Vector3())
         .sub(from.placed[objectId])
-        .applyQuaternion(from.orientations[objectId].clone().invert());
-      const value = from.point.value.map((p, i) =>
-        i === from.point.index ? at.toArray() : p,
+        .applyQuaternion(from.orientations[objectId].clone().invert())
+        .sub(new THREE.Vector3().fromArray(from.point.middle));
+      if (offset.lengthSq() < 1e-24) return; // pressed, not moved
+      const value = nested(
+        from.point.like,
+        from.point.value.map((p, i) =>
+          from.point.indices.includes(i)
+            ? new THREE.Vector3().fromArray(p).add(offset).toArray()
+            : p,
+        ),
       );
       host.dispatchEvent(
         new CustomEvent("objecttransform", {
@@ -472,9 +479,11 @@ function makeGizmo() {
         point:
           node === pointProxy
             ? {
-                index: node.userData.index,
+                indices: node.userData.indices,
+                middle: node.userData.middle,
                 attr: shapes[primary].attr,
-                value: shapes[primary].value.map((p) => [...p]),
+                like: shapes[primary].value, // its nesting, to write back in
+                value: pointsOf(shapes[primary].value).map((p) => [...p]),
               }
             : null,
         polarization:
@@ -580,6 +589,8 @@ function setGizmoMode(mode) {
   if (!gizmo) return gizmoMode;
   // a shape with grips of its own resizes by them, in place of the handles
   const alone = gizmoMode === "scale" && !together;
+  flatAxes = alone ? flatOf(primaryId()) : new Set();
+  showAxes();
   placeGrips(alone ? primaryId() : null);
   if (gripped) {
     gizmo.detach();
@@ -588,6 +599,7 @@ function setGizmoMode(mode) {
   // and one written as points has a dot on each, a picked one the move
   // handles; a point stays picked only while its object is resized
   if (!alone || chosenPoint?.objectId !== primaryId()) chosenPoint = null;
+  if (!alone || pickedPoints?.objectId !== primaryId()) pickedPoints = null;
   placeDots(alone ? primaryId() : null);
   if (placePointHandles()) return gizmoMode;
   if (together && gizmoMode !== "none") {
@@ -645,12 +657,43 @@ function setGizmoMode(mode) {
   return gizmoMode;
 }
 
+let lockedAxis = null; // the one axis the handles keep, by key, or none
+let flatAxes = new Set(); // the axes a flat shape has no extent along
+
 /** Restrict the handles to one axis, or to all of them again. */
 function constrainAxis(axis) {
+  lockedAxis = axis || null;
+  showAxes();
+}
+
+/** The handles' axes: those the lock keeps, but for any the shape resized
+ *  is flat along -- a triangle's, a sheet's or a pixel grid's own z, which
+ *  a resize has nothing to stretch along. */
+function showAxes() {
   if (!gizmo) return;
-  gizmo.showX = !axis || axis === "x";
-  gizmo.showY = !axis || axis === "y";
-  gizmo.showZ = !axis || axis === "z";
+  for (const axis of ["x", "y", "z"]) {
+    gizmo[`show${axis.toUpperCase()}`] =
+      !flatAxes.has(axis) && (!lockedAxis || lockedAxis === axis);
+  }
+}
+
+/** The axes `objectId`'s points have no extent along, in its own frame,
+ *  where it resizes by its points. */
+function flatOf(objectId) {
+  const shape = shapes[objectId];
+  if (!["vertices", "points", "pixels"].includes(shape?.constraint)) {
+    return new Set();
+  }
+  const each = (value) =>
+    Array.isArray(value[0]) ? value.flatMap(each) : [value];
+  const points = each(shape.value);
+  const extents = [0, 1, 2].map(
+    (k) =>
+      Math.max(...points.map((p) => p[k])) -
+      Math.min(...points.map((p) => p[k])),
+  );
+  const most = Math.max(...extents);
+  return new Set(["x", "y", "z"].filter((_, k) => extents[k] <= 1e-9 * most));
 }
 
 /** The axes the current mode drags along. */
@@ -696,8 +739,10 @@ function setSpaces(chosen = {}) {
 // draws the shape as it goes.
 //
 // A shape written as points -- a tetrahedron, a triangle, a wire -- has a
-// dot on each in the resize as well, and a click on one gives it the move
-// handles: that point alone moves, along their axes.
+// dot on each in the resize as well. Pointed at, a dot gets the move
+// handles: dragged by the dot, the point moves freely, facing the view, and
+// by an arrow along that axis -- that point alone. ⌘/ctrl-click picks
+// several, and the handles hold them together, on their middle.
 
 const grips = new THREE.Group(); // in the shape's own frame
 grips.name = "grips";
@@ -718,7 +763,8 @@ dots.visible = false;
 dots.matrixAutoUpdate = false;
 let dotted = null; // { objectId, value, frame } while the dots are shown
 let dotHovered = null;
-let chosenPoint = null; // { objectId, index }: the point the handles are on
+let chosenPoint = null; // { objectId, index }: the point under the pointer
+let pickedPoints = null; // { objectId, indices }: ⌘/ctrl-clicked, held
 const pointProxy = new THREE.Object3D();
 
 /** What a grip moves, by colour: x, y and z as the handles colour them, and
@@ -1035,6 +1081,22 @@ function setGrips(value, shift = null) {
   guide.geometry = new THREE.BufferGeometry().setFromPoints(points);
 }
 
+/** A point array's points, however it nests them: a sensor's pixels may
+ *  come as a grid. */
+function pointsOf(value) {
+  return Array.isArray(value[0]?.[0]) ? value.flatMap(pointsOf) : value;
+}
+
+/** `points`, in order, put back into `like`'s nesting. */
+function nested(like, points) {
+  let k = 0;
+  const fill = (value) =>
+    Array.isArray(value[0]?.[0])
+      ? value.map(fill)
+      : value.map(() => points[k++]);
+  return fill(like);
+}
+
 /** Show a dot on each of `objectId`'s points, if they move one at a time,
  *  or put them away. */
 function placeDots(objectId) {
@@ -1045,11 +1107,12 @@ function placeDots(objectId) {
     dots.visible = false;
     return;
   }
-  dotted = { objectId, value: shape.value, frame: frameOf(objectId) };
+  const points = pointsOf(shape.value);
+  dotted = { objectId, value: points, frame: frameOf(objectId) };
   dots.matrix.copy(dotted.frame);
   dots.matrixWorldNeedsUpdate = true;
   dots.visible = true;
-  while (dots.children.length < shape.value.length) {
+  while (dots.children.length < points.length) {
     const dot = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, 0.08, 0.08),
       new THREE.MeshBasicMaterial(HANDLE_LOOK),
@@ -1058,13 +1121,11 @@ function placeDots(objectId) {
     dots.add(dot);
   }
   dots.children.forEach((dot, index) => {
-    dot.visible = index < shape.value.length;
+    dot.visible = index < points.length;
     if (!dot.visible) return;
-    dot.position.fromArray(shape.value[index]);
+    dot.position.fromArray(points[index]);
     dot.userData.dot = index;
-    const lit =
-      index === dotHovered ||
-      (chosenPoint?.objectId === objectId && chosenPoint.index === index);
+    const lit = index === dotHovered || heldPoints()?.includes(index);
     dot.material.color.setHex(lit ? GRIP_ACTIVE : DOT);
   });
 }
@@ -1076,19 +1137,35 @@ function dotObjects() {
 
 /** Put the move handles on the point chosen, through a stand-in at it,
  *  turned with the object for "local". Returns whether they went there. */
+/** The points the move handles hold: those ⌘/ctrl-clicked, while any are,
+ *  or the one under the pointer. */
+function heldPoints() {
+  if (!dotted) return null;
+  if (pickedPoints?.objectId === dotted.objectId) return pickedPoints.indices;
+  if (chosenPoint?.objectId === dotted.objectId) return [chosenPoint.index];
+  return null;
+}
+
 function placePointHandles() {
-  if (!chosenPoint || !dotted || dotted.objectId !== chosenPoint.objectId) {
-    return false;
-  }
+  const indices = heldPoints();
+  const points = (indices ?? []).map((i) => dotted.value[i]).filter(Boolean);
+  if (!points.length) return false;
+  // on their middle, where the free handle in it is the one point's own dot
+  const point = [0, 1, 2].map(
+    (k) => points.reduce((sum, p) => sum + p[k], 0) / points.length,
+  );
+  // a point moves along all three, off a flat shape's plane too: a
+  // triangle's corner lifted tilts the triangle
+  flatAxes = new Set();
+  showAxes();
   // a redraw mid-drag comes back through here: the stand-in is the drag
   if (gizmo.dragging && gizmo.object === pointProxy) return true;
-  const point = dotted.value[chosenPoint.index];
-  if (!point) return false;
   pointProxy.position.fromArray(point).applyMatrix4(dotted.frame);
-  pointProxy.quaternion.copy(quaternionOf(orientations[chosenPoint.objectId]));
+  pointProxy.quaternion.copy(quaternionOf(orientations[dotted.objectId]));
   pointProxy.scale.set(1, 1, 1);
-  pointProxy.userData.objectId = chosenPoint.objectId;
-  pointProxy.userData.index = chosenPoint.index;
+  pointProxy.userData.objectId = dotted.objectId;
+  pointProxy.userData.indices = [...indices];
+  pointProxy.userData.middle = point;
   gizmo.setSpace(SPACES.translate ?? "world");
   gizmo.mode = "translate";
   gizmo.attach(pointProxy);
@@ -1225,18 +1302,53 @@ function watchGrips() {
       }),
     );
   };
-  let dotPress = null; // a press on a dot: a pick of it, if it stays put
+  /** The point under the pointer gets the move handles, and keeps them
+   *  while the pointer is on them: pressed where the dot is, their middle
+   *  moves it freely, facing the view, and an arrow along its axis. Off
+   *  both, the handles go back to the whole shape. */
+  const hoverPoints = (event) => {
+    if (!dotted || gizmo.dragging) return;
+    if (pickedPoints?.objectId === dotted.objectId) return; // they hold them
+    const dot = dotAt(event);
+    const held = gizmo.object === pointProxy && gizmo.axis !== null;
+    const next = dot ?? (held ? (chosenPoint?.index ?? null) : null);
+    if (next === (chosenPoint?.index ?? null)) return;
+    chosenPoint =
+      next === null ? null : { objectId: dotted.objectId, index: next };
+    setGizmoMode(gizmoMode);
+  };
+
+  // ⌘/ctrl-click on a dot picks its point, or puts it back: the points
+  // picked move together, the handles on their middle. Taken before the
+  // handles and the orbit see the press, which would start a drag of them.
+  element.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
+      const dot = dotted ? dotAt(event) : null;
+      if (dot === null) return;
+      event.stopImmediatePropagation();
+      gripPressed = true; // nor is it a pick of the object behind
+      const held = new Set(
+        pickedPoints?.objectId === dotted.objectId ? pickedPoints.indices : [],
+      );
+      if (held.has(dot)) held.delete(dot);
+      else held.add(dot);
+      pickedPoints = held.size
+        ? {
+            objectId: dotted.objectId,
+            indices: [...held].sort((a, b) => a - b),
+          }
+        : null;
+      setGizmoMode(gizmoMode);
+      redraw();
+    },
+    true,
+  );
 
   element.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     if (gizmo?.axis) return; // the move handles of a point already have it
-    const dot = dotted ? dotAt(event) : null;
-    if (dot !== null) {
-      gripPressed = true;
-      dotPress = { dot, x: event.clientX, y: event.clientY };
-      controls.enabled = false;
-      return;
-    }
     if (!gripped) return;
     const index = gripAt(event);
     if (index === null) return;
@@ -1265,6 +1377,7 @@ function watchGrips() {
   element.addEventListener("pointermove", (event) => {
     if (!gripping) {
       if (event.buttons) return; // orbiting
+      hoverPoints(event);
       const index = gripAt(event);
       const dot = dotAt(event);
       if (index === gripHovered && dot === dotHovered) return;
@@ -1313,28 +1426,10 @@ function watchGrips() {
 
   const letGo = (event) => {
     gripPressed = false;
-    controls.enabled = true;
-    if (dotPress) {
-      // a click on a dot picks its point up, and on the one picked puts it
-      // down again: the handles go back to the whole shape
-      const stayed =
-        Math.hypot(event.clientX - dotPress.x, event.clientY - dotPress.y) <= 4;
-      if (stayed && dotted) {
-        const same =
-          chosenPoint?.objectId === dotted.objectId &&
-          chosenPoint.index === dotPress.dot;
-        chosenPoint = same
-          ? null
-          : { objectId: dotted.objectId, index: dotPress.dot };
-        setGizmoMode(gizmoMode);
-        redraw();
-      }
-      dotPress = null;
-      return;
-    }
     if (!gripping) return;
     const drag = gripping;
     gripping = null;
+    controls.enabled = true;
     element.releasePointerCapture?.(event.pointerId);
     element.style.cursor = gripHovered === null ? "" : "grab";
     // where it was let go, until the engine's scene puts the grips back

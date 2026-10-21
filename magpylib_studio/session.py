@@ -3705,6 +3705,12 @@ class MagpylibStudioSession:
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
         scene["parametric"] = self._parametric_fields()
+        # Points written as a formula -- a grid over its `density` -- are not
+        # moved one at a time: one moved would end the formula, and with it
+        # the variable's say. A resize of them all stretches it instead.
+        for key, shape in scene["shapes"].items():
+            if shape.get("pointwise") and self._written_as_formula(key, shape["attr"]):
+                del shape["pointwise"]
         # How a view shows and reads a number, and what was written where a
         # number is -- `gap` rather than 0.015 -- both facts about the
         # document, as `parametric` is.
@@ -5563,6 +5569,15 @@ class MagpylibStudioSession:
         if made and result.get("ok"):
             result = {**result, "defined": made}
         return result
+
+    def _written_as_formula(self, object_id, attr):
+        """Whether the document writes `object_id`'s `attr` with a variable."""
+        try:
+            create = self._create_event(object_id)
+        except KeyError:
+            return False
+        value = (create.get("params") or {}).get(attr)
+        return bool(expressions.referenced_names([value]))
 
     def _kept_formula(self, edit):
         """`edit`, with a resize of pixels that a variable decides -- a grid
