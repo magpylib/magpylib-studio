@@ -192,7 +192,11 @@ def points_of(grid):
 
 #: Source-point pairs per magpylib call. Magpylib evaluates every pair of a
 #: call at once, with about a kilobyte of temporaries each: a meshed body of
-#: a thousand cells against a grid at rest took 8 GB in one call.
+#: a thousand cells against a grid at rest took 8 GB in one call. Measured on
+#: that body (1,056 cells, 8,000 points): 25,000 pairs a call took 6.7 s,
+#: 100,000 4.6 s, 200,000 4.4 s in 0.44 GB, and 1 or 2 million no less time in
+#: 1.4 and 2.2 GB. Hence a constant and no option: past the knee only memory
+#: grows. Set it at run time if you must; each call reads it.
 PAIRS_PER_CALL = 200_000
 
 
