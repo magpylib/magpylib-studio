@@ -257,16 +257,20 @@ TriangleStrip's and TriangleSheet's surface with streams along its current
 per sheet), each found as a path is, by its points being the conductor in the
 drawing's unit. The renderer runs pulses along them, a tapered comet each, in a
 wide line whose dash test is the pulse, and puts away the current's arrows,
-marked beside it, unless its style asked for them. That is the one picture drawn
-unasked: the view draws frame after frame, at most sixty a second, only while
-something flowing is shown, the view on screen and its page visible, and leaves
-the pulses standing for `prefers-reduced-motion`. The widget's `flow` trait,
-kept by an export, puts the pulses away and the arrows back. It says the scene's
-scale one of three ways (`setAxes`, the widget's `axes`): by default a view cube
-and a scale bar, drawn into the canvas's corner after the scene in the same
-frame, the cube a click away from twenty-six views and the bar a round length at
-the orbit centre, said in the unit that reads best, kept by the PNG where the
-cube is not; the graduated box round the scene; or neither
+marked beside it, unless its style asked for them. A sensor's field lines flow
+the same way, the way B points: the tracer counts each segment's distance along
+B, from a phase of its own line's so that neighbours' pulses are out of step,
+and the lines' shared materials run a wider, brighter head along it. That is the
+one picture drawn unasked: the view draws frame after frame, at most sixty a
+second, only while something flowing is shown, the view on screen and its page
+visible, and leaves the pulses standing for `prefers-reduced-motion`. The
+widget's `flow` trait, kept by an export, puts the pulses away and the arrows
+back, and stands the field lines still. It says the scene's scale one of three
+ways (`setAxes`, the widget's `axes`): by default a view cube and a scale bar,
+drawn into the canvas's corner after the scene in the same frame, the cube a
+click away from twenty-six views and the bar a round length at the orbit centre,
+said in the unit that reads best, kept by the PNG where the cube is not; the
+graduated box round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
 [0030](decisions.md#0030-the-view-cube-is-the-default-scale)). A drag goes
 through `static/drag.mjs`: open an undo group, pace previews with one request in

@@ -8,16 +8,17 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
-<summary>Currents flow</summary>
+<summary>Currents and field lines flow</summary>
 
 Every current shows its current flowing, in place of its arrows: pulses run
 along a Circle's or a Polyline's wire, down a TriangleStrip and over a
 TriangleSheet, the way the current runs, in the notebook widget and the VS Code
-panel, whether a run plays or not. They rest while the view is off screen and
-stand still for whoever asks the system for less motion. Arrows asked for in a
-style stay. The flow button among the view's tools, shown where something flows,
-or `SceneWidget(..., flow=False)`, puts the pulses away and the arrows back,
-which an export keeps (#63).
+panel, whether a run plays or not. A sensor's field lines flow too, the way the
+field points. They rest while the view is off screen and stand still for whoever
+asks the system for less motion. Arrows asked for in a style stay. The flow
+button among the view's tools, shown where something flows, or
+`SceneWidget(..., flow=False)`, puts the pulses away and the arrows back, and
+stands the field lines still, which an export keeps (#63).
 
 </details>
 

@@ -198,9 +198,9 @@ function ensureRenderer(canvasEl) {
  * loop apiece keeps the GPU drawing every one of them sixty times a second.
  * So whatever changes the picture asks for a frame -- the orbit and the
  * handles as they move, a new size, and every call a host makes (see
- * `drawingAfter`) -- and nothing else draws. The one exception is a
- * current's flow, which asks for the next frame from each one it draws, and
- * only while it is to be seen (`flowing`). */
+ * `drawingAfter`) -- and nothing else draws. The one exception is the
+ * flow, a current's or the field's, which asks for the next frame from each
+ * one it draws, and only while it is to be seen (`flowing`). */
 let frameAsked = false; // a frame is on its way
 let frameWanted = false; // and something besides a current's flow wants it
 let lastDrawn = 0;
@@ -2789,18 +2789,34 @@ function legible(hex, paper) {
 /** One material per opacity for every field line drawn: shared and never
  *  disposed, so its program is compiled once -- a material per frame would
  *  also grow `wideMaterials` without end, since a discarded node's are not
- *  taken out of it. */
+ *  taken out of it. Its lines flow as a current does, the way the field
+ *  points (`FIELD_PULSE`), while the host's flow is on. */
 const fieldLineMaterials = new Map();
 function fieldLineMaterial(opacity) {
   let material = fieldLineMaterials.get(opacity);
   if (!material) {
     material = new LineMaterial({
       vertexColors: true,
-      linewidth: 1.75,
+      linewidth: FIELD_PULSE_WIDTH,
+      dashed: true, // for the distance along the line, which a pulse runs by
       transparent: true,
       opacity,
       depthWrite: false, // lines behind lines still show through
     });
+    material.uniforms.flowClock = flowClock;
+    material.uniforms.flowGlow = flowGlow;
+    material.uniforms.fieldFlow = fieldFlow;
+    material.fragmentShader = material.fragmentShader
+      .replace(
+        "uniform float gapSize;",
+        "uniform float gapSize;\n\t\t\tuniform float flowClock;\n\t\t\tuniform float flowGlow;\n\t\t\tuniform float fieldFlow;",
+      )
+      .replace(DASH_TEST, FIELD_PULSE)
+      // lit after its colour, which a line's vertices carry
+      .replace(
+        "#include <color_fragment>",
+        "#include <color_fragment>\n\t\t\tdiffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * pulse * pulse );",
+      );
     if (renderer) renderer.getSize(material.resolution);
     wideMaterials.add(material);
     fieldLineMaterials.set(opacity, material);
@@ -3017,7 +3033,11 @@ function buildFieldLines(item) {
     return false;
   }
 
-  const bands = FIELD_LINE_BANDS.map(() => ({ positions: [], colours: [] }));
+  const bands = FIELD_LINE_BANDS.map(() => ({
+    positions: [],
+    colours: [],
+    distances: [], // along the line, the way B points, in pulses
+  }));
   const world = (x, y, z, out) => {
     for (let c = 0; c < 3; c++) {
       out.push(
@@ -3052,10 +3072,14 @@ function buildFieldLines(item) {
     if (sample(sx, sy, sz) <= fade) return;
     const line = lines++;
     claim(sx, sy, sz, line, 0);
+    // a line's pulses out of step with its neighbours', not a front across
+    const phase = (line * 0.618034) % 1;
+    const stride = FIELD_FLOW_STRIDE * spacing;
     for (const sign of [1, -1]) {
       let x = sx;
       let y = sy;
       let z = sz;
+      let d = phase;
       let m = sample(x, y, z);
       if (m <= fade) break;
       let shown = strength;
@@ -3100,6 +3124,9 @@ function buildFieldLines(item) {
           bands[FIELD_LINE_BANDS.findIndex((each) => t < each.below)];
         world(x, y, z, band.positions);
         world(tx, ty, tz, band.positions);
+        const d1 = d + (sign * Math.hypot(tx - x, ty - y, tz - z)) / stride;
+        band.distances.push(d, d1);
+        d = d1;
         const c0 = colourOf(shown);
         const c1 = colourOf(strength);
         band.colours.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
@@ -3143,6 +3170,20 @@ function buildFieldLines(item) {
     const geometry = new LineSegmentsGeometry();
     geometry.setPositions(band.positions);
     geometry.setColors(band.colours);
+    // as `computeLineDistances` lays them out, but counted the way B points
+    const distances = new THREE.InstancedInterleavedBuffer(
+      new Float32Array(band.distances),
+      2,
+      1,
+    );
+    geometry.setAttribute(
+      "instanceDistanceStart",
+      new THREE.InterleavedBufferAttribute(distances, 1, 0),
+    );
+    geometry.setAttribute(
+      "instanceDistanceEnd",
+      new THREE.InterleavedBufferAttribute(distances, 1, 1),
+    );
     // Not part of what the view frames: the lines run to the edge of their
     // grid, a quarter wider than the scene, and framing them shrank it. An
     // empty box is what `expandByObject` adds nothing for; and so nothing
@@ -3154,6 +3195,8 @@ function buildFieldLines(item) {
     );
     part.frustumCulled = false;
     part.raycast = () => {};
+    part.userData.field = true; // flows, but stays when the flow goes
+    flowLines.add(part);
     group.add(part);
   });
   return group;
@@ -3192,7 +3235,7 @@ const flowGlow = { value: 0 }; // how far a head is lit toward white: on a dark 
 const UNLIT = { value: 0 };
 const flowClock = { value: 0 }; // where every pulse is in its stride, 0 to 1
 const flowResolution = new THREE.Vector2(1, 1); // one for all, see `resize`
-const flowLines = new Set(); // the wires drawn flowing, to know if any is
+const flowLines = new Set(); // wires and field lines drawn flowing, to know if any is
 const flowArrows = new Set(); // a flowing current's arrows, away while it flows
 let flowShown = true; // the host's: see `setFlow`
 // still for whoever asks the system for less motion: the pulses show the
@@ -3214,6 +3257,23 @@ const PULSE = `
   alpha *= sqrt( body ) * ( 1.0 - smoothstep( girth - edge, girth + edge, abs( vUv.x ) ) );
   if ( alpha < 0.01 ) discard;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * body * body );`;
+
+/** How a field line flows: pulses run along it the way B points, at the
+ *  currents' pace, each a head wider and brighter than the line, its tail
+ *  narrowing behind it -- the line itself stays, a little dimmer, so the
+ *  picture is still the field's. Standing, it is the line as it was. */
+const FIELD_LINE_WIDTH = 1.75; // pixels, the line between pulses
+const FIELD_PULSE_WIDTH = 3.5; // pixels, a pulse's head
+const FIELD_FLOW_STRIDE = 3; // of the lines' spacing, from a pulse to the next
+const fieldFlow = { value: 1 }; // 1 while the field's lines flow: see `setFlow`
+const FIELD_PULSE = `
+  float stride = fract( vLineDistance - flowClock );
+  float pulse = fieldFlow * smoothstep( ${(1 - FLOW_TAIL).toFixed(3)}, 1.0, stride ) * ( 1.0 - smoothstep( 0.97, 1.0, stride ) );
+  float girth = mix( ${(FIELD_LINE_WIDTH / FIELD_PULSE_WIDTH).toFixed(3)}, 1.0, pulse );
+  float edge = fwidth( vUv.x );
+  alpha *= mix( 1.0, 0.6 + 0.9 * pulse, fieldFlow ) * ( 1.0 - smoothstep( girth - edge, girth + edge, abs( vUv.x ) ) );
+  alpha = min( alpha, 1.0 );
+  if ( alpha < 0.01 ) discard;`;
 
 /** A pulse's material, one per wire: its colour, its width, its fade. */
 function flowMaterial(colour, width, opacity, glow = flowGlow) {
@@ -3287,10 +3347,10 @@ function streamColour(colour) {
     : own.lerp(new THREE.Color("#000000"), 0.6);
 }
 
-/** Whether a current flows where it can be seen: so whether the view asks
- *  for its next frame. Not with the view off screen, or its page hidden, or
- *  every wire that flows hidden, nor for whoever asked for less motion. A
- *  wire taken off the scene is forgotten. */
+/** Whether a current or a field line flows where it can be seen: so
+ *  whether the view asks for its next frame. Not with the view off screen,
+ *  or its page hidden, or every line that flows hidden, nor for whoever
+ *  asked for less motion. A line taken off the scene is forgotten. */
 function flowing() {
   if (!flowShown || stillFlow || !inSight || document.hidden) return false;
   for (const line of flowLines) {
@@ -3303,12 +3363,16 @@ function flowing() {
   return false;
 }
 
-/** Show a current's flow along its wire, or not: the host's choice, for a
- *  picture without it. Its arrows, which magpylib draws to say the same,
- *  come back when it goes. */
+/** Show a current's flow along its wire, and the field's along its lines,
+ *  or not: the host's choice, for a picture without it. A current's arrows,
+ *  which magpylib draws to say the same, come back when it goes; a field
+ *  line stays, standing. */
 function setFlow(on) {
   flowShown = on !== false;
-  for (const line of flowLines) line.visible = flowShown;
+  fieldFlow.value = flowShown ? 1 : 0;
+  for (const line of flowLines) {
+    if (!line.userData.field) line.visible = flowShown;
+  }
   for (const arrows of flowArrows) arrows.visible = !flowShown;
 }
 

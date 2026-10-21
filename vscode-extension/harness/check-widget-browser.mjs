@@ -30,7 +30,8 @@
  *   selecting and hiding from the legend, the picture tool, the view cube,
  *   full screen, and a run that plays with no python behind it;
  * - what a selection is drawn with: a shape's edges, its path apart.
- * - a current's flow: moving on screen, resting off it, gone when off.
+ * - a current's flow: moving on screen, resting off it, gone when off; a
+ *   saved page's field lines flowing too, and standing when it is off.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -526,7 +527,7 @@ async function flow(port, base) {
       const arrows = shown("arrows");
       if (!(await tab.evaluate(pulses))) return "the coil's wire has no pulses";
       const offered = await tab.evaluate(
-        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Current flow")); return Boolean(b && !b.hidden);`,
+        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Flow")); return Boolean(b && !b.hidden);`,
       );
       if (!offered) return "no flow button beside a current";
       if (await tab.evaluate(arrows))
@@ -551,9 +552,11 @@ async function flow(port, base) {
 
 /** A saved page draws a sensor's field lines (#45): the page integrates them
  *  itself, from the field on the grid it carries -- no python behind it. A
- *  line part is the one with an empty box, kept out of what the view frames. */
+ *  line part is the one with an empty box, kept out of what the view frames.
+ *  They flow, with no current in the scene to offer the flow button but
+ *  them; switched off, they stay, standing. */
 async function savedLines(port, base) {
-  await check("a saved page draws a sensor's field lines", async () => {
+  await check("a saved page draws field lines that flow", async () => {
     const tab = await openTab(port);
     try {
       await tab.navigate(`${base}/out/lines.html`);
@@ -574,7 +577,25 @@ async function savedLines(port, base) {
         }
         return count;
       `);
-      return segments > 100 ? thrown(tab) : `${segments} line segments drawn`;
+      if (!(segments > 100)) return `${segments} line segments drawn`;
+      const moves = `
+        const before = window.scene3d.snapshot();
+        await new Promise((done) => setTimeout(done, 400));
+        return window.scene3d.snapshot() !== before;`;
+      const offered = await tab.evaluate(
+        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Flow")); return Boolean(b && !b.hidden);`,
+      );
+      if (!offered) return "no flow button beside the field lines";
+      if (!(await tab.evaluate(moves))) return "the field lines stood still";
+      await tab.evaluate("window.scene3d.setFlow(false)");
+      if (await tab.evaluate(moves)) return "switched off, they still moved";
+      const still = await tab.evaluate(`
+        let count = 0;
+        for (const node of window.scene3d.byObjectId.values()) {
+          node.traverse((part) => (count += part.userData.field && part.visible ? 1 : 0));
+        }
+        return count;`);
+      return still ? thrown(tab) : "switched off, the field lines went";
     } finally {
       await tab.close();
     }

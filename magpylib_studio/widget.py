@@ -209,11 +209,13 @@ class SceneWidget(anywidget.AnyWidget):
     axes = traitlets.Union(
         [traitlets.Enum(AXES), traitlets.Bool()], default_value="cube"
     ).tag(sync=True)
-    #: Whether currents flow: pulses running along a wire, down a strip or
-    #: over a sheet the way the current runs, whether a run plays or not,
-    #: and still for whoever asks the system for less motion. While they
+    #: Whether currents and field lines flow: pulses running along a wire,
+    #: down a strip or over a sheet the way the current runs, and along a
+    #: field line the way the field points -- whether a run plays or not,
+    #: and still for whoever asks the system for less motion. While currents
     #: flow, the arrows magpylib draws to say the same are away, unless a
-    #: style asked for them. Off, the arrows are back; an export keeps it.
+    #: style asked for them. Off, the arrows are back and the field lines
+    #: stand; an export keeps it.
     flow = traitlets.Bool(True).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and

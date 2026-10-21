@@ -500,7 +500,8 @@ function render({ model, el }) {
   );
   const flowButton = iconButton(
     "flow",
-    "Current flow — pulses along each current, the way it runs",
+    "Flow — pulses along each current, the way it runs, and along each " +
+      "field line, the way the field points",
     () => {
       const on = model.get("flow") === false;
       commit("flow", on);
@@ -1720,12 +1721,14 @@ function render({ model, el }) {
     pressed(linesButton, Boolean(model.get("field_lines")));
   }
 
-  /** The flow's switch, where something flows: a wire, a strip, a sheet. */
+  /** The flow's switch, where something flows: a wire, a strip, a sheet,
+   *  a field line. */
   function showFlow() {
     const payload = model.get("payload") || {};
     flowButton.hidden = !(
       (payload.scatters ?? []).some((item) => item.flow) ||
-      (payload.meshes ?? []).some((item) => item.streams)
+      (payload.meshes ?? []).some((item) => item.streams) ||
+      (payload.fieldlines ?? []).length
     );
     pressed(flowButton, model.get("flow") !== false);
   }
