@@ -101,6 +101,22 @@
       scene3d.render(el, before);
       const sensorNode = node("field");
       const sensorWas = drawn("field");
+      // The handles have the node where the pointer is, which is the pose
+      // the engine's answer is for: a redraw is carried to the node, so its
+      // drawing lands where the engine put it only with the node there too.
+      // One a round trip behind the pointer is held-reading's other half, in
+      // check-widget-browser.mjs's `heldReading`.
+      const rotvec = new THREE.Vector3().fromArray(
+        after.orientations?.field ?? [0, 0, 0],
+      );
+      sensorNode.position.fromArray(after.centroids.field);
+      if (rotvec.length() > 1e-12) {
+        sensorNode.quaternion.setFromAxisAngle(
+          rotvec.clone().normalize(),
+          THREE.MathUtils.degToRad(rotvec.length()),
+        );
+      }
+      sensorNode.updateMatrixWorld(true);
       scene3d.render(el, after, { keep: ["field"] }); // the sensor held
       const sensor = {
         sameNode: node("field") === sensorNode,
