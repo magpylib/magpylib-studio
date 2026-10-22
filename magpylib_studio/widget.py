@@ -201,6 +201,23 @@ class SceneWidget(anywidget.AnyWidget):
     faded = traitlets.Dict(
         value_trait=traitlets.Float(), key_trait=traitlets.Unicode()
     ).tag(sync=True)
+    #: The range each sensor's colours span, by its id: ``[low, high]`` of
+    #: |field| in SI -- tesla for B -- cut from what its pixels read, its
+    #: colormap stretched over it and the field past either end in that end's
+    #: colour; a sensor not named spans all it reads. Its pixels and field
+    #: lines alike. Written by the colour bar's handles, which show for a
+    #: sensor the field colours, assignable from the notebook. A view
+    #: setting, as `faded` is, kept by an export.
+    color_range = traitlets.Dict(
+        value_trait=traitlets.List(traitlets.Float(), minlen=2, maxlen=2),
+        key_trait=traitlets.Unicode(),
+    ).tag(sync=True)
+    #: One colour scale for the sensors that can share one -- the same
+    #: colormap and scaling: each coloured over what they read together, or
+    #: one cut of `color_range` given to them all, so that their colours
+    #: compare. One colour bar stands for them. The bar's switch; a view
+    #: setting, kept by an export.
+    color_shared = traitlets.Bool(False).tag(sync=True)
     #: How the scene's scale is said: ``"cube"``, the default, a scale bar and
     #: a cube to look from a side by, in a corner; ``"box"``, the graduated box
     #: round it; or ``"none"``. A cell can put it away for a clean picture, and
@@ -597,6 +614,11 @@ class SceneWidget(anywidget.AnyWidget):
                 for key, level in self.faded.items()
                 if moved(key) is not None
             }
+            self.color_range = {
+                moved(key): cut
+                for key, cut in self.color_range.items()
+                if moved(key) is not None
+            }
             payload = self.payload or {}
             if any(payload.get(key) != value for key, value in found.items()):
                 self.payload = {**payload, **found}
@@ -932,6 +954,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
             self.faded = {k: v for k, v in self.faded.items() if k in ids}
+            self.color_range = {k: v for k, v in self.color_range.items() if k in ids}
             self.variables = _values_of(self._session)
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
@@ -1013,6 +1036,8 @@ class SceneWidget(anywidget.AnyWidget):
             selected=self.selected,
             hidden=self.hidden,
             faded=self.faded,
+            color_range=self.color_range,
+            color_shared=self.color_shared,
             axes=self.axes,
             flow=self.flow,
             theme=self.theme,

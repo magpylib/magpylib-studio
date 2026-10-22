@@ -42,6 +42,7 @@
  */
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
+import { createColorBar } from "./colorbar.mjs";
 import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
 import {
@@ -653,7 +654,12 @@ function render({ model, el }) {
     "Save the view as a PNG picture",
     () => {
       const picture = api?.snapshot();
-      if (picture) save(picture, PICTURE_NAME);
+      if (!picture) return;
+      // with the colour bar on it, as the scale bar is: see `drawOn`
+      colorBar
+        .drawOn(picture, view.clientWidth)
+        .catch(() => picture)
+        .then((drawn) => save(drawn, PICTURE_NAME));
     },
   );
   // A round rather than a toggle: auto, then light, then dark. The icon is
@@ -945,6 +951,68 @@ function render({ model, el }) {
     onMeasure: (a, b) => (editable() ? call("get_gap", { a, b }) : null),
     canEdit: () => editable(),
   });
+  // The colour bar of a sensor the field colours, and its cut: a view
+  // setting, drawn at every step of a drag and the model told at its end,
+  // as a fade is.
+  const colorBarEl = document.createElement("div");
+  stage.append(colorBarEl);
+  const colorBar = createColorBar(colorBarEl, {
+    onRange: (ranges, { settled }) => {
+      if (drawing()) api.setColorRanges(colorBar.colouring(ranges));
+      if (settled) commit("color_range", ranges);
+    },
+    // one scale for all, or each its own: as one change, the group's cuts
+    // taken away with it
+    onShare: (on, ranges) => {
+      model.set("color_range", ranges);
+      model.set("color_shared", on);
+      model.save_changes();
+    },
+  });
+
+  /** The colour bar, for the sensor selected or the first the field
+   *  colours, with the cut the model holds -- and the renderer colouring
+   *  what it shows, which the sensors on screen decide as much as the cut.
+   *  Not while a run plays or a later step of it is on screen: a frame is
+   *  drawn in magpylib's colours for that step, which no bar says. */
+  function dressColorBar() {
+    const payload = model.get("payload") || {};
+    barAside = playing || shown > 0;
+    colorBar.update({
+      payload,
+      selected: model.get("selected") || [],
+      units: payload.units,
+      hidden: model.get("hidden") || [],
+      shared: Boolean(model.get("color_shared")),
+      aside: barAside,
+    });
+    colorBar.sync(model.get("color_range") || {});
+    if (drawing()) {
+      api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
+    }
+    keepCorner(); // it beside the column, or alone, and the cube clear of it
+  }
+  let barAside = false; // see `dressColorBar`
+
+  /** The bar away as a run starts or leaves its first step, and back as it
+   *  returns there and stops. */
+  function asideColorBar() {
+    if ((playing || shown > 0) !== barAside) dressColorBar();
+  }
+
+  /** Beside the editing column, its height, while the column is out;
+   *  alone on the right edge where there is none. */
+  function placeColorBar() {
+    const beside = !editBar.hidden && editBar.offsetHeight > 0;
+    colorBarEl.classList.toggle("beside", beside);
+    colorBarEl.style.top = beside ? `${editBar.offsetTop}px` : "";
+    colorBarEl.style.height = beside ? `${editBar.offsetHeight}px` : "";
+    colorBarEl.style.right = beside
+      ? `${stage.clientWidth - editBar.offsetLeft + 4}px`
+      : "";
+    colorBar.paint();
+  }
+
   let legendOpen = null; // undecided until there is a tree, and room, to decide by
   let legendRoom = null; // waits for the view to have a size to decide in
 
@@ -1153,13 +1221,14 @@ function render({ model, el }) {
 
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
-   *  column, which reaches down there in a view under about 520px tall, and
-   *  the transport. Told again whenever either comes or goes, and when the
+   *  column, which reaches down there in a view under about 520px tall, the
+   *  colour bar beside it, and the transport. Told again whenever either comes or goes, and when the
    *  view is resized. */
   function keepCorner() {
+    placeColorBar(); // beside the column, as it now stands
     if (!drawing()) return;
     api.keepClear(
-      [editBar, transport]
+      [editBar, transport, colorBarEl]
         .filter((part) => !part.hidden)
         .map((part) => part.getBoundingClientRect()),
     );
@@ -1518,6 +1587,7 @@ function render({ model, el }) {
     shown = index;
     scrub.value = String(index);
     showStep();
+    asideColorBar();
     // A document's run ends on the scene its payload draws, still, with
     // what no frame carries: its field lines, worked out for that pose. So
     // its last step is drawn whole again, rather than left as the frame was.
@@ -1533,6 +1603,7 @@ function render({ model, el }) {
     playing = api ? api.setPlaying(on) : false;
     setIcon(play, playing ? "pause" : "play");
     name(play, playing ? "Pause (space)" : "Play the path (space)");
+    asideColorBar();
     if (!playing) return;
     // Restart from the top when play is pressed at the end of the run, rather
     // than finishing immediately.
@@ -2217,6 +2288,8 @@ function render({ model, el }) {
     "selected",
     "hidden",
     "faded",
+    "color_range",
+    "color_shared",
     "axes",
     "flow",
     "theme",
@@ -2286,6 +2359,14 @@ function render({ model, el }) {
       dressLegend();
       showEditing(); // a view pointed at objects, or away from them
     } else legend.sync(stateOf());
+    if (
+      scene ||
+      ["selected", "hidden", "color_range", "color_shared"].some((k) =>
+        now.has(k),
+      )
+    ) {
+      dressColorBar();
+    }
     if (scene) {
       dressTransport();
       draw(); // which applies the hiding and the selection itself
@@ -2349,6 +2430,7 @@ function render({ model, el }) {
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
     api.setFades(model.get("faded") || {});
+    api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
     api.setAxes(axesChoice(model.get("axes")));
     api.setFlow(model.get("flow") !== false);
     api.watchCamera(tellCamera);
@@ -2411,6 +2493,7 @@ function render({ model, el }) {
   // element rather than a frame after it, and dressed for where they are.
   dressTheme();
   dressLegend();
+  dressColorBar();
   dressTransport();
   dressEditing();
   openAsked();

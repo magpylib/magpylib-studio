@@ -8,26 +8,26 @@ what is next is in [roadmap.md](roadmap.md)._
 
 ## The parts
 
-| Part                  | Where                                             | What it is                                                                                                                                             |
-| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| the engine            | `magpylib_studio/session.py`                      | `MagpylibStudioSession`: the document, the build, and every operation the GUI, the widget, the builder and the RPC call                                |
-| the scene function    | `magpylib_studio/recording.py`, `hook.py`         | `@scene` and studio's words: a plain magpylib function recorded into a document through magpylib's hook, or a copy of it from outside                  |
-| the document builder  | `magpylib_studio/build.py`                        | `Scene`: a document written one operation at a time, underneath the recorder; the writer that turns a document back into a function                    |
-| expressions           | `magpylib_studio/expressions.py`                  | the hermetic expression language of the document                                                                                                       |
-| units                 | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                                           |
-| meshes                | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                             |
-| import                | `magpylib_studio/importer.py`                     | `load_script` (run a script, intercept `show()`), `document_from_objects`                                                                              |
-| scripts outside       | `magpylib_studio/runner.py`                       | a script run in a process of its own -- the script tab's save, Open in Studio -- handing back documents, the meshes carried                            |
-| transport             | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                              |
-| drawing               | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                            |
-| the 3D view's data    | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                                        |
-| the notebook widget   | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
-| the agent skill       | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                               |
-| the VS Code extension | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks             |
-| the renderer          | `vscode-extension/media/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use                                                                               |
-| tools                 | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                     |
-| the agent evaluation  | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                   |
-| tests                 | `tests/`, `vscode-extension/src/test/`            | the engine suite, the extension suite in a real Extension Development Host, browser checks of the widget                                               |
+| Part                  | Where                                             | What it is                                                                                                                                                             |
+| --------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the engine            | `magpylib_studio/session.py`                      | `MagpylibStudioSession`: the document, the build, and every operation the GUI, the widget, the builder and the RPC call                                                |
+| the scene function    | `magpylib_studio/recording.py`, `hook.py`         | `@scene` and studio's words: a plain magpylib function recorded into a document through magpylib's hook, or a copy of it from outside                                  |
+| the document builder  | `magpylib_studio/build.py`                        | `Scene`: a document written one operation at a time, underneath the recorder; the writer that turns a document back into a function                                    |
+| expressions           | `magpylib_studio/expressions.py`                  | the hermetic expression language of the document                                                                                                                       |
+| units                 | `magpylib_studio/units.py`                        | unit kinds, the shown units, reading `15 mm`                                                                                                                           |
+| meshes                | `magpylib_studio/meshes.py`                       | STL reader, hulls, superquadrics, validity checks, the resolved-mesh cache                                                                                             |
+| import                | `magpylib_studio/importer.py`                     | `load_script` (run a script, intercept `show()`), `document_from_objects`                                                                                              |
+| scripts outside       | `magpylib_studio/runner.py`                       | a script run in a process of its own -- the script tab's save, Open in Studio -- handing back documents, the meshes carried                                            |
+| transport             | `magpylib_studio/rpc.py`, `__main__.py`           | one JSON object per line on stdio; `rpc.handle` is what the widget's connection calls too                                                                              |
+| drawing               | `backend.py`, `viewer.py`, `plotly_view.py`       | `magpy.show(backend="studio" \| "widget")`, where a script's figure goes, the plotly figure                                                                            |
+| the 3D view's data    | `magpylib_studio/threejs.py`                      | the scene payload the renderer draws (NaN sent as `null`, restored in the view)                                                                                        |
+| the notebook widget   | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `colorbar.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
+| the agent skill       | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                                               |
+| the VS Code extension | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks                             |
+| the renderer          | `vscode-extension/media/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use                                                                                               |
+| tools                 | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                                     |
+| the agent evaluation  | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                                   |
+| tests                 | `tests/`, `vscode-extension/src/test/`            | the engine suite, the extension suite in a real Extension Development Host, browser checks of the widget                                                               |
 
 ## The engine and magpylib's versions
 
@@ -272,16 +272,24 @@ click away from twenty-six views and the bar a round length at the orbit centre,
 said in the unit that reads best, kept by the PNG where the cube is not; the
 graduated box round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
-[0030](decisions.md#0030-the-view-cube-is-the-default-scale)). A drag goes
-through `static/drag.mjs`: open an undo group, pace previews with one request in
-flight, send the final pose through `apply_edits`, close the group.
-`apply_edits` turns the view's edits into `set_transform` / `set_param` calls in
-the session, batched into one undo step, for every host; with `define`, a bare
-variable's name typed where a number was, that the document lacks, is made at
-the value it replaces, in that kind of unit, in the same step. The payload says
-the scene's `units` and the `expressions` written behind the pose fields, so the
-view's readout shows `gap` in the scene's millimetres and reads `15 mm`, `5°` or
-a name back through `quantity`.
+[0030](decisions.md#0030-the-view-cube-is-the-default-scale)). A sensor whose
+pixels the field colours carries, on its pixels' item, each pixel's |field| and
+the table its lines are coloured from (`threejs._colour_scale`): `colorbar.mjs`
+draws it as a bar whose handles cut a range, the widget's `color_range`, and
+says what each sensor on screen is coloured over -- its cut, or a scale shared
+with the sensors on its table (`color_shared`) -- from which the renderer
+colours the pixels and the lines again (`setColorRanges`), in place and with no
+trip to python
+([0033](decisions.md#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)).
+A drag goes through `static/drag.mjs`: open an undo group, pace previews with
+one request in flight, send the final pose through `apply_edits`, close the
+group. `apply_edits` turns the view's edits into `set_transform` / `set_param`
+calls in the session, batched into one undo step, for every host; with `define`,
+a bare variable's name typed where a number was, that the document lacks, is
+made at the value it replaces, in that kind of unit, in the same step. The
+payload says the scene's `units` and the `expressions` written behind the pose
+fields, so the view's readout shows `gap` in the scene's millimetres and reads
+`15 mm`, `5°` or a name back through `quantity`.
 
 Every scene also says which objects overlap
 ([0029](decisions.md#0029-overlapping-magnets-are-found-and-said-as-you-edit)):

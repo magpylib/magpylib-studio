@@ -40,6 +40,8 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0029](#0029-overlapping-magnets-are-found-and-said-as-you-edit)                               | Overlapping magnets are found, and said, as you edit         | accepted 2026-10-18, as built (#47)                                  |
 | [0030](#0030-the-view-cube-is-the-default-scale)                                               | The view cube is the default scale                           | accepted 2026-10-18                                                  |
 | [0031](#0031-the-legends-eye-fades-as-a-view-setting)                                          | The legend's eye fades, as a view setting                    | accepted 2026-10-18, as built                                        |
+| [0032](#0032-field-lines-are-switched-in-the-scenes-document)                                  | Field lines are switched in the scene's document             | accepted 2026-10-18, for the field-lines prototype                   |
+| [0033](#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)                          | The colour bar cuts a sensor's colours, as a view setting    | accepted 2026-10-23, as built (#66)                                  |
 
 ---
 
@@ -1722,3 +1724,63 @@ style property, or the studio's document.
   the document's key becomes the sensors' property.
 - **A view setting, not saved**, as a fade is: lost on every reopen, and the
   panel's view would have nothing to keep it in.
+
+## 0033. The colour bar cuts a sensor's colours, as a view setting
+
+**Status:** accepted 2026-10-23, as built
+([#66](https://github.com/magpylib/magpylib-studio/pull/66)).
+
+### Context
+
+A sensor whose pixels the field colours showed its colours with no scale: they
+said more and less, not how much. Its strongest spot, next to a magnet, took
+most of the colormap and left the rest of the plane one colour. Two sensors,
+each coloured over what it reads, gave the same colour to different fields.
+
+### Decision
+
+- **A bar on the right, beside the editing column**, for the selected sensor or
+  else the first the field colours, in the table its pixels and field lines
+  already take (`fieldlines.colours`), so the three agree. None for a hidden
+  sensor, or one whose pixels and lines are both hidden.
+- **Two handles cut a range.** The table stretches over the cut, and the field
+  past either end takes that end's colour, on the pixels and the lines alike,
+  recoloured in the browser with no trip to python. A typed value may reach past
+  what the sensor reads, so two scenes can be coloured on one scale; the bar
+  then reaches the cut and marks where the readings end.
+- **A view setting, as a fade is
+  ([0031](#0031-the-legends-eye-fades-as-a-view-setting))**: `color_range`,
+  `{id: [low, high]}` in SI, and `color_shared`, carried over a rebuild and kept
+  by a saved page. The studio panel keeps both and does not tell the host: not
+  in the document, not undone.
+- **One scale for the sensors whose tables are one**, by a switch under the bar:
+  the same colormap, scaling and field, which is what a table depends on besides
+  its sensor's span. They colour over what they read together, a cut is all of
+  theirs, and one bar, "4 sensors · |B|", stands for them. A pattern's copies
+  come under their source's id and are that sensor: one scale over all they
+  read, always.
+- **The bar says what each sensor is coloured over** (`colouring`): a range per
+  sensor on screen, cut or shared. The renderer groups nothing, so what it draws
+  is what the bar says.
+- **It steps aside while a run plays or shows a later step**: those steps are
+  magpylib's drawing, in its colours for that step.
+- **The PNG carries it**, as it carries the scale bar: a field's colours without
+  their scale say nothing.
+
+### Rejected
+
+- **Ticks along the bar**: on a 13-pixel bar they crowded out the values. Its
+  ends, the cut's ends and the value under the pointer say what is read.
+- **Grey past the cut**, as some tools draw what is out of range: there the
+  pixels take the end colour, so the bar shows that colour, hatched.
+- **A card round the bar**: it covered the scene. A halo keeps the text legible.
+- **Saved in the document, as the field lines' switch is
+  ([0032](#0032-field-lines-are-switched-in-the-scenes-document))**: the cut is
+  a way of looking at the field, as a fade is a way of looking inside, not a
+  change to what the scene shows.
+- **Grouping in the renderer as well as in the bar**: it counted a hidden sensor
+  the bar left out, and the two disagreed.
+- **A bar per sensor, on screen or in the PNG**: three crowd the view and a
+  hundred cannot be drawn. A shared scale lets one bar say them all.
+- **The name as the button to the next sensor's bar**: it lies over the band, so
+  a press there has to drag. Arrows under the bar do it instead.

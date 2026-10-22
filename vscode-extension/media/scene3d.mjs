@@ -2767,15 +2767,28 @@ function buildPixels(item) {
     const size = item.sizes[i];
     scale.set(size, size, size);
     matrix.compose(at, turn, scale);
-    colour.set(Array.isArray(item.colors) ? item.colors[i] : item.colors);
-    for (const part of parts) {
-      part.setMatrixAt(i, matrix);
-      part.setColorAt(i, colour);
-    }
+    for (const part of parts) part.setMatrixAt(i, matrix);
   }
+  // Coloured as magpylib coloured them, or -- the colour bar's cut on them
+  // (`colorRanges`) -- from the sensor's table over the cut, by each one's
+  // |field|; a pixel that reads nothing keeps magpylib's grey.
+  const own = (i) =>
+    Array.isArray(item.colors) ? item.colors[i] : item.colors;
+  group.userData.recolour = (range) => {
+    for (let i = 0; i < count; i++) {
+      const norm = item.norms?.[i];
+      colour.set(
+        range && item.scale && norm > 0
+          ? tableColour(item.scale.lut, item.scale.levels, range, norm)
+          : own(i),
+      );
+      for (const part of parts) part.setColorAt(i, colour);
+    }
+    for (const part of parts) part.instanceColor.needsUpdate = true;
+  };
+  group.userData.recolour(colorRanges.get(item.object_id));
   for (const part of parts) {
     part.instanceMatrix.needsUpdate = true;
-    part.instanceColor.needsUpdate = true;
     // so framing and picking see the instances, not the one shape at the origin
     part.computeBoundingBox();
     part.computeBoundingSphere();
@@ -3073,7 +3086,7 @@ function buildFieldLines(item) {
 
   const bands = FIELD_LINE_BANDS.map(() => ({
     positions: [],
-    colours: [],
+    values: [], // |field| at each end of each segment, to colour it by
     distances: [], // along the line, the way B points, in pulses
   }));
   const world = (x, y, z, out) => {
@@ -3086,15 +3099,7 @@ function buildFieldLines(item) {
   // how strongly it shows, by the field against the sensor's
   const tone = (magnitude) =>
     Math.min(Math.max(0.5 + 0.5 * Math.log10(magnitude / middle), 0), 1);
-  // its colour, from the table, past the readings the end colour
-  const [low, high] = item.levels;
-  const colourOf = (magnitude) =>
-    lut[
-      Math.round(
-        Math.min(Math.max((magnitude - low) / (high - low), 0), 1) *
-          (lut.length - 1),
-      )
-    ];
+
   const ds = 0.5;
   const longest = Math.ceil((2 * (nx + ny + nz)) / ds);
   // How near another line a line may run: half a spacing, the even look of
@@ -3165,9 +3170,7 @@ function buildFieldLines(item) {
         const d1 = d + (sign * Math.hypot(tx - x, ty - y, tz - z)) / stride;
         band.distances.push(d, d1);
         d = d1;
-        const c0 = colourOf(shown);
-        const c1 = colourOf(strength);
-        band.colours.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
+        band.values.push(shown, strength);
         claim(tx, ty, tz, line, step);
         // a start beside the line every spacing or so along it
         if (flat && n % Math.max(Math.round(spacing / ds), 1) === 0) {
@@ -3203,11 +3206,11 @@ function buildFieldLines(item) {
   }
   const group = new THREE.Group();
   group.name = item.name;
+  const coloured = []; // each band's part and |field| along it: `lineColouring`
   bands.forEach((band, i) => {
     if (!band.positions.length) return;
     const geometry = new LineSegmentsGeometry();
     geometry.setPositions(band.positions);
-    geometry.setColors(band.colours);
     // as `computeLineDistances` lays them out, but counted the way B points
     const distances = new THREE.InstancedInterleavedBuffer(
       new Float32Array(band.distances),
@@ -3231,13 +3234,76 @@ function buildFieldLines(item) {
       geometry,
       fieldLineMaterial(FIELD_LINE_BANDS[i].opacity, item.object_id),
     );
+    part.userData.band = i;
     part.frustumCulled = false;
-    part.raycast = () => {};
+    part.raycast = unpicked;
     part.userData.field = true; // flows, but stays when the flow goes
     flowLines.add(part);
     group.add(part);
+    coloured.push({ part, values: Float32Array.from(band.values) });
   });
+  group.userData.recolour = lineColouring(coloured, lut, item.levels);
+  group.userData.recolour(colorRanges.get(item.object_id));
   return group;
+}
+
+/** A field line's raycast: never picked. Not made in `buildFieldLines`,
+ *  where it would keep the grid it traced. */
+function unpicked() {}
+
+/** How a sensor's field lines take their colours: each segment's ends from
+ *  `lut` by their |field|, `values` of each band's `part`, past the
+ *  readings the end colour -- or over the colour bar's range, as the
+ *  sensor's pixels are (`colorRanges`). Made out here, so that what it keeps
+ *  is these, not all the tracing worked with. */
+function lineColouring(coloured, lut, levels) {
+  return (range) => {
+    for (const { part, values } of coloured) {
+      // in place after the first time: a handle's drag colours them again
+      // at every step, and a new buffer each time is one the GPU keeps
+      const kept = part.geometry.attributes.instanceColorStart?.data;
+      const colours =
+        kept?.array.length === values.length * 3
+          ? kept.array
+          : new Float32Array(values.length * 3);
+      for (let j = 0; j < values.length; j++) {
+        const colour = tableColour(lut, levels, range, values[j]);
+        colours[j * 3] = colour.r;
+        colours[j * 3 + 1] = colour.g;
+        colours[j * 3 + 2] = colour.b;
+      }
+      if (colours === kept?.array) kept.needsUpdate = true;
+      else part.geometry.setColors(colours);
+    }
+  };
+}
+
+/** The colour `value` takes from a table spread evenly over `levels` -- or,
+ *  where the colour bar cut a `range` from them, over that range, stretched
+ *  to it, the value past either end taking that end's colour. The table's
+ *  colormap and scaling are magpylib's over the readings, so a cut is the
+ *  colours the sensor would take had it read only that range. */
+function tableColour(lut, [low, high], range, value) {
+  const [from, to] = range ?? [low, high];
+  const t = to > from ? (value - from) / (to - from) : 0.5;
+  return lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))];
+}
+
+/** Colour each sensor's pixels and field lines over the range `ranges`
+ *  names for it, by id -- a cut, or a scale it shares, as the view's colour
+ *  bar says (`colouring` in colorbar.mjs) -- and one not named over all it
+ *  reads, as magpylib coloured it. Only those whose range changed: a
+ *  handle's drag sets them at every step. */
+function setColorRanges(ranges) {
+  const was = colorRanges;
+  colorRanges = new Map(Object.entries(ranges ?? {}));
+  const same = (a, b) => a === b || (a && b && a[0] === b[0] && a[1] === b[1]);
+  for (const id of new Set([...was.keys(), ...colorRanges.keys()])) {
+    if (same(was.get(id), colorRanges.get(id))) continue;
+    byObjectId
+      .get(id)
+      ?.traverse((part) => part.userData.recolour?.(colorRanges.get(id)));
+  }
 }
 
 /** The shape a pixel is drawn as, at size 1 and pointing along z, as
@@ -3276,6 +3342,7 @@ const flowResolution = new THREE.Vector2(1, 1); // one for all, see `resize`
 const flowLines = new Set(); // wires and field lines drawn flowing, to know if any is
 const flowArrows = new Set(); // a flowing current's arrows, away while it flows
 let flowShown = true; // the host's: see `setFlow`
+let colorRanges = new Map(); // the colour bar's ranges, by sensor: see `setColorRanges`
 // still for whoever asks the system for less motion: the pulses show the
 // way, standing
 const stillFlow = Boolean(
@@ -4858,6 +4925,7 @@ export const scene3d = drawingAfter({
   hint,
   setAxes,
   setFlow,
+  setColorRanges,
   keepClear,
   setHidden,
   setFades,

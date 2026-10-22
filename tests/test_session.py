@@ -137,6 +137,15 @@ def test_a_sensor_drawn_apart_is_its_parts_in_the_tree_and_the_scene():
     scene = s.get_scene()
     assert {item["part"] for item in scene["pixels"]} == {"field/pixels"}
     assert {item["part"] for item in scene["fieldlines"]} == {"field/lines"}
+    # and its colour bar: each pixel's |field|, and the table its lines share,
+    # spanning what it reads along its whole path, as magpylib's colours do
+    read, *_ = scene["pixels"]
+    lines, *_ = scene["fieldlines"]
+    assert len(read["norms"]) == len(read["sizes"])
+    assert read["scale"]["lut"] == lines["lut"]
+    assert read["scale"]["levels"] == lines["levels"]
+    low, high = read["scale"]["levels"]
+    assert low <= min(read["norms"]) <= max(read["norms"]) <= high
 
 
 def test_the_payload_says_what_each_collection_holds():

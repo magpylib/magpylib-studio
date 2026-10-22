@@ -33,7 +33,10 @@
  * - a current's flow: moving on screen, resting off it, gone when off; a
  *   saved page's field lines flowing too, and standing when it is off;
  * - a dragged sensor's late redraw kept under the handles;
- * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`).
+ * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
+ * - a saved page's colour bar: a handle cuts the field's colours, and a
+ *   double click puts them back; a typed value and an arrow key move one;
+ *   one scale for two sensors on one colormap, by its switch.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -655,6 +658,120 @@ async function heldReading(port, base) {
   );
 }
 
+/** Two sensors on one colormap, each coloured over what it reads: the
+ *  arrows under their colour bar go from one's bar to the other's, and the
+ *  switch gives them one scale -- the bar says both, and the far one,
+ *  reading a weaker field, takes the darker colours of the scale they now
+ *  share, unless the near one is hidden. Again, and each has its own. */
+async function sharedScale(port, base) {
+  await check(
+    "one colour scale for two sensors, by the bar's switch",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/shared.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const far = `
+        let colour = null;
+        for (const [id, node] of window.scene3d.byObjectId) {
+          if (!id.includes("far")) continue;
+          node.traverse((p) => {
+            // every pixel's: the weakest may be at the foot of either scale
+            if (!colour && p.isInstancedMesh && p.instanceColor) {
+              colour = Array.from(p.instanceColor.array, (v) => v.toFixed(3)).join();
+            }
+          });
+        }
+        return colour;`;
+        const name = `return document.querySelector(".magpy-colorbar-name")?.textContent;`;
+        const own = await tab.evaluate(far);
+        if (!own) return "no colours on the far sensor's pixels";
+        // the arrows under the bar go from one sensor's bar to the other's
+        const first = await tab.evaluate(name);
+        const cycle = `document.querySelector(".magpy-colorbar-next").click(); return 1`;
+        await tab.evaluate(cycle);
+        if ((await tab.evaluate(name)) === first) {
+          return `the arrows left the bar on "${first}"`;
+        }
+        await tab.evaluate(cycle);
+        if ((await tab.evaluate(name)) !== first) {
+          return "the arrows did not come back to the first sensor";
+        }
+        const flip = `
+        const share = document.querySelector(".magpy-colorbar-share");
+        if (!share || share.hidden) return false;
+        share.click();
+        await new Promise((done) => setTimeout(done, 100));
+        return true;`;
+        if (!(await tab.evaluate(flip))) return "no switch under the bar";
+        if (!(await tab.evaluate(name))?.startsWith("2 sensors")) {
+          return `the bar says "${await tab.evaluate(name)}", not both sensors`;
+        }
+        if ((await tab.evaluate(far)) === own) {
+          return "on one scale, the far sensor kept the colours of its own";
+        }
+        // the scale is what is on screen reads: the near one hidden, the far
+        // one is alone on it, in its own colours
+        const eye = `${row("near")}.querySelector(".magpy-legend-eye").click(); return 1`;
+        await tab.evaluate(eye);
+        await wait(100);
+        if ((await tab.evaluate(far)) !== own) {
+          return "the near sensor hidden, the far one kept a scale shared with it";
+        }
+        await tab.evaluate(eye);
+        await wait(100);
+        await tab.evaluate(flip);
+        if ((await tab.evaluate(far)) !== own) {
+          return "switched back, the far sensor did not take its own scale again";
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** A run's later steps are drawn in magpylib's colours for that step, which
+ *  the colour bar does not say: it steps aside from the first step on, and
+ *  is back when the run is. */
+async function colorBarAside(port, base) {
+  await check(
+    "the colour bar steps aside from a run's later steps",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/colour-run.html`);
+        const ready = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d`,
+          20_000,
+        );
+        if (!ready) return "the page never drew";
+        const scrubTo = async (step) => {
+          await tab.evaluate(
+            `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+          );
+          await wait(300);
+          return tab.evaluate(
+            `return !document.querySelector(".magpy-colorbar")?.hidden`,
+          );
+        };
+        if (!(await scrubTo(0))) return "no colour bar at the run's start";
+        if (await scrubTo(5)) return "the colour bar stayed at step 6";
+        if (!(await scrubTo(0)))
+          return "the colour bar did not come back at the start";
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A drag's redraws, paced by their cost (drag.mjs): ones that cost most
  *  of a frame keep coming through the drag, at a third of its time or less
  *  -- a machine a quarter as fast as a laptop's drew none after the third
@@ -679,6 +796,105 @@ async function dragPace(port, base) {
       return `150 ms redraws went on: ${drawn[150].renders} of them`;
     }
     return null;
+  });
+}
+
+/** A saved page's colour bar, for the sensor the field colours: the top
+ *  handle dragged halfway down cuts the range, and the pixels take the
+ *  colours stretched over the cut, and a double click on the bar puts them
+ *  back as they were; a press on the uncut bar cuts it there. A value typed
+ *  into its top end is the cut's, and an arrow key on its foot's handle
+ *  moves that a step. */
+async function colorBar(port, base) {
+  await check("a saved page's colour bar cuts the colours", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/lines.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const bar = await tab.evaluate(`
+        const b = document.querySelector(".magpy-colorbar");
+        if (!b || b.hidden) return null;
+        const r = b.querySelector(".magpy-colorbar-track").getBoundingClientRect();
+        return { x: r.x + r.width / 2, top: r.top, bottom: r.bottom };`);
+      if (!bar) return "no colour bar beside a sensor the field colours";
+      const colours = `
+        const out = [];
+        window.scene3d.byObjectId.get("plane").traverse((p) => {
+          if (p.isInstancedMesh && p.instanceColor && !out.length) {
+            out.push(...Array.from(p.instanceColor.array, (v) => v.toFixed(3)));
+          }
+        });
+        return out.join(",");`;
+      const before = await tab.evaluate(colours);
+      // from the top down: a share of the bar, its high end at 0
+      const y = (f) => bar.top + 1 + f * (bar.bottom - bar.top - 2);
+      const mouse = (type, at, clickCount = 1) =>
+        tab.send("Input.dispatchMouseEvent", {
+          type,
+          x: bar.x,
+          y: y(at),
+          button: "left",
+          buttons: type === "mouseReleased" ? 0 : 1,
+          clickCount,
+        });
+      await tab.hover({ x: bar.x, y: y(0) });
+      await mouse("mousePressed", 0);
+      for (const at of [0.1, 0.2, 0.3, 0.4, 0.5]) {
+        await mouse("mouseMoved", at);
+      }
+      await mouse("mouseReleased", 0.5);
+      if ((await tab.evaluate(colours)) === before) {
+        return "the cut left the pixels' colours as they were";
+      }
+      // a double click, inside the cut: on its band, which a press drags
+      for (const clickCount of [1, 2]) {
+        await mouse("mousePressed", 0.8, clickCount);
+        await mouse("mouseReleased", 0.8, clickCount);
+      }
+      if ((await tab.evaluate(colours)) !== before) {
+        return "a double click did not take the cut away";
+      }
+      // a press on the bar with no cut brings the nearer handle there
+      await mouse("mousePressed", 0.25);
+      await mouse("mouseReleased", 0.25);
+      if ((await tab.evaluate(colours)) === before) {
+        return "a press on the uncut bar brought no handle to it";
+      }
+      // typed: the top end's value, clicked, takes a field in the bar's unit
+      const handles = `document.querySelectorAll(".magpy-colorbar-handle")`;
+      const end = await tab.evaluate(`
+        const e = document.querySelector(".magpy-colorbar-end");
+        const r = e.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, most: parseFloat(e.textContent) };`);
+      await tab.click(end);
+      const want = Number((end.most * 0.9).toPrecision(3));
+      const typed = await tab.evaluate(`
+        const box = document.activeElement;
+        if (!box?.classList.contains("magpy-colorbar-input")) return "no box to type in";
+        box.value = "${want}";
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        // the widget's color_range hands it back to the bar after this task
+        await new Promise((done) => setTimeout(done, 50));
+        const now = parseFloat(${handles}[0].getAttribute("aria-valuetext"));
+        return Math.abs(now - ${want}) < 1e-9 ? "" : "the top handle is at " + now + ", not ${want}";`);
+      if (typed) return typed;
+      // the keys: a step up on the foot's handle
+      const stepped = await tab.evaluate(`
+        const foot = ${handles}[1];
+        const was = foot.getAttribute("aria-valuetext");
+        foot.focus();
+        foot.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+        await new Promise((done) => setTimeout(done, 50));
+        return foot.getAttribute("aria-valuetext") === was ? "an arrow key did not move the handle" : "";`);
+      if (stepped) return stepped;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
   });
 }
 
@@ -3167,6 +3383,9 @@ try {
   await savedLines(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
+  await colorBar(browser.port, base);
+  await sharedScale(browser.port, base);
+  await colorBarAside(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

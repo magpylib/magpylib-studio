@@ -8,6 +8,31 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A colour bar for a sensor's field colours</summary>
+
+A sensor whose pixels the field colours gets a colour bar down the view's right
+edge, joined to the editing column while that is out: its colormap from the
+least to the most it reads, named for the sensor and its field (`bore · |B|`),
+wider under the pointer, which it says the field at, beside the range in force
+in the scene's field unit. Two handles, there while the pointer is, cut a range
+from it: the colormap stretches over the cut, past either end the field takes
+that end's colour, on the pixels and the field lines alike. Drag a handle, the
+band between them to move both, click the bar to bring the nearer handle there,
+double-click to take the cut away. A click on a value types one, in the scene's
+unit or another, and may reach past what the sensor reads, to colour two scenes
+on one scale: the bar then reaches the cut, and marks where what the sensor
+reads ends; a focused handle takes the arrow keys. The cut's ends are said
+beside its handles. With several such sensors the arrows under the bar show the
+next one's bar, or the switch beside them gives those on one colormap one scale,
+one bar standing for them all, so their colours compare however many there are;
+and a picture of the view carries the bar as it carries the scale bar. The cut
+is a view setting, `view.color_range`, kept by a saved page. The selected
+sensor's bar shows, else the first's; while a run plays, or shows a later step,
+the bar steps aside, as the steps are in magpylib's colours.
+
+</details>
+
+<details>
 <summary>Currents and field lines flow</summary>
 
 Every current shows its current flowing, in place of its arrows: pulses run
