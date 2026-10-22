@@ -50,6 +50,7 @@ const values = {
   // a view setting here too, not told to the host: docs/decisions.md#0031-the-legends-eye-fades-as-a-view-setting
   faded: {},
   color_range: {}, // the colour bar's cut: a view setting too
+  color_shared: false, // and its one scale for all
   axes: "cube",
   flow: true, // a view setting, as a fade is: not told to the host
   theme: "auto",

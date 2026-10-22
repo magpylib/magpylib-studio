@@ -2786,7 +2786,7 @@ function buildPixels(item) {
     }
     for (const part of parts) part.instanceColor.needsUpdate = true;
   };
-  group.userData.recolour(colorRanges.get(item.object_id));
+  group.userData.recolour(rangeFor(item.object_id));
   for (const part of parts) {
     part.instanceMatrix.needsUpdate = true;
     // so framing and picking see the instances, not the one shape at the origin
@@ -3262,7 +3262,7 @@ function buildFieldLines(item) {
       } else part.geometry.setColors(colours);
     });
   };
-  group.userData.recolour(colorRanges.get(item.object_id));
+  group.userData.recolour(rangeFor(item.object_id));
   return group;
 }
 
@@ -3278,13 +3278,53 @@ function tableColour(lut, [low, high], range, value) {
 }
 
 /** Colour each sensor's pixels and field lines over the range `ranges` cut
- *  for it, by id; one not named over all it reads. The view's colour bar. */
-function setColorRanges(ranges) {
+ *  for it, by id; one not named over all it reads -- or, `shared`, over all
+ *  its group reads (`rangeFor`). The view's colour bar. */
+function setColorRanges(ranges, { shared = false } = {}) {
   colorRanges = new Map(Object.entries(ranges ?? {}));
+  colorShared = shared;
   for (const [objectId, node] of byObjectId) {
-    node.traverse((part) =>
-      part.userData.recolour?.(colorRanges.get(objectId)),
-    );
+    node.traverse((part) => part.userData.recolour?.(rangeFor(objectId)));
+  }
+}
+
+/** Which of the sensors the field colours share a scale, and what they read
+ *  together: those whose tables are one -- the same colormap and scaling,
+ *  which a table is a function of alone, over its sensor's own readings --
+ *  so that one range colours the same field alike on each. */
+function scaleGroup(objectId) {
+  const own = sensorScales.get(objectId);
+  if (!own) return null;
+  const key = own.key;
+  let least = Infinity;
+  let most = -Infinity;
+  for (const scale of sensorScales.values()) {
+    if (scale.key !== key) continue;
+    least = Math.min(least, scale.levels[0]);
+    most = Math.max(most, scale.levels[1]);
+  }
+  return [least, most];
+}
+
+/** The range a sensor is coloured over: its cut, else -- one scale for all,
+ *  the bar's switch -- what its group reads together, else its own. */
+function rangeFor(objectId) {
+  return (
+    colorRanges.get(objectId) ??
+    (colorShared ? (scaleGroup(objectId) ?? undefined) : undefined)
+  );
+}
+
+/** Each sensor's colour table, from the pixels' items: what `scaleGroup`
+ *  groups by. A drag's later step brings only what it moves: the others
+ *  keep theirs. */
+function noteScales(payload, whole) {
+  if (whole) sensorScales.clear();
+  for (const item of payload.pixels ?? []) {
+    if (!item.scale) continue;
+    const { lut, scaling, source, levels } = item.scale;
+    const key = `${scaling}|${source?.[0]}|${lut.join()}`;
+    sensorScales.set(item.object_id, { key, levels });
   }
 }
 
@@ -3325,6 +3365,8 @@ const flowLines = new Set(); // wires and field lines drawn flowing, to know if 
 const flowArrows = new Set(); // a flowing current's arrows, away while it flows
 let flowShown = true; // the host's: see `setFlow`
 let colorRanges = new Map(); // the colour bar's cut, by sensor: see `setColorRanges`
+let colorShared = false; // one scale for the sensors that can share one
+const sensorScales = new Map(); // id -> { key, levels }: see `noteScales`
 // still for whoever asks the system for less motion: the pulses show the
 // way, standing
 const stillFlow = Boolean(
@@ -4528,6 +4570,7 @@ function renderFrame(payload) {
   changes = [];
   changing = [];
   luts = payload.luts ?? [];
+  noteScales(payload, true);
   overlapIds = overlapsAt(payload.frame, payload.frames);
   for (const item of drawnItems(payload)) {
     const node = nodeFor(item.object_id, null);
@@ -4788,6 +4831,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   collections = payload.collections || {};
   centroids = payload.centroids || {};
   copies = payload.copies || {};
+  noteScales(payload, !payload.partial); // before the pixels are coloured
 
   // A gesture's later steps draw only what it moves (`partial`): every other
   // node stands as its first step drew it, held as the dragged ones are.

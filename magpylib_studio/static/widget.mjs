@@ -956,10 +956,19 @@ function render({ model, el }) {
   // as a fade is.
   const colorBarEl = document.createElement("div");
   stage.append(colorBarEl);
+  // one scale for all, as the renderer is told it
+  const sharing = () => ({ shared: Boolean(model.get("color_shared")) });
   const colorBar = createColorBar(colorBarEl, {
     onRange: (ranges, { settled }) => {
-      if (drawing()) api.setColorRanges(ranges);
+      if (drawing()) api.setColorRanges(ranges, sharing());
       if (settled) commit("color_range", ranges);
+    },
+    // one scale for all, or each its own: as one change, the group's cuts
+    // taken away with it
+    onShare: (on, ranges) => {
+      model.set("color_range", ranges);
+      model.set("color_shared", on);
+      model.save_changes();
     },
   });
 
@@ -972,6 +981,7 @@ function render({ model, el }) {
       selected: model.get("selected") || [],
       units: payload.units,
       hidden: model.get("hidden") || [],
+      shared: Boolean(model.get("color_shared")),
     });
     colorBar.sync(model.get("color_range") || {});
     keepCorner(); // it beside the column, or alone, and the cube clear of it
@@ -2264,6 +2274,7 @@ function render({ model, el }) {
     "hidden",
     "faded",
     "color_range",
+    "color_shared",
     "axes",
     "flow",
     "theme",
@@ -2335,7 +2346,9 @@ function render({ model, el }) {
     } else legend.sync(stateOf());
     if (
       scene ||
-      ["selected", "hidden", "color_range"].some((k) => now.has(k))
+      ["selected", "hidden", "color_range", "color_shared"].some((k) =>
+        now.has(k),
+      )
     ) {
       dressColorBar();
     }
@@ -2350,8 +2363,8 @@ function render({ model, el }) {
     if (!drawing()) return;
     if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
     if (now.has("faded")) api.setFades(model.get("faded") || {});
-    if (now.has("color_range")) {
-      api.setColorRanges(model.get("color_range") || {});
+    if (now.has("color_range") || now.has("color_shared")) {
+      api.setColorRanges(model.get("color_range") || {}, sharing());
     }
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
@@ -2405,7 +2418,7 @@ function render({ model, el }) {
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
     api.setFades(model.get("faded") || {});
-    api.setColorRanges(model.get("color_range") || {});
+    api.setColorRanges(model.get("color_range") || {}, sharing());
     api.setAxes(axesChoice(model.get("axes")));
     api.setFlow(model.get("flow") !== false);
     api.watchCamera(tellCamera);

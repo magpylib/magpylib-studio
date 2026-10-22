@@ -23,9 +23,11 @@ unit or another, and may reach past what the sensor reads, to colour two scenes
 on one scale: the bar then reaches the cut, and marks where what the sensor
 reads ends; a focused handle takes the arrow keys. The cut's ends are said
 beside its handles. With several such sensors a click on the name shows the next
-one's bar, and a picture of the view carries the bar as it carries the scale
-bar. The cut is a view setting, `view.color_range`, kept by a saved page. The
-selected sensor's bar shows, else the first's.
+one's bar, or the switch under the bar gives those on one colormap one scale,
+one bar standing for them all, so their colours compare however many there are;
+and a picture of the view carries the bar as it carries the scale bar. The cut
+is a view setting, `view.color_range`, kept by a saved page. The selected
+sensor's bar shows, else the first's.
 
 </details>
 

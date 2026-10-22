@@ -35,7 +35,8 @@
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
- *   double click puts them back; a typed value and an arrow key move one.
+ *   double click puts them back; a typed value and an arrow key move one;
+ *   one scale for two sensors on one colormap, by its switch.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -648,6 +649,62 @@ async function heldReading(port, base) {
         return { moved, redrawn: first() };`);
         if (Math.abs(where.redrawn - where.moved) > 1e-6) {
           return `the redraw put the pixels at x = ${where.redrawn}, not ${where.moved}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** Two sensors on one colormap, each coloured over what it reads: the switch
+ *  under their colour bar gives them one scale -- the bar says both, and the
+ *  far one, reading a weaker field, takes the darker colours of the scale
+ *  they now share. Again, and each has its own. */
+async function sharedScale(port, base) {
+  await check(
+    "one colour scale for two sensors, by the bar's switch",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/shared.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const far = `
+        let colour = null;
+        for (const [id, node] of window.scene3d.byObjectId) {
+          if (!id.includes("far")) continue;
+          node.traverse((p) => {
+            // every pixel's: the weakest may be at the foot of either scale
+            if (!colour && p.isInstancedMesh && p.instanceColor) {
+              colour = Array.from(p.instanceColor.array, (v) => v.toFixed(3)).join();
+            }
+          });
+        }
+        return colour;`;
+        const name = `return document.querySelector(".magpy-colorbar-name")?.textContent;`;
+        const own = await tab.evaluate(far);
+        if (!own) return "no colours on the far sensor's pixels";
+        const flip = `
+        const share = document.querySelector(".magpy-colorbar-share");
+        if (!share || share.hidden) return false;
+        share.click();
+        await new Promise((done) => setTimeout(done, 100));
+        return true;`;
+        if (!(await tab.evaluate(flip))) return "no switch under the bar";
+        if (!(await tab.evaluate(name))?.startsWith("2 sensors")) {
+          return `the bar says "${await tab.evaluate(name)}", not both sensors`;
+        }
+        if ((await tab.evaluate(far)) === own) {
+          return "on one scale, the far sensor kept the colours of its own";
+        }
+        await tab.evaluate(flip);
+        if ((await tab.evaluate(far)) !== own) {
+          return "switched back, the far sensor did not take its own scale again";
         }
         return thrown(tab);
       } finally {
@@ -3262,6 +3319,7 @@ try {
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);
+  await sharedScale(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

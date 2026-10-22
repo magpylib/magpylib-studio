@@ -212,6 +212,12 @@ class SceneWidget(anywidget.AnyWidget):
         value_trait=traitlets.List(traitlets.Float(), minlen=2, maxlen=2),
         key_trait=traitlets.Unicode(),
     ).tag(sync=True)
+    #: One colour scale for the sensors that can share one -- the same
+    #: colormap and scaling: each coloured over what they read together, or
+    #: one cut of `color_range` given to them all, so that their colours
+    #: compare. One colour bar stands for them. The bar's switch; a view
+    #: setting, kept by an export.
+    color_shared = traitlets.Bool(False).tag(sync=True)
     #: How the scene's scale is said: ``"cube"``, the default, a scale bar and
     #: a cube to look from a side by, in a corner; ``"box"``, the graduated box
     #: round it; or ``"none"``. A cell can put it away for a clean picture, and
@@ -1031,6 +1037,7 @@ class SceneWidget(anywidget.AnyWidget):
             hidden=self.hidden,
             faded=self.faded,
             color_range=self.color_range,
+            color_shared=self.color_shared,
             axes=self.axes,
             flow=self.flow,
             theme=self.theme,

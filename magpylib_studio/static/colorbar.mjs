@@ -4,25 +4,27 @@
  * down the right edge: beside the editing column while that is out, and
  * alone where it is not. The least its pixels read at the foot, the most at
  * the top, both said above and below it, and the sensor and its field named
- * on it -- "bore · |B|",
- * written along the bar, clipped to its height, whole in its tooltip -- so
- * what is said beside it stands right against it. With more than one sensor
- * coloured so, a click on the name shows the next one's.
+ * on it -- "bore · |B|", written along the bar, clipped to its height, whole
+ * in its tooltip -- so what is said beside it stands right against it. With
+ * more than one sensor coloured so, a click on the name shows the next
+ * one's; or, with the switch under the bar, those that can share a scale
+ * (the same colormap and scaling) share one: one bar, "4 sensors · |B|",
+ * colouring them all over what they read together, or the cut, alike, so
+ * their colours compare however many there are.
  *
  * Two handles, there while the pointer is, cut a range from it: the
  * sensor's colours stretch over the cut, and the field past either end
  * takes that end's colour, on its pixels and its field lines alike
  * (`setColorRanges` in scene3d.mjs). Drag a handle to move one end, the band
  * between them to move both, press the bar to bring the nearer handle there,
- * double-click it to take the cut away. The cut's ends are said beside
- * its handles while there is one, and the field under the pointer. Or say
- * it: a click on a value -- an
- * end, or a handle's, beside it under the pointer -- takes a number typed,
+ * double-click it to take the cut away. The cut's ends are said beside its
+ * handles while there is one, and the field under the pointer. Or say it: a
+ * click on a value -- an end, or a cut's beside it -- takes a number typed,
  * in the scene's unit or with one of its own, which may reach past what the
  * sensor reads, to colour two scenes on one scale: the bar then reaches the
  * cut, its handle where its value is, and a mark in it, its value beside,
- * says where what the sensor reads ends. A handle takes the focus
- * too: arrows move it, a tenth of the bar with shift, Enter types its value.
+ * says where what the sensor reads ends. A handle takes the focus too:
+ * arrows move it, a tenth of the bar with shift, Enter types its value.
  *
  * A picture of the view carries the bar (`drawOn`), as it carries the scale
  * bar: a field's colours without their scale say nothing.
@@ -95,12 +97,33 @@ export function readField(text, unit) {
   return number * per;
 }
 
-export function createColorBar(container, { onRange }) {
+/** What a sensor's table is: those that are one can share a scale. */
+const tableKey = ({ scale }) =>
+  `${scale.scaling}|${scale.source?.[0]}|${scale.lut.join()}`;
+
+export function createColorBar(container, { onRange, onShare }) {
   container.classList.add("magpy-colorbar");
   container.hidden = true;
   const most = element("magpy-colorbar-end", container);
   const track = element("magpy-colorbar-track", container);
   const least = element("magpy-colorbar-end", container);
+  // one scale for all the sensors that can share one: under the bar
+  const share = element("magpy-colorbar-share", container, "button");
+  share.type = "button";
+  share.innerHTML =
+    '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.5" stroke-linecap="round" aria-hidden="true">' +
+    '<path d="M6.5 9.5 9.5 6.5"/><path d="M7 4.5 8.2 3.3a2.5 2.5 0 0 1 3.5 3.5L10.5 8"/>' +
+    '<path d="M9 11.5 7.8 12.7a2.5 2.5 0 0 1-3.5-3.5L5.5 8"/></svg>';
+  share.hidden = true;
+  let shareIds = []; // the sensors the switch would join, or part
+  share.addEventListener("click", () => {
+    if (!asked) return;
+    // a fresh start for them, whichever way: their own scales, or the one
+    const fresh = { ...ranges };
+    for (const id of shareIds) delete fresh[id];
+    onShare?.(!asked.shared, fresh);
+  });
   const shadeHigh = element("magpy-colorbar-shade high", track);
   const shadeLow = element("magpy-colorbar-shade low", track);
   const band = element("magpy-colorbar-band", track);
@@ -141,7 +164,7 @@ export function createColorBar(container, { onRange }) {
 
   let frozen = null; // what the bar reaches, held while a handle is dragged
   /** What the sensor reads, from the least to the most. */
-  const levels = () => shown.scale.levels;
+  const levels = () => shown.levels;
   /** What the bar reaches: what the sensor reads, and a cut past it, so a
    *  handle stands where its value is -- held while a drag goes, for the
    *  handle not to run from the pointer as the cut it makes moves. */
@@ -189,6 +212,13 @@ export function createColorBar(container, { onRange }) {
     const picked = (selected ?? []).join();
     if (picked !== selectedWas) chosen = null; // the selection moved: it decides
     selectedWas = picked;
+    // the sensors that can share a scale, by their table
+    const groups = new Map();
+    for (const each of scaled) {
+      const key = tableKey(each);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(each);
+    }
     const item =
       scaled.find((each) => each.object_id === chosen) ??
       scaled.find((each) => (selected ?? []).includes(each.object_id)) ??
@@ -204,19 +234,45 @@ export function createColorBar(container, { onRange }) {
       field === "B" || field === "J"
         ? (units?.field ?? { symbol: "T", scale: 1 })
         : { symbol: "A/m", scale: 1 };
+    // One scale for all: the bar is the group's, what they read together,
+    // and its cut theirs. A group of one is a sensor alone, as without.
+    const mates = groups.get(tableKey(item));
+    const together = Boolean(args.shared) && mates.length > 1;
+    const members = together ? mates : [item];
+    const quantity = `|${item.scale.source}|`;
     shown = {
       id: item.object_id,
+      ids: members.map((each) => each.object_id),
       scale: item.scale,
+      levels: [
+        Math.min(...members.map((each) => each.scale.levels[0])),
+        Math.max(...members.map((each) => each.scale.levels[1])),
+      ],
       unit,
-      name: `${item.name} · |${item.scale.source}|`,
-      candidates: scaled.map((each) => each.object_id),
+      name: together
+        ? `${members.length} sensors · ${quantity}`
+        : `${item.name} · ${quantity}`,
+      // the name's click goes on to the next sensor, or the next group
+      candidates: (args.shared
+        ? [...groups.values()].map((group) => group[0])
+        : scaled
+      ).map((each) => each.object_id),
     };
     name.textContent = shown.name;
     const more = shown.candidates.length > 1;
     name.classList.toggle("more", more);
     container.title =
-      `${item.name}: |${item.scale.source}| in ${unit.symbol}, ${item.scale.scaling}` +
-      (more ? " — click the name for the next sensor's" : "");
+      `${together ? members.map((each) => each.name).join(", ") : item.name}: ` +
+      `${quantity} in ${unit.symbol}, ${item.scale.scaling}` +
+      (more ? " — click the name for the next one's" : "");
+    // the switch, where a scale can be shared at all
+    share.hidden = mates.length < 2;
+    share.classList.toggle("on", together);
+    share.setAttribute("aria-pressed", String(together));
+    share.title = together
+      ? "One scale for all — click for each sensor its own"
+      : `One scale for the ${mates.length} sensors with this colormap, for their colours to compare`;
+    shareIds = mates.map((each) => each.object_id);
     paint();
   }
 
@@ -308,11 +364,13 @@ export function createColorBar(container, { onRange }) {
    *  where it is the whole of what the sensor reads. */
   function tell(next, settled) {
     const others = { ...ranges };
-    delete others[shown.id];
+    for (const id of shown.ids) delete others[id];
     const [least, most] = levels();
     const near = (a, b) => Math.abs(a - b) <= AT_END * (most - least);
     const whole = !next || (near(next[0], least) && near(next[1], most));
-    onRange(whole ? others : { ...others, [shown.id]: next }, { settled });
+    // one cut for all that share the scale; none, the scale they share
+    const cuts = Object.fromEntries(shown.ids.map((id) => [id, next]));
+    onRange(whole ? others : { ...others, ...cuts }, { settled });
   }
 
   /** Drag `which` -- "low", "high" or "band" -- from a pointer press; the

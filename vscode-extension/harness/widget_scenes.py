@@ -39,6 +39,9 @@ Writes into OUT:
   with, per object: for the view's own object panel;
 * ``lines.html`` -- a cube and a sensor in its plane of symmetry, saved with
   its field lines, which the page integrates from the grid it carries;
+* ``shared.html`` -- that cube with two sensors on one colormap, one near
+  and one far, each coloured over what it reads: one colour scale for both
+  is a switch under their colour bar;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -434,6 +437,11 @@ def main(out):
     plane = magpy.Sensor(pixel=[(x, 0, z) for x in across for z in across])
     plane.style.pixel.field.source = "B"
     SceneWidget(cube, plane, field_lines=True).write_html(out / "lines.html")
+    near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
+    far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
+    for sensor in (near, far):
+        sensor.style.pixel.field.source = "B"
+    SceneWidget(cube, near, far, field_lines=True).write_html(out / "shared.html")
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows, "small_span": span}

@@ -71,12 +71,12 @@ right edge, beside the editing column, whose two handles cut the range they span
 — the colormap stretched over the cut, the field past it in the end colours —
 kept in `color_range` as `{id: [low, high]}`, in SI; a click on a value types
 one, a focused handle takes the arrow keys, and a picture of the view carries
-the bar. It writes `selected`, `hidden` and `faded`, the traitlets a click in
-the view and a notebook cell write too; `faded` maps an id to the share of its
-opacity it is drawn at. It needs the objects, because the payload cannot say how
-they nest: it comes with `SceneWidget(...)` and `update()`, and with a bare
-`magpy.show()` only where magpylib hands its backends the objects
-(`Panel.objects`).
+the bar; `color_shared` gives the sensors on one colormap one scale. It writes
+`selected`, `hidden` and `faded`, the traitlets a click in the view and a
+notebook cell write too; `faded` maps an id to the share of its opacity it is
+drawn at. It needs the objects, because the payload cannot say how they nest: it
+comes with `SceneWidget(...)` and `update()`, and with a bare `magpy.show()`
+only where magpylib hands its backends the objects (`Panel.objects`).
 
 What is selected, hidden, faded or folded survives `update()`: an object passed
 again keeps it, and a rebuilt one inherits it from whatever sat in its place in

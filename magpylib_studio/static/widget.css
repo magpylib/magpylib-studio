@@ -444,6 +444,37 @@
   display: none;
 }
 
+/* One scale for all the sensors that can share one: a switch under the bar,
+   pressed while it is on. */
+.magpy-colorbar-share {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  color: inherit;
+  background: none;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.magpy-colorbar-share:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.magpy-colorbar-share.on {
+  opacity: 1;
+  color: var(--vscode-focusBorder, #0078d4);
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.magpy-colorbar-share[hidden] {
+  display: none;
+}
+
 /* a handle with the keys' focus shows, and says so */
 .magpy-colorbar:focus-within .magpy-colorbar-handle {
   opacity: 1;
