@@ -654,7 +654,12 @@ function render({ model, el }) {
     "Save the view as a PNG picture",
     () => {
       const picture = api?.snapshot();
-      if (picture) save(picture, PICTURE_NAME);
+      if (!picture) return;
+      // with the colour bar on it, as the scale bar is: see `drawOn`
+      colorBar
+        .drawOn(picture, view.clientWidth)
+        .catch(() => picture)
+        .then((drawn) => save(drawn, PICTURE_NAME));
     },
   );
   // A round rather than a toggle: auto, then light, then dark. The icon is

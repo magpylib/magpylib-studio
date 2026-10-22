@@ -67,14 +67,16 @@ view goes through what is faded to what is behind it. A sensor whose pixels read
 the field is listed as its parts — its axes, its pixels and its field lines,
 each naming the field it shows — and hides each apart; the field lines' eye is
 their switch, `field_lines`. Such a sensor's colours have a colour bar down the
-right edge, joined to the editing column, whose two handles cut the range they
-span — the colormap stretched over the cut, the field past it in the end colours
-— kept in `color_range` as `{id: [low, high]}`, in SI. It writes `selected`,
-`hidden` and `faded`, the traitlets a click in the view and a notebook cell
-write too; `faded` maps an id to the share of its opacity it is drawn at. It
-needs the objects, because the payload cannot say how they nest: it comes with
-`SceneWidget(...)` and `update()`, and with a bare `magpy.show()` only where
-magpylib hands its backends the objects (`Panel.objects`).
+right edge, beside the editing column, whose two handles cut the range they span
+— the colormap stretched over the cut, the field past it in the end colours —
+kept in `color_range` as `{id: [low, high]}`, in SI; a click on a value types
+one, a focused handle takes the arrow keys, and a picture of the view carries
+the bar. It writes `selected`, `hidden` and `faded`, the traitlets a click in
+the view and a notebook cell write too; `faded` maps an id to the share of its
+opacity it is drawn at. It needs the objects, because the payload cannot say how
+they nest: it comes with `SceneWidget(...)` and `update()`, and with a bare
+`magpy.show()` only where magpylib hands its backends the objects
+(`Panel.objects`).
 
 What is selected, hidden, faded or folded survives `update()`: an object passed
 again keeps it, and a rebuilt one inherits it from whatever sat in its place in

@@ -245,24 +245,24 @@
   margin-block: 0;
 }
 
-/* the name along the bar, read bottom to top, clipped to its height */
-.magpy-colorbar-row {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  gap: 3px;
-}
-
+/* the name on the bar, along it, read bottom to top, clipped to the bar's
+   height (`paint`): white under a dark halo, legible on either end of a
+   colormap. Clicks go through to the bar, but for the next sensor's name. */
 .magpy-colorbar-name {
-  align-self: center; /* along the middle of the bar, as an axis title is */
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  max-height: 100%;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 9.5px;
-  opacity: 0.75;
+  font-size: 9px;
+  line-height: 1;
+  color: #fff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.95),
+    0 0 4px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
 }
 
 /* the bar's ends, the least and the most it reads, in the card */
@@ -276,7 +276,7 @@
 .magpy-colorbar-track {
   position: relative;
   flex: 1 1 auto;
-  width: 8px;
+  width: 13px;
   border-radius: 4px;
   box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
   cursor: pointer;
@@ -285,7 +285,7 @@
 
 .magpy-colorbar:hover .magpy-colorbar-track,
 .magpy-colorbar.dragging .magpy-colorbar-track {
-  width: 12px;
+  width: 15px;
 }
 
 /* What the cut leaves out of the bar: its end colour, as the pixels past
@@ -353,10 +353,10 @@
   box-shadow: 0 0 0 1px var(--vscode-editor-background);
 }
 
-/* beside the bar, under the pointer: the cut's ends, the field there */
+/* beside the bar, right against it (`paint` says how far in): the cut's
+   ends, the field under the pointer */
 .magpy-colorbar-label {
   position: absolute;
-  right: calc(100% + 4px);
   transform: translateY(-50%);
   padding: 0 4px;
   border-radius: 3px;
@@ -374,6 +374,8 @@
   transition: opacity 0.12s;
 }
 
+/* the cut's ends, while there is a cut, and on the bar under the pointer */
+.magpy-colorbar.cut .magpy-colorbar-label.value,
 .magpy-colorbar:hover .magpy-colorbar-label.value,
 .magpy-colorbar.dragging .magpy-colorbar-label.value {
   opacity: 0.85;
@@ -381,6 +383,80 @@
 
 .magpy-colorbar-label.pointer {
   font-weight: 600;
+}
+
+/* a value said is one to type: the ends, and the cut's beside the handles */
+.magpy-colorbar-end,
+.magpy-colorbar-label.value {
+  cursor: text;
+}
+
+.magpy-colorbar-label.value {
+  pointer-events: auto;
+}
+
+.magpy-colorbar-label.typing,
+.magpy-colorbar:focus-within .magpy-colorbar-label.value {
+  opacity: 1;
+}
+
+.magpy-colorbar-input {
+  width: 6.5em;
+  box-sizing: border-box;
+  padding: 0 3px;
+  font: inherit;
+  color: inherit;
+  text-shadow: none;
+  background: var(--vscode-input-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-focusBorder, currentColor);
+  border-radius: 3px;
+}
+
+/* the name, where a click on it shows the next sensor's bar */
+.magpy-colorbar-name.more {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.magpy-colorbar-name.more:hover {
+  opacity: 1;
+  text-decoration: underline dotted;
+}
+
+/* Where what the sensor reads ends, in a bar a cut reaches past: a line
+   across it, its value beside in italics -- the cut's ends are the bar's. */
+.magpy-colorbar-readmark {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 1px;
+  margin-bottom: -0.5px;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.magpy-colorbar-label.read {
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.magpy-colorbar-readmark[hidden] {
+  display: none;
+}
+
+/* a handle with the keys' focus shows, and says so */
+.magpy-colorbar:focus-within .magpy-colorbar-handle {
+  opacity: 1;
+}
+
+.magpy-colorbar-handle:focus-visible {
+  outline: none;
+}
+
+.magpy-colorbar-handle:focus-visible::after {
+  box-shadow:
+    0 0 0 1px var(--vscode-editor-background),
+    0 0 0 3px var(--vscode-focusBorder, #0078d4);
 }
 
 .magpy-colorbar-label[hidden] {

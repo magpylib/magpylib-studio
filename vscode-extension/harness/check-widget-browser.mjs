@@ -35,7 +35,7 @@
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
- *   double click puts them back.
+ *   double click puts them back; a typed value and an arrow key move one.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -687,7 +687,8 @@ async function dragPace(port, base) {
 /** A saved page's colour bar, for the sensor the field colours: the top
  *  handle dragged halfway down cuts the range, and the pixels take the
  *  colours stretched over the cut, and a double click on the bar puts them
- *  back as they were. */
+ *  back as they were. A value typed into its top end is the cut's, and an
+ *  arrow key on its foot's handle moves that a step. */
 async function colorBar(port, base) {
   await check("a saved page's colour bar cuts the colours", async () => {
     const tab = await openTab(port);
@@ -741,6 +742,33 @@ async function colorBar(port, base) {
       if ((await tab.evaluate(colours)) !== before) {
         return "a double click did not take the cut away";
       }
+      // typed: the top end's value, clicked, takes a field in the bar's unit
+      const handles = `document.querySelectorAll(".magpy-colorbar-handle")`;
+      const end = await tab.evaluate(`
+        const e = document.querySelector(".magpy-colorbar-end");
+        const r = e.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, most: parseFloat(e.textContent) };`);
+      await tab.click(end);
+      const want = Number((end.most * 0.9).toPrecision(3));
+      const typed = await tab.evaluate(`
+        const box = document.activeElement;
+        if (!box?.classList.contains("magpy-colorbar-input")) return "no box to type in";
+        box.value = "${want}";
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        // the widget's color_range hands it back to the bar after this task
+        await new Promise((done) => setTimeout(done, 50));
+        const now = parseFloat(${handles}[0].getAttribute("aria-valuetext"));
+        return Math.abs(now - ${want}) < 1e-9 ? "" : "the top handle is at " + now + ", not ${want}";`);
+      if (typed) return typed;
+      // the keys: a step up on the foot's handle
+      const stepped = await tab.evaluate(`
+        const foot = ${handles}[1];
+        const was = foot.getAttribute("aria-valuetext");
+        foot.focus();
+        foot.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+        await new Promise((done) => setTimeout(done, 50));
+        return foot.getAttribute("aria-valuetext") === was ? "an arrow key did not move the handle" : "";`);
+      if (stepped) return stepped;
       return thrown(tab);
     } finally {
       await tab.close();

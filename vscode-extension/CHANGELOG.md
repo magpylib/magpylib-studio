@@ -18,9 +18,14 @@ in the scene's field unit. Two handles, there while the pointer is, cut a range
 from it: the colormap stretches over the cut, past either end the field takes
 that end's colour, on the pixels and the field lines alike. Drag a handle, the
 band between them to move both, click the bar to bring the nearer handle there,
-double-click to take the cut away. The cut is a view setting,
-`view.color_range`, kept by a saved page. The selected sensor's bar shows, else
-the first's.
+double-click to take the cut away. A click on a value types one, in the scene's
+unit or another, and may reach past what the sensor reads, to colour two scenes
+on one scale: the bar then reaches the cut, and marks where what the sensor
+reads ends; a focused handle takes the arrow keys. The cut's ends are said
+beside its handles. With several such sensors a click on the name shows the next
+one's bar, and a picture of the view carries the bar as it carries the scale
+bar. The cut is a view setting, `view.color_range`, kept by a saved page. The
+selected sensor's bar shows, else the first's.
 
 </details>
 
