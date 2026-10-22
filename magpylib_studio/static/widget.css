@@ -206,11 +206,12 @@
   display: none;
 }
 
-/* The colour bar (colorbar.mjs): a slim card down the right edge -- against
-   the editing column, its height, as a part of it, while that is out
-   (`placeColorBar` in widget.mjs), and alone, centred, where it is not. What
-   it says stands beside it, to the left: the sensor and its field always,
-   the cut's ends and the pointer's field while the pointer is on it. */
+/* The colour bar (colorbar.mjs): down the right edge, with no card of its
+   own -- beside the editing column, its height, while that is out
+   (`placeColorBar` in widget.mjs), and alone, centred, where it is not. Its
+   ends and its name are written on the scene, under a halo of the page's
+   colour that keeps them legible over whatever is behind; the cut's ends
+   and the pointer's field stand beside it while the pointer is on it. */
 .magpy-colorbar {
   position: absolute;
   top: 48px;
@@ -225,14 +226,10 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  background: color-mix(
-    in srgb,
-    var(--vscode-editor-background) 94%,
-    transparent
-  );
-  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-  border-radius: 7px;
   font-size: 10px;
+  text-shadow:
+    0 0 2px var(--vscode-editor-background),
+    0 0 4px var(--vscode-editor-background);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -241,18 +238,11 @@
   display: none;
 }
 
-/* joined to the column: one card, the seam squared */
+/* beside the column: its height */
 .magpy-colorbar.beside {
   bottom: auto;
   max-height: none;
   margin-block: 0;
-  border-right: none;
-  border-radius: 7px 0 0 7px;
-}
-
-.magpy-scene-edit.with-bar {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
 }
 
 /* the name along the bar, read bottom to top, clipped to its height */

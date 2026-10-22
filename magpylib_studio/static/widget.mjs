@@ -969,20 +969,18 @@ function render({ model, el }) {
       hidden: model.get("hidden") || [],
     });
     colorBar.sync(model.get("color_range") || {});
-    placeColorBar(); // and the column joined to it, or not
+    keepCorner(); // it beside the column, or alone, and the cube clear of it
   }
 
-  /** Against the editing column, its height, as a part of it, while the
-   *  column is out; alone on the right edge where there is none. */
+  /** Beside the editing column, its height, while the column is out;
+   *  alone on the right edge where there is none. */
   function placeColorBar() {
     const beside = !editBar.hidden && editBar.offsetHeight > 0;
-    const joined = beside && !colorBarEl.hidden;
     colorBarEl.classList.toggle("beside", beside);
-    editBar.classList.toggle("with-bar", joined);
     colorBarEl.style.top = beside ? `${editBar.offsetTop}px` : "";
     colorBarEl.style.height = beside ? `${editBar.offsetHeight}px` : "";
     colorBarEl.style.right = beside
-      ? `${stage.clientWidth - editBar.offsetLeft}px`
+      ? `${stage.clientWidth - editBar.offsetLeft + 4}px`
       : "";
     colorBar.paint();
   }
@@ -1195,14 +1193,14 @@ function render({ model, el }) {
 
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
-   *  column, which reaches down there in a view under about 520px tall, and
-   *  the transport. Told again whenever either comes or goes, and when the
+   *  column, which reaches down there in a view under about 520px tall, the
+   *  colour bar beside it, and the transport. Told again whenever either comes or goes, and when the
    *  view is resized. */
   function keepCorner() {
     placeColorBar(); // beside the column, as it now stands
     if (!drawing()) return;
     api.keepClear(
-      [editBar, transport]
+      [editBar, transport, colorBarEl]
         .filter((part) => !part.hidden)
         .map((part) => part.getBoundingClientRect()),
     );

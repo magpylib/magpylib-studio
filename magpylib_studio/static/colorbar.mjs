@@ -1,8 +1,8 @@
 /**
  * The view's colour bar: the field colours of one sensor -- the one
  * selected, else the first whose pixels the field colours -- as a slim bar
- * down the right edge: against the editing column, as a part of it, while
- * that is out, and alone where it is not. The least its pixels read at the
+ * down the right edge: beside the editing column while that is out, and
+ * alone where it is not. The least its pixels read at the
  * foot, the most at the top, both said in the card, above and below, and
  * the sensor and its field named along the bar -- "bore · |B|", clipped to
  * its height, whole in its tooltip -- so two sensors are never mistaken for
