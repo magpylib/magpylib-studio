@@ -106,7 +106,10 @@ def test_the_object_tree_is_what_a_legend_draws():
     ring = next(node for node in walk(tree) if node["id"] == "ring1")
     assert ring["kind"] == "Collection" and ring["children"]
     fields = {"id", "label", "kind", "visible", "children"}
-    assert all(set(node) - {"copies"} == fields for node in walk(tree))
+    assert all(set(node) - {"copies", "colors"} == fields for node in walk(tree))
+    # a sensor says its axes' tip colours, for its icon
+    sensor = next(node for node in tree if node["id"] == "sensor")
+    assert sensor["colors"] == ["red", "green", "blue"]
     listed = {e["id"] for e in s.list_objects(copies="count")}
     assert {node["id"] for node in walk(tree)} == listed  # no copies
     # a pattern's source says how many copies are drawn on it, for the count
@@ -128,6 +131,8 @@ def test_a_sensor_drawn_apart_is_its_parts_in_the_tree_and_the_scene():
         "field/pixels",
         "field/lines",
     ]
+    # the axes say their tips' colours, for an icon drawn as the view draws them
+    assert field["children"][0]["colors"] == ["red", "green", "blue"]
     s.set_field_lines(True)
     scene = s.get_scene()
     assert {item["part"] for item in scene["pixels"]} == {"field/pixels"}

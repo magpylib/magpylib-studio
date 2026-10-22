@@ -1294,6 +1294,12 @@ PARTS = (("axes", "axes", "Axes"), ("pixels", "pixels", "Pixels"))
 LINES = ("lines", "field lines", "FieldLines")
 
 
+def tip_colors(sensor):
+    """The colours of `sensor`'s axes' tips, x, y and z, as the view draws
+    them: for a legend to draw its icon as it looks."""
+    return [_resolve(sensor, f"style.arrows.{axis}.color") for axis in "xyz"]
+
+
 def part_id(key, part):
     """The id of `part` of the sensor at `key`: see `PARTS`."""
     return f"{key}/{part}"
@@ -1305,7 +1311,8 @@ def part_nodes(sensor, key, apart=False):
     scene, `apart` -- and its field lines where it can draw them
     (`fieldlines.sensors_of`); none for a sensor without pixels. The pixels
     say what they read, as their source does -- ``Bxy`` -- and the lines
-    what they are of: the whole of B or H, whatever the pixels show."""
+    what they are of: the whole of B or H, whatever the pixels show. The
+    axes carry their tips' colours (`tip_colors`), as the sensor does."""
     from magpylib_studio import fieldlines
 
     source = _resolve(sensor, "style.pixel.field.source")
@@ -1316,12 +1323,14 @@ def part_nodes(sensor, key, apart=False):
         "pixels": f"pixels ({source})",
         "lines": f"field lines ({source and source[:1]})",
     }
+    tips = tip_colors(sensor)
     return [
         {
             "id": part_id(key, part),
             "label": named.get(part, label),
             "kind": kind,
             "children": [],
+            **({"colors": tips} if part == "axes" else {}),
         }
         for part, label, kind in parts
     ]
@@ -1497,13 +1506,15 @@ def object_tree(objects):
     def node(obj):
         key = str(id(obj))
         found[key] = obj
+        sensor = isinstance(obj, magpy.Sensor)
         return {
             "id": key,
             "label": getattr(obj.style, "label", None) or type(obj).__name__,
             "kind": type(obj).__name__,
             "children": [node(child) for child in getattr(obj, "children", ())]
             # its field lines: no view of objects draws its pixels apart
-            + (part_nodes(obj, key) if isinstance(obj, magpy.Sensor) else []),
+            + (part_nodes(obj, key) if sensor else []),
+            **({"colors": tip_colors(obj)} if sensor else {}),
         }
 
     roots = [

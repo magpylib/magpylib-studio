@@ -3538,7 +3538,8 @@ class MagpylibStudioSession:
         both "Sensor", and the readout and the tree call it by that name.
         A sensor holds the parts of its drawing that hide apart: its axes and
         pixels, where the view draws them apart, and its field lines, where it
-        can draw them (`threejs.part_nodes`).
+        can draw them (`threejs.part_nodes`); and its axes' tip colours
+        (``colors``), for its icon.
         """
         entries = self.list_objects(copies="count")
         nodes = {
@@ -3563,6 +3564,7 @@ class MagpylibStudioSession:
         for key, node in nodes.items():
             obj = self._objs.get(key)
             if isinstance(obj, magpy.Sensor):
+                node["colors"] = threejs.tip_colors(obj)  # for its icon
                 for part in threejs.part_nodes(obj, key, apart=True):
                     node["children"].append({**part, "visible": True})
         return roots

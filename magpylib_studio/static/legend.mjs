@@ -96,8 +96,12 @@ function swatchOf(item, luts) {
   if (item.kind === "scatter") {
     return item.lines ? item.line_color : item.marker_color;
   }
-  // a sensor's lines, in the colours of its field: the middle of them
-  if (item.kind === "fieldlines") return item.lut[item.lut.length >> 1];
+  // a sensor's lines in their table, strongest in the middle, as round a
+  // magnet; its pixels, read by the field, in the same table across
+  if (item.kind === "fieldlines") return gradientOfColours(item.lut, true);
+  if (item.kind === "pixels" && item.scale) {
+    return gradientOfColours(item.scale.lut);
+  }
   if (item.kind === "pixels") {
     // a sensor's pixels coloured by the field: the middle of its colours
     const colors = item.colors;
@@ -110,6 +114,32 @@ function swatchOf(item, luts) {
   const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
   if (lut) return gradientOf(lut);
   return item.color || "#2e91e5";
+}
+
+/** A sensor's axes as the view draws them, as a CSS image: the shafts in
+ *  the sensor's colour, the tips in those of its x, y and z -- z up, x to
+ *  the lower left, y to the lower right, as the sensor's icon has them. A
+ *  picture rather than the masks of the other kinds, which take one colour. */
+function axesPicture(body, [x, y, z]) {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+    `<path d="M8 8.2V4.8M8 8.2 4.99 10.18M8 8.2l3.01 1.98" fill="none" stroke="${body}" stroke-width="1.3" stroke-linecap="round"/>` +
+    `<path d="M8 2.2 6.6 4.8h2.8Z" fill="${z}"/>` +
+    `<path d="m2.99 11.5 2.72-.23-1.43-2.17Z" fill="${x}"/>` +
+    `<path d="m13.01 11.5-2.72-.23 1.43-2.17Z" fill="${y}"/>` +
+    "</svg>";
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+/** Colours from the least field to the most, as a CSS gradient: across, or
+ *  `radial`, the most in the middle. Five stops: a 13px icon shows no more. */
+function gradientOfColours(colours, radial = false) {
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(
+    (at) => colours[Math.round(at * (colours.length - 1))],
+  );
+  return radial
+    ? `radial-gradient(circle, ${stops.reverse().join(", ")})`
+    : `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
 /** A colour scale's lookup table -- RGBA, flat -- as a CSS gradient. */
@@ -420,7 +450,15 @@ export function createLegend(
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.
     if (held.length) swatch.classList.add("collection");
-    else if (colour)
+    // a sensor, and its axes, drawn as the view draws them
+    else if (["Sensor", "Axes"].includes(node.kind) && node.colors && colour) {
+      swatch.classList.add("picture");
+      swatch.style.background = "";
+      swatch.style.setProperty(
+        "--magpy-picture",
+        axesPicture(colour, node.colors),
+      );
+    } else if (colour)
       swatch.classList.add("icon", `icon-${ICONS[node.kind] || "custom"}`);
     else swatch.classList.add("none");
     row.append(caret, swatch, label);

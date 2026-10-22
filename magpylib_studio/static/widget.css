@@ -570,6 +570,13 @@
   mask: no-repeat center / 13px var(--magpy-icon);
 }
 
+/* A sensor's axes, drawn in their own colours: see `axesPicture`. */
+.magpy-legend-swatch.picture {
+  box-shadow: none;
+  border-radius: 0;
+  background: no-repeat center / 13px var(--magpy-picture);
+}
+
 /* A collection has no colour of its own; the space stays so labels line up. */
 .magpy-legend-swatch.none {
   box-shadow: none;
