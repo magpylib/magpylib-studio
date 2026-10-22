@@ -1200,6 +1200,7 @@
     "check:window": "node harness/check-window-life.mjs",
     "screenshot": "node harness/screenshot.mjs",
     "drag-rate": "node harness/drag-rate.mjs",
+    "slow-machine": "node harness/slow-machine.mjs",
     "check:version": "node harness/check-version.js",
     "inspect": "node harness/webview-harness.js inspector",
     "test": "vscode-test",

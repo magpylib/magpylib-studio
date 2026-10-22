@@ -126,7 +126,11 @@ five-thousandth of the way in. A path drawn in millimetres is told from the
 object on it, a path marker of size 0 is not drawn at the default size, and a
 document's field lines come back when its run ends. Framing fits the objects
 themselves rather than a sphere round them all, so a ring of magnets fills the
-view instead of sitting small in the middle of it (#63).
+view instead of sitting small in the middle of it (#63). On a slower machine a
+drag no longer stops redrawing what it moves -- the field lines, a sensor's
+arrows -- once two redraws pass 8 ms: they come as often as what they cost
+allows, a third of the time at most, and only a scene whose redraw freezes the
+drag for 100 ms stops until the release (#67).
 
 </details>
 

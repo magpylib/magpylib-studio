@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  A drag's redraws paced by what they cost (drag.mjs): a stand-in view whose
+  redraw takes `?cost=` milliseconds of the main thread, a drag of 1.5 s, a
+  pose a frame, each answered at once with a scene. What the page tells is
+  how many redraws the drag drew, and the share of its time they took.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <div id="host"></div>
+    <script type="module">
+      import { watchDrags } from "/static/drag.mjs";
+
+      const cost = Number(new URLSearchParams(location.search).get("cost"));
+      const host = document.getElementById("host");
+      let renders = 0;
+      let busy = 0;
+      watchDrags(host, {
+        begin() {},
+        preview: () => Promise.resolve({ scene: {} }),
+        commit() {},
+        render() {
+          const started = performance.now();
+          while (performance.now() - started < cost);
+          busy += performance.now() - started;
+          renders += 1;
+        },
+      });
+      const fire = (type, detail) =>
+        host.dispatchEvent(new CustomEvent(type, { detail }));
+      fire("dragstart", { objectIds: ["a"], mode: "translate" });
+      const started = performance.now();
+      const step = () => {
+        if (performance.now() - started < 1500) {
+          fire("objecttransform", { preview: true, edits: [] });
+          requestAnimationFrame(step);
+          return;
+        }
+        fire("objecttransform", { preview: false, edits: [] });
+        const elapsed = performance.now() - started;
+        window.result = { renders, share: busy / elapsed };
+      };
+      requestAnimationFrame(step);
+    </script>
+  </body>
+</html>
