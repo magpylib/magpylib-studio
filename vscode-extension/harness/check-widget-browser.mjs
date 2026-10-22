@@ -33,7 +33,9 @@
  * - a current's flow: moving on screen, resting off it, gone when off; a
  *   saved page's field lines flowing too, and standing when it is off;
  * - a dragged sensor's late redraw kept under the handles;
- * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`).
+ * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
+ * - a saved page's colour bar: a handle cuts the field's colours, and a
+ *   double click puts them back.
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -679,6 +681,70 @@ async function dragPace(port, base) {
       return `150 ms redraws went on: ${drawn[150].renders} of them`;
     }
     return null;
+  });
+}
+
+/** A saved page's colour bar, for the sensor the field colours: the top
+ *  handle dragged halfway down cuts the range, and the pixels take the
+ *  colours stretched over the cut, and a double click on the bar puts them
+ *  back as they were. */
+async function colorBar(port, base) {
+  await check("a saved page's colour bar cuts the colours", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/lines.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const bar = await tab.evaluate(`
+        const b = document.querySelector(".magpy-colorbar");
+        if (!b || b.hidden) return null;
+        const r = b.querySelector(".magpy-colorbar-track").getBoundingClientRect();
+        return { x: r.x + r.width / 2, top: r.top, bottom: r.bottom };`);
+      if (!bar) return "no colour bar beside a sensor the field colours";
+      const colours = `
+        const out = [];
+        window.scene3d.byObjectId.get("plane").traverse((p) => {
+          if (p.isInstancedMesh && p.instanceColor && !out.length) {
+            out.push(...Array.from(p.instanceColor.array, (v) => v.toFixed(3)));
+          }
+        });
+        return out.join(",");`;
+      const before = await tab.evaluate(colours);
+      // from the top down: a share of the bar, its high end at 0
+      const y = (f) => bar.top + 1 + f * (bar.bottom - bar.top - 2);
+      const mouse = (type, at, clickCount = 1) =>
+        tab.send("Input.dispatchMouseEvent", {
+          type,
+          x: bar.x,
+          y: y(at),
+          button: "left",
+          buttons: type === "mouseReleased" ? 0 : 1,
+          clickCount,
+        });
+      await tab.hover({ x: bar.x, y: y(0) });
+      await mouse("mousePressed", 0);
+      for (const at of [0.1, 0.2, 0.3, 0.4, 0.5]) {
+        await mouse("mouseMoved", at);
+      }
+      await mouse("mouseReleased", 0.5);
+      if ((await tab.evaluate(colours)) === before) {
+        return "the cut left the pixels' colours as they were";
+      }
+      // a double click, inside the cut: on its band, which a press drags
+      for (const clickCount of [1, 2]) {
+        await mouse("mousePressed", 0.8, clickCount);
+        await mouse("mouseReleased", 0.8, clickCount);
+      }
+      if ((await tab.evaluate(colours)) !== before) {
+        return "a double click did not take the cut away";
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
   });
 }
 
@@ -3167,6 +3233,7 @@ try {
   await savedLines(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
+  await colorBar(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

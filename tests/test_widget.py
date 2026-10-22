@@ -438,19 +438,25 @@ def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     assert _outline(view.tree) == [("outer", [("inner", [("deep", [])]), ("ball", [])])]
 
 
-def test_hiding_and_fading_are_values_like_selecting(scene_objects):
-    """Kept by id, resolved by the view, and dropped with their objects."""
+def test_hiding_fading_and_cutting_colours_are_values_like_selecting(
+    scene_objects,
+):
+    """Kept by id, resolved by the view, and dropped with their objects --
+    the colour bar's cut as a fade is."""
     magnet, sensor = scene_objects
     view = widget.SceneWidget(magnet, sensor)
     view.hidden = [str(id(sensor))]
     view.faded = {str(id(sensor)): 0.5}
+    view.color_range = {str(id(sensor)): [0.01, 0.02]}
 
     view.update(magnet, sensor)
     assert view.hidden == [str(id(sensor))]
     assert view.faded == {str(id(sensor)): 0.5}
+    assert view.color_range == {str(id(sensor)): [0.01, 0.02]}
     view.update(magnet)  # nothing where the sensor was
     assert view.hidden == []
     assert view.faded == {}
+    assert view.color_range == {}
 
 
 def test_a_scene_and_its_tree_arrive_together(scene_objects, monkeypatch):

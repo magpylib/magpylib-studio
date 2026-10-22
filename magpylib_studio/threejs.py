@@ -1403,6 +1403,11 @@ def _pixels_of(sensor, field, key, path_ind=-1):
     sensor's own frame, with only the components its source names, as
     `pixel_fields` hands it over, and the sensor's pose takes it into the
     world's.
+
+    The readings' item carries, for a colour bar, each pixel's |field| as its
+    colour reads it (``norms``) and the sensor's colour table (``scale``:
+    `_colour_scale`), from which a view colours the pixels again over a
+    range cut from it -- the table its field lines are coloured from.
     """
     from magpylib.graphics.backend import pixel_colors, pixel_sizes
 
@@ -1447,12 +1452,40 @@ def _pixels_of(sensor, field, key, path_ind=-1):
 
     items = []
     if shape == "cube":
-        items.append(item(np.ones(len(pixel), dtype=bool), "cube", False))
+        read = np.ones(len(pixel), dtype=bool)
+        items.append(item(read, "cube", False))
     else:
-        items.append(item(~null, shape, True))
+        read = ~null
+        items.append(item(read, shape, True))
         if _resolve(sensor, "style.pixel.field.shownull"):
             items.append(item(null, "cube", False))
+    scale = _colour_scale(sensor, field)
+    if items[0] is not None and scale is not None:
+        norms = np.linalg.norm(field[path_ind], axis=-1)[np.flatnonzero(read)]
+        items[0]["norms"] = np.round(norms, 12).tolist()
+        items[0]["scale"] = scale
     return [i for i in items if i is not None]
+
+
+def _colour_scale(sensor, field):
+    """What a colour bar draws for `sensor`, whose pixels the field colours:
+    its table (`fieldlines.colours`, colours for |field| evenly from the
+    least to the most its pixels read, in SI), the field it reads, and its
+    ``colorscaling``. None where one colour is all there is."""
+    from magpylib_studio import fieldlines
+
+    scaling = _resolve(sensor, "style.pixel.field.colorscaling")
+    if scaling == "uniform":
+        return None
+    table, levels = fieldlines.colours(sensor, field)
+    if len(table) < 3:
+        return None  # it reads nothing yet: its one colour
+    return {
+        "lut": table,
+        "levels": levels,
+        "source": _resolve(sensor, "style.pixel.field.source"),
+        "scaling": scaling,
+    }
 
 
 def _ranges_with_pixels(ranges, pixels):
@@ -1572,6 +1605,7 @@ def saved_state(
     selected=(),
     hidden=(),
     faded=None,
+    color_range=None,
     axes="cube",
     flow=True,
     theme="auto",
@@ -1587,6 +1621,7 @@ def saved_state(
         "selected": list(selected),
         "hidden": list(hidden),
         "faded": dict(faded or {}),
+        "color_range": dict(color_range or {}),
         "axes": axes,
         "flow": flow,
         "theme": theme,

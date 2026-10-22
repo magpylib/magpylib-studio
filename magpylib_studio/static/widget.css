@@ -206,6 +206,197 @@
   display: none;
 }
 
+/* The colour bar (colorbar.mjs): a slim card down the right edge -- against
+   the editing column, its height, as a part of it, while that is out
+   (`placeColorBar` in widget.mjs), and alone, centred, where it is not. What
+   it says stands beside it, to the left: the sensor and its field always,
+   the cut's ends and the pointer's field while the pointer is on it. */
+.magpy-colorbar {
+  position: absolute;
+  top: 48px;
+  bottom: 108px;
+  right: 8px;
+  max-height: 240px;
+  margin-block: auto;
+  min-width: 26px;
+  box-sizing: border-box;
+  padding: 5px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 94%,
+    transparent
+  );
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 7px;
+  font-size: 10px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.magpy-colorbar[hidden] {
+  display: none;
+}
+
+/* joined to the column: one card, the seam squared */
+.magpy-colorbar.beside {
+  bottom: auto;
+  max-height: none;
+  margin-block: 0;
+  border-right: none;
+  border-radius: 7px 0 0 7px;
+}
+
+.magpy-scene-edit.with-bar {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+/* the name along the bar, read bottom to top, clipped to its height */
+.magpy-colorbar-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 3px;
+}
+
+.magpy-colorbar-name {
+  align-self: center; /* along the middle of the bar, as an axis title is */
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  max-height: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+
+/* the bar's ends, the least and the most it reads, in the card */
+.magpy-colorbar-end {
+  font-size: 9.5px;
+  line-height: 1.1;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.magpy-colorbar-track {
+  position: relative;
+  flex: 1 1 auto;
+  width: 8px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+  cursor: pointer;
+  transition: width 0.12s;
+}
+
+.magpy-colorbar:hover .magpy-colorbar-track,
+.magpy-colorbar.dragging .magpy-colorbar-track {
+  width: 12px;
+}
+
+/* What the cut leaves out of the bar: its end colour, as the pixels past
+   the cut are, under a light hatch that says it is clamped -- dimmed, the
+   bar showed a grey where the pixels were black. */
+.magpy-colorbar-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--vscode-editor-background) 55%, transparent) 0 1px,
+    transparent 1px 4px
+  );
+}
+
+.magpy-colorbar-shade.high {
+  top: 0;
+  border-radius: 4px 4px 0 0;
+}
+
+.magpy-colorbar-shade.low {
+  bottom: 0;
+  border-radius: 0 0 4px 4px;
+}
+
+.magpy-colorbar-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  cursor: grab;
+}
+
+.magpy-colorbar.dragging .magpy-colorbar-band {
+  cursor: grabbing;
+}
+
+/* A handle takes a press 12px tall, drawn as a 4px tab across the bar that
+   stands out of it either side -- only while the pointer is there. */
+.magpy-colorbar-handle {
+  position: absolute;
+  left: -4px;
+  right: -4px;
+  height: 12px;
+  margin-bottom: -6px;
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.magpy-colorbar:hover .magpy-colorbar-handle,
+.magpy-colorbar.dragging .magpy-colorbar-handle {
+  opacity: 1;
+}
+
+.magpy-colorbar-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px var(--vscode-editor-background);
+}
+
+/* beside the bar, under the pointer: the cut's ends, the field there */
+.magpy-colorbar-label {
+  position: absolute;
+  right: calc(100% + 4px);
+  transform: translateY(-50%);
+  padding: 0 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background) 85%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.magpy-colorbar-label.value {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.magpy-colorbar:hover .magpy-colorbar-label.value,
+.magpy-colorbar.dragging .magpy-colorbar-label.value {
+  opacity: 0.85;
+}
+
+.magpy-colorbar-label.pointer {
+  font-weight: 600;
+}
+
+.magpy-colorbar-label[hidden] {
+  display: none;
+}
+
 .magpy-scene-readout-head {
   opacity: 0.7;
 }

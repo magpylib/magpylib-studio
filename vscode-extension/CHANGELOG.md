@@ -8,6 +8,23 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A colour bar for a sensor's field colours</summary>
+
+A sensor whose pixels the field colours gets a colour bar down the view's right
+edge, joined to the editing column while that is out: its colormap from the
+least to the most it reads, named for the sensor and its field (`bore · |B|`),
+wider under the pointer, which it says the field at, beside the range in force
+in the scene's field unit. Two handles, there while the pointer is, cut a range
+from it: the colormap stretches over the cut, past either end the field takes
+that end's colour, on the pixels and the field lines alike. Drag a handle, the
+band between them to move both, click the bar to bring the nearer handle there,
+double-click to take the cut away. The cut is a view setting,
+`view.color_range`, kept by a saved page. The selected sensor's bar shows, else
+the first's.
+
+</details>
+
+<details>
 <summary>Currents and field lines flow</summary>
 
 Every current shows its current flowing, in place of its arrows: pulses run

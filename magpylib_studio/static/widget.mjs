@@ -42,6 +42,7 @@
  */
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
+import { createColorBar } from "./colorbar.mjs";
 import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
 import {
@@ -945,6 +946,47 @@ function render({ model, el }) {
     onMeasure: (a, b) => (editable() ? call("get_gap", { a, b }) : null),
     canEdit: () => editable(),
   });
+  // The colour bar of a sensor the field colours, and its cut: a view
+  // setting, drawn at every step of a drag and the model told at its end,
+  // as a fade is.
+  const colorBarEl = document.createElement("div");
+  stage.append(colorBarEl);
+  const colorBar = createColorBar(colorBarEl, {
+    onRange: (ranges, { settled }) => {
+      if (drawing()) api.setColorRanges(ranges);
+      if (settled) commit("color_range", ranges);
+    },
+  });
+
+  /** The colour bar, for the sensor selected or the first the field
+   *  colours, with the cut the model holds. */
+  function dressColorBar() {
+    const payload = model.get("payload") || {};
+    colorBar.update({
+      payload,
+      selected: model.get("selected") || [],
+      units: payload.units,
+      hidden: model.get("hidden") || [],
+    });
+    colorBar.sync(model.get("color_range") || {});
+    placeColorBar(); // and the column joined to it, or not
+  }
+
+  /** Against the editing column, its height, as a part of it, while the
+   *  column is out; alone on the right edge where there is none. */
+  function placeColorBar() {
+    const beside = !editBar.hidden && editBar.offsetHeight > 0;
+    const joined = beside && !colorBarEl.hidden;
+    colorBarEl.classList.toggle("beside", beside);
+    editBar.classList.toggle("with-bar", joined);
+    colorBarEl.style.top = beside ? `${editBar.offsetTop}px` : "";
+    colorBarEl.style.height = beside ? `${editBar.offsetHeight}px` : "";
+    colorBarEl.style.right = beside
+      ? `${stage.clientWidth - editBar.offsetLeft}px`
+      : "";
+    colorBar.paint();
+  }
+
   let legendOpen = null; // undecided until there is a tree, and room, to decide by
   let legendRoom = null; // waits for the view to have a size to decide in
 
@@ -1157,6 +1199,7 @@ function render({ model, el }) {
    *  the transport. Told again whenever either comes or goes, and when the
    *  view is resized. */
   function keepCorner() {
+    placeColorBar(); // beside the column, as it now stands
     if (!drawing()) return;
     api.keepClear(
       [editBar, transport]
@@ -2217,6 +2260,7 @@ function render({ model, el }) {
     "selected",
     "hidden",
     "faded",
+    "color_range",
     "axes",
     "flow",
     "theme",
@@ -2286,6 +2330,12 @@ function render({ model, el }) {
       dressLegend();
       showEditing(); // a view pointed at objects, or away from them
     } else legend.sync(stateOf());
+    if (
+      scene ||
+      ["selected", "hidden", "color_range"].some((k) => now.has(k))
+    ) {
+      dressColorBar();
+    }
     if (scene) {
       dressTransport();
       draw(); // which applies the hiding and the selection itself
@@ -2297,6 +2347,9 @@ function render({ model, el }) {
     if (!drawing()) return;
     if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
     if (now.has("faded")) api.setFades(model.get("faded") || {});
+    if (now.has("color_range")) {
+      api.setColorRanges(model.get("color_range") || {});
+    }
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
       if (editable()) setHandles(handles); // what was asked, for the new one
@@ -2349,6 +2402,7 @@ function render({ model, el }) {
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
     api.setFades(model.get("faded") || {});
+    api.setColorRanges(model.get("color_range") || {});
     api.setAxes(axesChoice(model.get("axes")));
     api.setFlow(model.get("flow") !== false);
     api.watchCamera(tellCamera);
@@ -2411,6 +2465,7 @@ function render({ model, el }) {
   // element rather than a frame after it, and dressed for where they are.
   dressTheme();
   dressLegend();
+  dressColorBar();
   dressTransport();
   dressEditing();
   openAsked();
