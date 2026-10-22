@@ -2786,7 +2786,7 @@ function buildPixels(item) {
     }
     for (const part of parts) part.instanceColor.needsUpdate = true;
   };
-  group.userData.recolour(rangeFor(item.object_id));
+  group.userData.recolour(colorRanges.get(item.object_id));
   for (const part of parts) {
     part.instanceMatrix.needsUpdate = true;
     // so framing and picking see the instances, not the one shape at the origin
@@ -3206,6 +3206,7 @@ function buildFieldLines(item) {
   }
   const group = new THREE.Group();
   group.name = item.name;
+  const coloured = []; // each band's part and |field| along it: `lineColouring`
   bands.forEach((band, i) => {
     if (!band.positions.length) return;
     const geometry = new LineSegmentsGeometry();
@@ -3235,35 +3236,46 @@ function buildFieldLines(item) {
     );
     part.userData.band = i;
     part.frustumCulled = false;
-    part.raycast = () => {};
+    part.raycast = unpicked;
     part.userData.field = true; // flows, but stays when the flow goes
     flowLines.add(part);
     group.add(part);
+    coloured.push({ part, values: Float32Array.from(band.values) });
   });
-  // Coloured from the table by |field|, past the readings the end colour --
-  // or over the colour bar's cut, as the sensor's pixels are (`colorRanges`).
-  group.userData.recolour = (range) => {
-    bands.forEach((band, i) => {
-      const part = group.children.find((child) => child.userData.band === i);
-      if (!part) return;
-      const colours = new Float32Array(band.values.length * 3);
-      band.values.forEach((value, j) => {
-        const colour = tableColour(lut, item.levels, range, value);
-        colours[j * 3] = colour.r;
-        colours[j * 3 + 1] = colour.g;
-        colours[j * 3 + 2] = colour.b;
-      });
+  group.userData.recolour = lineColouring(coloured, lut, item.levels);
+  group.userData.recolour(colorRanges.get(item.object_id));
+  return group;
+}
+
+/** A field line's raycast: never picked. Not made in `buildFieldLines`,
+ *  where it would keep the grid it traced. */
+function unpicked() {}
+
+/** How a sensor's field lines take their colours: each segment's ends from
+ *  `lut` by their |field|, `values` of each band's `part`, past the
+ *  readings the end colour -- or over the colour bar's range, as the
+ *  sensor's pixels are (`colorRanges`). Made out here, so that what it keeps
+ *  is these, not all the tracing worked with. */
+function lineColouring(coloured, lut, levels) {
+  return (range) => {
+    for (const { part, values } of coloured) {
       // in place after the first time: a handle's drag colours them again
       // at every step, and a new buffer each time is one the GPU keeps
       const kept = part.geometry.attributes.instanceColorStart?.data;
-      if (kept?.array.length === colours.length) {
-        kept.array.set(colours);
-        kept.needsUpdate = true;
-      } else part.geometry.setColors(colours);
-    });
+      const colours =
+        kept?.array.length === values.length * 3
+          ? kept.array
+          : new Float32Array(values.length * 3);
+      for (let j = 0; j < values.length; j++) {
+        const colour = tableColour(lut, levels, range, values[j]);
+        colours[j * 3] = colour.r;
+        colours[j * 3 + 1] = colour.g;
+        colours[j * 3 + 2] = colour.b;
+      }
+      if (colours === kept?.array) kept.needsUpdate = true;
+      else part.geometry.setColors(colours);
+    }
   };
-  group.userData.recolour(rangeFor(item.object_id));
-  return group;
 }
 
 /** The colour `value` takes from a table spread evenly over `levels` -- or,
@@ -3277,54 +3289,20 @@ function tableColour(lut, [low, high], range, value) {
   return lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))];
 }
 
-/** Colour each sensor's pixels and field lines over the range `ranges` cut
- *  for it, by id; one not named over all it reads -- or, `shared`, over all
- *  its group reads (`rangeFor`). The view's colour bar. */
-function setColorRanges(ranges, { shared = false } = {}) {
+/** Colour each sensor's pixels and field lines over the range `ranges`
+ *  names for it, by id -- a cut, or a scale it shares, as the view's colour
+ *  bar says (`colouring` in colorbar.mjs) -- and one not named over all it
+ *  reads, as magpylib coloured it. Only those whose range changed: a
+ *  handle's drag sets them at every step. */
+function setColorRanges(ranges) {
+  const was = colorRanges;
   colorRanges = new Map(Object.entries(ranges ?? {}));
-  colorShared = shared;
-  for (const [objectId, node] of byObjectId) {
-    node.traverse((part) => part.userData.recolour?.(rangeFor(objectId)));
-  }
-}
-
-/** Which of the sensors the field colours share a scale, and what they read
- *  together: those whose tables are one -- the same colormap and scaling,
- *  which a table is a function of alone, over its sensor's own readings --
- *  so that one range colours the same field alike on each. */
-function scaleGroup(objectId) {
-  const own = sensorScales.get(objectId);
-  if (!own) return null;
-  const key = own.key;
-  let least = Infinity;
-  let most = -Infinity;
-  for (const scale of sensorScales.values()) {
-    if (scale.key !== key) continue;
-    least = Math.min(least, scale.levels[0]);
-    most = Math.max(most, scale.levels[1]);
-  }
-  return [least, most];
-}
-
-/** The range a sensor is coloured over: its cut, else -- one scale for all,
- *  the bar's switch -- what its group reads together, else its own. */
-function rangeFor(objectId) {
-  return (
-    colorRanges.get(objectId) ??
-    (colorShared ? (scaleGroup(objectId) ?? undefined) : undefined)
-  );
-}
-
-/** Each sensor's colour table, from the pixels' items: what `scaleGroup`
- *  groups by. A drag's later step brings only what it moves: the others
- *  keep theirs. */
-function noteScales(payload, whole) {
-  if (whole) sensorScales.clear();
-  for (const item of payload.pixels ?? []) {
-    if (!item.scale) continue;
-    const { lut, scaling, source, levels } = item.scale;
-    const key = `${scaling}|${source?.[0]}|${lut.join()}`;
-    sensorScales.set(item.object_id, { key, levels });
+  const same = (a, b) => a === b || (a && b && a[0] === b[0] && a[1] === b[1]);
+  for (const id of new Set([...was.keys(), ...colorRanges.keys()])) {
+    if (same(was.get(id), colorRanges.get(id))) continue;
+    byObjectId
+      .get(id)
+      ?.traverse((part) => part.userData.recolour?.(colorRanges.get(id)));
   }
 }
 
@@ -3364,9 +3342,7 @@ const flowResolution = new THREE.Vector2(1, 1); // one for all, see `resize`
 const flowLines = new Set(); // wires and field lines drawn flowing, to know if any is
 const flowArrows = new Set(); // a flowing current's arrows, away while it flows
 let flowShown = true; // the host's: see `setFlow`
-let colorRanges = new Map(); // the colour bar's cut, by sensor: see `setColorRanges`
-let colorShared = false; // one scale for the sensors that can share one
-const sensorScales = new Map(); // id -> { key, levels }: see `noteScales`
+let colorRanges = new Map(); // the colour bar's ranges, by sensor: see `setColorRanges`
 // still for whoever asks the system for less motion: the pulses show the
 // way, standing
 const stillFlow = Boolean(
@@ -4570,7 +4546,6 @@ function renderFrame(payload) {
   changes = [];
   changing = [];
   luts = payload.luts ?? [];
-  noteScales(payload, true);
   overlapIds = overlapsAt(payload.frame, payload.frames);
   for (const item of drawnItems(payload)) {
     const node = nodeFor(item.object_id, null);
@@ -4831,7 +4806,6 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   collections = payload.collections || {};
   centroids = payload.centroids || {};
   copies = payload.copies || {};
-  noteScales(payload, !payload.partial); // before the pixels are coloured
 
   // A gesture's later steps draw only what it moves (`partial`): every other
   // node stands as its first step drew it, held as the dragged ones are.

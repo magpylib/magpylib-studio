@@ -658,10 +658,11 @@ async function heldReading(port, base) {
   );
 }
 
-/** Two sensors on one colormap, each coloured over what it reads: the switch
- *  under their colour bar gives them one scale -- the bar says both, and the
- *  far one, reading a weaker field, takes the darker colours of the scale
- *  they now share. Again, and each has its own. */
+/** Two sensors on one colormap, each coloured over what it reads: the
+ *  arrows under their colour bar go from one's bar to the other's, and the
+ *  switch gives them one scale -- the bar says both, and the far one,
+ *  reading a weaker field, takes the darker colours of the scale they now
+ *  share, unless the near one is hidden. Again, and each has its own. */
 async function sharedScale(port, base) {
   await check(
     "one colour scale for two sensors, by the bar's switch",
@@ -689,6 +690,17 @@ async function sharedScale(port, base) {
         const name = `return document.querySelector(".magpy-colorbar-name")?.textContent;`;
         const own = await tab.evaluate(far);
         if (!own) return "no colours on the far sensor's pixels";
+        // the arrows under the bar go from one sensor's bar to the other's
+        const first = await tab.evaluate(name);
+        const cycle = `document.querySelector(".magpy-colorbar-next").click(); return 1`;
+        await tab.evaluate(cycle);
+        if ((await tab.evaluate(name)) === first) {
+          return `the arrows left the bar on "${first}"`;
+        }
+        await tab.evaluate(cycle);
+        if ((await tab.evaluate(name)) !== first) {
+          return "the arrows did not come back to the first sensor";
+        }
         const flip = `
         const share = document.querySelector(".magpy-colorbar-share");
         if (!share || share.hidden) return false;
@@ -702,10 +714,56 @@ async function sharedScale(port, base) {
         if ((await tab.evaluate(far)) === own) {
           return "on one scale, the far sensor kept the colours of its own";
         }
+        // the scale is what is on screen reads: the near one hidden, the far
+        // one is alone on it, in its own colours
+        const eye = `${row("near")}.querySelector(".magpy-legend-eye").click(); return 1`;
+        await tab.evaluate(eye);
+        await wait(100);
+        if ((await tab.evaluate(far)) !== own) {
+          return "the near sensor hidden, the far one kept a scale shared with it";
+        }
+        await tab.evaluate(eye);
+        await wait(100);
         await tab.evaluate(flip);
         if ((await tab.evaluate(far)) !== own) {
           return "switched back, the far sensor did not take its own scale again";
         }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** A run's later steps are drawn in magpylib's colours for that step, which
+ *  the colour bar does not say: it steps aside from the first step on, and
+ *  is back when the run is. */
+async function colorBarAside(port, base) {
+  await check(
+    "the colour bar steps aside from a run's later steps",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/colour-run.html`);
+        const ready = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d`,
+          20_000,
+        );
+        if (!ready) return "the page never drew";
+        const scrubTo = async (step) => {
+          await tab.evaluate(
+            `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+          );
+          await wait(300);
+          return tab.evaluate(
+            `return !document.querySelector(".magpy-colorbar")?.hidden`,
+          );
+        };
+        if (!(await scrubTo(0))) return "no colour bar at the run's start";
+        if (await scrubTo(5)) return "the colour bar stayed at step 6";
+        if (!(await scrubTo(0)))
+          return "the colour bar did not come back at the start";
         return thrown(tab);
       } finally {
         await tab.close();
@@ -744,8 +802,9 @@ async function dragPace(port, base) {
 /** A saved page's colour bar, for the sensor the field colours: the top
  *  handle dragged halfway down cuts the range, and the pixels take the
  *  colours stretched over the cut, and a double click on the bar puts them
- *  back as they were. A value typed into its top end is the cut's, and an
- *  arrow key on its foot's handle moves that a step. */
+ *  back as they were; a press on the uncut bar cuts it there. A value typed
+ *  into its top end is the cut's, and an arrow key on its foot's handle
+ *  moves that a step. */
 async function colorBar(port, base) {
   await check("a saved page's colour bar cuts the colours", async () => {
     const tab = await openTab(port);
@@ -798,6 +857,12 @@ async function colorBar(port, base) {
       }
       if ((await tab.evaluate(colours)) !== before) {
         return "a double click did not take the cut away";
+      }
+      // a press on the bar with no cut brings the nearer handle there
+      await mouse("mousePressed", 0.25);
+      await mouse("mouseReleased", 0.25);
+      if ((await tab.evaluate(colours)) === before) {
+        return "a press on the uncut bar brought no handle to it";
       }
       // typed: the top end's value, clicked, takes a field in the bar's unit
       const handles = `document.querySelectorAll(".magpy-colorbar-handle")`;
@@ -3320,6 +3385,7 @@ try {
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);
   await sharedScale(browser.port, base);
+  await colorBarAside(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

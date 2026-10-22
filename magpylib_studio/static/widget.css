@@ -412,17 +412,6 @@
   border-radius: 3px;
 }
 
-/* the name, where a click on it shows the next sensor's bar */
-.magpy-colorbar-name.more {
-  pointer-events: auto;
-  cursor: pointer;
-}
-
-.magpy-colorbar-name.more:hover {
-  opacity: 1;
-  text-decoration: underline dotted;
-}
-
 /* Where what the sensor reads ends, in a bar a cut reaches past: a line
    across it, its value beside in italics -- the cut's ends are the bar's. */
 .magpy-colorbar-readmark {
@@ -444,8 +433,9 @@
   display: none;
 }
 
-/* One scale for all the sensors that can share one: a switch under the bar,
-   pressed while it is on. */
+/* The next sensor's bar, and one scale for all the sensors that can share
+   one: under the bar, the switch pressed while it is on. */
+.magpy-colorbar-next,
 .magpy-colorbar-share {
   display: grid;
   place-items: center;
@@ -460,6 +450,7 @@
   cursor: pointer;
 }
 
+.magpy-colorbar-next:hover,
 .magpy-colorbar-share:hover {
   opacity: 1;
   background: color-mix(in srgb, currentColor 12%, transparent);
@@ -471,6 +462,7 @@
   background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
+.magpy-colorbar-next[hidden],
 .magpy-colorbar-share[hidden] {
   display: none;
 }

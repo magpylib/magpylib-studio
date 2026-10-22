@@ -42,6 +42,8 @@ Writes into OUT:
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
+* ``colour-run.html`` -- that cube turning past such a sensor: a run whose
+  later steps the colour bar steps aside from;
 * ``array.json`` -- the array example as the studio panel's engine answers
   it: a tile patterned into a row, the row into a layer, the layer again, the
   copies drawn on the nodes of what was patterned;
@@ -442,6 +444,18 @@ def main(out):
     for sensor in (near, far):
         sensor.style.pixel.field.source = "B"
     SceneWidget(cube, near, far, field_lines=True).write_html(out / "shared.html")
+    # and a cube turning past one: a run whose later steps are drawn in
+    # magpylib's colours for each, which the colour bar steps aside from
+    turning = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(0.02, 0, 0)
+    )
+    turning.rotate_from_angax(np.linspace(0, 180, 10), "z", anchor=0, start=0)
+    watched = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across])
+    watched.style.pixel.field.source = "B"
+    stepped = SceneWidget(turning, watched, field_lines=True, animation=True)
+    if not any(item.get("scale") for item in stepped.payload.get("pixels", [])):
+        raise SystemExit("colour-run.html: a run with a colour bar at its start")
+    stepped.write_html(out / "colour-run.html")
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows, "small_span": span}

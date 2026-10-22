@@ -22,12 +22,13 @@ double-click to take the cut away. A click on a value types one, in the scene's
 unit or another, and may reach past what the sensor reads, to colour two scenes
 on one scale: the bar then reaches the cut, and marks where what the sensor
 reads ends; a focused handle takes the arrow keys. The cut's ends are said
-beside its handles. With several such sensors a click on the name shows the next
-one's bar, or the switch under the bar gives those on one colormap one scale,
+beside its handles. With several such sensors the arrows under the bar show the
+next one's bar, or the switch beside them gives those on one colormap one scale,
 one bar standing for them all, so their colours compare however many there are;
 and a picture of the view carries the bar as it carries the scale bar. The cut
 is a view setting, `view.color_range`, kept by a saved page. The selected
-sensor's bar shows, else the first's.
+sensor's bar shows, else the first's; while a run plays, or shows a later step,
+the bar steps aside, as the steps are in magpylib's colours.
 
 </details>
 

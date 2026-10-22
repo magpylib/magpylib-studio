@@ -956,11 +956,9 @@ function render({ model, el }) {
   // as a fade is.
   const colorBarEl = document.createElement("div");
   stage.append(colorBarEl);
-  // one scale for all, as the renderer is told it
-  const sharing = () => ({ shared: Boolean(model.get("color_shared")) });
   const colorBar = createColorBar(colorBarEl, {
     onRange: (ranges, { settled }) => {
-      if (drawing()) api.setColorRanges(ranges, sharing());
+      if (drawing()) api.setColorRanges(colorBar.colouring(ranges));
       if (settled) commit("color_range", ranges);
     },
     // one scale for all, or each its own: as one change, the group's cuts
@@ -973,18 +971,33 @@ function render({ model, el }) {
   });
 
   /** The colour bar, for the sensor selected or the first the field
-   *  colours, with the cut the model holds. */
+   *  colours, with the cut the model holds -- and the renderer colouring
+   *  what it shows, which the sensors on screen decide as much as the cut.
+   *  Not while a run plays or a later step of it is on screen: a frame is
+   *  drawn in magpylib's colours for that step, which no bar says. */
   function dressColorBar() {
     const payload = model.get("payload") || {};
+    barAside = playing || shown > 0;
     colorBar.update({
       payload,
       selected: model.get("selected") || [],
       units: payload.units,
       hidden: model.get("hidden") || [],
       shared: Boolean(model.get("color_shared")),
+      aside: barAside,
     });
     colorBar.sync(model.get("color_range") || {});
+    if (drawing()) {
+      api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
+    }
     keepCorner(); // it beside the column, or alone, and the cube clear of it
+  }
+  let barAside = false; // see `dressColorBar`
+
+  /** The bar away as a run starts or leaves its first step, and back as it
+   *  returns there and stops. */
+  function asideColorBar() {
+    if ((playing || shown > 0) !== barAside) dressColorBar();
   }
 
   /** Beside the editing column, its height, while the column is out;
@@ -1574,6 +1587,7 @@ function render({ model, el }) {
     shown = index;
     scrub.value = String(index);
     showStep();
+    asideColorBar();
     // A document's run ends on the scene its payload draws, still, with
     // what no frame carries: its field lines, worked out for that pose. So
     // its last step is drawn whole again, rather than left as the frame was.
@@ -1589,6 +1603,7 @@ function render({ model, el }) {
     playing = api ? api.setPlaying(on) : false;
     setIcon(play, playing ? "pause" : "play");
     name(play, playing ? "Pause (space)" : "Play the path (space)");
+    asideColorBar();
     if (!playing) return;
     // Restart from the top when play is pressed at the end of the run, rather
     // than finishing immediately.
@@ -2363,9 +2378,6 @@ function render({ model, el }) {
     if (!drawing()) return;
     if (now.has("hidden")) api.setHidden(model.get("hidden") || []);
     if (now.has("faded")) api.setFades(model.get("faded") || {});
-    if (now.has("color_range") || now.has("color_shared")) {
-      api.setColorRanges(model.get("color_range") || {}, sharing());
-    }
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
       if (editable()) setHandles(handles); // what was asked, for the new one
@@ -2418,7 +2430,7 @@ function render({ model, el }) {
     // taken away -- and so a pooled renderer drops the last widget's.
     api.setHidden(model.get("hidden") || []);
     api.setFades(model.get("faded") || {});
-    api.setColorRanges(model.get("color_range") || {}, sharing());
+    api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
     api.setAxes(axesChoice(model.get("axes")));
     api.setFlow(model.get("flow") !== false);
     api.watchCamera(tellCamera);

@@ -6,11 +6,12 @@
  * the top, both said above and below it, and the sensor and its field named
  * on it -- "bore · |B|", written along the bar, clipped to its height, whole
  * in its tooltip -- so what is said beside it stands right against it. With
- * more than one sensor coloured so, a click on the name shows the next
- * one's; or, with the switch under the bar, those that can share a scale
+ * more than one sensor coloured so, the arrows under the bar show the next
+ * one's; or, with the switch beside them, those that can share a scale
  * (the same colormap and scaling) share one: one bar, "4 sensors · |B|",
  * colouring them all over what they read together, or the cut, alike, so
- * their colours compare however many there are.
+ * their colours compare however many there are. A pattern's copies of a
+ * sensor are that sensor: one scale over all they read, always.
  *
  * Two handles, there while the pointer is, cut a range from it: the
  * sensor's colours stretch over the cut, and the field past either end
@@ -31,8 +32,11 @@
  *
  * A component, as the legend is: what is cut is the widget's `color_range`,
  * which the bar is told (`sync`) and says what a drag would make it
- * (`onRange`, at every step and once settled). Where it stands is the
- * widget's to say (`placeColorBar`).
+ * (`onRange`, at every step and once settled). What each sensor is coloured
+ * over, cut or shared, is the bar's to say (`colouring`), so the renderer
+ * colours what the bar shows and nothing else. Where it stands is the
+ * widget's to say (`placeColorBar`), and when it steps aside: while a step
+ * of a run, in colours of its own, is on screen.
  */
 
 /** How many stops of a table the bar's gradient is drawn with. */
@@ -101,13 +105,35 @@ export function readField(text, unit) {
 const tableKey = ({ scale }) =>
   `${scale.scaling}|${scale.source?.[0]}|${scale.lut.join()}`;
 
+/** From the least to the most that `items` read, together. */
+const reach = (items) => [
+  Math.min(...items.map((each) => each.scale.levels[0])),
+  Math.max(...items.map((each) => each.scale.levels[1])),
+];
+
+const CYCLE_ICON =
+  '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M12.5 6.5A4.6 4.6 0 0 0 4 4.6"/><path d="M3.8 2.2v2.6h2.6"/>' +
+  '<path d="M3.5 9.5A4.6 4.6 0 0 0 12 11.4"/><path d="M12.2 13.8v-2.6H9.6"/></svg>';
+
 export function createColorBar(container, { onRange, onShare }) {
   container.classList.add("magpy-colorbar");
   container.hidden = true;
   const most = element("magpy-colorbar-end", container);
   const track = element("magpy-colorbar-track", container);
   const least = element("magpy-colorbar-end", container);
-  // one scale for all the sensors that can share one: under the bar
+  // the next sensor's bar, where there is more than one: under the bar
+  const cycle = element("magpy-colorbar-next", container, "button");
+  cycle.type = "button";
+  cycle.innerHTML = CYCLE_ICON;
+  cycle.hidden = true;
+  cycle.addEventListener("click", () => {
+    if (!shown || shown.candidates.length < 2) return;
+    chosen = shown.candidates[(shown.at + 1) % shown.candidates.length];
+    update(asked);
+  });
+  // one scale for all the sensors that can share one: under it
   const share = element("magpy-colorbar-share", container, "button");
   share.type = "button";
   share.innerHTML =
@@ -153,12 +179,14 @@ export function createColorBar(container, { onRange, onShare }) {
     value.title = "Click to type a value";
   }
 
-  let shown = null; // { id, scale, unit, name, candidates }
+  let shown = null; // { id, ids, scale, levels, unit, name, candidates, at }
   let ranges = {}; // the widget's color_range
+  let common = {}; // id -> the scale it shares, where it shares one: `colouring`
   let cut = null; // [from, to] for the sensor shown, while one is dragged
   let pointing = null; // the share of the bar the pointer rests at
   let asked = null; // the last update's arguments, to show the next sensor by
-  let chosen = null; // a sensor the name's click chose, until the selection moves
+  let missed = false; // an update that came while a drag held the bar
+  let chosen = null; // a sensor the arrows chose, until the selection moves
   let selectedWas = "";
   let typing = null; // the box a value is being typed in
 
@@ -191,13 +219,19 @@ export function createColorBar(container, { onRange, onShare }) {
     return 1 - (event.clientY - box.top) / box.height;
   };
 
-  /** Show the sensor `payload` colours by the field: the one the name's
-   *  click chose, else the selected one if that is one, else the first --
-   *  its table drawn as the bar, it and its field named. Not one hidden, nor
+  /** Show the sensor `payload` colours by the field: the one the arrows
+   *  chose, else the selected one if that is one, else the first -- its
+   *  table drawn as the bar, it and its field named. Not one hidden, nor
    *  one whose pixels are hidden and whose lines are too, or not drawn:
-   *  nothing on screen is in its colours. */
+   *  nothing on screen is in its colours. None while the widget says the
+   *  bar steps `aside`. */
   function update(args) {
     asked = args;
+    // a drag holds the bar it began with; what came meanwhile, at its end
+    if (frozen) {
+      missed = true;
+      return;
+    }
     const { payload, selected, units, hidden } = args;
     const off = new Set(hidden ?? []);
     const lined = new Set(
@@ -206,9 +240,24 @@ export function createColorBar(container, { onRange, onShare }) {
     const seen = ({ object_id: id }) =>
       !off.has(id) &&
       !(off.has(`${id}/pixels`) && (!lined.has(id) || off.has(`${id}/lines`)));
-    const scaled = (payload?.pixels ?? []).filter(
-      (item) => item.scale && seen(item),
-    );
+    // one each: a pattern's copies come under their source's id, and are it
+    const sensors = new Map();
+    const copied = new Set();
+    for (const each of payload?.pixels ?? []) {
+      if (!each.scale || !seen(each)) continue;
+      const known = sensors.get(each.object_id);
+      if (known) copied.add(each.object_id);
+      sensors.set(
+        each.object_id,
+        known
+          ? {
+              ...known,
+              scale: { ...known.scale, levels: reach([known, each]) },
+            }
+          : each,
+      );
+    }
+    const scaled = [...sensors.values()];
     const picked = (selected ?? []).join();
     if (picked !== selectedWas) chosen = null; // the selection moved: it decides
     selectedWas = picked;
@@ -219,11 +268,23 @@ export function createColorBar(container, { onRange, onShare }) {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(each);
     }
+    // the scales shared, for `colouring`: a group's, one scale for all, or
+    // a sensor's own over all its copies read
+    common = {};
+    for (const group of groups.values()) {
+      const together = Boolean(args.shared) && group.length > 1;
+      const theirs = reach(group);
+      for (const each of group) {
+        if (together) common[each.object_id] = theirs;
+        else if (copied.has(each.object_id))
+          common[each.object_id] = each.scale.levels;
+      }
+    }
     const item =
       scaled.find((each) => each.object_id === chosen) ??
       scaled.find((each) => (selected ?? []).includes(each.object_id)) ??
       scaled[0];
-    container.hidden = !item;
+    container.hidden = !item || Boolean(args.aside);
     if (!item) {
       shown = null;
       return;
@@ -240,31 +301,32 @@ export function createColorBar(container, { onRange, onShare }) {
     const together = Boolean(args.shared) && mates.length > 1;
     const members = together ? mates : [item];
     const quantity = `|${item.scale.source}|`;
+    // the arrows go on to the next sensor, or, sharing, the next group
+    const candidates = args.shared
+      ? [...groups.values()].map((group) => group[0].object_id)
+      : scaled.map((each) => each.object_id);
     shown = {
       id: item.object_id,
       ids: members.map((each) => each.object_id),
       scale: item.scale,
-      levels: [
-        Math.min(...members.map((each) => each.scale.levels[0])),
-        Math.max(...members.map((each) => each.scale.levels[1])),
-      ],
+      levels: reach(members),
       unit,
       name: together
         ? `${members.length} sensors · ${quantity}`
         : `${item.name} · ${quantity}`,
-      // the name's click goes on to the next sensor, or the next group
-      candidates: (args.shared
-        ? [...groups.values()].map((group) => group[0])
-        : scaled
-      ).map((each) => each.object_id),
+      candidates,
+      // the one shown among them: its group's, sharing, whichever is shown
+      at: args.shared
+        ? [...groups.values()].indexOf(mates)
+        : candidates.indexOf(item.object_id),
     };
     name.textContent = shown.name;
-    const more = shown.candidates.length > 1;
-    name.classList.toggle("more", more);
+    const more = candidates.length > 1;
+    cycle.hidden = !more;
+    cycle.title = `The next sensor's colours (${shown.at + 1} of ${candidates.length})`;
     container.title =
       `${together ? members.map((each) => each.name).join(", ") : item.name}: ` +
-      `${quantity} in ${unit.symbol}, ${item.scale.scaling}` +
-      (more ? " — click the name for the next one's" : "");
+      `${quantity} in ${unit.symbol}, ${item.scale.scaling}`;
     // the switch, where a scale can be shared at all
     share.hidden = mates.length < 2;
     share.classList.toggle("on", together);
@@ -277,10 +339,16 @@ export function createColorBar(container, { onRange, onShare }) {
   }
 
   /** Mirror the widget's `color_range`. */
-  function sync(next) {
-    ranges = next ?? {};
+  function sync(given) {
+    ranges = given ?? {};
     paint();
   }
+
+  /** What each sensor is coloured over, for the renderer, by id: its cut
+   *  in `cuts`, else the scale it shares -- with the sensors on its table,
+   *  the switch on, or with its pattern's copies -- else none: its own. Of
+   *  the sensors on screen, so the colours are the bar's. */
+  const colouring = (cuts) => ({ ...common, ...cuts });
 
   /** The gradient as the pixels take it, the handles and the hatching past
    *  them where the cut puts them -- at the ends where there is none --
@@ -345,17 +413,20 @@ export function createColorBar(container, { onRange, onShare }) {
     container.classList.toggle("cut", Boolean(ranges[shown.id] || cut));
   }
 
-  /** The colours along the bar for a cut `from`..`to`, as a CSS gradient
-   *  toward `way`: the table stretched over the cut, each end's colour flat
-   *  past it. */
-  function gradient(from, to, way) {
+  /** The colour at a share `f` of the bar for a cut `from`..`to`: the table
+   *  stretched over the cut, each end's colour flat past it. */
+  function colourAt(f, from, to) {
     const { lut } = shown.scale;
+    const t = to > from ? (valueAt(f) - from) / (to - from) : 0.5;
+    return lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))];
+  }
+
+  /** The colours along the bar for a cut `from`..`to`, as a CSS gradient
+   *  toward `way`. */
+  function gradient(from, to, way) {
     const stops = Array.from({ length: STOPS }, (_, i) => {
       const f = i / (STOPS - 1);
-      const t = to > from ? (valueAt(f) - from) / (to - from) : 0.5;
-      const colour =
-        lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))];
-      return `${colour} ${(f * 100).toFixed(1)}%`;
+      return `${colourAt(f, from, to)} ${(f * 100).toFixed(1)}%`;
     });
     return `linear-gradient(${way}, ${stops.join(", ")})`;
   }
@@ -409,7 +480,11 @@ export function createColorBar(container, { onRange, onShare }) {
       if (cut) tell(cut, true);
       cut = null;
       frozen = null;
-      paint(); // the bar reaching the cut, as it settled
+      // the bar reaching the cut, as it settled -- on what came meanwhile
+      if (missed) {
+        missed = false;
+        update(asked);
+      } else paint();
     };
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", release);
@@ -436,7 +511,8 @@ export function createColorBar(container, { onRange, onShare }) {
     const [from, to] = currentCut();
     const box = element("magpy-colorbar-input", null, "input");
     box.type = "text";
-    box.value = said(which === "low" ? from : to, shown.unit);
+    const was = said(which === "low" ? from : to, shown.unit);
+    box.value = was;
     box.setAttribute(
       "aria-label",
       `the ${which === "low" ? "foot" : "top"} of the colour range`,
@@ -457,6 +533,11 @@ export function createColorBar(container, { onRange, onShare }) {
       event.stopPropagation(); // typed, not the view's keys
       if (event.key === "Escape") done(null);
       if (event.key !== "Enter") return;
+      // as it was said: no cut at its rounding
+      if (box.value.trim() === was) {
+        done(null);
+        return;
+      }
       const value = readField(box.value, shown.unit);
       if (value === null) {
         box.setCustomValidity(
@@ -471,20 +552,28 @@ export function createColorBar(container, { onRange, onShare }) {
     box.addEventListener("blur", () => done(null));
   }
 
+  /** A press on the bar past the cut brings the nearer handle there, and
+   *  drags it. */
+  function press(event) {
+    if (!shown) return;
+    const [from, to] = currentCut().map(at);
+    const f = shareAt(event);
+    const which = Math.abs(f - from) <= Math.abs(f - to) ? "low" : "high";
+    drag(which, event)?.(event);
+  }
   low.addEventListener("pointerdown", (event) => drag("low", event));
   high.addEventListener("pointerdown", (event) => drag("high", event));
-  band.addEventListener("pointerdown", (event) => drag("band", event));
-  // A press on the bar past the cut brings the nearer handle there, and
-  // drags it.
   for (const shade of [shadeLow, shadeHigh]) {
-    shade.addEventListener("pointerdown", (event) => {
-      if (!shown) return;
-      const [from, to] = currentCut().map(at);
-      const f = shareAt(event);
-      const which = Math.abs(f - from) <= Math.abs(f - to) ? "low" : "high";
-      drag(which, event)?.(event);
-    });
+    shade.addEventListener("pointerdown", press);
   }
+  // the band moves both ends -- but uncut it is the whole bar, with nothing
+  // to move, and a press on it is one on the bar
+  band.addEventListener("pointerdown", (event) => {
+    if (!shown) return;
+    const [from, to] = currentCut().map(at);
+    if (from <= AT_END && to >= 1 - AT_END) press(event);
+    else drag("band", event);
+  });
   track.addEventListener("dblclick", () => {
     if (shown && ranges[shown.id]) tell(null, true);
   });
@@ -524,13 +613,6 @@ export function createColorBar(container, { onRange, onShare }) {
       event.stopPropagation(); // the bar's, not the view's
     });
   }
-  // several sensors coloured by the field: the name shows the next one's
-  name.addEventListener("click", () => {
-    if (!shown || shown.candidates.length < 2) return;
-    const at = shown.candidates.indexOf(shown.id);
-    chosen = shown.candidates[(at + 1) % shown.candidates.length];
-    update(asked);
-  });
   // the field where the pointer rests
   track.addEventListener("pointermove", (event) => {
     if (!shown || container.classList.contains("dragging")) return;
@@ -575,14 +657,9 @@ export function createColorBar(container, { onRange, onShare }) {
     const [from, to] = currentCut();
     // the gradient, as on screen, then the hatching past the cut
     const fill = ctx.createLinearGradient(0, top + h, 0, top);
-    const { lut } = shown.scale;
     for (let i = 0; i < STOPS; i++) {
       const f = i / (STOPS - 1);
-      const t = to > from ? (valueAt(f) - from) / (to - from) : 0.5;
-      fill.addColorStop(
-        f,
-        lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))],
-      );
+      fill.addColorStop(f, colourAt(f, from, to));
     }
     const rounded = (path) => {
       path.beginPath();
@@ -687,5 +764,5 @@ export function createColorBar(container, { onRange, onShare }) {
     return canvas.toDataURL("image/png");
   }
 
-  return { update, sync, paint, drawOn };
+  return { update, sync, colouring, paint, drawOn };
 }
