@@ -150,7 +150,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
 `_build` folds the whole log from the start on every change: construct and
 attach each `create`, detach a `remove`'s subtree, move a `reparent`'s, then
 replay the transforms and patterns in order. 1.7 ms for the 24-object example,
-which is what makes sliders live and `sweep` affordable.
+which is what makes sliders live and `sweep` affordable. A drag's later steps
+skip it: each rewrites the pose that ends the log, so it is set on the live
+object instead (`_mutate_live`) -- unless it goes in before a pattern's step,
+which its copies follow.
 
 - A pattern's copies are built at fold time, registered as real sources, and
   reported by `list_objects` with `derived` naming their source: selectable, not

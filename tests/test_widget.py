@@ -624,6 +624,29 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
     assert marked(payload) == [5, 10, 10]
 
 
+@pytest.mark.parametrize("animation", [False, True])
+def test_a_view_of_a_cells_objects_draws_their_pixels_apart(animation):
+    """A sensor whose pixels the field colours, in a view of the cell's own
+    objects: still, its pixels are items of their own with their colour
+    table, for the colour bar, where magpylib's meshes of them would be --
+    in the drawing's unit, millimetres here; in a run, magpylib's meshes,
+    each step computed and coloured as it is."""
+    cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    across = np.linspace(-0.02, 0.02, 5)
+    sensor = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across])
+    sensor.style.pixel.field.source = "B"
+    cube.move(np.linspace((0, 0, 0), (0.001, 0, 0), 3), start=0)
+    view = widget.SceneWidget(cube, sensor, animation=animation)
+    pixels = view.payload.get("pixels", [])
+    if animation:
+        assert not pixels
+        return
+    (item,) = pixels
+    assert item["object_id"] == str(id(sensor)) and item["scale"]
+    assert item["origins"][:3] == [-20.0, 0.0, 12.0]
+    assert sensor.style.pixel.size == 1  # put back after the capture
+
+
 def test_an_editable_view_colours_its_objects_as_magpylib_does():
     """Copied into a session, the objects sit under its root collection,
     which magpylib would colour as one: drawn from the root's own, each has

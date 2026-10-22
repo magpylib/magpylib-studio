@@ -26,7 +26,9 @@ the view needs to draw lines nobody has to tune:
 During a gesture the grid is coarser and kept for its length, unless the
 sensor itself moves: the field of what does not move is computed once and
 only the moving sources' field added each frame, which is the whole field to
-float precision -- see `MagpylibStudioSession._field_lines`.
+float precision. A sensor dragged past sources that all stand still keeps a
+grid too, fixed in the world, and the field on it, until its pixels leave
+it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
@@ -164,6 +166,27 @@ def grid_around(sources, seeds, points, flat=None):
         "step": step,
         "shape": [int(n) for n in shape],
     }
+
+
+#: How far inside a kept grid its seeds must stay, as a share of its
+#: largest side: about half the padding `grid_around` gives them, so a
+#: line from a pixel near the edge still has some way to run.
+HELD_MARGIN = 1 / 12
+
+
+def holds(grid, seeds):
+    """Whether `grid` still serves `seeds`: they lie within it, kept
+    `HELD_MARGIN` from its edges -- and in its plane, a flat one's."""
+    local = (np.asarray(seeds, dtype=float) - grid["origin"]) @ np.asarray(
+        grid["axes"]
+    ).T
+    sides = grid["step"] * (np.asarray(grid["shape"]) - 1)
+    margin = HELD_MARGIN * float(sides.max())
+    if is_flat(grid):
+        if np.abs(local[:, 2]).max() > 1e-3 * grid["step"]:
+            return False
+        local, sides = local[:, :2], sides[:2]
+    return bool(((local >= margin) & (local <= sides - margin)).all())
 
 
 def is_flat(grid):

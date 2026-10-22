@@ -1571,17 +1571,46 @@ DEFAULT_HEIGHT = 420
 WHOLE_RUN_LIMIT: int = 50_000_000
 
 
-def run_payload(scene):
+def run_payload(scene, pixels=()):
     """What a view draws `scene` from, and the run kept to serve it a frame
     at a time: None when there is no run, or it plays on its own, as motion
-    and carried changes -- see `played_payload`."""
+    and carried changes -- see `played_payload`. `pixels` are a still
+    scene's sensors' pixels, drawn apart from it (`capture_view`)."""
     # a script's scene, which `_capture` did not make
     _mark_paths(scene)
     _mark_flows(scene)
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
-    payload = played or view_payload(scene, index=0)
+    payload = played or view_payload(scene, index=0, pixels=pixels)
     return payload, (scene if animated and played is None else None)
+
+
+def capture_view(objects, animation=False, **kwargs):
+    """`_capture` for a view of `objects` that nobody edits, and the
+    ``pixels`` items of their sensors whose pixels read the field: drawn as
+    instances, as a session's are (`_instanced_pixels`), keyed by magpylib's
+    own ``id(obj)`` as `view_payload` keys traces -- so a view of a cell's
+    own objects has their colour bar too. A run keeps magpylib's pixels,
+    each step computed and coloured as it is; and so does a scene drawn
+    with style given to `show`, which a sensor's own style here would not
+    know of."""
+    if animation or any(key.startswith("style") for key in kwargs):
+        return _capture(objects, animation=animation, **kwargs), []
+    pixels, restore = _instanced_pixels(objects, str)
+    try:
+        scene = _capture(objects, **kwargs)
+    finally:
+        restore()
+    if not pixels:
+        return scene, pixels
+    # in metres, and the drawing in the unit magpylib chose for it
+    per_metre = _drawn_per_metre(scene)
+    if per_metre is None:
+        return _capture(objects, **kwargs), []  # one it does not say: its own
+    for item in pixels:
+        for key, digits in (("origins", 9), ("sizes", 9)):
+            item[key] = np.round(np.asarray(item[key]) * per_metre, digits).tolist()
+    return scene, pixels
 
 
 def whole_run(scene, limit=None):
@@ -1681,7 +1710,7 @@ def widget_state(scene, height=DEFAULT_HEIGHT):
     return {"state": state, "run": run}
 
 
-def view_payload(scene, index=None, traces=None):
+def view_payload(scene, index=None, traces=None, pixels=()):
     """Everything a three.js view needs for a scene nobody is editing.
 
     `scene_payload` below is for the studio, where the engine owns the objects:
@@ -1705,15 +1734,16 @@ def view_payload(scene, index=None, traces=None):
     smear of two hundred poses for a run. `frame_payload` carries the others,
     once the view asks for them. `traces`, when given, are drawn instead of
     any frame's: the first frame's, tagged with their tracks, for
-    `played_payload`.
+    `played_payload`. `pixels` are drawn beside them: `capture_view`.
     """
     panel = scene.panel(1, 1)
     if traces is None:
         frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
         traces = [t for frame in frames for t in frame.traces]
+    reach = None if panel.ranges is None else panel.ranges.tolist()
     return {
-        **_by_kind(_keyed(traces)),
-        "ranges": None if panel.ranges is None else panel.ranges.tolist(),
+        **_by_kind([*_keyed(traces), *pixels]),
+        "ranges": _ranges_with_pixels(reach, pixels),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no

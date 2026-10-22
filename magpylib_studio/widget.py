@@ -501,8 +501,9 @@ class SceneWidget(anywidget.AnyWidget):
             widget.identify(*objects)
         return widget
 
-    def _adopt(self, scene):
-        """Draw `scene`, in one update.
+    def _adopt(self, scene, pixels=()):
+        """Draw `scene`, in one update -- with `pixels`, its sensors' pixels
+        drawn apart from it (`threejs.capture_view`).
 
         `hold_sync` because these are four traits and the view reads them
         together: sent one at a time, a payload can arrive at a browser that
@@ -513,7 +514,7 @@ class SceneWidget(anywidget.AnyWidget):
         # what changes as it goes is carried with it: the view plays it, kernel
         # or none. Only a run too big to carry is kept here, to be served a
         # frame at a time.
-        payload, served = threejs.run_payload(scene)
+        payload, served = threejs.run_payload(scene, pixels)
         with self.hold_sync():
             self._scene = served
             self.frames = len(scene.frames)
@@ -554,7 +555,7 @@ class SceneWidget(anywidget.AnyWidget):
         self._not_editable("update")
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
-            self._adopt(threejs._capture(objects, animation=animation, **kwargs))
+            self._adopt(*threejs.capture_view(objects, animation=animation, **kwargs))
             self.identify(*objects)
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():

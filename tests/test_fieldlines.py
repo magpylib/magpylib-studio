@@ -104,3 +104,33 @@ def test_field_in_chunks_matches_one_call(monkeypatch):
         )
     inside = np.linalg.norm(magpy.getJ(cells, points, sumup=True), axis=1) > 0
     np.testing.assert_array_equal(fieldlines.inside(cells, points), inside)
+
+
+def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
+    """The field of magnets that stand still is computed once in a drag of
+    the sensor, on a grid fixed in the world: its lines are traced from
+    where the pixels are now, until the drag takes them off the grid's
+    plane."""
+    widget = view()
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines, "field", lambda *a, **k: computed.append(1) or field(*a, **k)
+    )
+
+    def step(position):
+        edit = {"objectId": "probe", "position": position}
+        answer, _, _ = widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+        (item,) = answer["result"]["scene"]["fieldlines"]
+        return item
+
+    widget._reply({"method": "begin_interaction"})
+    first = step([0.001, 0, 0])
+    computed.clear()
+    later = step([0.002, 0, 0])
+    assert not computed  # the field stood still
+    assert later["origin"] == first["origin"] and later["seeds"] != first["seeds"]
+    step([0.002, 0.001, 0])  # off the plane the grid lies in
+    assert computed
