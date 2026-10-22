@@ -303,9 +303,9 @@ export function createLegend(
     return { picks, hides };
   }
 
-  function propose(ids) {
+  function propose(ids, part = null) {
     proposed = ids;
-    onSelect(ids);
+    onSelect(ids, { part });
   }
 
   /** `ids`, a collection among them as the drawn objects it holds. */
@@ -314,6 +314,14 @@ export function createLegend(
 
   function select(node, mode) {
     const mine = leaves.get(node.id);
+    // A part's row is a way in to its sensor, and to what of it the part
+    // is: it selects the sensor, and never clears it, as a second click on
+    // a row that is the whole selection does.
+    if (isPart(node) && mode === "replace") {
+      anchor = node.id;
+      propose(mine, node.kind);
+      return;
+    }
     if (mode === "range" && anchor !== null) {
       const from = order.findIndex((n) => n.id === anchor);
       const to = order.indexOf(node);

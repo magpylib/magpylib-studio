@@ -307,6 +307,11 @@ const NO_EDIT_ANSWER =
   "No answer from Python for this edit yet: the kernel may be busy or not " +
   "running. The view catches up if it answers.";
 
+/** The style group of a sensor's part (legend.mjs), which the object panel
+ *  opens at when the part's row is picked: the field lines are coloured as
+ *  the pixels are, by `pixel.field`. */
+const PART_STYLE = { Axes: "arrows", Pixels: "pixel", FieldLines: "pixel" };
+
 /** The keys that pick the handles, as the studio's panel has them. */
 const HANDLE_KEYS = {
   w: "translate",
@@ -910,8 +915,19 @@ function render({ model, el }) {
 
   // What selection and visibility *mean* is the widget's: they are traitlets.
   // The legend reports what a click would make them, as the view does.
+  let partStyle = null; // the style group a part's row asked the panel for
   const legend = createLegend(legendEl, {
-    onSelect: (ids) => commit("selected", ids),
+    onSelect: (ids, { part } = {}) => {
+      // a sensor's part, picked: the panel opens at its style, with the
+      // selection -- or now, for the sensor selected already
+      partStyle = part && !inspectorEl.hidden ? PART_STYLE[part] : null;
+      const same = ids.join() === (model.get("selected") || []).join();
+      commit("selected", ids);
+      if (same && partStyle && !inspectorEl.hidden) {
+        inspector.show(ids[0], { group: partStyle });
+        partStyle = null;
+      }
+    },
     onHide: hideAsked,
     // Each step of a slide drawn here, and the model told once, at its end:
     // a kernel round trip a step would trail the pointer.
@@ -2234,7 +2250,10 @@ function render({ model, el }) {
     // after an edit settled -- once, since a re-pointed view is both.
     if (!inspectorEl.hidden) {
       if (now.has("selected")) {
-        inspector.show((model.get("selected") || [])[0]);
+        inspector.show((model.get("selected") || [])[0], {
+          group: partStyle ?? undefined,
+        });
+        partStyle = null;
       } else if (now.has("payload") || now.has("revision")) {
         inspector.refresh();
       }
