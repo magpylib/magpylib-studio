@@ -32,6 +32,7 @@
  * - what a selection is drawn with: a shape's edges, its path apart.
  * - a current's flow: moving on screen, resting off it, gone when off; a
  *   saved page's field lines flowing too, and standing when it is off;
+ * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`).
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
@@ -601,6 +602,57 @@ async function savedLines(port, base) {
       await tab.close();
     }
   });
+}
+
+/** A dragged sensor redrawn from an answer a round trip old -- the pose the
+ *  engine had when it was asked -- stays where the handles hold it: its
+ *  pixels carried from that pose to the node's, not drawn back at it, which
+ *  on a slow kernel threw them back toward where the drag began. */
+async function heldReading(port, base) {
+  await check(
+    "a dragged sensor's late redraw stays under the handles",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/lines.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const where = await tab.evaluate(`
+        const text = document.getElementById("magpy-scene").textContent.trim();
+        const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+        const unzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        const payload = JSON.parse(await new Response(unzipped).text()).state.payload;
+        const s = window.scene3d;
+        const first = () => {
+          let at = null;
+          s.byObjectId.get("plane").traverse((part) => {
+            if (at || !part.isInstancedMesh) return;
+            part.updateWorldMatrix(true, false);
+            const m = new part.matrixWorld.constructor();
+            part.getMatrixAt(0, m);
+            at = m.premultiply(part.matrixWorld).elements[12];
+          });
+          return at;
+        };
+        const node = s.byObjectId.get("plane");
+        node.position.x += 0.01; // the handles carry it 10 mm, as a drag does
+        node.updateMatrixWorld(true);
+        const moved = first();
+        const host = document.querySelector("canvas").parentElement;
+        s.render(host, payload, { keepCamera: true, keep: ["plane"] });
+        return { moved, redrawn: first() };`);
+        if (Math.abs(where.redrawn - where.moved) > 1e-6) {
+          return `the redraw put the pixels at x = ${where.redrawn}, not ${where.moved}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** A drag's redraws, paced by their cost (drag.mjs): ones that cost most
@@ -3113,6 +3165,7 @@ try {
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
+  await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest

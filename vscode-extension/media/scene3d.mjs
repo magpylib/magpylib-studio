@@ -4696,7 +4696,11 @@ function viewKey(event, host = {}) {
  * drag began, carried along. The payload names those (`readings`). Their
  * node stays, with the handles on it, and what is drawn on it is replaced
  * like everything else: from the scene as the engine has it, which is a
- * round trip behind the pointer, and caught up by the next redraw.
+ * round trip behind the pointer -- several, on a slow kernel. So it is
+ * carried from the pose the engine drew it at (`centroids`, `orientations`)
+ * to where the handles hold the node now: what it reads lags, and catches
+ * up with the next redraw, but where it is does not jump back to where the
+ * pointer was a round trip ago.
  */
 function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const held = new Set([].concat(keep ?? []));
@@ -4746,8 +4750,20 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   }
   discard(held);
   const readings = new Set(payload.readings ?? []);
+  const carried = new Map(); // a held reading's id -> from the engine's pose to its node's
   for (const objectId of held) {
-    if (readings.has(objectId)) clearNode(byObjectId.get(objectId));
+    if (!readings.has(objectId)) continue;
+    const node = byObjectId.get(objectId);
+    clearNode(node);
+    const at = payload.centroids?.[objectId];
+    if (!node || !at) continue;
+    node.updateWorldMatrix(true, false);
+    const drawnAt = new THREE.Matrix4().compose(
+      new THREE.Vector3().fromArray(at),
+      quaternionOf(orientations[objectId]),
+      new THREE.Vector3(1, 1, 1),
+    );
+    carried.set(objectId, node.matrixWorld.clone().multiply(drawnAt.invert()));
   }
   tracks = payload.tracks ?? null;
   tracked = [];
@@ -4760,6 +4776,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
     if (held.has(item.object_id) && !readings.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
     const built = buildItem(item);
+    const carry = carried.get(item.object_id);
+    if (carry) built.applyMatrix4(carry); // where the handles hold it now
     node.attach(built);
     if (item.track != null) {
       tracked.push({ built, rest: built.matrix.clone(), track: item.track });

@@ -131,11 +131,13 @@ document's field lines come back when its run ends. Framing fits the objects
 themselves rather than a sphere round them all, so a ring of magnets fills the
 view instead of sitting small in the middle of it (#63). A faded sensor's field
 lines no longer fade further at every step of a drag, nor fade every other
-sensor's, and a line behind another shows through it (#65). On a slower machine
-a drag no longer stops redrawing what it moves -- the field lines, a sensor's
-arrows -- once two redraws pass 8 ms: they come as often as what they cost
-allows, a third of the time at most, and only a scene whose redraw freezes the
-drag for 100 ms stops until the release (#67).
+sensor's, and a line behind another shows through it. A dragged sensor whose
+pixels read the field no longer jumps back toward where the drag began while a
+slow kernel answers: each answer is drawn where the handles hold it (#65). On a
+slower machine a drag no longer stops redrawing what it moves -- the field
+lines, a sensor's arrows -- once two redraws pass 8 ms: they come as often as
+what they cost allows, a third of the time at most, and only a scene whose
+redraw freezes the drag for 100 ms stops until the release (#67).
 
 </details>
 
