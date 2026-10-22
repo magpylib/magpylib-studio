@@ -272,6 +272,7 @@ export function createInspector(
   let values = { set: {}, resolved: {} };
   let setPaths = []; // the style paths set on the object, for the head
   let stepId = null;
+  let focus = null; // the style group asked for, to open and bring to view
 
   function say(what) {
     statusEl.textContent =
@@ -509,10 +510,41 @@ export function createInspector(
       }
       const details = element("details");
       details.dataset.group = group;
-      if (filter || openGroups.has(group)) details.open = true;
+      if (filter || openGroups.has(group) || group === focus) {
+        details.open = true;
+      }
       details.append(element("summary", "", group), ...rows);
       propsEl.appendChild(details);
     }
+    bringFocus();
+  }
+
+  /** The style group asked for, open and in view -- once: then it is the
+   *  person's to fold, as any other. */
+  function bringFocus() {
+    if (!focus) return;
+    const group = propsEl.querySelector(`details[data-group="${focus}"]`);
+    if (!group) return;
+    group.open = true;
+    // into view in the panel alone: the browser's own scrollIntoView would
+    // scroll the notebook as well
+    for (let box = group.parentElement; box; box = box.parentElement) {
+      const { overflowY } = getComputedStyle(box);
+      if (
+        box.scrollHeight <= box.clientHeight ||
+        !/auto|scroll/.test(overflowY)
+      ) {
+        continue;
+      }
+      const at = group.getBoundingClientRect();
+      const seen = box.getBoundingClientRect();
+      if (at.top < seen.top) box.scrollTop -= seen.top - at.top;
+      else if (at.bottom > seen.bottom) {
+        box.scrollTop += Math.min(at.bottom - seen.bottom, at.top - seen.top);
+      }
+      break;
+    }
+    focus = null;
   }
 
   /** The style's properties in the order a person reaches for them, not
@@ -1197,9 +1229,20 @@ export function createInspector(
 
   return {
     /** The object whose properties to show; none clears the panel. Picking
-     *  an object directly is not picking a step: the step form clears. */
-    show(id) {
+     *  an object directly is not picking a step: the step form clears.
+     *  `group` is a style group to open and bring to view -- a sensor's
+     *  `pixel` for its pixels, `arrows` for its axes; asked of the object
+     *  shown already, it is all that happens. */
+    show(id, { group } = {}) {
       stepId = null;
+      // kept, for the same object asked again before its style is read
+      if (group) focus = group;
+      else if (id !== objectId) focus = null;
+      if (focus && compact) styleBox.open = true; // which reads the style
+      if (id && id === objectId && schema) {
+        bringFocus();
+        return Promise.resolve();
+      }
       return loadObject(id).catch(say);
     },
     /** One construction step's own values above the object it acted on. */

@@ -71,6 +71,25 @@ function take(key, value) {
 }
 // what the host last heard from here
 const told = { selected: [], hidden: [], field_lines: false };
+// A sensor drawn as its parts -- its axes, pixels and field lines, listed
+// beneath it (`threejs.PARTS`) -- hides them one by one as the view's own
+// setting, as a fade is: no object of the document is a part. Hidden whole,
+// it is the sensor that is hidden, an edit as any object's is.
+const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
+let partsHidden = new Set();
+/** Each sensor in `tree` drawn whole as its parts -- its axes among them --
+ *  and their ids; and, in `apart`, every part's id. */
+function partsIn(tree, into = new Map(), apart = new Set()) {
+  for (const node of tree) {
+    const children = node.children || [];
+    const parts = children.filter((child) => PART_KINDS.has(child.kind));
+    const ids = parts.map((part) => part.id);
+    for (const id of ids) apart.add(id);
+    if (parts.some((part) => part.kind === "Axes")) into.set(node.id, ids);
+    partsIn(children, into, apart);
+  }
+  return { whole: into, apart };
+}
 let inSidebar = null; // the object the sidebar shows
 
 let previewTaken = null; // settles the pose the host has not yet answered
@@ -146,7 +165,15 @@ function tell() {
       vscodeApi.postMessage({ type: "selectObject", objectId: inSidebar });
     }
   }
-  const hidden = new Set(values.hidden || []);
+  const asked = new Set(values.hidden || []);
+  const { whole, apart } = partsIn(values.tree || []);
+  const hidden = new Set([...asked].filter((id) => !apart.has(id)));
+  partsHidden = new Set([...asked].filter((id) => apart.has(id)));
+  for (const [sensor, ids] of whole) {
+    if (!ids.every((id) => asked.has(id))) continue;
+    hidden.add(sensor);
+    for (const id of ids) partsHidden.delete(id);
+  }
   const was = new Set(told.hidden);
   const hide = [...hidden].filter((id) => !was.has(id));
   const show = [...was].filter((id) => !hidden.has(id));
@@ -224,10 +251,17 @@ async function drawScene() {
   if (charting()) return; // switched while the engine was answering
   const hidden = hiddenIn(tree);
   told.hidden = hidden;
+  // a sensor hidden as its parts, as the legend's eye hides it, and the
+  // parts hidden here where it is not
+  const { whole, apart } = partsIn(tree);
+  const off = [
+    ...hidden.flatMap((id) => whole.get(id) ?? [id]),
+    ...[...partsHidden].filter((id) => apart.has(id)),
+  ];
   // the document's switch, which the engine's scene says (#45)
   told.field_lines = Boolean(payload.field_lines);
   take("tree", tree);
-  take("hidden", hidden);
+  take("hidden", off);
   take("frames", framesOf(payload));
   take("field_lines", told.field_lines);
   take("payload", payload);

@@ -404,6 +404,33 @@ def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
     assert drawn <= named
 
 
+def test_a_sensors_field_lines_are_a_row_beneath_it():
+    """Their switch, to hide apart from the rest of it, by an id a rebuild
+    carries over; a sensor with no pixels is a row alone. Its pixels are
+    magpylib's drawing here, which a session's scene draws apart."""
+
+    def build():
+        magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+        probe = magpy.Sensor(
+            pixel=[(0, 0, 2), (1, 0, 2)],
+            style={
+                "label": "probe",
+                "pixel": {"field": {"source": "Bxy", "symbol": "arrow3d"}},
+            },
+        )
+        return magnet, probe, magpy.Sensor(style_label="plain")
+
+    view = widget.SceneWidget(*build())
+    assert _outline(view.tree[1:]) == [
+        ("probe", [("field lines (B)", [])]),
+        ("plain", []),
+    ]
+    view.hidden = [view.tree[1]["children"][0]["id"]]
+    rebuilt = build()
+    view.update(*rebuilt)
+    assert view.hidden == [f"{id(rebuilt[1])}/lines"]
+
+
 def test_an_object_passed_twice_is_listed_once_where_it_sits(nested):
     """Passing a collection and something inside it names the thing once."""
     outer, _, deep = nested

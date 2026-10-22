@@ -8,16 +8,17 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
-<summary>Currents flow</summary>
+<summary>Currents and field lines flow</summary>
 
 Every current shows its current flowing, in place of its arrows: pulses run
 along a Circle's or a Polyline's wire, down a TriangleStrip and over a
 TriangleSheet, the way the current runs, in the notebook widget and the VS Code
-panel, whether a run plays or not. They rest while the view is off screen and
-stand still for whoever asks the system for less motion. Arrows asked for in a
-style stay. The flow button among the view's tools, shown where something flows,
-or `SceneWidget(..., flow=False)`, puts the pulses away and the arrows back,
-which an export keeps (#63).
+panel, whether a run plays or not. A sensor's field lines flow too, the way the
+field points. They rest while the view is off screen and stand still for whoever
+asks the system for less motion. Arrows asked for in a style stay. The flow
+button among the view's tools, shown where something flows, or
+`SceneWidget(..., flow=False)`, puts the pulses away and the arrows back, and
+stands the field lines still, which an export keeps (#63, #65).
 
 </details>
 
@@ -35,13 +36,15 @@ and a saved page carries them (#63).
 <summary>Field lines through a sensor's pixels, following a drag (prototype)</summary>
 
 A sensor whose pixels read B or H can draw the field's lines through them: the
-lines button among the view's tools, `SceneWidget(..., field_lines=True)` or
-`set_field_lines` on the session. In a plane of the field's symmetry the lines
-keep to it, elsewhere they run in 3D, and they stop at magnets: they show the
-field in the air, coloured as the sensor's arrows are. They follow a drag, are
-saved with the scene and undone like an edit, and a saved page carries them. In
-the notebook widget and the VS Code panel alike (#46). The field is computed a
-slice of the grid at a time, so a meshed body of a thousand cells takes 0.6 GB
+eye on its field lines in the legend, `SceneWidget(..., field_lines=True)` or
+`set_field_lines` on the session. The legend lists such a sensor's parts beneath
+it, its axes, its pixels and its field lines, each saying the field it shows,
+and hides and fades each apart (#65). In a plane of the field's symmetry the
+lines keep to it, elsewhere they run in 3D, and they stop at magnets: they show
+the field in the air, coloured as the sensor's arrows are. They follow a drag,
+are saved with the scene and undone like an edit, and a saved page carries them.
+In the notebook widget and the VS Code panel alike (#46). The field is computed
+a slice of the grid at a time, so a meshed body of a thousand cells takes 0.6 GB
 instead of 8 (#64).
 
 </details>
@@ -126,11 +129,15 @@ five-thousandth of the way in. A path drawn in millimetres is told from the
 object on it, a path marker of size 0 is not drawn at the default size, and a
 document's field lines come back when its run ends. Framing fits the objects
 themselves rather than a sphere round them all, so a ring of magnets fills the
-view instead of sitting small in the middle of it (#63). On a slower machine a
-drag no longer stops redrawing what it moves -- the field lines, a sensor's
-arrows -- once two redraws pass 8 ms: they come as often as what they cost
-allows, a third of the time at most, and only a scene whose redraw freezes the
-drag for 100 ms stops until the release (#67).
+view instead of sitting small in the middle of it (#63). A faded sensor's field
+lines no longer fade further at every step of a drag, nor fade every other
+sensor's, and a line behind another shows through it. A dragged sensor whose
+pixels read the field no longer jumps back toward where the drag began while a
+slow kernel answers: each answer is drawn where the handles hold it (#65). On a
+slower machine a drag no longer stops redrawing what it moves -- the field
+lines, a sensor's arrows -- once two redraws pass 8 ms: they come as often as
+what they cost allows, a third of the time at most, and only a scene whose
+redraw freezes the drag for 100 ms stops until the release (#67).
 
 </details>
 

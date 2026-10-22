@@ -30,7 +30,9 @@
  *   selecting and hiding from the legend, the picture tool, the view cube,
  *   full screen, and a run that plays with no python behind it;
  * - what a selection is drawn with: a shape's edges, its path apart.
- * - a current's flow: moving on screen, resting off it, gone when off;
+ * - a current's flow: moving on screen, resting off it, gone when off; a
+ *   saved page's field lines flowing too, and standing when it is off;
+ * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`).
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
@@ -527,7 +529,7 @@ async function flow(port, base) {
       const arrows = shown("arrows");
       if (!(await tab.evaluate(pulses))) return "the coil's wire has no pulses";
       const offered = await tab.evaluate(
-        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Current flow")); return Boolean(b && !b.hidden);`,
+        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Flow")); return Boolean(b && !b.hidden);`,
       );
       if (!offered) return "no flow button beside a current";
       if (await tab.evaluate(arrows))
@@ -552,9 +554,11 @@ async function flow(port, base) {
 
 /** A saved page draws a sensor's field lines (#45): the page integrates them
  *  itself, from the field on the grid it carries -- no python behind it. A
- *  line part is the one with an empty box, kept out of what the view frames. */
+ *  line part is the one with an empty box, kept out of what the view frames.
+ *  They flow, with no current in the scene to offer the flow button but
+ *  them; switched off, they stay, standing. */
 async function savedLines(port, base) {
-  await check("a saved page draws a sensor's field lines", async () => {
+  await check("a saved page draws field lines that flow", async () => {
     const tab = await openTab(port);
     try {
       await tab.navigate(`${base}/out/lines.html`);
@@ -575,11 +579,80 @@ async function savedLines(port, base) {
         }
         return count;
       `);
-      return segments > 100 ? thrown(tab) : `${segments} line segments drawn`;
+      if (!(segments > 100)) return `${segments} line segments drawn`;
+      const moves = `
+        const before = window.scene3d.snapshot();
+        await new Promise((done) => setTimeout(done, 400));
+        return window.scene3d.snapshot() !== before;`;
+      const offered = await tab.evaluate(
+        `const b = [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Flow")); return Boolean(b && !b.hidden);`,
+      );
+      if (!offered) return "no flow button beside the field lines";
+      if (!(await tab.evaluate(moves))) return "the field lines stood still";
+      await tab.evaluate("window.scene3d.setFlow(false)");
+      if (await tab.evaluate(moves)) return "switched off, they still moved";
+      const still = await tab.evaluate(`
+        let count = 0;
+        for (const node of window.scene3d.byObjectId.values()) {
+          node.traverse((part) => (count += part.userData.field && part.visible ? 1 : 0));
+        }
+        return count;`);
+      return still ? thrown(tab) : "switched off, the field lines went";
     } finally {
       await tab.close();
     }
   });
+}
+
+/** A dragged sensor redrawn from an answer a round trip old -- the pose the
+ *  engine had when it was asked -- stays where the handles hold it: its
+ *  pixels carried from that pose to the node's, not drawn back at it, which
+ *  on a slow kernel threw them back toward where the drag began. */
+async function heldReading(port, base) {
+  await check(
+    "a dragged sensor's late redraw stays under the handles",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/lines.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const where = await tab.evaluate(`
+        const text = document.getElementById("magpy-scene").textContent.trim();
+        const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+        const unzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        const payload = JSON.parse(await new Response(unzipped).text()).state.payload;
+        const s = window.scene3d;
+        const first = () => {
+          let at = null;
+          s.byObjectId.get("plane").traverse((part) => {
+            if (at || !part.isInstancedMesh) return;
+            part.updateWorldMatrix(true, false);
+            const m = new part.matrixWorld.constructor();
+            part.getMatrixAt(0, m);
+            at = m.premultiply(part.matrixWorld).elements[12];
+          });
+          return at;
+        };
+        const node = s.byObjectId.get("plane");
+        node.position.x += 0.01; // the handles carry it 10 mm, as a drag does
+        node.updateMatrixWorld(true);
+        const moved = first();
+        const host = document.querySelector("canvas").parentElement;
+        s.render(host, payload, { keepCamera: true, keep: ["plane"] });
+        return { moved, redrawn: first() };`);
+        if (Math.abs(where.redrawn - where.moved) > 1e-6) {
+          return `the redraw put the pixels at x = ${where.redrawn}, not ${where.moved}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** A drag's redraws, paced by their cost (drag.mjs): ones that cost most
@@ -1026,7 +1099,7 @@ async function heldReadings(port, base) {
  *  the old panel told it -- a pick, a drag's start, one pose in flight with
  *  the newest waiting and the newest scene drawn, the release -- and
  *  hiding goes to the host as an edit, Cmd+Z is left to VS Code's keybinding,
- *  a refresh asks the engine again, the lines' button is an edit too, and
+ *  a refresh asks the engine again, the field lines' eye is an edit too, and
  *  Chart mode draws the chart. */
 async function studioDrag(port, base) {
   let seen = null;
@@ -1131,7 +1204,7 @@ async function studioDrag(port, base) {
       }
       const switched = lined.filter((m) => m.type === "setFieldLines");
       if (switched.length !== 1 || switched[0].on !== true) {
-        return `the lines' button told the host: ${said(lined)}`;
+        return `the field lines' eye told the host: ${said(lined)}`;
       }
       const asked = refreshed.map((m) => m.method);
       if (!asked.includes("get_scene") || !asked.includes("object_tree")) {
@@ -3092,6 +3165,7 @@ try {
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
+  await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest

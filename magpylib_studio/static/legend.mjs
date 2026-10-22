@@ -24,7 +24,33 @@
  * through the pairs. The payload says which (`overlaps`), by the ids the view
  * draws, a pattern's copies among them; a copy is not listed, so it is
  * marked on its source's row.
+ *
+ * A sensor whose pixels the view draws apart is listed as its parts (`Axes`,
+ * `Pixels`, `FieldLines`: `threejs.PARTS`), each a row beneath it with an eye
+ * of its own, which hides and fades that part alone; the sensor's eye
+ * cascades to them all, as a collection's does. A part is not an object: a
+ * click on its row, a double click or the pointer resting on it is one on
+ * its sensor.
  */
+
+/** A part of a sensor's drawing, listed beneath it: see `threejs.PARTS`. */
+const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
+const isPart = (node) => PART_KINDS.has(node.kind);
+
+/** Each sensor in `tree` drawn as its parts, and what its eye hides in its
+ *  place: those, and itself where its axes are not one of them -- a sensor
+ *  whose pixels magpylib draws, with only its field lines apart. */
+export function partsIn(tree, into = new Map()) {
+  for (const node of tree) {
+    const parts = node.children.filter(isPart);
+    if (parts.length) {
+      const own = parts.some((part) => part.kind === "Axes") ? [] : [node.id];
+      into.set(node.id, [...own, ...parts.map((part) => part.id)]);
+    }
+    partsIn(node.children, into);
+  }
+  return into;
+}
 
 /** Every node, parents before their children. */
 function inTreeOrder(nodes, out = []) {
@@ -52,9 +78,12 @@ function swatchesOf(payload) {
     ...payload.meshes,
     ...payload.scatters,
     ...(payload.pixels ?? []),
+    ...(payload.fieldlines ?? []),
   ]) {
-    if (!swatches.has(item.object_id)) {
-      swatches.set(item.object_id, swatchOf(item, payload.luts || []));
+    // a sensor's parts by their own: its pixels' colours, its lines'
+    const key = item.part ?? item.object_id;
+    if (!swatches.has(key)) {
+      swatches.set(key, swatchOf(item, payload.luts || []));
     }
   }
   return swatches;
@@ -66,6 +95,12 @@ function swatchesOf(payload) {
 function swatchOf(item, luts) {
   if (item.kind === "scatter") {
     return item.lines ? item.line_color : item.marker_color;
+  }
+  // a sensor's lines in their table, strongest in the middle, as round a
+  // magnet; its pixels, read by the field, in the same table across
+  if (item.kind === "fieldlines") return gradientOfColours(item.lut, true);
+  if (item.kind === "pixels" && item.scale) {
+    return gradientOfColours(item.scale.lut);
   }
   if (item.kind === "pixels") {
     // a sensor's pixels coloured by the field: the middle of its colours
@@ -79,6 +114,32 @@ function swatchOf(item, luts) {
   const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
   if (lut) return gradientOf(lut);
   return item.color || "#2e91e5";
+}
+
+/** A sensor's axes as the view draws them, as a CSS image: the shafts in
+ *  the sensor's colour, the tips in those of its x, y and z -- z up, x to
+ *  the lower left, y to the lower right, as the sensor's icon has them. A
+ *  picture rather than the masks of the other kinds, which take one colour. */
+function axesPicture(body, [x, y, z]) {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+    `<path d="M8 8.2V4.8M8 8.2 4.99 10.18M8 8.2l3.01 1.98" fill="none" stroke="${body}" stroke-width="1.3" stroke-linecap="round"/>` +
+    `<path d="M8 2.2 6.6 4.8h2.8Z" fill="${z}"/>` +
+    `<path d="m2.99 11.5 2.72-.23-1.43-2.17Z" fill="${x}"/>` +
+    `<path d="m13.01 11.5-2.72-.23 1.43-2.17Z" fill="${y}"/>` +
+    "</svg>";
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+/** Colours from the least field to the most, as a CSS gradient: across, or
+ *  `radial`, the most in the middle. Five stops: a 13px icon shows no more. */
+function gradientOfColours(colours, radial = false) {
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(
+    (at) => colours[Math.round(at * (colours.length - 1))],
+  );
+  return radial
+    ? `radial-gradient(circle, ${stops.reverse().join(", ")})`
+    : `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
 /** A colour scale's lookup table -- RGBA, flat -- as a CSS gradient. */
@@ -120,6 +181,9 @@ const ICONS = {
   Dipole: "dipole",
   CustomSource: "custom",
   Sensor: "sensor",
+  Axes: "sensor",
+  Pixels: "pixels",
+  FieldLines: "field-lines",
 };
 
 /** How many objects a row stands for in the view: itself and the copies its
@@ -128,8 +192,9 @@ const ICONS = {
  *  one magnet; the count says ten. */
 function drawnUnder(node) {
   const own = 1 + (node.copies || 0);
-  if (!node.children.length) return own;
-  return own * node.children.reduce((sum, child) => sum + drawnUnder(child), 0);
+  const held = node.children.filter((child) => !isPart(child));
+  if (!held.length) return own;
+  return own * held.reduce((sum, child) => sum + drawnUnder(child), 0);
 }
 
 /** How many things a collection can hold and still be shown open when it is
@@ -167,6 +232,7 @@ export function createLegend(
 ) {
   let order = []; // every node, in tree order
   let leaves = new Map(); // id -> the drawn objects under that row
+  let shows = new Map(); // id -> what its eye hides: those, or their parts
   let holds = {}; // the collections the view can select, as the payload says
   let swatches = new Map();
   let selected = [];
@@ -212,20 +278,34 @@ export function createLegend(
   container.addEventListener("mouseleave", () => onHint?.([]));
 
   /** Ids a click on `node` acts on: its own traces, if it has any, and those
-   *  of everything beneath it. A collection is drawn only as its contents. */
-  function collectLeaves(node, drawn) {
+   *  of everything beneath it. A collection is drawn only as its contents.
+   *  And what its eye hides, kept in `shows`: the same, but a sensor drawn
+   *  as its parts as those, and a part as itself -- a click on which is on
+   *  its sensor (`owner`). */
+  function collectLeaves(node, drawn, owner = null) {
     for (const child of node.children) parents.set(child.id, node.id);
+    if (isPart(node)) {
+      leaves.set(node.id, owner ? [owner.id] : []);
+      shows.set(node.id, [node.id]);
+      return { picks: [], hides: [node.id] };
+    }
     const own = drawn.has(node.id) ? [node.id] : [];
-    const under = own.concat(
-      node.children.flatMap((child) => collectLeaves(child, drawn)),
-    );
-    leaves.set(node.id, under);
-    return under;
+    let picks = own;
+    // drawn as its axes and the rest, a sensor hides as those
+    let hides = node.children.some((child) => child.kind === "Axes") ? [] : own;
+    for (const child of node.children) {
+      const under = collectLeaves(child, drawn, node);
+      picks = picks.concat(under.picks);
+      hides = hides.concat(under.hides);
+    }
+    leaves.set(node.id, picks);
+    shows.set(node.id, hides);
+    return { picks, hides };
   }
 
-  function propose(ids) {
+  function propose(ids, part = null) {
     proposed = ids;
-    onSelect(ids);
+    onSelect(ids, { part });
   }
 
   /** `ids`, a collection among them as the drawn objects it holds. */
@@ -234,6 +314,14 @@ export function createLegend(
 
   function select(node, mode) {
     const mine = leaves.get(node.id);
+    // A part's row is a way in to its sensor, and to what of it the part
+    // is: it selects the sensor, and never clears it, as a second click on
+    // a row that is the whole selection does.
+    if (isPart(node) && mode === "replace") {
+      anchor = node.id;
+      propose(mine, node.kind);
+      return;
+    }
     if (mode === "range" && anchor !== null) {
       const from = order.findIndex((n) => n.id === anchor);
       const to = order.indexOf(node);
@@ -263,7 +351,7 @@ export function createLegend(
   /** The eye cascades: anything showing, and the lot goes; none, and it all
    *  comes back. */
   function toggleHidden(node) {
-    const mine = leaves.get(node.id);
+    const mine = shows.get(node.id);
     const showing = mine.some((id) => !hidden.has(id));
     const next = new Set(hidden);
     for (const id of mine) showing ? next.add(id) : next.delete(id);
@@ -272,7 +360,7 @@ export function createLegend(
 
   /** The share of their own opacity a row's objects are drawn at, together. */
   function levelOf(node) {
-    const mine = leaves.get(node.id);
+    const mine = shows.get(node.id);
     if (!mine.length) return 1;
     const sum = mine.reduce((total, id) => total + (faded.get(id) ?? 1), 0);
     return sum / mine.length;
@@ -282,7 +370,7 @@ export function createLegend(
    *  faded, and is left out. */
   function fadedWith(node, level) {
     const next = new Map(faded);
-    for (const id of leaves.get(node.id)) {
+    for (const id of shows.get(node.id)) {
       level < 1 ? next.set(id, level) : next.delete(id);
     }
     return next;
@@ -310,7 +398,7 @@ export function createLegend(
         rows.get(node.id).classList.add("sliding");
         onHint?.([]); // the hover's outline would cover the fade it shows
         // a hidden row slid is a row to look at
-        const mine = leaves.get(node.id);
+        const mine = shows.get(node.id);
         if (mine.every((id) => hidden.has(id))) {
           onHide([...hidden].filter((id) => !mine.includes(id)));
         }
@@ -344,8 +432,10 @@ export function createLegend(
     });
   }
 
-  function addRow(node, path, into) {
+  function addRow(node, path, into, parent = null) {
     pathOf.set(node.id, path);
+    // what the row holds as a collection does: a sensor's parts are not that
+    const held = node.children.filter((child) => !isPart(child));
     const row = document.createElement("div");
     row.className = "magpy-legend-row";
     const caret = part("magpy-legend-caret");
@@ -356,24 +446,38 @@ export function createLegend(
     const swatch = part("magpy-legend-swatch");
     const label = part("magpy-legend-label");
     label.textContent = node.label;
-    row.title = `${node.label} (${node.kind})`;
-    const colour = swatches.get(node.id);
+    row.title =
+      isPart(node) && parent
+        ? `${parent.label}'s ${node.label}`
+        : `${node.label} (${node.kind})`;
+    // a sensor's axes are what is left of it beside its other parts
+    const colour =
+      swatches.get(node.id) ??
+      (isPart(node) && parent ? swatches.get(parent.id) : undefined);
     if (colour) swatch.style.background = colour;
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.
-    if (node.children.length) swatch.classList.add("collection");
-    else if (colour)
+    if (held.length) swatch.classList.add("collection");
+    // a sensor, and its axes, drawn as the view draws them
+    else if (["Sensor", "Axes"].includes(node.kind) && node.colors && colour) {
+      swatch.classList.add("picture");
+      swatch.style.background = "";
+      swatch.style.setProperty(
+        "--magpy-picture",
+        axesPicture(colour, node.colors),
+      );
+    } else if (colour)
       swatch.classList.add("icon", `icon-${ICONS[node.kind] || "custom"}`);
     else swatch.classList.add("none");
     row.append(caret, swatch, label);
     const drawn = drawnUnder(node);
-    if (node.children.length) {
+    if (held.length) {
       // What a folded row would otherwise hide: how much is in it, the
       // copies its patterns make included.
       const count = part("magpy-legend-count");
       count.textContent = String(drawn);
-      if (drawn !== node.children.length) {
-        count.title = `${node.children.length} listed, ${drawn} drawn: a pattern's copies are drawn on their source`;
+      if (drawn !== held.length) {
+        count.title = `${held.length} listed, ${drawn} drawn: a pattern's copies are drawn on their source`;
       }
       row.append(count);
     } else if (node.copies) {
@@ -420,7 +524,9 @@ export function createLegend(
     const branch = document.createElement("div");
     branch.className = "magpy-legend-branch";
     into.append(branch);
-    node.children.forEach((child, i) => addRow(child, `${path}/${i}`, branch));
+    node.children.forEach((child, i) =>
+      addRow(child, `${path}/${i}`, branch, node),
+    );
     if (!seen.has(path)) {
       seen.add(path);
       if (node.children.length > FOLD_ABOVE || depthOf(path) >= foldDepth) {
@@ -668,6 +774,7 @@ export function createLegend(
     holds = payload.collections || {};
     order = inTreeOrder(tree);
     leaves = new Map();
+    shows = new Map();
     parents = new Map();
     pathOf = new Map();
     for (const node of tree) collectLeaves(node, drawn);
@@ -746,15 +853,16 @@ export function createLegend(
     const chosen = new Set(drawnOf(selected));
     for (const node of order) {
       const mine = leaves.get(node.id);
+      const seen = shows.get(node.id);
       const row = rows.get(node.id);
       const picked = mine.filter((id) => chosen.has(id)).length;
-      const gone = mine.filter((id) => hidden.has(id)).length;
-      const all = (n) => mine.length > 0 && n === mine.length;
-      const some = (n) => n > 0 && n < mine.length;
-      row.classList.toggle("selected", all(picked));
-      row.classList.toggle("partial", some(picked));
-      row.classList.toggle("off", all(gone));
-      row.classList.toggle("mixed", some(gone));
+      const gone = seen.filter((id) => hidden.has(id)).length;
+      const all = (n, of) => of.length > 0 && n === of.length;
+      const some = (n, of) => n > 0 && n < of.length;
+      row.classList.toggle("selected", all(picked, mine));
+      row.classList.toggle("partial", some(picked, mine));
+      row.classList.toggle("off", all(gone, seen));
+      row.classList.toggle("mixed", some(gone, seen));
       row.classList.toggle("empty", mine.length === 0);
       const level = levelOf(node);
       row.classList.toggle("faded", level < 1);

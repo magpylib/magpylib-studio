@@ -209,11 +209,13 @@ class SceneWidget(anywidget.AnyWidget):
     axes = traitlets.Union(
         [traitlets.Enum(AXES), traitlets.Bool()], default_value="cube"
     ).tag(sync=True)
-    #: Whether currents flow: pulses running along a wire, down a strip or
-    #: over a sheet the way the current runs, whether a run plays or not,
-    #: and still for whoever asks the system for less motion. While they
+    #: Whether currents and field lines flow: pulses running along a wire,
+    #: down a strip or over a sheet the way the current runs, and along a
+    #: field line the way the field points -- whether a run plays or not,
+    #: and still for whoever asks the system for less motion. While currents
     #: flow, the arrows magpylib draws to say the same are away, unless a
-    #: style asked for them. Off, the arrows are back; an export keeps it.
+    #: style asked for them. Off, the arrows are back and the field lines
+    #: stand; an export keeps it.
     flow = traitlets.Bool(True).tag(sync=True)
     #: Light or dark. ``"auto"`` wears whatever the view sits on -- the
     #: notebook's output area, which is not always the page's theme -- and
@@ -270,6 +272,8 @@ class SceneWidget(anywidget.AnyWidget):
     variables = traitlets.Dict().tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
+    #: Its switch in the view is the eye on each sensor's field lines, a row
+    #: beneath it in the legend: one shown turns them on, all hidden off.
     field_lines = traitlets.Bool(False).tag(sync=True)
     #: The panel an editable view opens with, docked beside it:
     #: ``"variables"``, a slider per variable, or ``"object"``, the
@@ -534,14 +538,6 @@ class SceneWidget(anywidget.AnyWidget):
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
             self._adopt(threejs._capture(objects, animation=animation, **kwargs))
-            # the sensors that read the field, which the lines' button is
-            # shown for -- keyed as this payload keys objects, by magpylib's id
-            from magpylib_studio import fieldlines
-
-            reading = fieldlines.sensors_of(objects)
-            if reading:
-                readings = [str(id(sensor)) for sensor in reading]
-                self.payload = {**self.payload, "readings": readings}
             self.identify(*objects)
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
@@ -896,7 +892,7 @@ class SceneWidget(anywidget.AnyWidget):
 
     @traitlets.observe("field_lines")
     def _field_lines_asked_for(self, change):
-        """The lines asked for, or put away: the view's button, or
+        """The lines asked for, or put away: the legend's eye, or
         ``view.field_lines``. The document keeps the choice, as one step to
         undo (`set_field_lines`), and the trait follows the document back --
         see `_show`. They are computed by a session, so a view of the cell's

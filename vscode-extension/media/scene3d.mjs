@@ -198,9 +198,9 @@ function ensureRenderer(canvasEl) {
  * loop apiece keeps the GPU drawing every one of them sixty times a second.
  * So whatever changes the picture asks for a frame -- the orbit and the
  * handles as they move, a new size, and every call a host makes (see
- * `drawingAfter`) -- and nothing else draws. The one exception is a
- * current's flow, which asks for the next frame from each one it draws, and
- * only while it is to be seen (`flowing`). */
+ * `drawingAfter`) -- and nothing else draws. The one exception is the
+ * flow, a current's or the field's, which asks for the next frame from each
+ * one it draws, and only while it is to be seen (`flowing`). */
 let frameAsked = false; // a frame is on its way
 let frameWanted = false; // and something besides a current's flow wants it
 let lastDrawn = 0;
@@ -2242,10 +2242,7 @@ function outermost(objectIds) {
 /** Hide these objects, and show every other. */
 function setHidden(objectIds) {
   hiddenIds = new Set(objectIds);
-  for (const [objectId, node] of byObjectId) {
-    // a collection's node draws nothing, and hidden would hide what it carries
-    node.visible = node.userData.collection || !hiddenIds.has(objectId);
-  }
+  for (const node of byObjectId.values()) dress(node);
   highlight(selectedIds); // an outline round nothing reads as a bug
   drawHints();
 }
@@ -2254,8 +2251,35 @@ function setHidden(objectIds) {
  *  every other at its own. */
 function setFades(levels) {
   fades = new Map(Object.entries(levels ?? {}));
-  for (const [objectId, node] of byObjectId) {
+  for (const node of byObjectId.values()) dress(node);
+}
+
+/** Show `node` and fade it as `hiddenIds` and `fades` say. A sensor drawn
+ *  as its parts -- its pixels and its field lines, marked so in the payload,
+ *  and the rest of it its axes (`threejs.PARTS`) -- shows and fades each by
+ *  the part's own id, which its legend's rows hide and fade apart. */
+function dress(node) {
+  const objectId = node.userData.objectId;
+  // a collection's node draws nothing, and hidden would hide what it carries
+  node.visible = node.userData.collection || !hiddenIds.has(objectId);
+  const built = node.children.filter((child) => child.userData.built);
+  if (!built.some((child) => child.userData.part)) {
     fade(node, fades.get(objectId) ?? 1);
+    return;
+  }
+  for (const child of built) {
+    const part = child.userData.part ?? `${objectId}/axes`;
+    child.visible = !hiddenIds.has(part);
+    fade(child, fades.get(part) ?? fades.get(objectId) ?? 1);
+  }
+  // every part hidden is the sensor hidden: not picked, walked to or framed
+  node.visible &&= built.some((child) => child.visible);
+}
+
+/** `dress` the nodes drawn as parts, once their items are on them. */
+function dressParts() {
+  for (const node of byObjectId.values()) {
+    if (node.children.some((child) => child.userData.part)) dress(node);
   }
 }
 
@@ -2268,7 +2292,8 @@ function fade(part, level) {
   const material = part.material;
   if (material?.userData.own !== undefined) {
     material.opacity = material.userData.own * level;
-    // a current's flow is see-through at any level: it is a glow on the wire
+    // a current's flow is see-through at any level: it is a glow on the wire;
+    // and a field line, which other lines show through
     const blended = Boolean(material.userData.blended);
     const transparent = material.opacity < 1 || blended;
     // three compiles an opaque material's alpha away: the program changes
@@ -2675,6 +2700,8 @@ function buildItem(item) {
           ? buildFieldLines(item)
           : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
+  built.userData.built = true; // what a node carries for its object, see `dress`
+  if (item.part) built.userData.part = item.part;
   // a current's arrows, which say what its flow says: see `setFlow`
   if (item.arrows) {
     built.userData.arrows = true;
@@ -2683,8 +2710,12 @@ function buildItem(item) {
   }
   // a field line is the field's, not a thing a drag could land on
   if (item.kind === "fieldlines") built.userData.unsnapped = true;
+  // the opacity a fade is a share of -- a field line's material, kept from
+  // build to build, knows its own already (`fieldLineMaterial`)
   built.traverse((part) => {
-    if (part.material) part.material.userData.own = part.material.opacity;
+    if (part.material && part.material.userData.own === undefined) {
+      part.material.userData.own = part.material.opacity;
+    }
   });
   fade(built, fades.get(item.object_id) ?? 1);
   return built;
@@ -2786,24 +2817,47 @@ function legible(hex, paper) {
   return `#${mix(high).map(byte).join("")}`;
 }
 
-/** One material per opacity for every field line drawn: shared and never
- *  disposed, so its program is compiled once -- a material per frame would
- *  also grow `wideMaterials` without end, since a discarded node's are not
- *  taken out of it. */
+/** One material per opacity for each sensor's lines (`owner`, their node):
+ *  kept across rebuilds and never disposed, so its program is compiled once
+ *  -- a material per frame would also grow `wideMaterials` without end,
+ *  since a discarded node's are not taken out of it. A sensor's own, so that
+ *  fading its lines fades no other's; the opacity a fade is a share of is the
+ *  band's, set here once (`own`), where a rebuild would take the faded one
+ *  for it and fade again. Its lines flow as a current does, the way the
+ *  field points (`FIELD_PULSE`), while the host's flow is on. */
 const fieldLineMaterials = new Map();
-function fieldLineMaterial(opacity) {
-  let material = fieldLineMaterials.get(opacity);
+function fieldLineMaterial(opacity, owner) {
+  const key = `${owner}|${opacity}`;
+  let material = fieldLineMaterials.get(key);
   if (!material) {
     material = new LineMaterial({
       vertexColors: true,
-      linewidth: 1.75,
+      linewidth: FIELD_PULSE_WIDTH,
+      dashed: true, // for the distance along the line, which a pulse runs by
       transparent: true,
       opacity,
       depthWrite: false, // lines behind lines still show through
     });
+    material.uniforms.flowClock = flowClock;
+    material.uniforms.flowGlow = flowGlow;
+    material.uniforms.fieldFlow = fieldFlow;
+    material.fragmentShader = material.fragmentShader
+      .replace(
+        "uniform float gapSize;",
+        "uniform float gapSize;\n\t\t\tuniform float flowClock;\n\t\t\tuniform float flowGlow;\n\t\t\tuniform float fieldFlow;",
+      )
+      .replace(DASH_TEST, FIELD_PULSE)
+      // lit after its colour, which a line's vertices carry
+      .replace(
+        "#include <color_fragment>",
+        "#include <color_fragment>\n\t\t\tdiffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * pulse * pulse );",
+      );
+    material.userData.own = opacity;
+    // see-through at any fade: lines behind lines still show
+    material.userData.blended = true;
     if (renderer) renderer.getSize(material.resolution);
     wideMaterials.add(material);
-    fieldLineMaterials.set(opacity, material);
+    fieldLineMaterials.set(key, material);
   }
   return material;
 }
@@ -3017,7 +3071,11 @@ function buildFieldLines(item) {
     return false;
   }
 
-  const bands = FIELD_LINE_BANDS.map(() => ({ positions: [], colours: [] }));
+  const bands = FIELD_LINE_BANDS.map(() => ({
+    positions: [],
+    colours: [],
+    distances: [], // along the line, the way B points, in pulses
+  }));
   const world = (x, y, z, out) => {
     for (let c = 0; c < 3; c++) {
       out.push(
@@ -3052,10 +3110,14 @@ function buildFieldLines(item) {
     if (sample(sx, sy, sz) <= fade) return;
     const line = lines++;
     claim(sx, sy, sz, line, 0);
+    // a line's pulses out of step with its neighbours', not a front across
+    const phase = (line * 0.618034) % 1;
+    const stride = FIELD_FLOW_STRIDE * spacing;
     for (const sign of [1, -1]) {
       let x = sx;
       let y = sy;
       let z = sz;
+      let d = phase;
       let m = sample(x, y, z);
       if (m <= fade) break;
       let shown = strength;
@@ -3100,6 +3162,9 @@ function buildFieldLines(item) {
           bands[FIELD_LINE_BANDS.findIndex((each) => t < each.below)];
         world(x, y, z, band.positions);
         world(tx, ty, tz, band.positions);
+        const d1 = d + (sign * Math.hypot(tx - x, ty - y, tz - z)) / stride;
+        band.distances.push(d, d1);
+        d = d1;
         const c0 = colourOf(shown);
         const c1 = colourOf(strength);
         band.colours.push(c0.r, c0.g, c0.b, c1.r, c1.g, c1.b);
@@ -3143,6 +3208,20 @@ function buildFieldLines(item) {
     const geometry = new LineSegmentsGeometry();
     geometry.setPositions(band.positions);
     geometry.setColors(band.colours);
+    // as `computeLineDistances` lays them out, but counted the way B points
+    const distances = new THREE.InstancedInterleavedBuffer(
+      new Float32Array(band.distances),
+      2,
+      1,
+    );
+    geometry.setAttribute(
+      "instanceDistanceStart",
+      new THREE.InterleavedBufferAttribute(distances, 1, 0),
+    );
+    geometry.setAttribute(
+      "instanceDistanceEnd",
+      new THREE.InterleavedBufferAttribute(distances, 1, 1),
+    );
     // Not part of what the view frames: the lines run to the edge of their
     // grid, a quarter wider than the scene, and framing them shrank it. An
     // empty box is what `expandByObject` adds nothing for; and so nothing
@@ -3150,10 +3229,12 @@ function buildFieldLines(item) {
     geometry.boundingBox = new THREE.Box3();
     const part = new LineSegments2(
       geometry,
-      fieldLineMaterial(FIELD_LINE_BANDS[i].opacity),
+      fieldLineMaterial(FIELD_LINE_BANDS[i].opacity, item.object_id),
     );
     part.frustumCulled = false;
     part.raycast = () => {};
+    part.userData.field = true; // flows, but stays when the flow goes
+    flowLines.add(part);
     group.add(part);
   });
   return group;
@@ -3192,7 +3273,7 @@ const flowGlow = { value: 0 }; // how far a head is lit toward white: on a dark 
 const UNLIT = { value: 0 };
 const flowClock = { value: 0 }; // where every pulse is in its stride, 0 to 1
 const flowResolution = new THREE.Vector2(1, 1); // one for all, see `resize`
-const flowLines = new Set(); // the wires drawn flowing, to know if any is
+const flowLines = new Set(); // wires and field lines drawn flowing, to know if any is
 const flowArrows = new Set(); // a flowing current's arrows, away while it flows
 let flowShown = true; // the host's: see `setFlow`
 // still for whoever asks the system for less motion: the pulses show the
@@ -3214,6 +3295,23 @@ const PULSE = `
   alpha *= sqrt( body ) * ( 1.0 - smoothstep( girth - edge, girth + edge, abs( vUv.x ) ) );
   if ( alpha < 0.01 ) discard;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 1.0 ), flowGlow * body * body );`;
+
+/** How a field line flows: pulses run along it the way B points, at the
+ *  currents' pace, each a head wider and brighter than the line, its tail
+ *  narrowing behind it -- the line itself stays, a little dimmer, so the
+ *  picture is still the field's. Standing, it is the line as it was. */
+const FIELD_LINE_WIDTH = 1.75; // pixels, the line between pulses
+const FIELD_PULSE_WIDTH = 3.5; // pixels, a pulse's head
+const FIELD_FLOW_STRIDE = 3; // of the lines' spacing, from a pulse to the next
+const fieldFlow = { value: 1 }; // 1 while the field's lines flow: see `setFlow`
+const FIELD_PULSE = `
+  float stride = fract( vLineDistance - flowClock );
+  float pulse = fieldFlow * smoothstep( ${(1 - FLOW_TAIL).toFixed(3)}, 1.0, stride ) * ( 1.0 - smoothstep( 0.97, 1.0, stride ) );
+  float girth = mix( ${(FIELD_LINE_WIDTH / FIELD_PULSE_WIDTH).toFixed(3)}, 1.0, pulse );
+  float edge = fwidth( vUv.x );
+  alpha *= mix( 1.0, 0.6 + 0.9 * pulse, fieldFlow ) * ( 1.0 - smoothstep( girth - edge, girth + edge, abs( vUv.x ) ) );
+  alpha = min( alpha, 1.0 );
+  if ( alpha < 0.01 ) discard;`;
 
 /** A pulse's material, one per wire: its colour, its width, its fade. */
 function flowMaterial(colour, width, opacity, glow = flowGlow) {
@@ -3287,10 +3385,10 @@ function streamColour(colour) {
     : own.lerp(new THREE.Color("#000000"), 0.6);
 }
 
-/** Whether a current flows where it can be seen: so whether the view asks
- *  for its next frame. Not with the view off screen, or its page hidden, or
- *  every wire that flows hidden, nor for whoever asked for less motion. A
- *  wire taken off the scene is forgotten. */
+/** Whether a current or a field line flows where it can be seen: so
+ *  whether the view asks for its next frame. Not with the view off screen,
+ *  or its page hidden, or every line that flows hidden, nor for whoever
+ *  asked for less motion. A line taken off the scene is forgotten. */
 function flowing() {
   if (!flowShown || stillFlow || !inSight || document.hidden) return false;
   for (const line of flowLines) {
@@ -3303,12 +3401,16 @@ function flowing() {
   return false;
 }
 
-/** Show a current's flow along its wire, or not: the host's choice, for a
- *  picture without it. Its arrows, which magpylib draws to say the same,
- *  come back when it goes. */
+/** Show a current's flow along its wire, and the field's along its lines,
+ *  or not: the host's choice, for a picture without it. A current's arrows,
+ *  which magpylib draws to say the same, come back when it goes; a field
+ *  line stays, standing. */
 function setFlow(on) {
   flowShown = on !== false;
-  for (const line of flowLines) line.visible = flowShown;
+  fieldFlow.value = flowShown ? 1 : 0;
+  for (const line of flowLines) {
+    if (!line.userData.field) line.visible = flowShown;
+  }
   for (const arrows of flowArrows) arrows.visible = !flowShown;
 }
 
@@ -4383,6 +4485,7 @@ function renderFrame(payload) {
     node.quaternion.identity(); // the geometry already holds the pose
     node.add(buildItem(item));
   }
+  dressParts();
   placeCollections();
   // round the nodes just built, not the ones discarded
   drawOutlines();
@@ -4417,6 +4520,10 @@ function poseFrame(index) {
     entry.built.traverse(free);
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
+    // a sensor's part, or its axes beside its parts, hidden as they were
+    if (entry.node.children.some((child) => child.userData.part)) {
+      dress(entry.node);
+    }
   }
   const frames = Math.max(
     1,
@@ -4589,7 +4696,11 @@ function viewKey(event, host = {}) {
  * drag began, carried along. The payload names those (`readings`). Their
  * node stays, with the handles on it, and what is drawn on it is replaced
  * like everything else: from the scene as the engine has it, which is a
- * round trip behind the pointer, and caught up by the next redraw.
+ * round trip behind the pointer -- several, on a slow kernel. So it is
+ * carried from the pose the engine drew it at (`centroids`, `orientations`)
+ * to where the handles hold the node now: what it reads lags, and catches
+ * up with the next redraw, but where it is does not jump back to where the
+ * pointer was a round trip ago.
  */
 function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const held = new Set([].concat(keep ?? []));
@@ -4639,8 +4750,20 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   }
   discard(held);
   const readings = new Set(payload.readings ?? []);
+  const carried = new Map(); // a held reading's id -> from the engine's pose to its node's
   for (const objectId of held) {
-    if (readings.has(objectId)) clearNode(byObjectId.get(objectId));
+    if (!readings.has(objectId)) continue;
+    const node = byObjectId.get(objectId);
+    clearNode(node);
+    const at = payload.centroids?.[objectId];
+    if (!node || !at) continue;
+    node.updateWorldMatrix(true, false);
+    const drawnAt = new THREE.Matrix4().compose(
+      new THREE.Vector3().fromArray(at),
+      quaternionOf(orientations[objectId]),
+      new THREE.Vector3(1, 1, 1),
+    );
+    carried.set(objectId, node.matrixWorld.clone().multiply(drawnAt.invert()));
   }
   tracks = payload.tracks ?? null;
   tracked = [];
@@ -4653,6 +4776,8 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
     if (held.has(item.object_id) && !readings.has(item.object_id)) continue;
     const node = nodeFor(item.object_id, payload.centroids[item.object_id]);
     const built = buildItem(item);
+    const carry = carried.get(item.object_id);
+    if (carry) built.applyMatrix4(carry); // where the handles hold it now
     node.attach(built);
     if (item.track != null) {
       tracked.push({ built, rest: built.matrix.clone(), track: item.track });
@@ -4661,6 +4786,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
       changing.push({ node, built, changes: item.changes });
     }
   }
+  dressParts();
   placeCollections();
 
   // Size first: the fit depends on the aspect ratio, and on the very first

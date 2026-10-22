@@ -63,12 +63,15 @@ the row under the pointer, and always on one that is hidden — a swatch in the
 colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
 range in tree order, a double click frames it. Press the eye and slide sideways
 to fade instead: left to look through it, right to bring it back. A click in the
-view goes through what is faded to what is behind it. It writes `selected`,
-`hidden` and `faded`, the traitlets a click in the view and a notebook cell
-write too; `faded` maps an id to the share of its opacity it is drawn at. It
-needs the objects, because the payload cannot say how they nest: it comes with
-`SceneWidget(...)` and `update()`, and with a bare `magpy.show()` only where
-magpylib hands its backends the objects (`Panel.objects`).
+view goes through what is faded to what is behind it. A sensor whose pixels read
+the field is listed as its parts — its axes, its pixels and its field lines,
+each naming the field it shows — and hides each apart; the field lines' eye is
+their switch, `field_lines`. It writes `selected`, `hidden` and `faded`, the
+traitlets a click in the view and a notebook cell write too; `faded` maps an id
+to the share of its opacity it is drawn at. It needs the objects, because the
+payload cannot say how they nest: it comes with `SceneWidget(...)` and
+`update()`, and with a bare `magpy.show()` only where magpylib hands its
+backends the objects (`Panel.objects`).
 
 What is selected, hidden, faded or folded survives `update()`: an object passed
 again keeps it, and a rebuilt one inherits it from whatever sat in its place in
