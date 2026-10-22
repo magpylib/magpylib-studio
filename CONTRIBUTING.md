@@ -108,6 +108,15 @@ in a VS Code of its own and writes `docs/halbach.png`, which both READMEs show.
 VS Code renders its own window, so it needs no screen-recording permission; it
 takes about a minute.
 
+**By hand, on a slow machine**, after a change to what a drag or a slider does:
+`npm run slow-machine -- examples/marimo_demo.py` (the demo by default; `--edit`
+for `marimo edit`, or any server after `--` with its page as `--url`) opens the
+notebook in a Chrome window of its own, with sliders for the browser's speed and
+the kernel's, as a share of this machine's, the latency between them, and a
+switch for the GPU -- off, WebGL is drawn on the CPU. Beside each, what it comes
+to: the page's busy share, frames and memory, the kernel's CPU and memory, the
+round trip, the renderer. For hands; `npm run drag-rate` is the number.
+
 **By hand, the scenes**, after a change to the tabs, the side bar or the undo
 keys -- the two the script cannot do:
 

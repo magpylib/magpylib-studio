@@ -30,7 +30,8 @@
  *   selecting and hiding from the legend, the picture tool, the view cube,
  *   full screen, and a run that plays with no python behind it;
  * - what a selection is drawn with: a shape's edges, its path apart.
- * - a current's flow: moving on screen, resting off it, gone when off.
+ * - a current's flow: moving on screen, resting off it, gone when off;
+ * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`).
  *
  * Needs Chrome or Chromium (set CHROME to name one), Node 22 or later for its
  * WebSocket, `npm ci` in vscode-extension/ for the three.js the panel's own
@@ -578,6 +579,33 @@ async function savedLines(port, base) {
     } finally {
       await tab.close();
     }
+  });
+}
+
+/** A drag's redraws, paced by their cost (drag.mjs): ones that cost most
+ *  of a frame keep coming through the drag, at a third of its time or less
+ *  -- a machine a quarter as fast as a laptop's drew none after the third
+ *  once they crossed 8 ms -- and only ones that freeze the gesture stop. */
+async function dragPace(port, base) {
+  await check("a drag keeps redrawing at what its redraws cost", async () => {
+    const drawn = {};
+    for (const cost of [12, 150]) {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/drag-pace.html?cost=${cost}`);
+        drawn[cost] = await tab.until("return window.result", 10_000);
+        if (!drawn[cost]) return `the ${cost} ms drag never finished`;
+      } finally {
+        await tab.close();
+      }
+    }
+    const { renders, share } = drawn[12];
+    if (renders < 12) return `12 ms redraws: ${renders} in a 1.5 s drag`;
+    if (share > 0.45) return `12 ms redraws took ${Math.round(share * 100)}%`;
+    if (drawn[150].renders > 3) {
+      return `150 ms redraws went on: ${drawn[150].renders} of them`;
+    }
+    return null;
   });
 }
 
@@ -3064,6 +3092,7 @@ try {
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
+  await dragPace(browser.port, base);
   await flow(browser.port, base);
   await slowPosing(browser.port, base); // last: a frozen page could stall the rest
 } finally {

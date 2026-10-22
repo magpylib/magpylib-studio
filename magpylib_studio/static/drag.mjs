@@ -30,24 +30,28 @@
  * field lines drew 30 scenes a second where it now draws 51 (#45). Nothing
  * queues: one pose is in flight, and one scene waits to be drawn.
  *
- * Pacing stops the work queueing up; it does not stop one slow redraw from
- * stuttering the drag it is meant to illustrate. So the redraws of each
- * gesture are timed, and once building the scene costs more than a frame
- * twice in a row, the rest of that drag goes without: the object under the
- * pointer keeps up, and the scene catches up when the drag ends. Not the
- * first redraw: it pays for what a drag makes once, and judged on it alone,
- * a field that redraws in 5 ms stopped for the whole drag one time in two
- * (#45). A big scene on a slow machine then
- * loses the thing that was never going to look right anyway, rather than the
- * smoothness of the gesture.
+ * Pacing stops the work queueing up; it does not stop slow redraws from
+ * stuttering the drag they are meant to illustrate. So each is timed, and
+ * the next waits for as long again as it took, twice: redraws take no more
+ * than a third of the view's time (`REDRAW_SHARE`), and the frames between
+ * them move the object under the pointer. A redraw a frame long comes every
+ * third frame, and the scene follows the drag at whatever rate the machine
+ * affords -- a hard stop at 8 ms, which this replaces, stopped it outright
+ * on a machine a quarter as fast, where the demo's Halbach redraws in 7 to
+ * 10. Only a scene that freezes the gesture outright, past `HEAVY_REDRAW_MS`
+ * twice in a row, goes without for the rest of the drag, and catches up
+ * when it ends. Not judged on the first redraw: it pays for what a drag
+ * makes once (#45).
  */
 
-/** How long building the scene may take before a drag stops waiting for it.
- *
- * Well under a frame at 60 Hz. Whatever else a drag updates may live in
- * another webview and cannot slow the pointer down; this runs in the view,
- * so it is the only thing that can make the gesture itself feel heavy. */
-export const REDRAW_BUDGET_MS = 8;
+/** The most of the view's time a drag's redraws may take: after one that
+ *  took `t`, the next waits `2t`. The rest is the frames that move what the
+ *  handles hold, which is what a drag feels like. */
+export const REDRAW_SHARE = 1 / 3;
+
+/** How long a redraw may take before the drag stops waiting for them: six
+ *  frames at 60 Hz, a freeze the gesture cannot hide, however seldom. */
+export const HEAVY_REDRAW_MS = 100;
 
 /** Take the drags on `host`, the element the renderer draws in.
  *
@@ -77,7 +81,7 @@ export const REDRAW_BUDGET_MS = 8;
  */
 export function watchDrags(host, view) {
   const drawing = view.drawing ?? (() => true);
-  let dragging = null; // { keep, tooSlow, redraws, slow, begun } while a handle is held
+  let dragging = null; // { keep, tooSlow, redraws, slow, nextAt, begun } while a handle is held
   let pending = null; // the newest pose not yet sent
   let inFlight = false;
   let ticked = true; // a frame has begun since the last pose was sent
@@ -94,9 +98,12 @@ export function watchDrags(host, view) {
     // time, not the view's: it delays the next pose without blocking this one.
     const started = performance.now();
     view.render(payload, { keep: dragging.keep });
-    const slow = performance.now() - started > REDRAW_BUDGET_MS;
+    const ended = performance.now();
+    const cost = ended - started;
+    dragging.nextAt = ended + cost * (1 / REDRAW_SHARE - 1);
     dragging.redraws += 1;
-    dragging.slow = slow && dragging.redraws > 1 ? dragging.slow + 1 : 0;
+    const heavy = cost > HEAVY_REDRAW_MS && dragging.redraws > 1;
+    dragging.slow = heavy ? dragging.slow + 1 : 0;
     dragging.tooSlow = dragging.slow >= 2;
   }
 
@@ -133,7 +140,13 @@ export function watchDrags(host, view) {
     toDraw = { drag, carried };
     if (drawAsked || redrawing) return;
     drawAsked = true;
-    requestAnimationFrame(async () => {
+    // no sooner than the last redraw's cost allows: see `REDRAW_SHARE`
+    const wait = Math.max((drag?.nextAt ?? 0) - performance.now(), 0);
+    const frame = (draw) =>
+      wait > 1
+        ? setTimeout(() => requestAnimationFrame(draw), wait)
+        : requestAnimationFrame(draw);
+    frame(async () => {
       drawAsked = false;
       const next = toDraw;
       toDraw = null;
@@ -167,8 +180,9 @@ export function watchDrags(host, view) {
     dragging = {
       keep: redrawn ? null : objectIds,
       tooSlow: false,
-      redraws: 0, // redraws in this drag, and slow ones in a row
+      redraws: 0, // redraws in this drag, and heavy ones in a row
       slow: 0,
+      nextAt: 0, // when the next may start, by the last one's cost
       begun: false,
       objectIds,
       mode,
