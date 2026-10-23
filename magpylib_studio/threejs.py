@@ -253,6 +253,23 @@ def _sampled_lut(colorscale):
     )
 
 
+def _on_scale(intensity, cmin=None, cmax=None):
+    """Where each `intensity` falls on its colorscale, from 0 to 1, as plotly
+    places it: between `cmin` and `cmax`, and where they are unset, between
+    the intensity's own least and most -- so a constant is the middle.
+
+    Magpylib sends a magnet with no polarization as intensity 0 throughout,
+    with neither set: plotly draws it in the scale's neutral middle, and
+    taken as it came it was the south pole's colour (#73).
+    """
+    intensity = np.asarray(intensity, dtype=float)
+    low = np.nanmin(intensity) if cmin is None else cmin
+    high = np.nanmax(intensity) if cmax is None else cmax
+    if high == low:
+        return np.full(intensity.shape, 0.5)
+    return np.clip((intensity - low) / (high - low), 0, 1)
+
+
 def _points(trace):
     """A trace's vertices as rows of x, y, z -- NaN where a line lifts its pen."""
     return np.stack([np.asarray(trace[a], dtype=float) for a in "xyz"], axis=1)
@@ -282,8 +299,8 @@ def _mesh_payload(trace):
 
     uv = back_uv = None
     if graded:
-        intensity = np.clip(np.asarray(intensity, dtype=float), 0, 1)
-        uv = np.stack([intensity, np.full(len(position), 0.5)], axis=1)
+        along = _on_scale(intensity, trace.get("cmin"), trace.get("cmax"))
+        uv = np.stack([along, np.full(len(position), 0.5)], axis=1)
     two_faced = _two_faced(position, index)
     if two_faced is not None:
         position, front, back = two_faced
