@@ -1390,6 +1390,32 @@ def test_the_pencil_puts_a_view_into_editing_later(scene_objects):
         view.update(magpy.Sensor())
 
 
+@pytest.mark.parametrize(
+    ("asked", "refusal"),
+    [("editable", "Not editable"), ("field_lines", "No field lines")],
+)
+def test_a_press_python_cannot_answer_is_put_back_and_said(
+    scene_objects, monkeypatch, asked, refusal
+):
+    """The pencil, or the lines, on objects that cannot be copied into a
+    session: the press is put back and the view told why. Raised, the error
+    reached the kernel's log alone, and the view said "Editing" over a scene
+    nothing could edit."""
+
+    def refuse(objects, named):
+        raise ValueError("could not load these objects: no")
+
+    monkeypatch.setattr(widget, "_session_of", refuse)
+    view = widget.SceneWidget(*scene_objects)
+    sent = []
+    monkeypatch.setattr(view, "send", sent.append)
+    view.set_state({asked: True})  # as the press arrives
+    assert getattr(view, asked) is False and view._session is None
+    assert sent == [
+        {"kind": "refused", "message": f"{refusal} — could not load these objects: no"}
+    ]
+
+
 def test_a_view_of_nothing_has_nothing_to_edit(scene_objects):
     """Handles over nothing would reach nothing that keeps an edit; pointed
     at objects later, the view has them, named as the cell names them then."""
@@ -1591,12 +1617,19 @@ def test_what_an_edit_was_is_said():
     assert studio.last_edit == {"by": "undo", "step": "set transform probe"}
 
 
-def test_objects_are_named_after_the_callers_own_variables():
-    """A function's own variables name its objects, not only a module's."""
+@pytest.mark.parametrize("made_by", ["SceneWidget", "show"])
+def test_objects_are_named_after_the_callers_own_variables(made_by):
+    """A function's own variables name its objects, not only a module's; and
+    those of the code that called `magpy.show`, however deep magpylib goes
+    before its backend, which the pencil then copies them under."""
 
     def make():
         cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
         pickup = magpy.Sensor(position=(0, 0, 2))
+        if made_by == "show":
+            view = magpy.show(cube, pickup, backend="widget", return_fig=True)
+            view.editable = True
+            return view
         return widget.SceneWidget(cube, pickup, editable=True)
 
     assert sorted(make().objects) == ["cube", "pickup"]

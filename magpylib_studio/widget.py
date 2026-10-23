@@ -493,13 +493,17 @@ class SceneWidget(anywidget.AnyWidget):
 
         Named by the objects magpylib hands over with the scene
         (`Panel.objects`): they are what the legend's nesting and a click's
-        object come from, which no trace can carry -- see `identify`.
+        object come from, which no trace can carry -- see `identify`. And by
+        the names the cell that called `show` gave them, which the pencil
+        names them by in the session it copies them into: without them it
+        named a cell's `magnet` and `sensor` `obj` and `obj_2`.
         """
         widget = cls()
         widget._adopt(scene)
         objects = [obj for panel in scene.panels for obj in panel.objects]
         if objects:
             widget.identify(*objects)
+            widget._keep_names(_names_of_caller())
         return widget
 
     def _adopt(self, scene, pixels=()):
@@ -561,8 +565,13 @@ class SceneWidget(anywidget.AnyWidget):
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
                 setattr(self, name, value)
-        # Only the names of what is shown: the rest of the namespace is the
-        # notebook's, and a view that held it would hold everything in it.
+        self._keep_names(named)
+
+    def _keep_names(self, named):
+        """Hold `named`'s names for the objects shown, to name them by when
+        they are copied into a session. Only theirs: the rest of the
+        namespace is the notebook's, and a view that held it would hold
+        everything in it."""
         self._named = {
             name: obj for name, obj in named.items() if str(id(obj)) in self._objects
         }
@@ -890,10 +899,26 @@ class SceneWidget(anywidget.AnyWidget):
         paths and all."""
         if not change["new"] or self._session is not None:
             return
+        session = self._copied("editable", "Not editable")
+        if session is None:
+            return
         with self.hold_sync():
             self._scene = None
             self.frames = 1
-            self._edit(_session_of(self._given, self._named))
+            self._edit(session)
+
+    def _copied(self, asked, refusal):
+        """The cell's objects copied into a session -- or None when they
+        cannot be, with `asked` put back and the view told why, after
+        `refusal`. Raised here instead, from a press in the view, the error
+        reached the kernel's log and no further, and the view said "Editing"
+        with nothing behind it."""
+        try:
+            return _session_of(self._given, self._named)
+        except Exception as error:  # noqa: BLE001 - said in the view, not lost
+            setattr(self, asked, False)
+            self.send({"kind": "refused", "message": f"{refusal} — {error}"})
+            return None
 
     def _edit(self, session, handles=True):
         """Make this the view of `session`'s scene, with its handles out --
@@ -932,10 +957,13 @@ class SceneWidget(anywidget.AnyWidget):
         elif change["new"] and getattr(self, "_given", None):
             if self.editable is None:
                 return  # made for looking only: no session, so no lines
+            session = self._copied("field_lines", "No field lines")
+            if session is None:
+                return
             with self.hold_sync():
                 self._scene = None
                 self.frames = 1
-                self._edit(_session_of(self._given, self._named), handles=False)
+                self._edit(session, handles=False)
 
     def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected,
@@ -1312,6 +1340,18 @@ def _names_above():
     cell did."""
     caller = sys._getframe(2)
     return {**caller.f_globals, **caller.f_locals}
+
+
+def _names_of_caller():
+    """The variables of the code that called magpylib's `show`: its own, then
+    its module's -- the first frame out of magpylib and this package, however
+    deep `show` goes before it reaches the backend."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__name__", "").startswith(
+        ("magpylib.", "magpylib_studio.")
+    ):
+        frame = frame.f_back
+    return {} if frame is None else {**frame.f_globals, **frame.f_locals}
 
 
 def _is_built(obj):

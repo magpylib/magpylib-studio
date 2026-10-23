@@ -6,7 +6,11 @@
   the model. `?standalone` is a saved page, with no python to ask; `?empty`
   a view with nothing named to edit. `window.result` is what the pencil did,
   and what W did after it: on a view that offers the pencil, the handle keys
-  are the pencil, and come up in their mode.
+  are the pencil, and come up in their mode. `?millimetres` is a cell's magnet,
+  drawn in the millimetres magpylib picked, whose session answers in metres:
+  `cameras` is where the camera stood before the press and after it.
+  `?refused` is a kernel that cannot copy the objects into a session: it puts
+  the press back, and says why.
 -->
 <html>
   <head>
@@ -23,8 +27,11 @@
         for (let i = 0; i < 80 && !test(); i++) await wait(50);
         return test();
       };
-      const { state, scene } = await (await fetch("/out/edit.json")).json();
       const query = new URLSearchParams(location.search);
+      const given = query.has("millimetres") ? "pencil" : "edit";
+      const { state, scene, tree } = await (
+        await fetch(`/out/${given}.json`)
+      ).json();
       const values = { ...state, editable: false };
       if (query.has("standalone")) values.standalone = true;
       if (query.has("empty")) values.tree = [];
@@ -43,12 +50,22 @@
         save_changes() {
           saved.push(values.editable);
           if (!values.editable) return;
+          if (query.has("refused")) {
+            setTimeout(() => {
+              model.set("editable", false);
+              emit("msg:custom", {
+                kind: "refused",
+                message: "Not editable — could not load these objects: no",
+              });
+            }, 20);
+            return;
+          }
           // python, told, copies the objects into a session and draws it
           setTimeout(() => {
             model.set("payload", { ...scene });
             model.set(
               "tree",
-              state.tree.map((node) => ({ ...node })),
+              (tree ?? state.tree).map((node) => ({ ...node })),
             );
           }, 20);
         },
@@ -73,9 +90,11 @@
         bar: !hidden(button("Undo")),
       });
       const before = seen();
+      const cameras = [window.scene3d.cameraState()];
       if (!hidden(pencil)) pencil.click();
       await wait(300);
       const after = seen();
+      cameras.push(window.scene3d.cameraState());
       const notice = el.querySelector(".magpy-scene-notice")?.textContent ?? "";
       if (!hidden(pencil)) pencil.click(); // again: the handles go away
       await wait(200);
@@ -90,7 +109,7 @@
         ...seen(),
         moving: button("Move")?.getAttribute("aria-pressed") ?? null,
       };
-      window.result = { before, after, again, byKey, saved, notice };
+      window.result = { before, after, again, byKey, saved, notice, cameras };
     </script>
   </body>
 </html>
