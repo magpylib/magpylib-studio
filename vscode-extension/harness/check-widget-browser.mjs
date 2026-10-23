@@ -1454,7 +1454,9 @@ async function studioDrag(port, base) {
 /** The pencil: a read-only view of named objects offers one, and pressing
  *  it saves `editable` for python and brings the edit bar out; a saved page
  *  and a view of nothing offer none. W on a view that offers the pencil is
- *  the pencil, and comes up moving; elsewhere it does nothing. */
+ *  the pencil, and comes up moving; elsewhere it does nothing. A view drawn
+ *  in millimetres keeps looking at what it looked at when the session's
+ *  scene comes in metres. */
 async function pencil(port, base) {
   await check("the pencil puts a read-only view into editing", async () => {
     const tab = await openTab(port);
@@ -1464,6 +1466,7 @@ async function pencil(port, base) {
         ["?standalone", false],
         ["?empty", false],
         ["?never", false],
+        ["?millimetres", true],
       ]) {
         const page = query || "a plain view";
         await tab.navigate(`${base}/pages/pencil.html${query}`);
@@ -1491,6 +1494,15 @@ async function pencil(port, base) {
         }
         if (saved.join() !== "true,false,true") {
           return `the presses saved ${saved.join()}`;
+        }
+        // the same magnet, in metres: the camera follows it, and stands
+        // where it stood a thousandth as far out
+        const [was, now] = result.cameras.map(({ position, target }) =>
+          Math.hypot(...position.map((p, i) => p - target[i])),
+        );
+        const shrunk = query === "?millimetres" ? 1e-3 : 1;
+        if (Math.abs(now / was / shrunk - 1) > 0.01) {
+          return `${page}: the camera went from ${was} to ${now} away`;
         }
       }
       return thrown(tab);

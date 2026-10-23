@@ -3784,6 +3784,20 @@ function fitView(objectIds) {
   if (snapping) setSnapping(true); // the step follows the scene's size
 }
 
+/** Scale where the camera is by `factor`, about the origin, as a scene's
+ *  coordinates are when it comes in another unit: it looks at what it
+ *  looked at, from where it looked. */
+function rescaleCamera(factor) {
+  camera.position.multiplyScalar(factor);
+  controls.target.multiplyScalar(factor);
+  frustumHeight *= factor;
+  camera.near *= factor;
+  camera.far *= factor;
+  applyProjection();
+  controls.update();
+  if (snapping) setSnapping(true); // the step follows the scene's size
+}
+
 /** Where the scene is, as last drawn: what the clipping planes must take in. */
 let drawnSphere = null;
 
@@ -4899,7 +4913,15 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // first, a renderer's first scene was framed without its box -- or with the
   // last scene's -- and came up zoomed in, the numbers off the edge, unless
   // something happened to fit it again.
+  const was = METRES[unit];
   drawAxes(payload.ranges, payload.labels);
+  if (keepCamera && framed && was && METRES[unit] && METRES[unit] !== was) {
+    // The scene again, in another unit: a cell's objects, in the millimetres
+    // magpylib drew them in, made editable come back in the session's
+    // metres. The camera kept as it was looked at them from a thousand
+    // times too far, a speck the scale bar called twenty metres across.
+    rescaleCamera(was / METRES[unit]);
+  }
   if (corner) dressCorner(); // in the theme the scene was just drawn in
   // Refit when there was nothing to look at before. A scene that arrives
   // empty and is filled by a later refresh -- which is what a parametric

@@ -27,6 +27,9 @@ Writes into OUT:
   standing by, whole and as a drag's later step draws it, only what moves;
 * ``edit.json`` -- an editable view's model, a ring and a probe to edit, and
   the scene its session answers `get_scene` with;
+* ``pencil.json`` -- a cell's magnet viewed read only, in the millimetres
+  magpylib draws it in, and the scene and tree the pencil's session answers
+  with, in metres;
 * ``studio.json`` -- what the studio panel's engine answers for that scene:
   ``get_scene`` and ``object_tree``;
 * ``collection.json`` -- an editable view of two magnets held as one
@@ -293,6 +296,21 @@ def main(out):
         raise SystemExit("edit.json: the studio should hold a probe to edit")
     (out / "edit.json").write_text(
         json.dumps({"state": studio.get_state(), "scene": studio.payload})
+    )
+    # a cell's magnet, read only, drawn in the millimetres magpylib picks for
+    # it, and the pencil's answer: the session's scene, drawn in metres
+    looked = SceneWidget(
+        magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    )
+    shown = looked.get_state()
+    looked.editable = True
+    if (shown["payload"]["labels"]["x"], looked.payload["labels"]["x"]) != (
+        "x (mm)",
+        "x (m)",
+    ):
+        raise SystemExit("pencil.json: the pencil should change the unit")
+    (out / "pencil.json").write_text(
+        json.dumps({"state": shown, "scene": looked.payload, "tree": looked.tree})
     )
     # what the studio panel's engine answers: the scene, and its tree
     (out / "studio.json").write_text(

@@ -19,6 +19,20 @@ hold: it is left out, and the import names the object (#77).
 
 </details>
 
+<details>
+<summary>The pencil keeps the scene in view</summary>
+
+Pressing the pencil on a view of a cell's objects -- `SceneWidget(magnet)` or
+`magpy.show(magnet, backend="widget")` -- left an empty view with a scale bar of
+"20 m": the objects, drawn in the millimetres magpylib picked, came back from
+the session in metres, and the camera stayed where it was, a thousand times too
+far out. The camera now follows a scene that comes in another unit, which a
+reactive notebook's `view.update` can also bring. A view made by `magpy.show`
+names the objects by the cell's variables, as `SceneWidget` does, so the pencil
+copies `magnet` and `sensor` rather than `obj` and `obj_2`.
+
+</details>
+
 ## [0.7.1]
 
 ### Fixed
