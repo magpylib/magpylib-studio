@@ -1378,15 +1378,15 @@ def display(widget):
     it can say whether it is the one running. Returns whether either took
     it; when neither did, the caller shows it the way a script can -- see
     `backend._outside_a_notebook`.
-    """
-    try:
-        import marimo
 
-        if marimo.running_in_notebook():
-            marimo.output.append(widget)
-            return True
-    except ImportError:
-        pass
+    Looked up, not imported: a notebook marimo runs has imported it already,
+    and importing it only to hear "no" cost a Jupyter kernel's first view
+    some 130 ms wherever marimo is installed.
+    """
+    marimo = sys.modules.get("marimo")
+    if marimo is not None and marimo.running_in_notebook():
+        marimo.output.append(widget)
+        return True
     try:
         from IPython.core.getipython import get_ipython
         from IPython.display import display as ipy_display

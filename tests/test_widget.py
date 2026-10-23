@@ -11,6 +11,7 @@ import gzip
 import io
 import json
 import re
+import sys
 import tempfile
 from typing import Annotated
 
@@ -132,6 +133,26 @@ def test_a_terminal_ipython_is_no_notebook(monkeypatch):
     monkeypatch.setattr(getipython, "get_ipython", ZMQInteractiveShell)
     assert widget.display(view) is True
     assert shown == [view]
+
+
+def test_marimo_is_not_imported_to_ask_whether_it_runs(monkeypatch):
+    """Asked of a marimo already imported, as one running the notebook is:
+    importing it only to hear "no" cost a Jupyter kernel's first view some
+    130 ms wherever marimo is installed."""
+    getipython = pytest.importorskip("IPython.core.getipython")
+    imported = []
+
+    class Watch:
+        def find_spec(self, name, path=None, target=None):
+            if name == "marimo":
+                imported.append(name)
+                raise ImportError(name)
+
+    monkeypatch.delitem(sys.modules, "marimo", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [Watch(), *sys.meta_path])
+    monkeypatch.setattr(getipython, "get_ipython", lambda: None)
+    assert widget.display(object()) is False
+    assert imported == []
 
 
 def test_a_run_too_big_to_hand_over_whole_is_shown_still(

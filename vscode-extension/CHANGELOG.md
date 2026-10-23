@@ -5,6 +5,20 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Fixed
+
+<details>
+<summary>A notebook view drawn once, in the page's colours</summary>
+
+A cell run again no longer shows its view dark for a frame: a renderer already
+loaded drew the scene before the view was on the page, with nothing behind it to
+take colours from, then drew it all again in the page's. The view now waits to
+be placed and is drawn once (1000 cuboids in JupyterLab: 324 → 262 ms to the
+finished picture). A Jupyter kernel's first view no longer imports marimo, where
+it is installed, to find out marimo is not running it (~130 ms) (#72).
+
+</details>
+
 ## [0.7.0]
 
 ### Added

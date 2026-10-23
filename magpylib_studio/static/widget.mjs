@@ -1181,8 +1181,13 @@ function render({ model, el }) {
   // until something looks again. Drawing did -- a renderer loaded a moment
   // later, and the view went from the system's colours to the page's before
   // your eyes -- and a view with no renderer to draw with never did at all.
+  // A draw asked for before then is done now, dressed for where it is.
   const placing = new ResizeObserver(() => {
-    retheme();
+    if (unplaced && view.isConnected) {
+      unplaced = false;
+      dressTheme(); // the controls now, the scene once the renderer is in
+      draw();
+    } else retheme();
     keepCorner(); // what floats over the view moved with its edges
   });
   placing.observe(el);
@@ -1388,6 +1393,7 @@ function render({ model, el }) {
   const drawing = () => api !== null && slot.host === view;
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // frames the view again as its size settles -- see draw
+  let unplaced = false; // a draw waits for the view to be on the page
 
   // --- resting ----------------------------------------------------------
   // A view whose renderer was taken for another -- see "How many" at the top
@@ -2398,6 +2404,14 @@ function render({ model, el }) {
     // view on screen to rest: a scene or a theme that changed under a
     // picture is caught up when the view is next looked at or pointed to.
     if (resting && !(onScreen() && wake({ anywhere: false }))) return;
+    // Nor off the page, where nothing behind the view has a colour to read:
+    // a renderer already loaded -- a pooled one, for a cell run again -- drew
+    // the scene on its dark fallback, and again in the page's colours a frame
+    // later. Drawn once, when `placing` sees the view arrive.
+    if (!view.isConnected) {
+      unplaced = true;
+      return;
+    }
     // The renderer this draw loads, held on to: while it loads, the view may
     // be put to rest and woken again with another, and a draw that took
     // whichever it held when it came back would drive a renderer drawing
