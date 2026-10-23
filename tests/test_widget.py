@@ -11,7 +11,9 @@ import gzip
 import io
 import json
 import re
+import sys
 import tempfile
+import types
 from typing import Annotated
 
 import magpylib as magpy
@@ -132,6 +134,35 @@ def test_a_terminal_ipython_is_no_notebook(monkeypatch):
     monkeypatch.setattr(getipython, "get_ipython", ZMQInteractiveShell)
     assert widget.display(view) is True
     assert shown == [view]
+
+
+def test_marimo_is_asked_only_once_imported(monkeypatch):
+    """A marimo running the notebook has been imported, and takes the view.
+    One that has not is not imported to ask: hearing "no" cost a Jupyter
+    kernel's first view some 130 ms wherever marimo is installed."""
+    getipython = pytest.importorskip("IPython.core.getipython")
+    imported, taken = [], []
+
+    class Watch:
+        def find_spec(self, name, path=None, target=None):
+            if name == "marimo":
+                imported.append(name)
+                raise ImportError(name)
+
+    monkeypatch.delitem(sys.modules, "marimo", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [Watch(), *sys.meta_path])
+    monkeypatch.setattr(getipython, "get_ipython", lambda: None)
+    view = object()
+    assert widget.display(view) is False
+    assert imported == []
+
+    running = types.SimpleNamespace(
+        running_in_notebook=lambda: True,
+        output=types.SimpleNamespace(append=taken.append),
+    )
+    monkeypatch.setitem(sys.modules, "marimo", running)
+    assert widget.display(view) is True
+    assert taken == [view]
 
 
 def test_a_run_too_big_to_hand_over_whole_is_shown_still(
