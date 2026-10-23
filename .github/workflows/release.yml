@@ -121,13 +121,15 @@ jobs:
       # Gated on a clean tag for the same reason the version sync above is:
       # the Marketplace has no pre-release concept for a normal publish, and
       # re-running this on an rc tag would just try to republish a version
-      # already live and fail.
+      # already live and fail. `--skip-duplicate` lets a re-run of a release
+      # whose later step failed get past the version it already published: on
+      # v0.7.1, GitHub answered 500 when the release was made.
       - name: Publish to the VS Code Marketplace
         working-directory: vscode-extension
         run: |
           version="${GITHUB_REF_NAME#v}"
           if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            npx @vscode/vsce publish --azure-credential --packagePath "${{ github.workspace }}/magpylib-studio-${{ github.ref_name }}.vsix"
+            npx @vscode/vsce publish --azure-credential --skip-duplicate --packagePath "${{ github.workspace }}/magpylib-studio-${{ github.ref_name }}.vsix"
           else
             echo "::notice::${GITHUB_REF_NAME} is a pre-release tag; not publishing it to the Marketplace"
           fi
