@@ -35,7 +35,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
 | [0025](#0025-a-panel-is-a-widget-of-its-own-where-a-host-places-it)                            | A panel is a widget of its own where a host places it        | accepted 2026-10-10, as built                                        |
 | [0026](#0026-variants-are-named-value-sets-inside-a-scene)                                     | Variants are named value sets inside a scene                 | accepted 2026-10-11, as built (#32)                                  |
-| [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built; its default superseded by 0030        |
+| [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)                               | The scale is said round the scene, or in its corner          | accepted 2026-10-12, as built; superseded in part by 0030 and 0035   |
 | [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251)                                  | marimo's slow answers were its own, fixed in 0.25.1          | accepted 2026-10-17                                                  |
 | [0029](#0029-overlapping-magnets-are-found-and-said-as-you-edit)                               | Overlapping magnets are found, and said, as you edit         | accepted 2026-10-18, as built (#47)                                  |
 | [0030](#0030-the-view-cube-is-the-default-scale)                                               | The view cube is the default scale                           | accepted 2026-10-18                                                  |
@@ -43,6 +43,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0032](#0032-field-lines-are-switched-in-the-scenes-document)                                  | Field lines are switched in the scene's document             | accepted 2026-10-18, for the field-lines prototype                   |
 | [0033](#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)                          | The colour bar cuts a sensor's colours, as a view setting    | accepted 2026-10-23, as built (#66)                                  |
 | [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#77)                                            |
+| [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)                            | The corner shows the axes, and grows the cube on hover       | accepted 2026-10-23, as built                                        |
 
 ---
 
@@ -1437,8 +1438,9 @@ the first with its first edit. Roadmap R9 named variants as not separate scenes:
 ## 0027. The scale is said round the scene, or in its corner
 
 **Status:** accepted 2026-10-12, as built; its default superseded by
-[0030](#0030-the-view-cube-is-the-default-scale). **Record of:**
-`plans/view-cube.md`, now deleted.
+[0030](#0030-the-view-cube-is-the-default-scale), and the cube's look and its
+snap by [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover).
+**Record of:** `plans/view-cube.md`, now deleted.
 
 ### Context
 
@@ -1816,3 +1818,70 @@ scene function dropped every trace, with a warning.
   round-trip, but a script's custom shapes would not survive opening it, though
   they are plain data. A large mesh makes a large document and a long line in
   the script tab; that is the cost taken.
+
+## 0035. The corner shows the axes, and grows the cube on hover
+
+**Status:** accepted 2026-10-23, with Alex, as built; supersedes the look of
+[0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)'s cube and its
+snap, whose other rules carry over.
+
+### Context
+
+0027's cube sat in the corner at full size whatever the pointer did: flat faces
+shaded a step apart, names in the axis colours, a green slab under the pointer,
+and a click that jumped the view. Ten other looks were tried side by side, live,
+in a page: one rounded cube with four rules for x, y and z arrows (never,
+always, only on hover, only at rest), a cube that stays small until the pointer
+reaches it, glass, a chamfered cube, faces tinted by axis, a line drawing, and
+axis balls. Alex chose the small one, with the axes alone at rest.
+
+The first view was asked about at the same time: magpylib's backends were
+thought to show +y running down to the left. Rendered, none does. All four look
+from the same side -- matplotlib by its default (30 degrees up, -60 round),
+Plotly from `eye=(1, -1.5, 1.4)` (38, -56), pyvista from its isometric view
+turned by `azimuth=-90` (35, -45), the widget from (29, -51) -- so +x runs down
+to the right and +y up to the right in each. Matplotlib's is the reference: the
+others start near it.
+
+### Decision
+
+- **At rest the corner shows the axes alone**: x, y and z arrows in the handles'
+  colours, named at their tips, at 70 % of their size grown. They say which way
+  the scene faces at a glance, which is what the corner is for while nothing
+  points at it.
+- **With the pointer on the corner's square, it grows**, and a cube comes up
+  round the arrows, which move out to run along its edges from its -x, -y, -z
+  corner. What the cube hides of them shows faintly. The cube is rounded, lit
+  from the upper left, its faces named in the theme's ink. The part a click
+  would look from is lit in the focus colour, by the same rule the click is
+  decided by, and asked again as the cube grows or turns under a pointer that
+  has stopped.
+- **A click turns the view over 0.4 s**, as the 1, 3 and 7 keys do. A drag, the
+  wheel, framing or a camera handed in takes over from a turn on its way. With
+  less motion asked for, it jumps, and the corner grows at once.
+- **The square is 84 pixels at rest**, as the cube's was, room for the axes
+  turned any way, and that is what stands clear of what a host floats over the
+  view. Grown it is 112, up and left out of the corner, room for the arrows past
+  the cube; it may reach in under a column that stops short of the corner.
+- **The bar stands low in the middle of the foot**, beside the axes at rest --
+  left of them only in a view too narrow for both. A picture leaves the corner
+  out and keeps the bar where it is on screen.
+- **A view first looks from where matplotlib's does**: 30 degrees up, -60 round.
+
+### Rejected
+
+- **Arrows only on hover, on a cube shown always**: gone when a glance wants
+  them. **Only at rest**: taken away under a pointer that is aiming.
+- **A cube always shown, with the arrows always on it**: Alex wanted the corner
+  out of the way.
+- **Glass, a chamfered cube, faces tinted by axis, a line drawing**: tried, and
+  not chosen.
+- **Six axis balls in place of a cube**: six views instead of twenty-six.
+- **The arrows from the cube's middle**: through the faces' names.
+- **The square at 112 pixels at rest too**: in a short view the edit column and
+  the colour bar beside it reach down within that of the foot, and pushed the
+  axes left of both.
+- **The bar beside the corner**, as 0027 had it: Alex wanted the axes in the
+  corner and the bar in the middle, low beside them.
+- **Plotly's first view, or pyvista's**: each is magpylib's to set, and both
+  start near matplotlib's, which the widget now takes exactly.

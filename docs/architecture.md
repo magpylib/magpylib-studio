@@ -274,19 +274,23 @@ visible, and leaves the pulses standing for `prefers-reduced-motion`. The
 widget's `flow` trait, kept by an export, puts the pulses away and the arrows
 back, and stands the field lines still. It says the scene's scale one of three
 ways (`setAxes`, the widget's `axes`): by default a view cube and a scale bar,
-drawn into the canvas's corner after the scene in the same frame, the cube a
-click away from twenty-six views and the bar a round length at the orbit centre,
-said in the unit that reads best, kept by the PNG where the cube is not; the
-graduated box round the scene; or neither
+drawn into the canvas's corner after the scene in the same frame -- at rest only
+the cube's x, y, z arrows, small, which grow with the cube round them while the
+pointer is on the corner -- the cube a click away from twenty-six views, turned
+to over a few frames (`axisView`, as the 1, 3 and 7 keys), and the bar a round
+length at the orbit centre, low in the middle of the foot beside the axes at
+rest, said in the unit that reads best, kept by the PNG where the corner is not;
+the graduated box round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
-[0030](decisions.md#0030-the-view-cube-is-the-default-scale)). A sensor whose
-pixels the field colours carries, on its pixels' item, each pixel's |field| and
-the table its lines are coloured from (`threejs._colour_scale`): `colorbar.mjs`
-draws it as a bar whose handles cut a range, the widget's `color_range`, and
-says what each sensor on screen is coloured over -- its cut, or a scale shared
-with the sensors on its table (`color_shared`) -- from which the renderer
-colours the pixels and the lines again (`setColorRanges`), in place and with no
-trip to python
+[0030](decisions.md#0030-the-view-cube-is-the-default-scale),
+[0035](decisions.md#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)).
+A view first looks from where matplotlib's does. A sensor whose pixels the field
+colours carries, on its pixels' item, each pixel's |field| and the table its
+lines are coloured from (`threejs._colour_scale`): `colorbar.mjs` draws it as a
+bar whose handles cut a range, the widget's `color_range`, and says what each
+sensor on screen is coloured over -- its cut, or a scale shared with the sensors
+on its table (`color_shared`) -- from which the renderer colours the pixels and
+the lines again (`setColorRanges`), in place and with no trip to python
 ([0033](decisions.md#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)).
 A drag goes through `static/drag.mjs`: open an undo group, pace previews with
 one request in flight, send the final pose through `apply_edits`, close the
