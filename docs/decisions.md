@@ -1804,9 +1804,9 @@ scene function dropped every trace, with a warning.
   lists: kept by the import and the recorder alike, drawn in the 3D view, and
   written into both scripts. JSON has no tuple, so `args` is made one again
   where magpylib takes it.
-- **A trace made at show time is left out and said**: an `updatefunc`, or
-  `args` given as a function, is code, and the document holds data. The import
-  names the object; the recorder warns, as it did.
+- **A trace made at show time is left out and said**: an `updatefunc`, or `args`
+  given as a function, is code, and the document holds data. The import names
+  the object; the recorder warns, as it did.
 - **A runner answer that is not JSON is an error naming the value**, not a
   process that ends without a word.
 
