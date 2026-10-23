@@ -42,7 +42,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0031](#0031-the-legends-eye-fades-as-a-view-setting)                                          | The legend's eye fades, as a view setting                    | accepted 2026-10-18, as built                                        |
 | [0032](#0032-field-lines-are-switched-in-the-scenes-document)                                  | Field lines are switched in the scene's document             | accepted 2026-10-18, for the field-lines prototype                   |
 | [0033](#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)                          | The colour bar cuts a sensor's colours, as a view setting    | accepted 2026-10-23, as built (#66)                                  |
-| [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#51)                                            |
+| [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#77)                                            |
 
 ---
 
@@ -1789,7 +1789,7 @@ each coloured over what it reads, gave the same colour to different fields.
 ## 0034. A model3d trace is kept, as data
 
 **Status:** accepted 2026-10-23, with Alex
-([#51](https://github.com/magpylib/magpylib-studio/issues/51)).
+([#77](https://github.com/magpylib/magpylib-studio/pull/77)).
 
 ### Context
 

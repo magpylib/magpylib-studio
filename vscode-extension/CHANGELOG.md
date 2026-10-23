@@ -15,7 +15,7 @@ only that the script "ended its process before it handed back a scene". The
 trace now comes across as data: drawn in the 3D view, saved with the scene and
 written into the script tab, and a scene function keeps it too, where it was
 dropped. A trace made when `show()` runs (`updatefunc`) is code a scene cannot
-hold: it is left out, and the import names the object (#51).
+hold: it is left out, and the import names the object (#77).
 
 </details>
 
