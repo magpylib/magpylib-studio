@@ -169,8 +169,16 @@ def main(argv):
     if meshes:
         with open(meshes, "wb") as f:
             pickle.dump(cache, f)
+    try:
+        text = json.dumps(result)
+    except (TypeError, ValueError) as e:
+        # Said here, where the cause is known: raised, it ended the process,
+        # and all the engine could tell was that no scene came back.
+        text = json.dumps(
+            {"ok": False, "error": f"the scene holds what a document cannot: {e}"}
+        )
     # on a line of its own, marked: what else reached stdout is not it
-    answer.write(f"\n{session.RUNNER_ANSWER}{json.dumps(result)}\n")
+    answer.write(f"\n{session.RUNNER_ANSWER}{text}\n")
     answer.flush()
 
 

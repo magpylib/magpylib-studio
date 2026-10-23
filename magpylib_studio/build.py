@@ -37,6 +37,7 @@ from magpylib_studio.session import (
     MagpylibStudioSession,
     _arange_lit,
     _linspace_lit,
+    _style_arg,
     _variant_problem,
 )
 
@@ -1272,7 +1273,7 @@ class _ScriptWriter:
 
     def write_create(self, event, name):
         kind = event["type"]
-        style = dict(event.get("style") or {})
+        style = {p: _style_arg(p, v) for p, v in (event.get("style") or {}).items()}
         # Hidden, its style holds the switches that hide it, and what they
         # replaced is set aside: written as it was, and hidden at the end.
         aside = event.get("hidden_style")

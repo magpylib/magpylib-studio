@@ -1395,11 +1395,43 @@ def _plain(value):
     (and generated scripts contain literals, not np.float64 reprs)."""
     if isinstance(value, np.generic | np.ndarray):
         return value.tolist()
+    if isinstance(value, magpy.graphics.Trace3d):
+        # a `model3d` trace, as the values set on it: what `add_trace` takes
+        return _plain(value.set_values())
     if isinstance(value, dict):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, list | tuple):
         return [_plain(v) for v in value]
     return value
+
+
+def _style_values(obj):
+    """The style set on `obj`, by dotted path, in plain Python. Not all of it
+    is data: a `model3d` trace made at show time (`updatefunc`) is a
+    function, which `_is_data` tells apart."""
+    return {path: _plain(value) for path, value in obj.style.set_values().items()}
+
+
+def _style_arg(path, value):
+    """A style value from the document, as magpylib takes it: JSON has no
+    tuple, and a `model3d` trace's `args` has to be one."""
+    if path != "model3d.data" or not isinstance(value, list):
+        return value
+    return [
+        {**trace, "args": tuple(trace["args"])}
+        if isinstance(trace, dict) and isinstance(trace.get("args"), list)
+        else trace
+        for trace in value
+    ]
+
+
+def _is_data(value):
+    """Whether a document can hold `value`: JSON's own types, nested."""
+    if isinstance(value, list | tuple):
+        return all(_is_data(item) for item in value)
+    if isinstance(value, dict):
+        return all(_is_data(item) for item in value.values())
+    return value is None or isinstance(value, bool | int | float | str)
 
 
 def _spec_ops(spec):
@@ -2729,7 +2761,7 @@ class MagpylibStudioSession:
             obj = _resolve_type(event["type"])(**params)
         self._stamp_mesh(obj, object_id)
         for path, value in (event.get("style") or {}).items():
-            obj.style.set(path, value)  # same call the GUI/LLM makes
+            obj.style.set(path, _style_arg(path, value))  # same call the GUI/LLM makes
         self._objs[object_id] = obj
         self._specs[object_id] = spec
         parent = event.get("parent")
@@ -3103,7 +3135,7 @@ class MagpylibStudioSession:
             obj = cls(**params)
         self._stamp_mesh(obj, spec["id"])
         for path, value in spec.get("style", {}).items():
-            obj.style.set(path, value)  # same call the GUI/LLM makes
+            obj.style.set(path, _style_arg(path, value))  # same call the GUI/LLM makes
         if spec["id"] in self._objs:
             raise ValueError(f"duplicate object id {spec['id']!r}")
         self._objs[spec["id"]] = obj
@@ -4647,10 +4679,10 @@ class MagpylibStudioSession:
         first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
         try:
-            obj.style.set(path, value)
+            obj.style.set(path, _style_arg(path, value))
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
             return {"ok": False, "error": str(e)}
-        style = obj.style.set_values()
+        style = _style_values(obj)
 
         def mutate(doc):
             self._create_event(object_id)["style"] = style
@@ -7833,7 +7865,8 @@ class MagpylibStudioSession:
                 else:
                     parts.append(f"{key}={_param_lit(value)}")
             if spec.get("style"):
-                parts.append(f"style={_nest(spec['style'])!r}")
+                given = {p: _style_arg(p, v) for p, v in spec["style"].items()}
+                parts.append(f"style={_nest(given)!r}")
             ctor = "Collection" if spec["type"] == "Collection" else spec["type"]
             lines.append(f"{target} = magpy.{ctor}{factory}({', '.join(parts)})")
             if parent_of.get(target) is not None:

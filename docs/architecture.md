@@ -140,6 +140,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
 - **Hidden objects** stay in the scene and in the field: hiding sets magpylib's
   own `model3d.showdefault` and `path.show` on the leaf specs, keeping the prior
   values in `hidden_style` for an exact restore, so nothing else is recoloured.
+- **A `model3d` trace** is held as the values set on it, numpy as lists, its
+  `args` a tuple again where magpylib takes it; one made at show time
+  (`updatefunc`) is code, left out by an import or a recording, which says so
+  ([0034](decisions.md#0034-a-model3d-trace-is-kept-as-data)).
 - **Versioning**: `DOC_VERSION` is stamped on every document that passes through
   a session; an older one is migrated, a newer one refused; unknown keys
   survive. A JSON Schema at `vscode-extension/schemas/magpy-scene.schema.json`

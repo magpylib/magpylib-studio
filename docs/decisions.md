@@ -42,6 +42,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0031](#0031-the-legends-eye-fades-as-a-view-setting)                                          | The legend's eye fades, as a view setting                    | accepted 2026-10-18, as built                                        |
 | [0032](#0032-field-lines-are-switched-in-the-scenes-document)                                  | Field lines are switched in the scene's document             | accepted 2026-10-18, for the field-lines prototype                   |
 | [0033](#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)                          | The colour bar cuts a sensor's colours, as a view setting    | accepted 2026-10-23, as built (#66)                                  |
+| [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#51)                                            |
 
 ---
 
@@ -1784,3 +1785,34 @@ each coloured over what it reads, gave the same colour to different fields.
   hundred cannot be drawn. A shared scale lets one bar say them all.
 - **The name as the button to the next sensor's bar**: it lies over the band, so
   a press there has to drag. Arrows under the bar do it instead.
+
+## 0034. A model3d trace is kept, as data
+
+**Status:** accepted 2026-10-23, with Alex
+([#51](https://github.com/magpylib/magpylib-studio/issues/51)).
+
+### Context
+
+A script whose object had a `model3d` trace did not open: `style.set_values()`
+hands back the traces as magpylib objects, the import put them in the document,
+and the runner died writing it as JSON, saying only that no scene came back. A
+scene function dropped every trace, with a warning.
+
+### Decision
+
+- **A trace is held as the values set on it**, what `add_trace` takes, numpy as
+  lists: kept by the import and the recorder alike, drawn in the 3D view, and
+  written into both scripts. JSON has no tuple, so `args` is made one again
+  where magpylib takes it.
+- **A trace made at show time is left out and said**: an `updatefunc`, or
+  `args` given as a function, is code, and the document holds data. The import
+  names the object; the recorder warns, as it did.
+- **A runner answer that is not JSON is an error naming the value**, not a
+  process that ends without a word.
+
+### Rejected
+
+- **Leaving every trace out with a warning**: smaller files and nothing new to
+  round-trip, but a script's custom shapes would not survive opening it, though
+  they are plain data. A large mesh makes a large document and a long line in
+  the script tab; that is the cost taken.

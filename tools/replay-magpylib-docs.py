@@ -74,15 +74,32 @@ class Unencodable(Exception):
     pass
 
 
+def plain(value):
+    """Arrays as lists and a `model3d` trace as its values: what a document
+    holds of them, to compare by."""
+    import numpy as np
+
+    if isinstance(value, np.ndarray | np.generic):
+        return value.tolist()
+    if callable(getattr(value, "set_values", None)):
+        return plain(value.set_values())
+    if isinstance(value, dict):
+        return {k: plain(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [plain(v) for v in value]
+    return value
+
+
 def same(a, b):
-    """Equality that survives values whose == raises (a trace holding arrays)."""
+    """Equality that survives values whose == raises (a trace holding arrays,
+    beside the same trace from a document, holding lists)."""
     import numpy as np
 
     try:
         r = a == b
         return bool(np.all(r)) if isinstance(r, np.ndarray) else bool(r)
-    except Exception:  # noqa: BLE001 - any failure means compare the text
-        return repr(a) == repr(b)
+    except Exception:  # noqa: BLE001 - any failure means compare the values
+        return plain(a) == plain(b)
 
 
 def descendants(obj):
