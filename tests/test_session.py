@@ -5117,6 +5117,44 @@ def test_a_source_that_cannot_compute_does_not_take_the_scene_with_it(tmp_path):
         only.get_field(points=[[1, 1, 1]])
 
 
+def test_a_model3d_trace_comes_across_and_one_a_function_makes_is_said(tmp_path):
+    """A script whose object had a `model3d` trace did not open: the trace
+    went into the document as a magpylib object, and the runner died writing
+    it, with nothing said but that no scene came back. A trace is data, kept
+    and drawn; one made at show time is a function, left out and named."""
+    path = tmp_path / "model3d.py"
+    path.write_text(
+        "import magpylib as magpy\n"
+        "cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))\n"
+        "cube.style.model3d.add_trace(\n"
+        "    constructor='Scatter3d', kwargs={'x': [0, 1], 'y': [0, 1], 'z': [0, 1]}\n"
+        ")\n"
+        "cube.style.model3d.add_trace(\n"
+        "    backend='matplotlib', constructor='plot', args=([0, 1], [0, 1], [0, 1])\n"
+        ")\n"
+        "ball = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=1)\n"
+        "ball.style.model3d.add_trace(\n"
+        "    constructor='Scatter3d', kwargs={'x': [0], 'y': [0], 'z': [0]},\n"
+        "    updatefunc=lambda: {},\n"
+        ")\n"
+        "magpy.show(cube, ball)\n",
+        encoding="utf-8",
+    )
+    s = MagpylibStudioSession()
+    res = s.load_script(str(path))
+    assert res["ok"] and not res.get("broken")
+    assert any(w.startswith("ball's model3d.data") for w in res["warnings"])
+    assert [m["object_id"] for m in s.get_scene()["scatters"]] == ["cube"]
+
+    # the script tab's code, run, is the same scene: the recorder keeps a
+    # trace too, and `args` is a tuple again where magpylib takes it
+    builder = tmp_path / "builder.py"
+    builder.write_text(s.to_builder_script(), encoding="utf-8")
+    again = MagpylibStudioSession()
+    assert again.load_script(str(builder))["ok"]
+    assert again.to_dict()["events"] == s.to_dict()["events"]
+
+
 def test_a_current_sheet_keeps_its_current_densities_through_an_import(tmp_path):
     """The importer rebuilds an object from a fixed list of constructor
     kwargs, and TriangleSheet's current was not on it. So it was rebuilt as

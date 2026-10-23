@@ -22,6 +22,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import units
+from magpylib_studio.session import _is_data, _style_values
 
 # Constructor kwargs worth introspecting, tried in order per object.
 # magnetization is intentionally absent: it is derived from polarization.
@@ -81,7 +82,7 @@ def _unique_id(base, used):
     return candidate
 
 
-def _spec_from(obj, object_id, used_ids, unnamed, names):
+def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # An object the script never bound to a variable was built inline — in a
     # loop, a comprehension, a helper. Executing the script keeps what it
     # built and loses how, so this is the one trace of the structure that went
@@ -103,6 +104,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names):
                     used_ids,
                     unnamed,
                     names,
+                    left_out,
                 )
                 for child in obj.children
             ],
@@ -146,7 +148,10 @@ def _spec_from(obj, object_id, used_ids, unnamed, names):
                         "axis": _zeroed((rotvec[0] / angle).round(9)).tolist(),
                     }
                 ]
-    style = obj.style.set_values()
+    style = _style_values(obj)
+    for path in [path for path, value in style.items() if not _is_data(value)]:
+        del style[path]
+        left_out.append(f"{object_id}'s {path}")
     if style:
         spec["style"] = style
     return spec
@@ -171,13 +176,15 @@ def _document_from_named(named, names):
             unique_top.append((name, obj))
     if not unique_top:
         raise ValueError("script produced no magpylib objects")
-    used_ids, unnamed = set(), []
+    used_ids, unnamed, left_out = set(), [], []
     objects = [
-        _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names)
+        _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names, left_out)
         for name, obj in unique_top
     ]
-    return {"objects": objects}, _flattening_warnings(unnamed) + _inert_warnings(
-        objects
+    return {"objects": objects}, (
+        _flattening_warnings(unnamed)
+        + _inert_warnings(objects)
+        + _style_warnings(left_out)
     )
 
 
@@ -205,6 +212,21 @@ def _inert_warnings(objects):
         f"{', '.join(names)}: a CustomSource's field function cannot be written "
         "to a document, so it did not come across. The object is here, but it "
         "contributes nothing and is left out of field calculations."
+    ]
+
+
+def _style_warnings(left_out):
+    """The style a document cannot hold, said rather than failing the import.
+
+    A `model3d` trace is data, and comes across to be drawn; one made by a
+    function when `show()` runs (`updatefunc`) is code. Writing it into the
+    document ended the import with a TypeError the caller never saw.
+    """
+    if not left_out:
+        return []
+    return [
+        f"{', '.join(left_out)}: made by a function, which a document cannot "
+        "hold, so it did not come across. The object is drawn without it."
     ]
 
 

@@ -71,6 +71,7 @@ from scipy.spatial.transform import Rotation as R
 
 from magpylib_studio import build, expressions, hook, meshes
 from magpylib_studio.build import BuildError, Expression, Sampled, _arg, _value
+from magpylib_studio.session import _is_data, _style_values
 
 __all__ = [
     "Angle",
@@ -479,7 +480,7 @@ def _style_set(obj):
     `obj.style` creates it, and `copy()` then labels the copy."""
     if getattr(obj, "_style", None) is None:
         return _flat_style(getattr(obj, "_style_kwargs", None))
-    return obj.style.set_values()
+    return _style_values(obj)
 
 
 def _same(a, b):
@@ -879,7 +880,7 @@ class _Recorder:
                     value = _value(now[path])
                 except TypeError:
                     value = now[path]
-                if not _encodable(value):
+                if not _is_data(value):
                     if (object_id, path) not in self.warned:
                         self.warned.add((object_id, path))
                         warnings.warn(
@@ -978,14 +979,6 @@ def _descendants(obj):
     for child in getattr(obj, "children", ()) or ():
         out += [child, *_descendants(child)]
     return out
-
-
-def _encodable(value):
-    if isinstance(value, list | tuple):
-        return all(_encodable(item) for item in value)
-    if isinstance(value, dict):
-        return all(_encodable(item) for item in value.values())
-    return value is None or isinstance(value, bool | int | float | str)
 
 
 # --- studio's words -----------------------------------------------------------
