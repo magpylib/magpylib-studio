@@ -19,6 +19,9 @@
   boxed: and drawn before they are on the page, which is how a box of them
     arrives. Still no more than eight, each shows something, and each is
     dressed for the white page rather than the dark system the check sets.
+  rerun: a cell run again hands its renderer, loaded already, to a view not
+    yet on the page. The scene must be drawn once, on the page: drawn
+    before, it was dark for a frame, and built again in the page's colours.
 -->
 <html>
   <head>
@@ -191,6 +194,28 @@
             shown: views.every(shown),
             light,
           };
+        },
+        async rerun() {
+          const a = view();
+          page.append(a);
+          const teardown = widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          teardown();
+          a.remove();
+          // the renderer they share: each scene it builds, and whether the
+          // view was on the page then
+          const renders = [];
+          const { render } = window.scene3d;
+          window.scene3d.render = (host, ...rest) => {
+            renders.push(host.isConnected);
+            return render(host, ...rest);
+          };
+          const b = view();
+          widget.render({ model: localModel(), el: b });
+          await wait(0);
+          page.append(b);
+          await wait(1500);
+          return { renders };
         },
       };
 

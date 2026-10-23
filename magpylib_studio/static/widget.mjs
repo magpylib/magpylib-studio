@@ -2399,6 +2399,13 @@ function render({ model, el }) {
   }
 
   // --- drawing ----------------------------------------------------------
+  /** Whether the view is on the page; when not, a draw waits for `placing`. */
+  function placed() {
+    if (view.isConnected) return true;
+    unplaced = true;
+    return false;
+  }
+
   async function draw() {
     // A resting view is drawn by waking it, and only if that does not put a
     // view on screen to rest: a scene or a theme that changed under a
@@ -2408,10 +2415,7 @@ function render({ model, el }) {
     // a renderer already loaded -- a pooled one, for a cell run again -- drew
     // the scene on its dark fallback, and again in the page's colours a frame
     // later. Drawn once, when `placing` sees the view arrive.
-    if (!view.isConnected) {
-      unplaced = true;
-      return;
-    }
+    if (!placed()) return;
     // The renderer this draw loads, held on to: while it loads, the view may
     // be put to rest and woken again with another, and a draw that took
     // whichever it held when it came back would drive a renderer drawing
@@ -2436,16 +2440,17 @@ function render({ model, el }) {
       return;
     }
     if (!ours()) return; // taken while we were away
+    if (!placed()) return; // or taken off the page while it loaded
+    unplaced = false;
     api = loaded;
     mine.used = performance.now();
-    if (view.isConnected) mine.shown = true;
+    mine.shown = true;
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
     // Again here, not only at mount: a notebook may hand over the element
     // before it is on the page, when there is nothing behind it to read --
-    // nor a backdrop to find.
+    // nor a backdrop to find. (Dressing wears the backdrops too.)
     dressTheme();
-    wearBackdrop();
     // Read only, unless the objects are a session's.
     api.setGizmoMode(editable() ? handles : "none");
     // Before the render, so nodes are built hidden rather than drawn and then

@@ -2981,6 +2981,10 @@ async function pool(port, base) {
       // are dressed for the page too, not left on the system's guess
       (r) => r.light,
     ],
+    rerun: [
+      "a cell run again draws its scene once, on the page",
+      (r) => r.renders.length === 1 && r.renders[0],
+    ],
   };
   for (const [name, [label, ...holds]] of Object.entries(cases)) {
     await check(label, async () => {
