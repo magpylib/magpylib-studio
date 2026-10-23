@@ -3232,15 +3232,17 @@ async function savedView(port, base, out, expected) {
   );
 
   async function cubeTurnsTheView() {
-    // The middle of the cube's corner. The saved camera looks from -y and a
-    // little above, so what is there is the middle of the -y face.
+    // The middle of the corner grown, which is inside it at rest too. The
+    // saved camera looks from -y and a little above, so what is there is the
+    // middle of the -y face. The cube comes up as the pointer reaches the
+    // corner, and the view turns over a few frames.
     const cube = await tab.evaluate(`
       const box = ${VIEW}.querySelector("canvas").getBoundingClientRect();
-      return { x: box.right - 8 - 42, y: box.bottom - 8 - 42 };`);
+      return { x: box.right - 8 - 56, y: box.bottom - 8 - 56 };`);
     await tab.hover(cube);
-    await wait(200);
+    await wait(400);
     await tab.click(cube);
-    await wait(300);
+    await wait(700);
     const { position, target } = await tab.evaluate(
       "return window.scene3d.cameraState()",
     );
@@ -3249,9 +3251,9 @@ async function savedView(port, base, out, expected) {
     if (rounded(along) !== rounded([0, -1, 0])) {
       return `the -y face looks along ${rounded(along)}`;
     }
-    // In the picture the cube is not drawn, and the bar takes its corner:
-    // one colour, the background's, above the bar where the cube is on
-    // screen; more than one along the foot, where the bar is.
+    // In the picture the corner is not drawn: one colour, the background's,
+    // where it is on screen at rest; more than one across the middle of the
+    // foot, where the bar is, low beside it.
     const seen = await tab.evaluate(`
       const image = new Image();
       image.src = window.scene3d.snapshot();
@@ -3276,8 +3278,8 @@ async function savedView(port, base, out, expected) {
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       return {
-        cube: colours(w - 92, h - 92, 84, 54),
-        bar: colours(w - 144, h - 38, 136, 30),
+        cube: colours(w - 92, h - 92, 84, 84),
+        bar: colours(w / 2 - 68, h - 49, 136, 30),
       };`);
     if (seen.cube > 1) {
       return `the picture shows the cube (${seen.cube} colours)`;

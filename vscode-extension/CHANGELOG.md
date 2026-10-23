@@ -5,6 +5,23 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>The view cube: small axes at rest, the cube on hover, a smooth turn</summary>
+
+The corner of the 3D view now shows only small x, y and z arrows, in the move
+handles' colours, until the pointer reaches it. Then it grows, and a rounded
+cube comes up round the arrows; the face, edge or corner a click would look from
+is lit in the focus colour. A click turns the view there over 0.4 s, as the 1, 3
+and 7 keys now do, where it jumped; with reduced motion asked for, it still
+jumps. The scale bar moves to the middle of the view's foot, low beside the
+arrows. A view first looks from where matplotlib's does, 30 degrees up and -60
+round: +x runs down to the right and +y up to the right, as in magpylib's other
+backends (#79).
+
+</details>
+
 ### Fixed
 
 <details>

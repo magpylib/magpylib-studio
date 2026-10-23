@@ -28,12 +28,13 @@ python when the run changes shape as it goes.
 
 The axes button goes round three ways to show the scale: a view cube with a
 scale bar, which is the default, the graduated box, and none; `axes="cube"`,
-`"box"` or `"none"` chooses one from code. Click a face, an edge or a corner of
-the cube to look from there. Lengths are said in the unit that reads best: the
-bar under a Halbach ring reads `20 mm`, and the box round it is ticked in
-millimetres too.
+`"box"` or `"none"` chooses one from code. At rest the corner shows only small
+x, y and z arrows; point at them and they grow into the cube. Click a face, an
+edge or a corner of the cube and the view turns to look from there. Lengths are
+said in the unit that reads best: the bar beside a Halbach ring reads `10 mm`,
+and the box round it is ticked in millimetres too.
 
-![The Halbach example with the view cube in the corner, its near corner marked under the pointer, and a 20 mm scale bar beside it](../view-cube.png)
+![The Halbach example with the corner grown into the view cube under the pointer, its near corner lit, the x, y and z arrows along its edges, and a 10 mm scale bar beside it](../view-cube.png)
 
 A `SceneWidget` is read only, like the panel — what a view can offer to edit is
 what its host can put back, and a cell has already run (for a view you can edit,
