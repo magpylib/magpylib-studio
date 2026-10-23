@@ -287,28 +287,16 @@ def colours(sensor, readings):
     return list(table), [low, high]
 
 
-def item(sensor, key, grid, values, within, seeds, readings):
-    """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
-    part (`threejs.PARTS`): the grid, the
-    field along its axes, which points are inside a magnet, the pixels to
-    start from, nearest the middle first, how far apart to keep the lines,
-    and the colours their |field| takes (`colours`)."""
-    from magpylib_studio.threejs import part_id
-
-    lut, levels = colours(sensor, readings)
+def encoded_field(grid, values, within):
+    """The grid, the field along its axes and which of its points are
+    inside a magnet, as an item carries them: the part of `item` that costs,
+    and that a field standing still through a drag keeps."""
     # 16 bits a component, against the peak: a quarter of the bytes JSON
     # numbers took, and 40 uT steps for a 1.3 T peak, finer than a line shows
     along = values @ grid["axes"].T
     peak = float(np.max(np.abs(along))) or 1.0
     quanta = np.round(along / peak * 32767).astype("<i2")
-    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
-    starts = seeds[order][:MAX_SEEDS]
     return {
-        "kind": "fieldlines",
-        "object_id": key,
-        # a part of the sensor's drawing, hidden and faded apart from it
-        "part": part_id(key, "lines"),
-        "name": f"{sensor.style.label or 'Sensor'} field lines",
         "origin": np.asarray(grid["origin"]).tolist(),
         "axes": np.asarray(grid["axes"]).ravel().tolist(),
         "step": grid["step"],
@@ -318,6 +306,27 @@ def item(sensor, key, grid, values, within, seeds, readings):
         "inside": base64.b64encode(np.packbits(within, bitorder="little")).decode(
             "ascii"
         ),
+    }
+
+
+def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
+    """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
+    part (`threejs.PARTS`): the grid and the field on it (`encoded_field`,
+    or `encoded` where that is in hand), the pixels to start from, nearest
+    the middle first, how far apart to keep the lines, and the colours
+    their |field| takes (`colours`)."""
+    from magpylib_studio.threejs import part_id
+
+    lut, levels = colours(sensor, readings)
+    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
+    starts = seeds[order][:MAX_SEEDS]
+    return {
+        "kind": "fieldlines",
+        "object_id": key,
+        # a part of the sensor's drawing, hidden and faded apart from it
+        "part": part_id(key, "lines"),
+        "name": f"{sensor.style.label or 'Sensor'} field lines",
+        **(encoded or encoded_field(grid, values, within)),
         "seeds": np.round(starts, 9).ravel().tolist(),
         "spacing": spacing_of(seeds, grid),
         "lut": lut,

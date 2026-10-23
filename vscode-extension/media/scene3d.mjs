@@ -2016,7 +2016,6 @@ function watchGrips() {
     const drag = gripping;
     gripping = null;
     controls.enabled = true;
-    redraw(); // and the flow goes on
     element.releasePointerCapture?.(event.pointerId);
     element.style.cursor = gripHovered === null ? "" : "grab";
     // where it was let go, until the engine's scene puts the grips back
@@ -4049,7 +4048,7 @@ function drawAxes(ranges, labels) {
   axesFor = ranges ? { ranges, labels } : null;
   // Built only while it is shown: its numbers are a canvas each, and a
   // scene drawn again at every step of a drag built them all again for a
-  // box nobody saw -- a sixth of a redraw. `setAxes` builds it when asked.
+  // box nobody saw -- a third of a redraw. `setAxes` builds it when asked.
   if (axesMode === "box") buildAxes();
 }
 

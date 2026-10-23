@@ -137,6 +137,7 @@ const model = {
   send(message) {
     if (message.kind !== "frame" || !run.length) return;
     const at = Math.max(0, Math.min(message.index, run.length - 1));
+    if (!run[at]) return; // the payload's own step, never asked for
     setTimeout(() =>
       emit("msg:custom", { kind: "frame", ...run[at], runId: message.runId }),
     );
@@ -587,7 +588,9 @@ class SceneWidget(anywidget.AnyWidget):
         self._not_editable("identify")
         given = list(threejs._given(objects))
         before = dict(_positions(self.tree))
-        tree, objects = threejs.object_tree(objects)
+        # its sensors' parts where their pixels are drawn apart: `capture_view`
+        apart = {item["object_id"] for item in self.payload.get("pixels", [])}
+        tree, objects = threejs.object_tree(objects, apart)
         after = {path: key for key, path in _positions(tree)}
 
         def moved(key):
@@ -1019,8 +1022,13 @@ class SceneWidget(anywidget.AnyWidget):
         if self._scene is not None:
             run = threejs.whole_run(self._scene, limit)
         elif frames > 1 and getattr(self, "_session", None) is not None:
-            # a session's run, served a step at a time
-            run = [self._session.get_scene(frame=i) for i in range(frames)]
+            # a session's run, served a step at a time -- but the step its
+            # payload draws, which the view draws from that
+            step = self.payload.get("step")
+            run = [
+                None if i == step else self._session.get_scene(frame=i)
+                for i in range(frames)
+            ]
             if limit is not None and len(json.dumps(run, allow_nan=False)) > limit:
                 run = None
         else:

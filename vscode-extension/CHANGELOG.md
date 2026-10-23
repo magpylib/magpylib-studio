@@ -30,8 +30,9 @@ is a view setting, `view.color_range`, kept by a saved page. The selected
 sensor's bar shows, else the first's; while a run plays, or shows a step other
 than the one its scene draws, the bar steps aside, as the steps are in
 magpylib's colours. A view of a cell's own objects has the bar too, with or
-without field lines: its sensors' pixels are drawn as an editable view's are
-(#70).
+without field lines: its sensors' pixels are drawn as an editable view's are,
+their parts listed beneath them; `magpy.show(..., backend=...)` hands its
+backend each sensor's pixels drawn into the sensor, and has none (#70).
 
 </details>
 
@@ -180,10 +181,13 @@ slow kernel answers: each answer is drawn where the handles hold it (#65). On a
 slower machine a drag no longer stops redrawing what it moves -- the field
 lines, a sensor's arrows -- once two redraws pass 8 ms: they come as often as
 what they cost allows, a third of the time at most, and only a scene whose
-redraw freezes the drag for 100 ms stops until the release (#67). A run with
-field lines no longer draws its last step over and over, a hundred and sixty
-times a second, for as long as the page is open; and an editable view of a run
-opens on its last step, the one its scene draws, its counter saying so (#70).
+redraw freezes the drag for 100 ms stops until the release (#67). A drag of
+several objects at once no longer adds a pose of each to the scene's log, and
+its script, at every step; and a sensor's arrows in a weak field, a microtesla
+or less, point the way it does. A run with field lines no longer draws its last
+step over and over, a hundred and sixty times a second, for as long as the page
+is open; and an editable view of a run opens on its last step, the one its scene
+draws, its counter saying so (#70).
 
 </details>
 

@@ -1563,10 +1563,11 @@ function render({ model, el }) {
       reached(wanted);
       return;
     }
-    // The step the payload draws is drawn from it, whole, and nothing is
-    // asked for: its field lines, and its pixels in the colour bar's
-    // colours, are what no frame carries.
-    if (wanted === drawnStep()) {
+    // The step a session's payload draws is drawn from it, whole, and
+    // nothing is asked for: its field lines, and its pixels in the colour
+    // bar's colours, are what no frame carries. A captured run's first
+    // frame is its payload's own, and the cheaper to draw.
+    if (model.get("payload")?.step !== undefined && wanted === drawnStep()) {
       if (slot.host !== view) return;
       reached(wanted);
       draw();

@@ -406,8 +406,8 @@ def test_the_legend_keeps_the_nesting_the_payload_cannot(nested):
 
 def test_a_sensors_field_lines_are_a_row_beneath_it():
     """Their switch, to hide apart from the rest of it, by an id a rebuild
-    carries over; a sensor with no pixels is a row alone. Its pixels are
-    magpylib's drawing here, which a session's scene draws apart."""
+    carries over, beside its axes and its pixels, which a still view draws
+    apart as a session's does; a sensor with no pixels is a row alone."""
 
     def build():
         magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
@@ -422,10 +422,10 @@ def test_a_sensors_field_lines_are_a_row_beneath_it():
 
     view = widget.SceneWidget(*build())
     assert _outline(view.tree[1:]) == [
-        ("probe", [("field lines (B)", [])]),
+        ("probe", [("axes", []), ("pixels (Bxy)", []), ("field lines (B)", [])]),
         ("plain", []),
     ]
-    view.hidden = [view.tree[1]["children"][0]["id"]]
+    view.hidden = [view.tree[1]["children"][2]["id"]]
     rebuilt = build()
     view.update(*rebuilt)
     assert view.hidden == [f"{id(rebuilt[1])}/lines"]
@@ -629,21 +629,31 @@ def test_a_view_of_a_cells_objects_draws_their_pixels_apart(animation):
     """A sensor whose pixels the field colours, in a view of the cell's own
     objects: still, its pixels are items of their own with their colour
     table, for the colour bar, where magpylib's meshes of them would be --
-    in the drawing's unit, millimetres here; in a run, magpylib's meshes,
-    each step computed and coloured as it is."""
+    in the drawing's unit, millimetres here, and sized as magpylib sizes
+    them there; in a run, magpylib's meshes, each step computed and
+    coloured as it is."""
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
     across = np.linspace(-0.02, 0.02, 5)
     sensor = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across])
-    sensor.style.pixel.field.source = "B"
+    # one pixel, at its origin: sized against the sensor, as magpylib sizes it
+    # in this drawing, not against magpylib's metre
+    alone = magpy.Sensor(pixel=[(0, 0, 0)], position=(0, 0, 0.012))
+    for each in (sensor, alone):
+        each.style.pixel.field.source = "B"
     cube.move(np.linspace((0, 0, 0), (0.001, 0, 0), 3), start=0)
-    view = widget.SceneWidget(cube, sensor, animation=animation)
+    view = widget.SceneWidget(cube, sensor, alone, animation=animation)
     pixels = view.payload.get("pixels", [])
     if animation:
         assert not pixels
         return
-    (item,) = pixels
+    item, single = pixels
     assert item["object_id"] == str(id(sensor)) and item["scale"]
     assert item["origins"][:3] == [-20.0, 0.0, 12.0]
+    assert single["sizes"][0] < 1  # mm; a fifth of a metre without the panel's
+    # directions, whatever the field's strength: a microtesla rounded as a
+    # field was turned by the rounding
+    lengths = np.linalg.norm(np.reshape(item["vectors"], (-1, 3)), axis=1)
+    np.testing.assert_allclose(lengths, 1, atol=1e-5)
     assert sensor.style.pixel.size == 1  # put back after the capture
 
 
@@ -937,7 +947,8 @@ def test_a_view_plays_a_moving_run_itself(swept):
 
 def test_a_view_of_a_scene_with_a_path_plays_it(monkeypatch):
     """An editable view's scene has a path: it plays it, the session serving
-    each step asked for, and a saved page carries every one."""
+    each step asked for, and a saved page carries every one but the last,
+    which its scene draws."""
     magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
     magnet.move(np.linspace((0, 0, 0), (0.02, 0, 0), 5), start=0)
     view = widget.SceneWidget(magnet, editable=True)
@@ -946,7 +957,8 @@ def test_a_view_of_a_scene_with_a_path_plays_it(monkeypatch):
     monkeypatch.setattr(view, "send", sent.append)
     view._on_message(view, {"kind": "frame", "index": 3, "runId": 7}, [])
     assert [(m["frame"], m["frames"], m["runId"]) for m in sent] == [(3, 5, 7)]
-    assert [step["frame"] for step in view._saved()["run"]] == [0, 1, 2, 3, 4]
+    run = view._saved()["run"]
+    assert [step and step["frame"] for step in run] == [0, 1, 2, 3, None]
 
 
 def _unpacked(page, name):

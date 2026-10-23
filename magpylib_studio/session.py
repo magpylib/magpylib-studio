@@ -3989,12 +3989,12 @@ class MagpylibStudioSession:
         field is the field of what stays, computed at the first frame, plus
         the field of what moves, computed every frame: the same field to float
         precision, at the cost of the moving sources alone -- a twentieth of
-        it for one magnet of the Halbach demo's 24. A sensor dragged past
-        sources that stay keeps its grid as well, fixed in the world, and the
-        field on it: its lines are traced from where its pixels are now,
-        through the field the first frame computed, until they leave the
-        grid or its plane. A variable moves anything: then the whole field is
-        computed every frame, on the coarser grid.
+        it for one magnet of the Halbach demo's 24, and nothing for a sensor
+        dragged past magnets that stand still. A sensor dragged keeps its
+        grid too, fixed in the world: its lines are traced from where its
+        pixels are now, until they leave the grid or its plane
+        (`fieldlines.holds`). A variable moves anything: then the whole field
+        is computed every frame, on the coarser grid.
 
         `readings` are the sensors' pixel fields, where the scene has them.
         """
@@ -4013,8 +4013,6 @@ class MagpylibStudioSession:
             from magpylib.graphics.backend import pixel_fields
 
             readings = pixel_fields(self.scene)
-        # the field stands still: the gesture moves no source, only sensors
-        standing = names is not None and not self._sources_named(sources, names, key_of)
         items = []
         for sensor in sensors:
             key = key_of.get(id(sensor))
@@ -4028,24 +4026,15 @@ class MagpylibStudioSession:
                 budget = fieldlines.REST_POINTS
             else:
                 budget = fieldlines.DRAG_POINTS if names else fieldlines.DRAG_POINTS_ALL
-            if standing and follows:
-                held = cache if cache is not None and cache.get("standing") else None
-                if held is None or not fieldlines.holds(held["grid"], seeds):
-                    held = self._standing_field(sources, seeds, budget, kind)
-                    self._field_cache[key] = held
-                items.append(
-                    fieldlines.item(
-                        sensor,
-                        key,
-                        held["grid"],
-                        held["field"],
-                        held["inside"],
-                        seeds,
-                        readings.get(sensor),
-                    )
-                )
-                continue
-            if gesture and cache is not None and not follows:
+            # A gesture that names what it moves keeps each sensor's grid --
+            # one it drags while its pixels are on it -- and the field of what
+            # stays on it, adding only the moving sources' every frame.
+            stays = names is not None
+            if (
+                stays
+                and cache is not None
+                and (not follows or fieldlines.holds(cache["grid"], seeds))
+            ):
                 grid = cache["grid"]
             else:
                 grid = fieldlines.grid_around(sources, seeds, budget)
@@ -4053,38 +4042,34 @@ class MagpylibStudioSession:
                     sources, seeds, kind
                 ):
                     grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-            values, within = self._field_on(
-                key, grid, sources, names, gesture and not follows, kind
-            )
+            values, within = self._field_on(key, grid, sources, names, stays, kind)
             if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
                 grid, values, within
             ):
                 # a drag took the field off the sensor's plane: its lines, in 3D
                 grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-                values, within = self._field_on(
-                    key, grid, sources, names, gesture and not follows, kind
+                values, within = self._field_on(key, grid, sources, names, stays, kind)
+            # the field as sent, once while it stands still
+            held = self._field_cache.get(key) if stays else None
+            if held is not None and values is held["field"]:
+                encoded = held.setdefault(
+                    "encoded", fieldlines.encoded_field(grid, values, within)
                 )
+            else:
+                encoded = None
             items.append(
                 fieldlines.item(
-                    sensor, key, grid, values, within, seeds, readings.get(sensor)
+                    sensor,
+                    key,
+                    grid,
+                    values,
+                    within,
+                    seeds,
+                    readings.get(sensor),
+                    encoded,
                 )
             )
         return items
-
-    def _standing_field(self, sources, seeds, budget, kind):
-        """The grid for `seeds` and the whole field on it, as `_field_lines`
-        draws a sensor at rest -- in its plane where the field keeps to it --
-        to be kept while the sources stand still."""
-        from magpylib_studio import fieldlines
-
-        grid = fieldlines.grid_around(sources, seeds, budget)
-        if fieldlines.is_flat(grid) and not self._keeps_to_plane(sources, seeds, kind):
-            grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-        values, within = self._field_on(None, grid, sources, None, False, kind)
-        if fieldlines.is_flat(grid) and not fieldlines.keeps_to(grid, values, within):
-            grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-            values, within = self._field_on(None, grid, sources, None, False, kind)
-        return {"standing": True, "grid": grid, "field": values, "inside": within}
 
     @staticmethod
     def _keeps_to_plane(sources, seeds, kind):
@@ -4125,6 +4110,8 @@ class MagpylibStudioSession:
                 "inside": fieldlines.inside(still, points),
             }
             self._field_cache[key] = cache
+        if not moving:
+            return cache["field"], cache["inside"]  # the same, frame after frame
         values = cache["field"] + fieldlines.field(moving, points, kind)
         within = cache["inside"] | fieldlines.inside(moving, points)
         return values, within
@@ -4842,15 +4829,15 @@ class MagpylibStudioSession:
         path, written back as builder code, added both again on every run.
         """
         events = self.doc.setdefault("events", [])
-        end = len(events) if at is None else at
-        tail = events[max(0, end - len(ops)) : end]
-        if (
-            len(tail) == len(ops)
-            and all(e.get("target") == object_id for e in tail)
-            and [e.get("op") for e in tail] == [op["op"] for op in ops]
-        ):
+        kinds = [op["op"] for op in ops]
+        # in a gesture, this object's pin wherever among the pins ending the
+        # log it is, as a drag of several objects leaves them
+        start = self._gesture_pin(object_id, kinds) if at is None else None
+        if start is None:
+            start = self._tail_pin(object_id, kinds, at)
+        if start is not None:
             for offset, op in enumerate(expressions.normalized(_plain(ops))):
-                events[end - len(ops) + offset] = {**tail[offset], **op}
+                events[start + offset] = {**events[start + offset], **op}
         else:
             self._log(object_id, ops, at=at)
 
@@ -5076,49 +5063,94 @@ class MagpylibStudioSession:
             for kind, given in (("position", position), ("orientation", orientation))
             if given is not None
         ]
-        if not is_path and self._pins_last(object_id, kinds):
-            return self._mutate_live(mutate, len(kinds), label)
+        start = None if is_path else self._live_pin(object_id, kinds)
+        if start is not None:
+            return self._mutate_live(mutate, start, len(kinds), label)
         return self._mutate_doc(mutate, label)
 
-    def _pins_last(self, object_id, kinds):
-        """Whether a pose of `object_id`, of `kinds` -- ``"position"``,
-        ``"orientation"`` -- is a later step of a gesture that rewrites the
-        pin ending the log in place (`_pin`): then nothing replays after it,
-        and the scene built again is the scene as it stands, with that pose
-        set. Not where the pose goes in before a pattern's step, which the
-        copies would follow (`_pattern_step_at`), nor in a history rolled
+    def _gesture_pin(self, object_id, kinds):
+        """Where, in a gesture, `object_id`'s pin of `kinds` -- ``"position"``,
+        ``"orientation"`` -- is among the pins that end the log, to be written
+        over in place (`_pin`): a drag of several objects pins each at every
+        step, and only the last one's pin ends the log. Only where nothing
+        pinned after it moves the object or is moved by it -- its collections,
+        or anything in it -- so that writing over it is the same as pinning
+        it again at the end. None outside a gesture, or in a history rolled
         back."""
-        if self._interaction is None or self._rollback is not None:
-            return False
+        if self._interaction is None or self._rollback is not None or not kinds:
+            return None
         events = self.doc.get("events") or []
-        tail = events[len(events) - len(kinds) :] if kinds else []
-        return (
-            len(tail) == len(kinds)
-            and bool(kinds)
-            and all(e.get("target") == object_id for e in tail)
-            and [e.get("op") for e in tail] == kinds
-            and self._pattern_step_at(object_id) is None
-        )
+        first = len(events)
+        while first and events[first - 1].get("op") in ("position", "orientation"):
+            first -= 1
+        count = len(kinds)
+        for i in range(len(events) - count, first - 1, -1):
+            block = events[i : i + count]
+            if (
+                all(e.get("target") == object_id for e in block)
+                and [e.get("op") for e in block] == kinds
+            ):
+                kin = {object_id, *self._descendants(object_id)}
+                parent = self._parents.get(object_id)
+                while parent is not None:
+                    kin.add(parent)
+                    parent = self._parents.get(parent)
+                after = events[i + count :]
+                return None if any(e.get("target") in kin for e in after) else i
+        return None
 
-    def _mutate_live(self, mutate, count, label):
-        """`_mutate_doc` for a pose that rewrites the `count` events ending
-        the log (`_pins_last`): applied to the live object instead of
-        building the document again -- the scene that build would give, at a
-        fraction of its cost. Every step of a drag past its first one is
-        this: 6 of a sensor's 10 ms a step in the Halbach demo, its patterns
-        replayed. On any failure the document is put back and built."""
-        snapshot = json.loads(json.dumps(self.doc))
+    def _tail_pin(self, object_id, kinds, end=None):
+        """Where the pin of `object_id`, of `kinds`, is that ends the log --
+        or the part of it before `end` -- which a pin of the same object and
+        kinds writes over (`_pin`); None where something else ends it."""
+        events = self.doc.get("events") or []
+        end = len(events) if end is None else end
+        start = end - len(kinds)
+        block = events[max(0, start) : end]
+        if (
+            kinds
+            and start >= 0
+            and all(e.get("target") == object_id for e in block)
+            and [e.get("op") for e in block] == kinds
+        ):
+            return start
+        return None
+
+    def _live_pin(self, object_id, kinds):
+        """Where the gesture's pin of `object_id` is (`_gesture_pin`), when a
+        pose written over it can be set on the live objects rather than the
+        document built again, for the scene that build would give: where it
+        pins no pattern's source, whose copies follow it (`_pattern_step_at`),
+        and its last build applied it."""
+        start = self._gesture_pin(object_id, kinds)
+        if start is None or self._pattern_step_at(object_id) is not None:
+            return None
+        broken = {b["id"] for b in self._broken}
+        block = self.doc["events"][start : start + len(kinds)]
+        return None if any(e.get("id") in broken for e in block) else start
+
+    def _mutate_live(self, mutate, start, count, label):
+        """`_mutate_doc` for a pose that writes over the `count` events from
+        `start` (`_live_pin`): applied to the live object instead of building
+        the document again -- the scene that build would give, at a fraction
+        of its cost. Every step of a drag past its first is this: 6 of a
+        sensor's 10 ms a step in the Halbach demo, its patterns replayed. On
+        any failure the events are put back and the document built."""
+        events = self.doc["events"]
+        kept = events[start : start + count]  # written over, not changed
+        # the state to undo to, where the gesture has none yet
+        snapshot = None if self._interaction else json.loads(json.dumps(self.doc))
         try:
             mutate(self.doc)
-            _canonical(self.doc)
-            for event in self.doc["events"][-count:]:
+            for event in events[start : start + count]:
                 self._apply(event)
             self._animated = None  # the captured run is of a scene that no longer is
         except Exception as e:  # noqa: BLE001 - report every failure to the caller
-            self.doc = snapshot
+            events[start : start + count] = kept
             self._build()
             return {"ok": False, "error": str(e)}
-        self._record_state(label, snapshot)
+        if snapshot is not None:
+            self._record_state(label, snapshot)
         return {"ok": True}
 
     def duplicate_along(self, object_id, count, step):
