@@ -9,6 +9,8 @@
   are the pencil, and come up in their mode. `?millimetres` is a cell's magnet,
   drawn in the millimetres magpylib picked, whose session answers in metres:
   `cameras` is where the camera stood before the press and after it.
+  `?refused` is a kernel that cannot copy the objects into a session: it puts
+  the press back, and says why.
 -->
 <html>
   <head>
@@ -48,6 +50,16 @@
         save_changes() {
           saved.push(values.editable);
           if (!values.editable) return;
+          if (query.has("refused")) {
+            setTimeout(() => {
+              model.set("editable", false);
+              emit("msg:custom", {
+                kind: "refused",
+                message: "Not editable — could not load these objects: no",
+              });
+            }, 20);
+            return;
+          }
           // python, told, copies the objects into a session and draws it
           setTimeout(() => {
             model.set("payload", { ...scene });

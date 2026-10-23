@@ -899,10 +899,26 @@ class SceneWidget(anywidget.AnyWidget):
         paths and all."""
         if not change["new"] or self._session is not None:
             return
+        session = self._copied("editable", "Not editable")
+        if session is None:
+            return
         with self.hold_sync():
             self._scene = None
             self.frames = 1
-            self._edit(_session_of(self._given, self._named))
+            self._edit(session)
+
+    def _copied(self, asked, refusal):
+        """The cell's objects copied into a session -- or None when they
+        cannot be, with `asked` put back and the view told why, after
+        `refusal`. Raised here instead, from a press in the view, the error
+        reached the kernel's log and no further, and the view said "Editing"
+        with nothing behind it."""
+        try:
+            return _session_of(self._given, self._named)
+        except Exception as error:  # noqa: BLE001 - said in the view, not lost
+            setattr(self, asked, False)
+            self.send({"kind": "refused", "message": f"{refusal} — {error}"})
+            return None
 
     def _edit(self, session, handles=True):
         """Make this the view of `session`'s scene, with its handles out --
@@ -941,10 +957,13 @@ class SceneWidget(anywidget.AnyWidget):
         elif change["new"] and getattr(self, "_given", None):
             if self.editable is None:
                 return  # made for looking only: no session, so no lines
+            session = self._copied("field_lines", "No field lines")
+            if session is None:
+                return
             with self.hold_sync():
                 self._scene = None
                 self.frames = 1
-                self._edit(_session_of(self._given, self._named), handles=False)
+                self._edit(session, handles=False)
 
     def _show(self, edit):
         """Draw the session's scene as it is now, keeping what is selected,

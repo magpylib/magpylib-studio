@@ -1673,6 +1673,13 @@ function render({ model, el }) {
       download(message);
       return;
     }
+    if (message.kind === "refused") {
+      // The pencil, or the lines, asked for a session python could not make
+      // of the cell's objects: the model puts the press back, and this says
+      // why, until something else is said.
+      notify(message.message, { stay: true });
+      return;
+    }
     if (message.kind !== "frame") return;
     // A frame of the run before this one, answered after the view was
     // re-pointed: drawn, it would put the old scene over the new.

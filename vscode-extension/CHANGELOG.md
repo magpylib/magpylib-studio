@@ -29,7 +29,10 @@ the session in metres, and the camera stayed where it was, a thousand times too
 far out. The camera now follows a scene that comes in another unit, which a
 reactive notebook's `view.update` can also bring. A view made by `magpy.show`
 names the objects by the cell's variables, as `SceneWidget` does, so the pencil
-copies `magnet` and `sensor` rather than `obj` and `obj_2`.
+copies `magnet` and `sensor` rather than `obj` and `obj_2`. When Python cannot
+copy the objects into a session, the pencil, or the field lines' eye, is put
+back and the view says why, where it said "Editing" over a scene nothing could
+edit (#78).
 
 </details>
 

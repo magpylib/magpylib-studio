@@ -1456,7 +1456,8 @@ async function studioDrag(port, base) {
  *  and a view of nothing offer none. W on a view that offers the pencil is
  *  the pencil, and comes up moving; elsewhere it does nothing. A view drawn
  *  in millimetres keeps looking at what it looked at when the session's
- *  scene comes in metres. */
+ *  scene comes in metres. A press python cannot answer with a session is put
+ *  back, and the view says why. */
 async function pencil(port, base) {
   await check("the pencil puts a read-only view into editing", async () => {
     const tab = await openTab(port);
@@ -1467,6 +1468,7 @@ async function pencil(port, base) {
         ["?empty", false],
         ["?never", false],
         ["?millimetres", true],
+        ["?refused", true],
       ]) {
         const page = query || "a plain view";
         await tab.navigate(`${base}/pages/pencil.html${query}`);
@@ -1477,6 +1479,16 @@ async function pencil(port, base) {
           return `${page} ${offered ? "offered no pencil" : "offered a pencil"}`;
         }
         if (before.bar) return `${page}: the edit bar was out before a press`;
+        if (query === "?refused") {
+          // python could not make the session: the pencil back up, and why
+          if (after.bar || after.pressed !== "false") {
+            return `${page}: ${JSON.stringify(after)}`;
+          }
+          if (!notice.startsWith("Not editable — ")) {
+            return `${page}: it said ${JSON.stringify(notice)}`;
+          }
+          continue;
+        }
         if (!offered) {
           if (saved.length || byKey.bar) return `${page}: W did something`;
           continue;
