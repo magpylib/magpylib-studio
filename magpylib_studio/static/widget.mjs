@@ -973,11 +973,12 @@ function render({ model, el }) {
   /** The colour bar, for the sensor selected or the first the field
    *  colours, with the cut the model holds -- and the renderer colouring
    *  what it shows, which the sensors on screen decide as much as the cut.
-   *  Not while a run plays or a later step of it is on screen: a frame is
-   *  drawn in magpylib's colours for that step, which no bar says. */
+   *  Not while a run plays or another of its steps than the payload's is
+   *  on screen: a frame is drawn in magpylib's colours for that step,
+   *  which no bar says. */
   function dressColorBar() {
     const payload = model.get("payload") || {};
-    barAside = playing || shown > 0;
+    barAside = playing || shown !== drawnStep();
     colorBar.update({
       payload,
       selected: model.get("selected") || [],
@@ -994,10 +995,10 @@ function render({ model, el }) {
   }
   let barAside = false; // see `dressColorBar`
 
-  /** The bar away as a run starts or leaves its first step, and back as it
-   *  returns there and stops. */
+  /** The bar away as a run starts or leaves the payload's step, and back
+   *  as it returns there and stops. */
   function asideColorBar() {
-    if ((playing || shown > 0) !== barAside) dressColorBar();
+    if ((playing || shown !== drawnStep()) !== barAside) dressColorBar();
   }
 
   /** Beside the editing column, its height, while the column is out;
@@ -1496,10 +1497,13 @@ function render({ model, el }) {
   // changes shape as it goes is asked for a frame at a time, as in the panel:
   // the whole run is every trace of every step, and one frame is all anyone
   // is looking at.
+  /** The step of the run the payload draws: the first of a run captured,
+   *  the last of a session's, where magpylib draws an object on a path. */
+  const drawnStep = () => model.get("payload")?.step ?? 0;
   let playing = false;
   let inFlight = false;
   let wanted = null; // the frame last asked for, which may not be the one shown
-  let shown = 0;
+  let shown = drawnStep(); // the step on screen
   let runId = 0; // which scene a frame was asked for; the model's, per payload
   let silence = null; // how long a frame has gone unanswered
   let startedAt = 0;
@@ -1559,6 +1563,16 @@ function render({ model, el }) {
       reached(wanted);
       return;
     }
+    // The step a session's payload draws is drawn from it, whole, and
+    // nothing is asked for: its field lines, and its pixels in the colour
+    // bar's colours, are what no frame carries. A captured run's first
+    // frame is its payload's own, and the cheaper to draw.
+    if (model.get("payload")?.step !== undefined && wanted === drawnStep()) {
+      if (slot.host !== view) return;
+      reached(wanted);
+      draw();
+      return;
+    }
     inFlight = true;
     model.send({ kind: "frame", index: wanted, runId });
     clearTimeout(silence);
@@ -1588,12 +1602,6 @@ function render({ model, el }) {
     scrub.value = String(index);
     showStep();
     asideColorBar();
-    // A document's run ends on the scene its payload draws, still, with
-    // what no frame carries: its field lines, worked out for that pose. So
-    // its last step is drawn whole again, rather than left as the frame was.
-    if (index === frames() - 1 && model.get("payload")?.fieldlines?.length) {
-      draw();
-    }
     if (playing) afterFrame();
     else if (wanted !== null && wanted !== shown) askFor(wanted);
   }
@@ -2353,7 +2361,7 @@ function render({ model, el }) {
       inFlight = false;
       answered(); // nothing is owed any more
       wanted = null;
-      shown = 0;
+      shown = drawnStep();
     }
     if (scene || now.has("tree")) {
       dressLegend();
@@ -2463,10 +2471,10 @@ function render({ model, el }) {
     api.setSpaces(spaces);
     api.highlight(model.get("selected") || []);
     if (editable()) setHandles(handles);
-    // The payload is the run's first frame, so a redraw of the same run --
-    // a theme that changed -- would leave the picture at the start while the
-    // counter says otherwise. Back to the step that was on screen.
-    if (shown > 0) askFor(shown);
+    // The payload is one step of the run (`drawnStep`), so a redraw of the
+    // same run -- a theme that changed -- would leave the picture there
+    // while the counter says otherwise. Back to the step that was on screen.
+    if (shown !== drawnStep()) askFor(shown);
     // The view framed itself at whatever size it had then, and a host may
     // not have laid it out yet: a cell whose output is made before it is
     // placed, or a second output beside it that narrows the first. So it is

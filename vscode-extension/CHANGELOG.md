@@ -27,8 +27,12 @@ next one's bar, or the switch beside them gives those on one colormap one scale,
 one bar standing for them all, so their colours compare however many there are;
 and a picture of the view carries the bar as it carries the scale bar. The cut
 is a view setting, `view.color_range`, kept by a saved page. The selected
-sensor's bar shows, else the first's; while a run plays, or shows a later step,
-the bar steps aside, as the steps are in magpylib's colours.
+sensor's bar shows, else the first's; while a run plays, or shows a step other
+than the one its scene draws, the bar steps aside, as the steps are in
+magpylib's colours. A view of a cell's own objects has the bar too, with or
+without field lines: its sensors' pixels are drawn as an editable view's are,
+their parts listed beneath them; `magpy.show(..., backend=...)` hands its
+backend each sensor's pixels drawn into the sensor, and has none (#70).
 
 </details>
 
@@ -143,6 +147,21 @@ to 59, its frame rate (#58).
 
 </details>
 
+<details>
+<summary>Faster on a slow machine</summary>
+
+A sensor dragged past magnets that stand still keeps their field, computed once
+on a grid fixed in the world, and its lines are traced from where its pixels are
+now; and a drag's later steps set the pose on the objects themselves rather than
+building the scene's document again, unless the object is a pattern's source. A
+sensor drag of the Halbach demo went from 34 to 3 ms a step in python. Without a
+GPU the flow draws some twenty frames a second instead of sixty, and none while
+a handle is held: a page at rest on a machine four times slower than a laptop's
+went from 49 to 26 % busy. The graduated box's labels are made only while it
+shows, which took a third off every redraw (#68, #70).
+
+</details>
+
 ### Fixed
 
 <details>
@@ -162,7 +181,13 @@ slow kernel answers: each answer is drawn where the handles hold it (#65). On a
 slower machine a drag no longer stops redrawing what it moves -- the field
 lines, a sensor's arrows -- once two redraws pass 8 ms: they come as often as
 what they cost allows, a third of the time at most, and only a scene whose
-redraw freezes the drag for 100 ms stops until the release (#67).
+redraw freezes the drag for 100 ms stops until the release (#67). A drag of
+several objects at once no longer adds a pose of each to the scene's log, and
+its script, at every step; and a sensor's arrows in a weak field, a microtesla
+or less, point the way it does. A run with field lines no longer draws its last
+step over and over, a hundred and sixty times a second, for as long as the page
+is open; and an editable view of a run opens on its last step, the one its scene
+draws, its counter saying so (#70).
 
 </details>
 

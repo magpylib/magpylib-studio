@@ -208,7 +208,11 @@ async function serveFrame({ index, runId }) {
 
 /** How many steps the paths have: what the transport is drawn for, until the
  *  first frame says how many magpylib composed. */
+/** How many steps the scene's run has: one past the step its payload
+ *  draws, the last (`step`), which counts every path -- `paths` leaves out
+ *  those too long to drag, and a pattern's copies. */
 function framesOf(payload) {
+  if (payload.step !== undefined) return payload.step + 1;
   const steps = Object.values(payload.paths || {}).map(
     (path) => path.position.length,
   );

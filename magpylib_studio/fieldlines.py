@@ -26,7 +26,9 @@ the view needs to draw lines nobody has to tune:
 During a gesture the grid is coarser and kept for its length, unless the
 sensor itself moves: the field of what does not move is computed once and
 only the moving sources' field added each frame, which is the whole field to
-float precision -- see `MagpylibStudioSession._field_lines`.
+float precision. A sensor dragged past sources that all stand still keeps a
+grid too, fixed in the world, and the field on it, until its pixels leave
+it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
@@ -166,6 +168,27 @@ def grid_around(sources, seeds, points, flat=None):
     }
 
 
+#: How far inside a kept grid its seeds must stay, as a share of its
+#: largest side: about half the padding `grid_around` gives them, so a
+#: line from a pixel near the edge still has some way to run.
+HELD_MARGIN = 1 / 12
+
+
+def holds(grid, seeds):
+    """Whether `grid` still serves `seeds`: they lie within it, kept
+    `HELD_MARGIN` from its edges -- and in its plane, a flat one's."""
+    local = (np.asarray(seeds, dtype=float) - grid["origin"]) @ np.asarray(
+        grid["axes"]
+    ).T
+    sides = grid["step"] * (np.asarray(grid["shape"]) - 1)
+    margin = HELD_MARGIN * float(sides.max())
+    if is_flat(grid):
+        if np.abs(local[:, 2]).max() > 1e-3 * grid["step"]:
+            return False
+        local, sides = local[:, :2], sides[:2]
+    return bool(((local >= margin) & (local <= sides - margin)).all())
+
+
 def is_flat(grid):
     """Whether `grid` is a plane's."""
     return grid["shape"][2] == 1
@@ -264,28 +287,16 @@ def colours(sensor, readings):
     return list(table), [low, high]
 
 
-def item(sensor, key, grid, values, within, seeds, readings):
-    """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
-    part (`threejs.PARTS`): the grid, the
-    field along its axes, which points are inside a magnet, the pixels to
-    start from, nearest the middle first, how far apart to keep the lines,
-    and the colours their |field| takes (`colours`)."""
-    from magpylib_studio.threejs import part_id
-
-    lut, levels = colours(sensor, readings)
+def encoded_field(grid, values, within):
+    """The grid, the field along its axes and which of its points are
+    inside a magnet, as an item carries them: the part of `item` that costs,
+    and that a field standing still through a drag keeps."""
     # 16 bits a component, against the peak: a quarter of the bytes JSON
     # numbers took, and 40 uT steps for a 1.3 T peak, finer than a line shows
     along = values @ grid["axes"].T
     peak = float(np.max(np.abs(along))) or 1.0
     quanta = np.round(along / peak * 32767).astype("<i2")
-    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
-    starts = seeds[order][:MAX_SEEDS]
     return {
-        "kind": "fieldlines",
-        "object_id": key,
-        # a part of the sensor's drawing, hidden and faded apart from it
-        "part": part_id(key, "lines"),
-        "name": f"{sensor.style.label or 'Sensor'} field lines",
         "origin": np.asarray(grid["origin"]).tolist(),
         "axes": np.asarray(grid["axes"]).ravel().tolist(),
         "step": grid["step"],
@@ -295,6 +306,27 @@ def item(sensor, key, grid, values, within, seeds, readings):
         "inside": base64.b64encode(np.packbits(within, bitorder="little")).decode(
             "ascii"
         ),
+    }
+
+
+def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
+    """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
+    part (`threejs.PARTS`): the grid and the field on it (`encoded_field`,
+    or `encoded` where that is in hand), the pixels to start from, nearest
+    the middle first, how far apart to keep the lines, and the colours
+    their |field| takes (`colours`)."""
+    from magpylib_studio.threejs import part_id
+
+    lut, levels = colours(sensor, readings)
+    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
+    starts = seeds[order][:MAX_SEEDS]
+    return {
+        "kind": "fieldlines",
+        "object_id": key,
+        # a part of the sensor's drawing, hidden and faded apart from it
+        "part": part_id(key, "lines"),
+        "name": f"{sensor.style.label or 'Sensor'} field lines",
+        **(encoded or encoded_field(grid, values, within)),
         "seeds": np.round(starts, 9).ravel().tolist(),
         "spacing": spacing_of(seeds, grid),
         "lut": lut,

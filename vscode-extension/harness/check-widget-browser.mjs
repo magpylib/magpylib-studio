@@ -736,12 +736,15 @@ async function sharedScale(port, base) {
   );
 }
 
-/** A run's later steps are drawn in magpylib's colours for that step, which
- *  the colour bar does not say: it steps aside from the first step on, and
- *  is back when the run is. */
+/** A session's payload draws its run's last step, with what no frame
+ *  carries: the field lines, the pixels in the colour bar's colours. The
+ *  view opens there, the counter saying so; the bar steps aside from the
+ *  other steps, which are magpylib's frames in its colours; and back at the
+ *  last step the payload is drawn once -- it was drawn, asked for that step
+ *  again, and drawn, for as long as the page was open. */
 async function colorBarAside(port, base) {
   await check(
-    "the colour bar steps aside from a run's later steps",
+    "a run's last step is its payload's, drawn once, with the colour bar",
     async () => {
       const tab = await openTab(port);
       try {
@@ -751,19 +754,33 @@ async function colorBarAside(port, base) {
           20_000,
         );
         if (!ready) return "the page never drew";
+        const counter = `return document.querySelector(".magpy-scene-counter").textContent`;
+        const barShown = `return !document.querySelector(".magpy-colorbar")?.hidden`;
         const scrubTo = async (step) => {
           await tab.evaluate(
             `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
           );
           await wait(300);
-          return tab.evaluate(
-            `return !document.querySelector(".magpy-colorbar")?.hidden`,
-          );
+          return tab.evaluate(barShown);
         };
-        if (!(await scrubTo(0))) return "no colour bar at the run's start";
+        const opened = await tab.evaluate(counter);
+        if (opened !== "10 / 10") return `the counter opens at ${opened}`;
+        if (!(await tab.evaluate(barShown)))
+          return "no colour bar at the start";
         if (await scrubTo(5)) return "the colour bar stayed at step 6";
-        if (!(await scrubTo(0)))
-          return "the colour bar did not come back at the start";
+        await tab.evaluate(`
+          const api = window.scene3d;
+          window.drawn = 0;
+          for (const name of ["render", "renderFrame"]) {
+            const was = api[name];
+            api[name] = (...args) => (window.drawn++, was(...args));
+          }
+          return 1`);
+        if (!(await scrubTo(9)))
+          return "the colour bar did not come back at the last step";
+        await wait(1000);
+        const drawn = await tab.evaluate("return window.drawn");
+        if (drawn > 2) return `the last step was drawn ${drawn} times in 1.3 s`;
         return thrown(tab);
       } finally {
         await tab.close();

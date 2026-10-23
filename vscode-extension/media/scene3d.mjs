@@ -64,6 +64,7 @@ function overlapsAt(index, frames) {
 }
 let hints = [];
 let axes = null; // the box, ticks and names that give the scene a scale
+let axesFor = null; // { ranges, labels } it is drawn for: see `drawAxes`
 // How the host wants the scale said: "box", "cube" -- the view cube and the
 // scale bar, in a corner -- or "none". Held here, like hiding, because the box
 // is drawn again on every redraw.
@@ -170,6 +171,7 @@ function ensureRenderer(canvasEl) {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   canvasEl.appendChild(renderer.domElement);
+  if (drawnBySoftware()) flowFrameMs = SOFTWARE_FLOW_FRAME_MS;
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
   camera.up.set(0, 0, 1); // magpylib scenes are z-up
@@ -219,14 +221,28 @@ function drawFrame(now) {
   frameAsked = false;
   const flows = flowing();
   if (flows) askFrame();
-  // the flow alone draws no faster than `FLOW_FRAME_MS`, whatever the display
-  if (!frameWanted && (!flows || now - lastDrawn < FLOW_FRAME_MS)) return;
+  // the flow alone draws no faster than `flowFrameMs`, whatever the display
+  if (!frameWanted && (!flows || now - lastDrawn < flowFrameMs)) return;
   frameWanted = false;
   lastDrawn = now;
   if (flows) flowClock.value = ((now / 1000) * FLOW_RATE) % 1;
   sizeGrips();
   renderer.render(scene, camera);
   drawCorner(true);
+}
+
+/** Whether the view is drawn without a GPU -- SwiftShader, llvmpipe, a
+ *  basic render driver -- as a browser draws on a machine without one, or
+ *  with it turned off. */
+function drawnBySoftware() {
+  const gl = renderer.getContext();
+  const debug = gl.getExtension("WEBGL_debug_renderer_info");
+  const name = gl.getParameter(
+    debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER,
+  );
+  return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(
+    String(name),
+  );
 }
 
 /** A rotation as magpylib writes one: an axis scaled by its angle in degrees. */
@@ -564,6 +580,7 @@ function makeGizmo() {
       }
       releasePaths(from.pathTraces);
       from = null;
+      redraw(); // and the flow goes on
     }
   });
   // A handle lit under the pointer, or moved by it.
@@ -1710,6 +1727,7 @@ function watchGrips() {
     gripping = null;
     gripPressed = false;
     controls.enabled = true;
+    redraw(); // and the flow goes on
     element.style.cursor = "";
     showSnap(null);
     if (gripped) setGrips(gripped.value);
@@ -2312,6 +2330,7 @@ function fade(part, level) {
  *  leaves room for the box's numbers only while it is there. */
 function setAxes(mode) {
   axesMode = mode === "box" || mode === "none" ? mode : "cube";
+  if (axesMode === "box" && !axes) buildAxes();
   if (axes) axes.visible = axesMode === "box";
   // Whatever was under the pointer was under it in the last view drawn,
   // which a pooled renderer is moving on from.
@@ -3333,6 +3352,10 @@ function pixelShape(symbol) {
  *  tail narrowing and fading behind it: it says the way even standing. */
 const FLOW_RATE = 0.8; // pulses passing a point of the wire each second
 const FLOW_FRAME_MS = 15; // sixty frames a second: a faster display draws every other
+// Without a GPU every frame is the CPU's: sixty a second of a software
+// renderer kept a slow machine's page 97% busy with the view at rest.
+const SOFTWARE_FLOW_FRAME_MS = 45; // some twenty frames a second
+let flowFrameMs = FLOW_FRAME_MS; // see `drawnBySoftware`
 const FLOW_SPACING = 0.75; // of the wire's own radius from a pulse to the next
 const FLOW_TAIL = 0.6; // of that spacing, a pulse's tail
 const flowGlow = { value: 0 }; // how far a head is lit toward white: on a dark scene
@@ -3455,9 +3478,12 @@ function streamColour(colour) {
 /** Whether a current or a field line flows where it can be seen: so
  *  whether the view asks for its next frame. Not with the view off screen,
  *  or its page hidden, or every line that flows hidden, nor for whoever
- *  asked for less motion. A line taken off the scene is forgotten. */
+ *  asked for less motion -- nor while a handle is held, when each frame
+ *  the flow draws is one the drag's own redraws wait behind. A line taken
+ *  off the scene is forgotten. */
 function flowing() {
   if (!flowShown || stillFlow || !inSight || document.hidden) return false;
+  if (gizmo?.dragging || gripping) return false;
   for (const line of flowLines) {
     let node = line;
     let shown = true;
@@ -4019,7 +4045,17 @@ function drawAxes(ranges, labels) {
   // The unit the coordinates are in, for the box's numbers and the scale
   // bar: magpylib names it in each axis's label, "x (mm)".
   unit = /\(([^)]+)\)\s*$/.exec(labels?.x ?? "")?.[1] ?? "";
-  if (!ranges) return;
+  axesFor = ranges ? { ranges, labels } : null;
+  // Built only while it is shown: its numbers are a canvas each, and a
+  // scene drawn again at every step of a drag built them all again for a
+  // box nobody saw -- a third of a redraw. `setAxes` builds it when asked.
+  if (axesMode === "box") buildAxes();
+}
+
+/** The box for the scene `drawAxes` was last given. */
+function buildAxes() {
+  if (!axesFor) return;
+  const { ranges, labels } = axesFor;
   // The box's numbers in the unit that reads best for its largest; a unit
   // this does not know is kept, numbers and names as they came.
   const factor = METRES[unit];

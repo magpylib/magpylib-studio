@@ -582,6 +582,66 @@ def test_a_gesture_that_changes_something_still_records_it(session):
     assert session.doc["variables"]["gap"] == 0.01
 
 
+@pytest.mark.parametrize(
+    ("targets", "live"),
+    [
+        (["sensor"], True),
+        (["ring1"], True),  # a collection, a pattern inside it
+        (["r1"], False),  # a pattern's source
+        (["sensor", "ring1"], True),  # two at once
+    ],
+)
+def test_a_drags_later_steps_are_the_scene_built_again(targets, live):
+    """Past a drag's first step a pose is set on the live objects, not built
+    from the log again -- but where the pose goes in before a pattern's
+    step, which its copies follow. Either way each object dragged is pinned
+    once, however many steps, and every object -- a collection's children
+    and a pattern's copies too -- is where building the log again puts it."""
+    s = MagpylibStudioSession()
+    s.load_example("halbach")
+    built = []
+    build = s._build
+    s._build = lambda: built.append(1) or build()
+    starts = {t: np.atleast_2d(s._objs[t].position)[-1] for t in targets}
+
+    def drag(steps):
+        s.begin_interaction()
+        for i in steps:
+            s.apply_edits(
+                [
+                    {
+                        "objectId": t,
+                        "position": (
+                            starts[t] + np.array([0.001, 0.002, 0]) * i
+                        ).tolist(),
+                        "orientation": [0, 5 * i, 10 * i],
+                    }
+                    for t in targets
+                ]
+            )
+        s.end_interaction()
+
+    events = len(s.doc["events"])
+    drag(range(1, 4))
+    assert len(s.doc["events"]) - events == 2 * len(targets)
+    assert (len(built) == len(targets)) == live  # the first step's builds alone
+    # and again, from where it was let go: its pin the log's end, written over
+    built.clear()
+    drag(range(4, 7))
+    assert (not built) == live
+    assert len(s.doc["events"]) - events == 2 * len(targets)
+    live_poses = {
+        key: (np.atleast_2d(obj.position).copy(), obj.orientation.as_matrix())
+        for key, obj in s._objs.items()
+    }
+    build()
+    assert s._objs.keys() == live_poses.keys()
+    for key, obj in s._objs.items():
+        position, turn = live_poses[key]
+        np.testing.assert_allclose(np.atleast_2d(obj.position), position, atol=1e-12)
+        np.testing.assert_allclose(obj.orientation.as_matrix(), turn, atol=1e-12)
+
+
 def test_edits_after_a_gesture_undo_on_their_own_again(session):
     """A group closes: the next edit is its own step, and a gesture left open
     by a view that went away is closed by the next one that begins."""

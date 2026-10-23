@@ -1376,12 +1376,7 @@ def _instanced_pixels(objects, key_of, fields=None):
         from magpylib.graphics.backend import pixel_fields
 
         fields = pixel_fields(_given(objects))
-    items = []
-    for sensor in sensors:
-        key = key_of(id(sensor))
-        if key is None or sensor not in fields:
-            continue
-        items.extend(_pixels_of(sensor, fields[sensor], key))
+    items = _pixel_items(sensors, fields, key_of)
     was = [(sensor, sensor.style.pixel.size) for sensor in sensors]
     for sensor, _ in was:
         sensor.style.pixel.size = 0
@@ -1393,7 +1388,19 @@ def _instanced_pixels(objects, key_of, fields=None):
     return items, restore
 
 
-def _pixels_of(sensor, field, key, path_ind=-1):
+def _pixel_items(sensors, fields, key_of, autosize=None):
+    """The ``pixels`` items of `sensors` reading `fields`, each keyed by
+    `key_of` its ``id`` -- see `_pixels_of`."""
+    items = []
+    for sensor in sensors:
+        key = key_of(id(sensor))
+        if key is None or sensor not in fields:
+            continue
+        items.extend(_pixels_of(sensor, fields[sensor], key, autosize=autosize))
+    return items
+
+
+def _pixels_of(sensor, field, key, path_ind=-1, autosize=None):
     """A sensor's pixels as ``pixels`` items: one for its readings, and one
     of cubes for the pixels that read nothing, where the style shows those.
 
@@ -1414,7 +1421,7 @@ def _pixels_of(sensor, field, key, path_ind=-1):
     style = sensor.style
     pixel = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
     field = np.asarray(field, dtype=float)
-    sizes = pixel_sizes(sensor, field, path_index=path_ind)
+    sizes = pixel_sizes(sensor, field, autosize=autosize, path_index=path_ind)
     colors = pixel_colors(sensor, field, path_index=path_ind)
 
     # into the world: the pixels sit in the sensor's frame, and so does the
@@ -1423,6 +1430,10 @@ def _pixels_of(sensor, field, key, path_ind=-1):
     turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[path_ind]
     origins = turn.apply(pixel) + pose
     vectors = turn.apply(field[path_ind])
+    # directions alone, which is all a view reads of them: rounded as fields,
+    # a microtesla's turned by the rounding, and a weaker one's vanished
+    lengths = np.linalg.norm(vectors, axis=1, keepdims=True)
+    vectors = np.divide(vectors, lengths, out=np.zeros_like(vectors), where=lengths > 0)
     null = (np.abs(field[path_ind]) < _NULL_VECTOR).all(axis=1)
     shape = _PIXEL_SHAPES[_resolve(sensor, "style.pixel.field.symbol")]
     label = (style.label if style.label is not None else type(sensor).__name__) or ""
@@ -1518,7 +1529,7 @@ def _given(objects):
             yield obj
 
 
-def object_tree(objects):
+def object_tree(objects, apart=()):
     """The Collection hierarchy under `objects`, and every object in it by id:
     nodes of ``{id, label, kind, children}``, what a legend draws. Here
     rather than beside the widget that first needed it, because the studio's
@@ -1530,7 +1541,9 @@ def object_tree(objects):
 
     Each object appears once, where it sits in its collection. One that was
     passed and is also inside another that was passed is shown in its
-    collection rather than a second time at the top.
+    collection rather than a second time at the top. A sensor whose id is
+    among `apart` has its pixels drawn apart (`capture_view`), and its
+    parts listed as a session's are (`part_nodes`).
     """
     given = list(_given(objects))
     inside = {id(child) for obj in given for child in getattr(obj, "children_all", ())}
@@ -1545,8 +1558,7 @@ def object_tree(objects):
             "label": getattr(obj.style, "label", None) or type(obj).__name__,
             "kind": type(obj).__name__,
             "children": [node(child) for child in getattr(obj, "children", ())]
-            # its field lines: no view of objects draws its pixels apart
-            + (part_nodes(obj, key) if sensor else []),
+            + (part_nodes(obj, key, apart=key in apart) if sensor else []),
             **({"colors": tip_colors(obj)} if sensor else {}),
         }
 
@@ -1571,17 +1583,54 @@ DEFAULT_HEIGHT = 420
 WHOLE_RUN_LIMIT: int = 50_000_000
 
 
-def run_payload(scene):
+def run_payload(scene, pixels=()):
     """What a view draws `scene` from, and the run kept to serve it a frame
     at a time: None when there is no run, or it plays on its own, as motion
-    and carried changes -- see `played_payload`."""
+    and carried changes -- see `played_payload`. `pixels` are a still
+    scene's sensors' pixels, drawn apart from it (`capture_view`)."""
     # a script's scene, which `_capture` did not make
     _mark_paths(scene)
     _mark_flows(scene)
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
-    payload = played or view_payload(scene, index=0)
+    payload = played or view_payload(scene, index=0, pixels=pixels)
     return payload, (scene if animated and played is None else None)
+
+
+def capture_view(objects, animation=False, **kwargs):
+    """`_capture` for a view of `objects` that nobody edits, and the
+    ``pixels`` items of their sensors whose pixels read the field: drawn as
+    instances, as a session's are (`_instanced_pixels`), keyed by magpylib's
+    own ``id(obj)`` as `view_payload` keys traces -- so a view of a cell's
+    own objects has their colour bar too. A run keeps magpylib's pixels,
+    each step computed and coloured as it is; and so does a scene drawn
+    with style given to `show`, which a sensor's own style here would not
+    know of."""
+    if animation or any(key.startswith("style") for key in kwargs):
+        return _capture(objects, animation=animation, **kwargs), []
+    sensors = _reading_sensors(objects)
+    if not sensors:
+        return _capture(objects, **kwargs), []
+    from magpylib.graphics.backend import pixel_fields
+
+    fields = pixel_fields(_given(objects))
+    _, restore = _instanced_pixels(objects, str, fields)
+    try:
+        scene = _capture(objects, **kwargs)
+    finally:
+        restore()
+    # in metres, and the drawing in the unit magpylib chose for it
+    per_metre = _drawn_per_metre(scene)
+    if per_metre is None:
+        return _capture(objects, **kwargs), []  # one it does not say: its own
+    # Sized as this drawing sizes them: pixels on one spot are a fifth of
+    # their sensor, which the panel sizes here, unpinned (`autosize`) --
+    # without it, a fifth of magpylib's metre.
+    pixels = _pixel_items(sensors, fields, str, scene.panel(1, 1).autosize)
+    for item in pixels:
+        for key, digits in (("origins", 9), ("sizes", 9)):
+            item[key] = np.round(np.asarray(item[key]) * per_metre, digits).tolist()
+    return scene, pixels
 
 
 def whole_run(scene, limit=None):
@@ -1681,7 +1730,7 @@ def widget_state(scene, height=DEFAULT_HEIGHT):
     return {"state": state, "run": run}
 
 
-def view_payload(scene, index=None, traces=None):
+def view_payload(scene, index=None, traces=None, pixels=()):
     """Everything a three.js view needs for a scene nobody is editing.
 
     `scene_payload` below is for the studio, where the engine owns the objects:
@@ -1705,15 +1754,16 @@ def view_payload(scene, index=None, traces=None):
     smear of two hundred poses for a run. `frame_payload` carries the others,
     once the view asks for them. `traces`, when given, are drawn instead of
     any frame's: the first frame's, tagged with their tracks, for
-    `played_payload`.
+    `played_payload`. `pixels` are drawn beside them: `capture_view`.
     """
     panel = scene.panel(1, 1)
     if traces is None:
         frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
         traces = [t for frame in frames for t in frame.traces]
+    reach = None if panel.ranges is None else panel.ranges.tolist()
     return {
-        **_by_kind(_keyed(traces)),
-        "ranges": None if panel.ranges is None else panel.ranges.tolist(),
+        **_by_kind([*_keyed(traces), *pixels]),
+        "ranges": _ranges_with_pixels(reach, pixels),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no
