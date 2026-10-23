@@ -921,6 +921,17 @@ def test_a_colour_table_takes_named_colours():
     assert lut[-4:] == [255, 0, 0, 255]
 
 
+def test_a_part_with_no_polarization_takes_the_middle_colour():
+    """Zero polarization comes as intensity 0 everywhere: plotly draws it in
+    the colorscale's neutral middle, not at the south end (#73). A magnet's
+    own intensities, 0 to 1, are where they were."""
+    plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(3, 0.6, 0.3))
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+    meshes = widget.SceneWidget(plate, magnet).payload["meshes"]
+    along = [sorted(set(mesh["uv"][::2])) for mesh in meshes]
+    assert along == [[0.5], [0.0, 1.0]]
+
+
 def test_a_run_in_which_nothing_moves_is_motion_of_nothing():
     """A current that ramps changes nothing drawn: no tracks, nothing kept to
     serve -- and the view steps through it with nothing to ask for."""
