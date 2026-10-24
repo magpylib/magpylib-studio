@@ -19,7 +19,8 @@ the view needs to draw lines nobody has to tune:
   none, so a uniform field shows a line per row and not one per pixel.
 - **Where they end.** Leaving the grid, closing on itself, where the field
   fades out, or at a magnet -- the grid points inside one, from magpylib's
-  own polarization (`getJ`), so every shape it knows. The lines are of the
+  own polarization (`getJ`), so every shape it knows; a cuboid's answered
+  here as getJ answers it (`inside`), for a meshed body's thousands. The lines are of the
   field in the air: let through the magnets, 3D lines wandered on paths too
   unstable to trace.
 
@@ -176,19 +177,53 @@ def grid_around(sources, seeds, points, flat=None):
 HELD_MARGIN = 1 / 12
 
 
-def holds(grid, seeds):
+#: How far inside a grid kept from rest a sensor's seeds must be to be drawn
+#: from it at rest again: three quarters of the sixth of its side that
+#: `grid_around` pads them by. A sensor let go nearer an edge than that is
+#: given a grid round where it is now, rather than lines with half the room
+#: on that side; a gesture makes do with `HELD_MARGIN` while it lasts.
+REST_MARGIN = 1 / 8
+
+
+def holds(grid, seeds, margin=HELD_MARGIN):
     """Whether `grid` still serves `seeds`: they lie within it, kept
-    `HELD_MARGIN` from its edges -- and in its plane, a flat one's."""
+    `margin` of its largest side from its edges -- and in its plane, a flat
+    one's."""
     local = (np.asarray(seeds, dtype=float) - grid["origin"]) @ np.asarray(
         grid["axes"]
     ).T
     sides = grid["step"] * (np.asarray(grid["shape"]) - 1)
-    margin = HELD_MARGIN * float(sides.max())
+    margin = margin * float(sides.max())
     if is_flat(grid):
         if np.abs(local[:, 2]).max() > 1e-3 * grid["step"]:
             return False
         local, sides = local[:, :2], sides[:2]
     return bool(((local >= margin) & (local <= sides - margin)).all())
+
+
+def slide(kept, then, now):
+    """`kept` moved with a sensor whose seeds stood at `then` and stand at
+    `now`: by whole steps along its own axes, so that the seeds keep the
+    room they had in it, and every point it shares with `kept` is one of
+    `kept`'s exactly. ``(grid, was)``, `was` the index among `kept`'s points
+    of each of the new grid's, or -1 where it has none -- only those are
+    for the field to be computed at. None where the seeds have left a flat
+    grid's plane, which another grid is for."""
+    axes = np.asarray(kept["axes"])
+    moved = (np.mean(now, axis=0) - np.mean(then, axis=0)) @ axes.T
+    if is_flat(kept):
+        local = (np.asarray(now, dtype=float) - kept["origin"]) @ axes.T
+        if np.abs(local[:, 2]).max() > 1e-3 * kept["step"]:
+            return None
+        moved[2] = 0.0
+    shift = np.rint(moved / kept["step"]).astype(int)
+    shape = np.asarray(kept["shape"])
+    index = np.indices(shape).reshape(3, -1).T + shift
+    inside = np.all((index >= 0) & (index < shape), axis=1)
+    was = np.full(len(index), -1)
+    was[inside] = np.ravel_multi_index(index[inside].T, shape)
+    grid = {**kept, "origin": kept["origin"] + (shift * kept["step"]) @ axes}
+    return grid, was
 
 
 def is_flat(grid):
@@ -215,18 +250,19 @@ def points_of(grid):
     return grid["origin"] + local @ grid["axes"]
 
 
-#: Element-point pairs per magpylib call, a wire's segments and a mesh's faces
-#: each an element (`_weight`). Magpylib evaluates every pair of a call at once, with about a kilobyte of temporaries each: a meshed body of
-#: a thousand cells against a grid at rest took 8 GB in one call. Measured on
-#: that body (1,056 cells, 8,000 points): 25,000 pairs a call took 6.7 s,
-#: 100,000 4.6 s, 200,000 4.4 s in 0.44 GB, and 1 or 2 million no less time in
-#: 1.4 and 2.2 GB. Hence a constant and no option: past the knee only memory
-#: grows. Set it at run time if you must; each call reads it.
+#: Element-point pairs evaluated at once, all threads together; a wire's
+#: segments and a mesh's faces are each an element (`_weight`). Magpylib
+#: evaluates every pair of a call at once, with about a kilobyte of
+#: temporaries each: a meshed body of a thousand cells against a grid at rest
+#: took 8 GB in one call. Measured on that body (1,056 cells, 8,000 points):
+#: 25,000 pairs a call took 6.7 s, 100,000 4.6 s, 200,000 4.4 s in 0.44 GB, and
+#: 1 or 2 million no less time in 1.4 and 2.2 GB. Hence a constant and no
+#: option: past the knee only memory grows. Set it at run time if you must;
+#: each call reads it.
 PAIRS_PER_CALL = 200_000
-#: Threads the calls of `_in_chunks` run on: magpylib's kernels are numpy,
-#: which lets go of the GIL. Four, which a small laptop has too: a meshed
-#: U-core's field (5,888 cells, 8,280 points) took 14 s on one, 4.8 on four
-#: and 3.5 on eight, each holding its own call's memory.
+#: Threads the calls of `_in_chunks` run on, each with its share of
+#: `PAIRS_PER_CALL`: magpylib's kernels are numpy, which lets go of the GIL.
+#: Four, which a small laptop has too.
 THREADS = min(4, os.cpu_count() or 1)
 
 
@@ -243,28 +279,24 @@ def _weight(source):
 
 
 def _in_chunks(get, sources, points):
-    """`get(sources, points, sumup=True)`, in calls of no more than
-    `PAIRS_PER_CALL` element-point pairs, on `THREADS` threads.
+    """`get(sources, points, sumup=True)` at the last step of every path, on
+    `THREADS` threads: `PAIRS_PER_CALL` element-point pairs at once in all,
+    the memory one call took before there were threads.
 
     A call takes a slice of the sources and as many points as it can --
     all of them, mostly: magpylib reads each source of a call in Python
     before it computes, so slicing the points instead read a body meshed
     into thousands of cells once per slice, a third of the time. A source
-    on a path is answered step by step, so there the points are sliced, as
-    before, to keep those answers as they come."""
+    on a path is answered step by step, and the last step is the one the
+    view draws and a sensor's seeds stand at (`seeds_of`). One call is made
+    where it is, and so are all where no thread can be started (Pyodide)."""
     points = np.asarray(points, dtype=float).reshape(-1, 3)
-    if any(np.ndim(s.position) > 1 for s in sources):
-        step = max(1, PAIRS_PER_CALL // max(len(sources), 1))
-        parts = [
-            np.asarray(get(sources, points[i : i + step], sumup=True)).reshape(-1, 3)
-            for i in range(0, len(points), step)
-        ]
-        return np.concatenate(parts) if parts else np.zeros((0, 3))
     n = len(points)
+    budget = max(1, PAIRS_PER_CALL // THREADS)
     groups, group, load = [], [], 0
     for source in sources:
         weight = _weight(source)
-        if group and (load + weight) * n > PAIRS_PER_CALL:
+        if group and (load + weight) * n > budget:
             groups.append((group, load))
             group, load = [], 0
         group.append(source)
@@ -272,19 +304,28 @@ def _in_chunks(get, sources, points):
     if group:
         groups.append((group, load))
     calls = [
-        (group, i, min(n, i + max(1, PAIRS_PER_CALL // load)))
+        (group, i, min(n, i + max(1, budget // load)))
         for group, load in groups
-        for i in range(0, n, max(1, PAIRS_PER_CALL // load))
+        for i in range(0, n, max(1, budget // load))
     ]
 
     def call(task):
         group, i, j = task
-        return i, j, np.asarray(get(group, points[i:j], sumup=True)).reshape(-1, 3)
+        answer = np.asarray(get(group, points[i:j], sumup=True))
+        return i, j, answer.reshape(-1, j - i, 3)[-1]
+
+    def answers():
+        if THREADS == 1 or len(calls) < 2:
+            return list(map(call, calls))
+        try:
+            with ThreadPoolExecutor(min(THREADS, len(calls))) as pool:
+                return list(pool.map(call, calls))
+        except RuntimeError:  # no thread to be had: one call after another
+            return list(map(call, calls))
 
     out = np.zeros((n, 3))
-    with ThreadPoolExecutor(max(1, min(THREADS, len(calls)))) as pool:
-        for i, j, part in pool.map(call, calls):
-            out[i:j] += part
+    for i, j, part in answers():
+        out[i:j] += part
     return out
 
 
@@ -302,15 +343,12 @@ def inside(sources, points):
     Cuboids are tested here, each point against the cuboids round it
     (`_inside_cuboids`): magpylib's `getJ` tests every point against every
     cuboid, which for a body meshed into thousands of cells cost a third as
-    much as its field. Every other shape is magpylib's."""
+    much as its field. Every other shape is magpylib's. A source on a path
+    stands at its last step, as in `field`."""
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     within = np.zeros(len(points), dtype=bool)
     if not sources:
         return within
-    if any(np.ndim(s.position) > 1 for s in sources):
-        # a source on a path: magpylib answers step by step, as it does for
-        # `field`, and the two are kept alike
-        return np.linalg.norm(_in_chunks(magpy.getJ, sources, points), axis=1) > 0
     cuboids = [s for s in sources if _cuboid(s)]
     others = [s for s in sources if not _cuboid(s)]
     if cuboids:
@@ -325,20 +363,24 @@ def _cuboid(source):
 
 
 #: How far, relative to a half-side, a point may stand outside a cuboid and
-#: still be in it: magpylib's own ``RTOL_SURFACE``, so the answer is getJ's.
+#: still be in it: magpylib's own ``RTOL_SURFACE``.
 _SURFACE = 1e-15
 
 
 def _inside_cuboids(cuboids, points):
-    """`inside` for cuboids, each in one pose, as magpylib's getJ answers it:
-    in the cuboid's own frame, within its half-sides, polarization not zero.
+    """`inside` for cuboids at their last step, as magpylib's getJ answers
+    it: in the cuboid's own frame, within its half-sides, polarization not
+    zero. To rounding: a point on a turned cuboid's face is in or out by the
+    last bit of a rotation, and that bit can fall either way here and there.
     Each point is tested only against the cuboids whose centres are within
     the largest half-diagonal of it -- a meshed body's neighbours -- found
     with a k-d tree; a cuboid far larger than the rest is tested against
     every point, so that one does not widen the search for all."""
-    centres = np.array([c.position for c in cuboids], dtype=float)
+    centres = np.array([np.atleast_2d(c.position)[-1] for c in cuboids], dtype=float)
     halves = np.abs(np.array([c.dimension for c in cuboids], dtype=float)) / 2
-    turns = Rotation.concatenate([c.orientation for c in cuboids])
+    turns = Rotation.concatenate(
+        [c.orientation if c.orientation.single else c.orientation[-1] for c in cuboids]
+    )
     live = np.array([np.any(c.polarization) for c in cuboids])
     reach = np.linalg.norm(halves, axis=1)
     large = reach > 4 * np.median(reach)

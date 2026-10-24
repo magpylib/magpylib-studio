@@ -104,8 +104,6 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # built and loses how, so this is the one trace of the structure that went
     # missing, and the caller is told rather than left to notice: a leaf with
     # what it is made of, so that `_flattening_warnings` can tell copies apart.
-    if id(obj) not in names and isinstance(obj, magpy.Collection):
-        unnamed.append(("Collection", None))
     if isinstance(obj, magpy.Collection):
         spec = {
             "id": object_id,
@@ -124,6 +122,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
                 for child in obj.children
             ],
         }
+        if id(obj) not in names:
+            unnamed.append(("Collection", _made_of(spec)))
     else:
         params = {}
         for attr in _PARAM_ATTRS:
@@ -146,8 +146,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
             params["position"] = position.tolist()
         spec = {"id": object_id, "type": _dotted_type(obj), "params": params}
         if id(obj) not in names:
-            made_of = {k: v for k, v in params.items() if k != "position"}
-            unnamed.append((spec["type"], json.dumps(made_of, sort_keys=True)))
+            unnamed.append((spec["type"], _made_of(spec)))
         if moved is not None:
             spec["transforms"] = [{"op": "move", "displacement": moved, "start": 0}]
         rotvec = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))
@@ -175,7 +174,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     return spec
 
 
-def _document_from_named(named, names):
+def _document_from_named(named, names, script=True):
     """[(name, obj), ...] -> (document, warnings). `names` maps id(obj) -> the
     script's variable name, so nested children keep their script identity too
     (a Collection's children are not in `named`, only reachable through it)."""
@@ -200,7 +199,7 @@ def _document_from_named(named, names):
         for name, obj in unique_top
     ]
     return {"objects": objects}, (
-        _flattening_warnings(unnamed)
+        _flattening_warnings(unnamed, script)
         + _inert_warnings(objects)
         + _style_warnings(left_out)
     )
@@ -248,7 +247,16 @@ def _style_warnings(left_out):
     ]
 
 
-def _flattening_warnings(unnamed):
+def _made_of(spec):
+    """What an object is made of apart from where it stands -- a leaf its
+    parameters, a collection what it holds -- the same for copies of one."""
+    if spec["type"] == "Collection":
+        return json.dumps([_made_of(child) for child in spec.get("children", [])])
+    params = {k: v for k, v in (spec.get("params") or {}).items() if k != "position"}
+    return json.dumps([spec["type"], params], sort_keys=True)
+
+
+def _flattening_warnings(unnamed, script=True):
     """What executing the script cost, in the words of what it built.
 
     Reported per type and only from two upwards: one inline object is how
@@ -256,12 +264,13 @@ def _flattening_warnings(unnamed):
     longer exists. Saying so matters most to a caller that is about to edit
     them — they are eight separate objects now, and changing one changes one.
 
-    Only copies count: objects made of the same values, placed apart, which
-    is what a loop of one object built and a pattern builds back. A body
-    meshed into cells and solved, each cell its own polarization, or a coil
-    whose every winding has its own vertices, is many objects no pattern
-    makes, and the advice to pattern them would be noise. `unnamed` holds
-    ``(type, what it is made of)``; a collection's is None, and counts.
+    Copies -- made of the same values, placed apart (`_made_of`) -- are what
+    a loop of one object built and a pattern builds back, and are told so.
+    Objects each made of their own values, a meshed body's solved cells or a
+    coil whose windings differ, no pattern makes: from a `script` they are
+    only said to be separate now, and from a notebook's own objects, which
+    lose no loop by being copied into a view, nothing is said. `unnamed`
+    holds ``(type, what it is made of)``.
     """
     made = {}
     for kind, made_of in unnamed:
@@ -269,14 +278,20 @@ def _flattening_warnings(unnamed):
     warnings = []
     for type_name, values in made.items():  # first-seen order
         times = Counter(values)
-        count = sum(1 for value in values if value is None or times[value] > 1)
-        if count > 1:
+        copies = sum(1 for value in values if times[value] > 1)
+        if copies > 1:
             warnings.append(
-                f"{count} {type_name} objects were built without a variable of "
+                f"{copies} {type_name} objects were built without a variable of "
                 "their own — a loop or comprehension, which running the script "
                 "cannot preserve. They are separate objects here: editing one "
                 "does not change the others. Pattern them instead to get that "
                 "back."
+            )
+        elif script and len(values) > 1:
+            warnings.append(
+                f"{len(values)} {type_name} objects were built without a "
+                "variable of their own. They are separate objects here: "
+                "editing one does not change the others."
             )
     return warnings
 
@@ -300,12 +315,14 @@ def document_from_namespace(namespace):
     return _document_from_named(named, _name_map(namespace))
 
 
-def document_from_objects(objects, namespace):
+def document_from_objects(objects, namespace, script=True):
     """The objects of one captured show() call, named from the namespace
-    where possible (falling back to style labels / generated ids)."""
+    where possible (falling back to style labels / generated ids). `script`:
+    whether they come from running a script, rather than a notebook's own
+    objects copied into a view (`_flattening_warnings`)."""
     names = _name_map(namespace)
     named = [(names.get(id(obj)) or obj.style.label or "obj", obj) for obj in objects]
-    return _document_from_named(named, names)
+    return _document_from_named(named, names, script)
 
 
 def _loop_names(code):

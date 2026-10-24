@@ -14,7 +14,6 @@ import re
 import sys
 import tempfile
 import types
-import warnings
 from typing import Annotated
 
 import magpylib as magpy
@@ -22,7 +21,7 @@ import numpy as np
 import pytest
 import traitlets
 
-from magpylib_studio import backend, threejs
+from magpylib_studio import backend, importer, threejs
 
 widget = pytest.importorskip("magpylib_studio.widget")
 
@@ -1110,31 +1109,53 @@ def test_the_view_is_shipped_with_the_package():
 # --- editing: SceneWidget(..., editable=True), over a session in the kernel -
 
 
+def _cubes(*polarizations):
+    """Unnamed cubes in a row, one per polarization."""
+    return [
+        magpy.magnet.Cuboid(
+            polarization=p, dimension=(0.01, 0.01, 0.01), position=(0.02 * i, 0, 0)
+        )
+        for i, p in enumerate(polarizations)
+    ]
+
+
+_DIFFERING = [(0, 0, 1), (0, 0.5, 1), (0.2, 0, 1)]
+
+
 @pytest.mark.parametrize(
-    ("polarizations", "said"),
+    ("objects", "script", "said"),
     [
-        ([(0, 0, 1)] * 3, True),  # copies, as a loop of one magnet makes them
-        ([(0, 0, 1), (0, 0.5, 1), (0.2, 0, 1)], False),  # as a solved mesh's cells
+        # copies, as a loop of one magnet makes them: a pattern builds them back
+        (lambda: _cubes(*[(0, 0, 1)] * 3), False, "Pattern them"),
+        # each its own, as a solved mesh's cells: a script lost its loop
+        (lambda: _cubes(*_DIFFERING), True, "separate objects"),
+        # but a notebook's own objects, copied into a view, lost nothing
+        (lambda: _cubes(*_DIFFERING), False, None),
+        # nor do the groups of a body meshed by parts, every cell its own
+        (
+            lambda: [
+                magpy.Collection(*_cubes(*[(0, n, 1 + k) for k in range(3)]))
+                for n in range(3)
+            ],
+            False,
+            None,
+        ),
     ],
 )
-def test_unnamed_objects_are_said_to_be_a_loop_only_when_copies(polarizations, said):
-    """Unnamed copies of one object are a loop a pattern builds back, and the
-    view says so as it copies them; unnamed objects each made of their own
-    values, as a meshed body's solved cells are, are not, and it says
-    nothing."""
-    cells = magpy.Collection(
-        *(
-            magpy.magnet.Cuboid(
-                polarization=p, dimension=(0.01, 0.01, 0.01), position=(0.02 * i, 0, 0)
-            )
-            for i, p in enumerate(polarizations)
-        )
+def test_unnamed_objects_are_said_to_be_a_loop_only_when_copies(objects, script, said):
+    """Unnamed objects made of the same values, placed apart, are a loop that
+    a pattern builds back, and are said so; ones each made of their own, a
+    meshed body's solved cells, are said only to be separate now -- and only
+    when a script built them."""
+    _, warnings = importer.document_from_objects(
+        [magpy.Collection(*objects())], {}, script=script
     )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        widget.SceneWidget(cells, editable=True)
-    loop = [w for w in caught if "without a variable" in str(w.message)]
-    assert bool(loop) == said
+    loop = [w for w in warnings if "without a variable" in w]
+    if said is None:
+        assert not loop
+    else:
+        assert any(said in w for w in loop)
+        assert said == "Pattern them" or not any("Pattern them" in w for w in loop)
 
 
 def _studio(**traits):

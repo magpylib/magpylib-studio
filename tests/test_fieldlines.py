@@ -90,42 +90,77 @@ def test_the_switch_is_the_documents(tmp_path):
 
 def test_field_in_chunks_matches_one_call(monkeypatch):
     """B, H and the inside of many sources, in slices of the sources and the
-    grid, on threads, are what one magpylib call gives -- on a cuboid's faces
-    and corners too, which the inside is tested on without magpylib."""
+    grid, on threads, are what one magpylib call gives at the last step of
+    every path -- on an upright cube's faces and corners too, which the
+    inside is tested on without magpylib; a turned one's, to rounding, just
+    within and just without."""
     cells = [
         magpy.magnet.Cuboid(
             dimension=(1, 1, 1), polarization=(0, 0.3, 1), position=(i, 0, 0)
         )
         for i in range(7)
     ]
+    turned = magpy.magnet.Cuboid(
+        dimension=(1, 2, 0.5),
+        polarization=(1, 0, 0),
+        position=(3, 3, 0),
+        orientation=Rotation.from_rotvec((0.3, -0.7, 1.1)),
+    )
+    travels = magpy.magnet.Cuboid(
+        dimension=(1, 1, 1), polarization=(0, 0, 1), position=[(0, 4, 0), (2, 4, 0)]
+    )
     cells += [
-        magpy.magnet.Cuboid(
-            dimension=(1, 2, 0.5),
-            polarization=(1, 0, 0),
-            position=(3, 3, 0),
-            orientation=Rotation.from_rotvec((0.3, -0.7, 1.1)),
-        ),
+        turned,
+        travels,
         magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 0)),
         magpy.current.Polyline(current=2, vertices=[(0, -2, 0), (6, -2, 0), (6, 4, 1)]),
     ]
-    rotated = cells[7]
-    corners = rotated.position + rotated.orientation.apply(
-        [(0.5, 1, 0.25), (-0.5, 0, 0.25), (0, -1, 0)]
-    )
+    near_faces = [(0.49, 0.99, 0.24), (-0.49, 0, 0.24), (0.51, 1.01, 0.26)]
     points = np.concatenate(
         [
             np.random.default_rng(0).uniform(-2, 8, size=(50, 3)),
-            [(0.5, 0.5, 0.5), (1.5, 0, 0), (6.5, 0.5, -0.5)],
-            corners,
+            [(0.5, 0.5, 0.5), (1.5, 0, 0), (6.5, 0.5, -0.5), (2.5, 4.5, 0.5)],
+            turned.position + turned.orientation.apply(near_faces),
         ]
     )
     monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 30)  # several calls each way
     for kind, get in (("B", magpy.getB), ("H", magpy.getH)):
         np.testing.assert_allclose(
-            fieldlines.field(cells, points, kind), get(cells, points, sumup=True)
+            fieldlines.field(cells, points, kind), get(cells, points, sumup=True)[-1]
         )
-    inside = np.linalg.norm(magpy.getJ(cells, points, sumup=True), axis=1) > 0
+    inside = np.linalg.norm(magpy.getJ(cells, points, sumup=True)[-1], axis=1) > 0
     np.testing.assert_array_equal(fieldlines.inside(cells, points), inside)
+
+
+def test_a_sensor_let_go_far_off_takes_its_grid_along(monkeypatch):
+    """Let go past the room its grid kept round it, a sensor's grid moves
+    with it by whole steps: the field it had is kept where the two meet,
+    computed only where the moved one is new -- and is the field there."""
+    widget = view()
+    session = widget._session
+    before = session._rest_lines["probe"]["grid"]
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines,
+        "field",
+        lambda sources, points, kind="B": (
+            computed.append(len(points)) or field(sources, points, kind)
+        ),
+    )
+    edit = {"objectId": "probe", "position": [0.004, 0, 0]}
+    widget._reply({"method": "begin_interaction"})
+    widget._reply({"method": "apply_edits", "params": {"edits": [edit]}, "scene": True})
+    widget._reply({"method": "end_interaction"})
+    computed.clear()
+    session.get_scene()
+    after = session._rest_lines["probe"]
+    points = fieldlines.points_of(after["grid"])
+    assert not np.allclose(after["grid"]["origin"], before["origin"])
+    assert 0 < sum(computed) < len(points) / 2  # the strip it moved onto
+    np.testing.assert_allclose(
+        after["values"], field(fieldlines.sources_of(session.scene), points), atol=1e-15
+    )
 
 
 def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):

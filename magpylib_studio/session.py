@@ -2127,6 +2127,28 @@ def _create_parts(params):
     return factory, parts
 
 
+def _broke(event, error):
+    """What the history says of an event the fold could not apply."""
+    return {
+        "id": event.get("id"),
+        "target": event.get("target"),
+        "source": _event_source(event),
+        "error": f"{type(error).__name__}: {error}",
+    }
+
+
+def _addable(holder, child):
+    """Whether magpylib's `add` takes `child` into `holder`: its own two
+    refusals, asked ahead (`_add_waiting`) -- a child that has a parent, and
+    a collection added into itself or into one it holds."""
+    if child.parent is not None:
+        return False
+    return not (
+        isinstance(child, magpy.Collection)
+        and (child is holder or holder in child.collections_all)
+    )
+
+
 def _event_source(event):
     """One event as the line it stands for, for a history list."""
     op = event.get("op", "rotate_from_angax")
@@ -2609,6 +2631,10 @@ class MagpylibStudioSession:
         #: beside the objects rather than on them because the built object
         #: has its checks skipped: it is the cache that knows.
         self._mesh_status: dict[str, dict] = {}
+        #: What each mesh file this build read held, by object: a field kept
+        #: for a scene (`_sources_written`) is not the field of a file since
+        #: exported again, or of the same name in another folder.
+        self._mesh_read: dict[str, str | None] = {}
         #: Where a relative mesh path is relative *to* — the directory of the
         #: document, which only the host knows, so it says (see load_scene).
         self._base_dir: str | None = None
@@ -2647,6 +2673,7 @@ class MagpylibStudioSession:
         # Refilled as the objects are built. The cache behind it is not
         # cleared: it is keyed by what was read, not by which scene read it.
         self._mesh_status = {}
+        self._mesh_read = {}
         self._vars = expressions.resolve_variables(self.doc.get("variables") or {})
         # Hard bounds are checked here rather than where a value is typed, so
         # they hold however the variable arrived at its value — including
@@ -2664,25 +2691,20 @@ class MagpylibStudioSession:
         self._specs = {}  # id -> the spec its create event describes
         self._parents = {}  # id -> parent id or None
         self._broken = []  # events the fold could not apply, in order
+        breaks = []  # (where in the log, what broke): `_add_waiting` reports late
         self.scene = magpy.Collection()
         self._adding = {}
-        for event in self._folded_events():
+        for at, event in enumerate(self._folded_events()):
             try:
-                self._apply(event)
+                self._apply(event, at, breaks)
             except Exception as e:  # noqa: BLE001 - one bad event is not a
                 # broken document: the rest of the log still describes a
                 # scene, and refusing to build it would leave nothing to
                 # look at while fixing the event that went wrong.
-                self._broken.append(
-                    {
-                        "id": event.get("id"),
-                        "target": event.get("target"),
-                        "source": _event_source(event),
-                        "error": f"{type(e).__name__}: {e}",
-                    }
-                )
-        self._add_waiting()
+                breaks.append((at, _broke(event, e)))
+        self._add_waiting(breaks)
         self._adding = None
+        self._broken = [entry for _, entry in sorted(breaks, key=lambda b: b[0])]
         # The object tree is a projection of the log, rebuilt here rather than
         # stored: two representations of the same structure would drift.
         self._objects_view = self._project()
@@ -2725,15 +2747,16 @@ class MagpylibStudioSession:
             return {"ok": False, "error": str(e)}
         return {"ok": True, "rollback": index, "events": total}
 
-    def _apply(self, event):
-        """Fold one event into the scene being built."""
+    def _apply(self, event, at=None, breaks=None):
+        """Fold one event into the scene being built: the `at`-th of the log,
+        a failure of a create's late add going into `breaks` (`_build`)."""
         op = event.get("op", "rotate_from_angax")
         if op != "create" or event.get("children"):
             # anything else reads the tree, and a collection given its
             # children takes them from where they stand: both see it whole
-            self._add_waiting()
+            self._add_waiting(breaks)
         if op == "create":
-            self._create(event)
+            self._create(event, at)
             return
         if op == "remove":
             self._remove(event["target"])
@@ -2754,7 +2777,7 @@ class MagpylibStudioSession:
         else:
             _replay(target, [resolved])
 
-    def _create(self, event):
+    def _create(self, event, at=None):
         """A create event -> a live magpylib object in its place in the tree."""
         object_id = event["target"]
         if object_id in self._objs:
@@ -2786,19 +2809,40 @@ class MagpylibStudioSession:
         # step's failure, added now so that it is reported as this step's.
         waits = parent is None or isinstance(self._objs.get(parent), magpy.Collection)
         if self._adding is not None and waits:
-            self._adding.setdefault(parent, []).append(obj)
+            self._adding.setdefault(parent, []).append((obj, event, at))
         else:
             (self._objs[parent] if parent else self.scene).add(obj)
 
-    def _add_waiting(self):
+    def _add_waiting(self, breaks=None):
         """Add the objects a run of creates left waiting, each parent's in
         one call: magpylib's `add` goes through every child a collection
         holds each time, so one at a time costs the square of the count: a
-        body meshed into thousands of cells."""
-        if self._adding:
-            for parent, children in self._adding.items():
-                (self._objs[parent] if parent else self.scene).add(*children)
-            self._adding.clear()
+        body meshed into thousands of cells.
+
+        One `add` takes them all or, on the first it refuses, none -- while
+        having already set the parent of those before it. So what it would
+        refuse is asked first, its own two refusals: a child with a parent,
+        and a collection added into itself. Those are added one at a time,
+        to fail with magpylib's own words, and go into `breaks` under the
+        create that made them, where the log has it."""
+        if not self._adding:
+            return
+        waiting, self._adding = self._adding, {}
+        for parent, entries in waiting.items():
+            holder = self._objs[parent] if parent else self.scene
+            fits = [entry for entry in entries if _addable(holder, entry[0])]
+            if fits:
+                holder.add(*(obj for obj, _, _ in fits))
+            taken = {id(obj) for obj, _, _ in fits}
+            for obj, event, at in entries:
+                if id(obj) in taken:
+                    continue
+                try:
+                    holder.add(obj)
+                except Exception as e:
+                    if breaks is None:
+                        raise
+                    breaks.append((at, _broke(event, e)))
 
     def _remove(self, object_id):
         """A remove event: the object and everything under it stop existing
@@ -3101,6 +3145,7 @@ class MagpylibStudioSession:
             return resolved
         mesh = meshes.resolve(source, base_dir=self._base_dir, cache=self._mesh_cache)
         if object_id is not None:
+            self._mesh_read[object_id] = mesh.get("sha256")
             recorded = source.get("sha256")
             self._mesh_status[object_id] = {
                 **mesh["status"],
@@ -3667,17 +3712,8 @@ class MagpylibStudioSession:
         `last` (`_last_events`) and the object's `spec`, from a caller asking
         this of every object: looked up, rather than the log and the document
         searched again for each."""
-        if last is None:
-            event = next(
-                (
-                    e
-                    for e in reversed(self.doc.get("events") or [])
-                    if e["target"] == object_id and e.get("op") == op
-                ),
-                None,
-            )
-        else:
-            event = last.get((object_id, op))
+        last = self._last_events() if last is None else last
+        event = last.get((object_id, op))
         if event is not None:
             value = event.get(key)
             return value if expressions.contains_expression(value) else None
@@ -3694,7 +3730,7 @@ class MagpylibStudioSession:
     def _last_events(self):
         """The last event of each kind on each object, ``{(target, op):
         event}``: the log read once, for a caller asking of every object."""
-        return {(e["target"], e.get("op")): e for e in self.doc.get("events") or []}
+        return {(e.get("target"), e.get("op")): e for e in self.doc.get("events") or []}
 
     def _events_of(self):
         """Each object's events in the log's order, ``{target: [event,
@@ -4127,14 +4163,27 @@ class MagpylibStudioSession:
             kind = fieldlines.kind_of(sensor)
             seeds = fieldlines.seeds_of(sensor)
             cache = self._field_cache.get(key)
-            # kept from rest: drawn from at rest, and a gesture's start
-            rest = self._rest_lines.get(key) if not (gesture and cache) else None
-            if not (
-                rest is not None
-                and rest["kind"] == kind
-                and rest["sources"] == written()
-                and fieldlines.holds(rest["grid"], seeds)
+            # kept from rest: drawn from at rest, and the start of a gesture
+            # that moves no source -- for no other frame is it asked after,
+            # nor is the log read for it
+            kept = not gesture or (
+                cache is None
+                and names is not None
+                and not self._sources_named(sources, names, key_of)
+            )
+            rest = self._rest_lines.get(key) if kept else None
+            if rest is not None and not (
+                rest["kind"] == kind and rest["sources"] == written()
             ):
+                rest = None
+            margin = fieldlines.HELD_MARGIN if gesture else fieldlines.REST_MARGIN
+            fits = rest is not None and fieldlines.holds(rest["grid"], seeds, margin)
+            # The same field, and the sensor let go short of its room: the
+            # grid moved with it, the field computed where it was not
+            slid = None
+            if rest is not None and not fits and not gesture:
+                slid = fieldlines.slide(rest["grid"], rest["seeds"], seeds)
+            if not fits:
                 rest = None
             if rest is not None and not gesture:
                 items.append(
@@ -4150,12 +4199,7 @@ class MagpylibStudioSession:
                     )
                 )
                 continue
-            if (
-                cache is None
-                and rest is not None
-                and names is not None
-                and not self._sources_named(sources, names, key_of)
-            ):
+            if gesture and rest is not None:
                 # a gesture moving no source: the field at rest is its field
                 cache = self._field_cache[key] = {
                     "grid": rest["grid"],
@@ -4173,19 +4217,27 @@ class MagpylibStudioSession:
             # one it drags while its pixels are on it -- and the field of what
             # stays on it, adding only the moving sources' every frame.
             stays = names is not None
-            if (
-                stays
-                and cache is not None
-                and (not follows or fieldlines.holds(cache["grid"], seeds))
-            ):
-                grid = cache["grid"]
+            if slid is not None:
+                grid, was = slid
+                values, within = self._slid_field(
+                    self._rest_lines[key], grid, was, sources, kind
+                )
             else:
-                grid = fieldlines.grid_around(sources, seeds, budget)
-                if fieldlines.is_flat(grid) and not self._keeps_to_plane(
-                    sources, seeds, kind
+                if (
+                    stays
+                    and cache is not None
+                    and (not follows or fieldlines.holds(cache["grid"], seeds))
                 ):
-                    grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-            values, within = self._field_on(key, grid, sources, names, stays, kind)
+                    grid = cache["grid"]
+                else:
+                    grid = fieldlines.grid_around(sources, seeds, budget)
+                    if fieldlines.is_flat(grid) and not self._keeps_to_plane(
+                        sources, seeds, kind
+                    ):
+                        grid = fieldlines.grid_around(
+                            sources, seeds, budget, flat=False
+                        )
+                values, within = self._field_on(key, grid, sources, names, stays, kind)
             if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
                 grid, values, within
             ):
@@ -4200,9 +4252,14 @@ class MagpylibStudioSession:
                 )
             elif not gesture:
                 encoded = fieldlines.encoded_field(grid, values, within)
+                # only sensors still in the scene: a removed one's lines go
+                self._rest_lines = {
+                    k: v for k, v in self._rest_lines.items() if k in self._objs
+                }
                 self._rest_lines[key] = {
                     "sources": written(),
                     "kind": kind,
+                    "seeds": seeds,
                     "grid": grid,
                     "values": values,
                     "within": within,
@@ -4224,17 +4281,43 @@ class MagpylibStudioSession:
             )
         return items
 
+    @staticmethod
+    def _slid_field(rest, grid, was, sources, kind):
+        """The field and the inside on `grid`, slid from `rest`'s
+        (`fieldlines.slide`): kept where it was computed, computed where it
+        was not."""
+        from magpylib_studio import fieldlines
+
+        points = fieldlines.points_of(grid)
+        values = np.empty((len(points), 3))
+        within = np.empty(len(points), dtype=bool)
+        had = was >= 0
+        values[had] = rest["values"][was[had]]
+        within[had] = rest["within"][was[had]]
+        if not had.all():
+            new = points[~had]
+            values[~had] = fieldlines.field(sources, new, kind)
+            within[~had] = fieldlines.inside(sources, new)
+        return values, within
+
     def _sources_written(self):
         """What the field of the sources follows from: the log less the
-        sensors' own steps, the variables, and how far the log is folded --
-        as a digest, since a body meshed into thousands of cells writes
+        sensors' own steps, the variables, how far the log is folded, and
+        what the mesh files it reads held, from the folder they are read in
+        -- as a digest, since a body meshed into thousands of cells writes
         megabytes. The same digest is the same field (`_field_lines`)."""
         sensors = {k for k, o in self._objs.items() if isinstance(o, magpy.Sensor)}
         events = [
             e for e in self.doc.get("events") or [] if e.get("target") not in sensors
         ]
         text = json.dumps(
-            [events, self.doc.get("variables"), self._rollback],
+            [
+                events,
+                self.doc.get("variables"),
+                self._rollback,
+                self._base_dir,
+                sorted(self._mesh_read.items()),
+            ],
             sort_keys=True,
             default=str,
         )
@@ -6716,11 +6799,8 @@ class MagpylibStudioSession:
         """One object's values, grouped by the field they decide, with what a
         later step overrules already dropped. `events_of` (`_events_of`) from
         a caller asking this of every object."""
-        if events_of is None:
-            events = self.doc.get("events") or []
-            mine = [e for e in events if e.get("target") == spec["id"]]
-        else:
-            mine = events_of.get(spec["id"], [])
+        events_of = self._events_of() if events_of is None else events_of
+        mine = events_of.get(spec["id"], [])
         params = dict(spec.get("params") or {})
         out = {}
         for field, (keys, ops) in _DRAG_WRITES.items():
