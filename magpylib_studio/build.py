@@ -517,7 +517,10 @@ class Scene:
         #: Constructed, in order, for the ones never added or touched: they
         #: enter at the root when the scene is read.
         self._objects = []
-        self._ids = {spec["id"] for spec, _ in self._session._iter_specs()}
+        from magpylib_studio import importer
+
+        # each id named from a base picks up where the last left off
+        self._ids = importer._Ids(spec["id"] for spec, _ in self._session._iter_specs())
         #: The scene function this was built from, if any.
         self._built_from = None
 
@@ -890,7 +893,7 @@ class _ScriptWriter:
         self.alias = {
             word: f"{word}_" if word in self.variables else word for word in _RESERVED
         }
-        taken = set(self.variables) | set(self.alias.values())
+        taken = importer._Ids(set(self.variables) | set(self.alias.values()))
         self.function = next(
             fn for fn in ("design", "the_scene", "studio_scene") if fn not in taken
         )

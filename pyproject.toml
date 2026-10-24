@@ -95,3 +95,4 @@ ignore = [
 # A marimo cell's output *is* its last expression, so a bare name on the last
 # line is the notebook displaying something, not a statement that does nothing.
 "examples/marimo_demo.py" = ["B018"]
+"examples/ucore_demo.py" = ["B018"]

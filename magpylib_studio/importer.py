@@ -14,9 +14,11 @@ from __future__ import annotations
 import contextlib
 import dis
 import io
+import json
 import keyword
 import re
 import sys
+from collections import Counter
 
 import magpylib as magpy
 import numpy as np
@@ -70,15 +72,29 @@ def _tolist(value):
     return _zeroed(value).tolist() if isinstance(value, np.ndarray) else value
 
 
+class _Ids(set):
+    """Ids in use, and per base the number `_unique_id` gave last: every
+    number below it is taken, and the set only grows, so the next one is
+    looked for from there -- a thousand cells all called ``obj`` would
+    otherwise each count up from ``obj`` again."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.last = {}
+
+
 def _unique_id(base, used):
     base = re.sub(r"\W|^(?=\d)", "_", str(base)) or "obj"
     if keyword.iskeyword(base):
         base += "_"
-    candidate, n = base, 1
+    n = used.last.get(base, 1) if isinstance(used, _Ids) else 1
+    candidate = base if n == 1 else f"{base}_{n}"
     while candidate in used:
         n += 1
         candidate = f"{base}_{n}"
     used.add(candidate)
+    if isinstance(used, _Ids):
+        used.last[base] = n
     return candidate
 
 
@@ -86,11 +102,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # An object the script never bound to a variable was built inline — in a
     # loop, a comprehension, a helper. Executing the script keeps what it
     # built and loses how, so this is the one trace of the structure that went
-    # missing, and the caller is told rather than left to notice.
-    if id(obj) not in names:
-        unnamed.append(
-            "Collection" if isinstance(obj, magpy.Collection) else _dotted_type(obj)
-        )
+    # missing, and the caller is told rather than left to notice: a leaf with
+    # what it is made of, so that `_flattening_warnings` can tell copies apart.
     if isinstance(obj, magpy.Collection):
         spec = {
             "id": object_id,
@@ -109,6 +122,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
                 for child in obj.children
             ],
         }
+        if id(obj) not in names:
+            unnamed.append(("Collection", _made_of(spec)))
     else:
         params = {}
         for attr in _PARAM_ATTRS:
@@ -130,6 +145,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
         if np.any(position):
             params["position"] = position.tolist()
         spec = {"id": object_id, "type": _dotted_type(obj), "params": params}
+        if id(obj) not in names:
+            unnamed.append((spec["type"], _made_of(spec)))
         if moved is not None:
             spec["transforms"] = [{"op": "move", "displacement": moved, "start": 0}]
         rotvec = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))
@@ -157,7 +174,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     return spec
 
 
-def _document_from_named(named, names):
+def _document_from_named(named, names, script=True):
     """[(name, obj), ...] -> (document, warnings). `names` maps id(obj) -> the
     script's variable name, so nested children keep their script identity too
     (a Collection's children are not in `named`, only reachable through it)."""
@@ -176,13 +193,13 @@ def _document_from_named(named, names):
             unique_top.append((name, obj))
     if not unique_top:
         raise ValueError("script produced no magpylib objects")
-    used_ids, unnamed, left_out = set(), [], []
+    used_ids, unnamed, left_out = _Ids(), [], []
     objects = [
         _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names, left_out)
         for name, obj in unique_top
     ]
     return {"objects": objects}, (
-        _flattening_warnings(unnamed)
+        _flattening_warnings(unnamed, script)
         + _inert_warnings(objects)
         + _style_warnings(left_out)
     )
@@ -230,24 +247,51 @@ def _style_warnings(left_out):
     ]
 
 
-def _flattening_warnings(unnamed):
+def _made_of(spec):
+    """What an object is made of apart from where it stands -- a leaf its
+    parameters, a collection what it holds -- the same for copies of one."""
+    if spec["type"] == "Collection":
+        return json.dumps([_made_of(child) for child in spec.get("children", [])])
+    params = {k: v for k, v in (spec.get("params") or {}).items() if k != "position"}
+    return json.dumps([spec["type"], params], sort_keys=True)
+
+
+def _flattening_warnings(unnamed, script=True):
     """What executing the script cost, in the words of what it built.
 
     Reported per type and only from two upwards: one inline object is how
     anybody writes a one-off, while eight unnamed Circles are a loop that no
     longer exists. Saying so matters most to a caller that is about to edit
     them — they are eight separate objects now, and changing one changes one.
+
+    Copies -- made of the same values, placed apart (`_made_of`) -- are what
+    a loop of one object built and a pattern builds back, and are told so.
+    Objects each made of their own values, a meshed body's solved cells or a
+    coil whose windings differ, no pattern makes: from a `script` they are
+    only said to be separate now, and from a notebook's own objects, which
+    lose no loop by being copied into a view, nothing is said. `unnamed`
+    holds ``(type, what it is made of)``.
     """
+    made = {}
+    for kind, made_of in unnamed:
+        made.setdefault(kind, []).append(made_of)
     warnings = []
-    for type_name in dict.fromkeys(unnamed):  # first-seen order, deduplicated
-        count = unnamed.count(type_name)
-        if count > 1:
+    for type_name, values in made.items():  # first-seen order
+        times = Counter(values)
+        copies = sum(1 for value in values if times[value] > 1)
+        if copies > 1:
             warnings.append(
-                f"{count} {type_name} objects were built without a variable of "
+                f"{copies} {type_name} objects were built without a variable of "
                 "their own — a loop or comprehension, which running the script "
                 "cannot preserve. They are separate objects here: editing one "
                 "does not change the others. Pattern them instead to get that "
                 "back."
+            )
+        elif script and len(values) > 1:
+            warnings.append(
+                f"{len(values)} {type_name} objects were built without a "
+                "variable of their own. They are separate objects here: "
+                "editing one does not change the others."
             )
     return warnings
 
@@ -271,12 +315,14 @@ def document_from_namespace(namespace):
     return _document_from_named(named, _name_map(namespace))
 
 
-def document_from_objects(objects, namespace):
+def document_from_objects(objects, namespace, script=True):
     """The objects of one captured show() call, named from the namespace
-    where possible (falling back to style labels / generated ids)."""
+    where possible (falling back to style labels / generated ids). `script`:
+    whether they come from running a script, rather than a notebook's own
+    objects copied into a view (`_flattening_warnings`)."""
     names = _name_map(namespace)
     named = [(names.get(id(obj)) or obj.style.label or "obj", obj) for obj in objects]
-    return _document_from_named(named, names)
+    return _document_from_named(named, names, script)
 
 
 def _loop_names(code):

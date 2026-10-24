@@ -1380,7 +1380,7 @@ def _session_of(objects, namespace):
     """A studio session holding `objects`, named from `namespace`."""
     from magpylib_studio import importer
 
-    doc, said = importer.document_from_objects(objects, namespace)
+    doc, said = importer.document_from_objects(objects, namespace, script=False)
     return _loaded(lambda session: session.load_scene(doc), said, "these objects")
 
 

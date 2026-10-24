@@ -934,7 +934,7 @@ class _Recorder:
             for key, recorded in self.objects.items()
             if key in self.by_hand
         }
-        taken = set(keep.values())
+        taken = importer._Ids(keep.values())
         named = {}
         for name, held in self.held.items():
             key = held[0] if len(held) == 1 else None
