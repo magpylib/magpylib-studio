@@ -5,10 +5,11 @@ designs visually — in VS Code, in a notebook, or in code. Name the numbers tha
 matter, drag a slider, and the whole design follows, with the field computed
 exactly in milliseconds.
 
-![The Halbach example in VS Code: the objects and the steps that built them, the variables with their sliders, the 3D view and the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.png)
+![The Halbach rings of the marimo example in VS Code, half in the light theme and half in the dark: the objects and the steps that built them, the variables with their sliders, the 3D view with the field lines flowing through the bore, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.gif)
 
-_The Halbach example: two rings of ten magnets, each ring one magnet and one
-pattern. Drag `n` and both rings rebuild._
+_The Halbach rings from `examples/marimo_demo.py`: two rings of twelve magnets,
+each ring one magnet and one pattern, and the field's lines flowing through the
+bore. Drag `n` and both rings rebuild._
 
 ## What you can do
 

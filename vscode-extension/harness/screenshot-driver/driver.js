@@ -1,8 +1,8 @@
 /**
- * Sets the window up for `harness/screenshot.mjs`: the Halbach scene in its
- * tab, the studio's side bar without the Inspector, and the script tab beside
- * it. Silent unless SHOT_DIR is set, so it is harmless anywhere else. When the
- * window is ready it writes SHOT_DIR/ready, and the script takes the picture.
+ * Sets the window up for `harness/screenshot.mjs`: the scene in its tab, the
+ * studio's side bar without the Inspector, and the script tab beside it. Silent
+ * unless SHOT_DIR is set, so it is harmless anywhere else. When the window is
+ * ready it writes SHOT_DIR/ready, and the script takes the picture.
  */
 const fs = require("fs");
 const path = require("path");
@@ -18,6 +18,8 @@ const STEPS = [
   // a selection draws handles and hints over the scene
   ["magpylib-studio.inspectorView.removeView"],
   ["magpylib-studio.viewScript"],
+  // the scene in front, so the script tab draws no blinking cursor
+  ["workbench.action.focusFirstEditorGroup"],
   ["notifications.clearAll"],
 ];
 

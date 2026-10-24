@@ -39,6 +39,9 @@ repos:
     rev: "v6.0.0"
     hooks:
       - id: check-added-large-files
+        # the README's picture, flowing (`npm run screenshot`): legible at the
+        # width a README shows it costs about 1.2 MB, and it is retaken rarely
+        exclude: ^docs/halbach\.gif$
       - id: check-case-conflict
       - id: check-merge-conflict
       - id: check-symlinks
