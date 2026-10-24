@@ -5,15 +5,17 @@
  *   node harness/screenshot.mjs out.png  -> anywhere else
  *
  * The studio is installed into a VS Code of its own -- the one the test runner
- * downloaded, with a fresh profile: dark theme, no AI features, no tips --
- * beside the driver in `screenshot-driver/`, which opens the Halbach example
- * and lays the window out. VS Code then renders its own window through its
- * DevTools protocol, so no screen-recording permission is needed and nothing
- * else on the screen can end up in the picture.
+ * downloaded, with a fresh profile: no AI features, no tips -- beside the
+ * driver in `screenshot-driver/`, which opens the Halbach example and lays the
+ * window out. VS Code then renders its own window through its DevTools
+ * protocol, so no screen-recording permission is needed and nothing else on the
+ * screen can end up in the picture.
  *
- * 1800 x 1080 CSS pixels drawn at 4/3: a 2400 x 1440 PNG. With Pillow in the
- * engine's `.venv` it is reduced to 256 colours, about 320 KB instead of 830,
- * which the 3D view's shading survives without visible banding.
+ * The window is taken twice, in VS Code's dark theme and then in its light one,
+ * and the two are cut along a diagonal: light to the left of it, dark to the
+ * right. 1800 x 1080 CSS pixels drawn at 4/3: a 2400 x 1440 PNG, reduced to 256
+ * colours by Pillow from the engine's `.venv`. Without Pillow it is the dark
+ * picture alone, as taken.
  *
  * Run `npm run compile` first: the studio installed is `out/` as it stands.
  * macOS only, like check:window. Takes about a minute and opens a window.
@@ -120,11 +122,12 @@ json.dump(s.to_dict(), open(sys.argv[1], "w"), indent=2)
   return file;
 }
 
-function profile() {
+/** The settings; written again with the other theme, VS Code applies it live. */
+function profile(theme) {
   fs.writeFileSync(
     path.join(user, "User", "settings.json"),
     JSON.stringify({
-      "workbench.colorTheme": "Default Dark Modern",
+      "workbench.colorTheme": theme,
       "workbench.startupEditor": "none",
       "workbench.welcomePage.walkthroughs.openOnInstall": false,
       "workbench.secondarySideBar.defaultVisibility": "hidden",
@@ -174,31 +177,41 @@ async function devtools(port) {
   return { send, close: () => socket.close() };
 }
 
-/** 256 colours when Pillow is there; the PNG as taken when it is not. */
-function finish(raw) {
-  const reduced = spawnSync(
+/** The two cut and joined, in 256 colours, when Pillow is there. */
+function finish(dark, light) {
+  const joined = spawnSync(
     PYTHON,
     [
       "-c",
       `
 import sys
-from PIL import Image
-image = Image.open(sys.argv[1]).convert("RGB")
-image.quantize(256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG).save(sys.argv[2], optimize=True)
+from PIL import Image, ImageDraw
+dark = Image.open(sys.argv[1]).convert("RGB")
+light = Image.open(sys.argv[2]).convert("RGB")
+w, h = dark.size
+# the cut runs from 60 % across the top to 40 % across the foot, drawn at
+# four times the size and reduced, so its edge is smooth
+s = 4
+mask = Image.new("L", (w * s, h * s), 0)
+ImageDraw.Draw(mask).polygon([(0, 0), (0.6 * w * s, 0), (0.4 * w * s, h * s), (0, h * s)], fill=255)
+mask = mask.resize((w, h), Image.Resampling.LANCZOS)
+image = Image.composite(light, dark, mask)
+image.quantize(256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG).save(sys.argv[3], optimize=True)
 `,
-      raw,
+      dark,
+      light,
       out,
     ],
     { encoding: "utf8" },
   );
-  if (reduced.status !== 0) {
-    fs.copyFileSync(raw, out);
-    console.log("no Pillow in .venv: written as taken");
+  if (joined.status !== 0) {
+    fs.copyFileSync(dark, out);
+    console.log("no Pillow in .venv: the dark picture, as taken");
   }
 }
 
 install();
-profile();
+profile("Default Dark Modern");
 const file = scene();
 const env = { ...process.env, SHOT_DIR: results, SHOT_SCENE: file };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -233,16 +246,26 @@ try {
     deviceScaleFactor: SCALE,
     mobile: false,
   });
+  const capture = async (name) => {
+    const shot = await window.send("Page.captureScreenshot", {
+      format: "png",
+    });
+    if (!shot.result) {
+      throw new Error(`capture failed: ${JSON.stringify(shot.error)}`);
+    }
+    const raw = path.join(base, `${name}.png`);
+    fs.writeFileSync(raw, Buffer.from(shot.result.data, "base64"));
+    return raw;
+  };
   // the webviews lay out again at the new size, and the 3D view redraws
   await wait(4000);
-  const shot = await window.send("Page.captureScreenshot", { format: "png" });
+  const dark = await capture("dark");
+  // the workbench and the webviews take the theme, and the 3D view redraws
+  profile("Default Light Modern");
+  await wait(4000);
+  const light = await capture("light");
   window.close();
-  if (!shot.result) {
-    throw new Error(`capture failed: ${JSON.stringify(shot.error)}`);
-  }
-  const raw = path.join(base, "raw.png");
-  fs.writeFileSync(raw, Buffer.from(shot.result.data, "base64"));
-  finish(raw);
+  finish(dark, light);
   console.log(`screenshot: ${out}`);
 } catch (error) {
   failed = true;

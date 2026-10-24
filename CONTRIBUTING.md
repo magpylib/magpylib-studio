@@ -104,9 +104,10 @@ folder.
 
 **The README's screenshot**, after a change that shows in it:
 `npm run screenshot` (macOS, after `npm run compile`) opens the Halbach example
-in a VS Code of its own and writes `docs/halbach.png`, which both READMEs show.
-VS Code renders its own window, so it needs no screen-recording permission; it
-takes about a minute.
+in a VS Code of its own, takes it in the dark theme and then the light, and
+writes the two cut along a diagonal to `docs/halbach.png`, which both READMEs
+show. VS Code renders its own window, so it needs no screen-recording
+permission; it takes about a minute.
 
 **By hand, on a slow machine**, after a change to what a drag or a slider does:
 `npm run slow-machine -- examples/marimo_demo.py` (the demo by default; `--edit`
