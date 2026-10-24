@@ -583,9 +583,12 @@ explicit cross-section.
 
 ### 10.4 material-response scaling
 
-`apply_demag` builds a dense interaction matrix: O(n²) in cells. Tier 2 (μr
-~ 1000) is exactly where cell counts want to explode and the matrix conditions
-badly. Use `max_dist` / `pairs_matching`, and cap scene size in tier-2 fixtures.
+`apply_demag` solves cuboid cells on one grid by FFT and GMRES, O(n log n) in
+cells; the interactions between grids of different spacing, and of any other
+cells, stay dense, O(n²). Tier 2 (μr ~ 1000) is exactly where cell counts want
+to explode and the system conditions badly. Mesh with `meshing.mesh_uniform`,
+which gives every body one cell size so the blocks between bodies are FFT
+products too, and cap scene size in tier-2 fixtures.
 
 ### 10.5 Force is cancellation-prone
 
