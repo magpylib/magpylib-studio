@@ -2219,12 +2219,15 @@ function pick(event) {
   const drawn = [...byObjectId.values()].filter((node) => node.visible);
   const hits = raycaster.intersectObjects(drawn, true);
   // A faded object is one being looked through: the click goes on to what
-  // it shows, and takes the faded one only where nothing else is there.
+  // it shows, and takes the faded one only where nothing else is there. So
+  // does a field line, which runs past and in front of what it is the field
+  // of.
   let through;
   for (const hit of hits) {
     const objectId = ownerOf(hit.object);
     if (objectId === undefined || !shown(hit.object)) continue;
-    if ((fades.get(objectId) ?? 1) >= 1) return objectId;
+    const behind = (fades.get(objectId) ?? 1) < 1 || hit.object.userData.field;
+    if (!behind) return objectId;
     through ??= objectId;
   }
   return through;
@@ -3343,7 +3346,7 @@ function buildFieldLines(item) {
     );
     part.userData.band = i;
     part.frustumCulled = false;
-    part.raycast = unpicked;
+    part.raycast = pickedAsLine;
     part.userData.field = true; // flows, but stays when the flow goes
     flowLines.add(part);
     group.add(part);
@@ -3354,9 +3357,29 @@ function buildFieldLines(item) {
   return group;
 }
 
-/** A field line's raycast: never picked. Not made in `buildFieldLines`,
- *  where it would keep the grid it traced. */
-function unpicked() {}
+/** How wide a field line is to a click, in pixels: wider than it is drawn. */
+const FIELD_LINE_REACH = 8;
+
+/** A field line's raycast, which `pick` takes for its sensor where nothing
+ *  else is under the pointer: with its pixels hidden, its lines are all
+ *  there is of it to click. Three's would miss every line, by the empty box
+ *  `buildFieldLines` leaves for framing, so the ray is given the real one.
+ *  Not made in `buildFieldLines`, where it would keep the grid it traced. */
+function pickedAsLine(raycaster, intersects) {
+  const geometry = this.geometry;
+  const framed = geometry.boundingBox;
+  const params = raycaster.params.Line2;
+  geometry.boundingBox = null; // computed from the lines for this ray
+  raycaster.params.Line2 = {
+    threshold: Math.max(0, FIELD_LINE_REACH - this.material.linewidth),
+  };
+  try {
+    LineSegments2.prototype.raycast.call(this, raycaster, intersects);
+  } finally {
+    geometry.boundingBox = framed;
+    raycaster.params.Line2 = params;
+  }
+}
 
 /** How a sensor's field lines take their colours: each segment's ends from
  *  `lut` by their |field|, `values` of each band's `part`, past the
