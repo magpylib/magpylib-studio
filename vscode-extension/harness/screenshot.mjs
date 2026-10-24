@@ -1,19 +1,25 @@
 /**
- * The README's screenshot, taken from the studio as it stands:
+ * The README's picture, taken from the studio as it stands:
  *
- *   npm run screenshot                   -> ../docs/halbach.png
- *   node harness/screenshot.mjs out.png  -> anywhere else
+ *   npm run screenshot                   -> ../docs/halbach.png and .gif
+ *   node harness/screenshot.mjs out.png  -> anywhere else, out.gif beside it
  *
  * The studio is installed into a VS Code of its own -- the one the test runner
- * downloaded, with a fresh profile: dark theme, no AI features, no tips --
- * beside the driver in `screenshot-driver/`, which opens the Halbach example
- * and lays the window out. VS Code then renders its own window through its
- * DevTools protocol, so no screen-recording permission is needed and nothing
- * else on the screen can end up in the picture.
+ * downloaded, with a fresh profile: no AI features, no tips -- beside the
+ * driver in `screenshot-driver/`, which opens the scene and lays the window
+ * out. The scene is the Halbach design of `examples/marimo_demo.py` with its
+ * field lines, its `density` at the top of its slider (`screenshot.py scene`).
+ * VS Code then renders its own window through its DevTools protocol, so no
+ * screen-recording permission is needed and nothing else on the screen can end
+ * up in the picture.
  *
- * 1800 x 1080 CSS pixels drawn at 4/3: a 2400 x 1440 PNG. With Pillow in the
- * engine's `.venv` it is reduced to 256 colours, about 320 KB instead of 830,
- * which the 3D view's shading survives without visible banding.
+ * The lines flow. The 3D view is handed the time it draws at, so the window is
+ * taken at `FRAMES` even steps through one period of the flow, in VS Code's
+ * dark theme and then in its light one. `screenshot.py join` cuts each pair
+ * along a diagonal through the middle of the 3D view, light to its left: the
+ * first is the PNG, 2400 x 1440 (1800 x 1080 CSS pixels at 4/3), and all of
+ * them the GIF, smaller, which loops without a jump. Pillow comes from the
+ * engine's `.venv`.
  *
  * Run `npm run compile` first: the studio installed is `out/` as it stands.
  * macOS only, like check:window. Takes about a minute and opens a window.
@@ -32,6 +38,11 @@ const PYTHON = path.join(REPO, ".venv", "bin", "python");
 const WIDTH = 1800;
 const HEIGHT = 1080;
 const SCALE = 4 / 3;
+const EXAMPLE = path.join(REPO, "examples", "marimo_demo.py");
+const HELPER = path.join(HERE, "screenshot.py");
+/** One period of the flow, `scene3d.mjs`'s FLOW_RATE of 0.8 pulses a second. */
+const PERIOD_MS = 1250;
+const FRAMES = 25;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 if (process.platform !== "darwin") {
@@ -41,6 +52,7 @@ if (process.platform !== "darwin") {
 const out = path.resolve(
   process.argv[2] ?? path.join(REPO, "docs", "halbach.png"),
 );
+const gif = out.replace(/\.png$/, "") + ".gif";
 
 function vscodeApp() {
   const root = path.join(EXT, ".vscode-test");
@@ -103,28 +115,19 @@ function install() {
   );
 }
 
-/** The scene, written by the engine: the built-in Halbach example. */
+/** The scene, written by the engine: see `screenshot.py scene`. */
 function scene() {
   const file = path.join(work, "halbach.magpy.json");
-  execFileSync(PYTHON, [
-    "-c",
-    `
-import json, sys
-from magpylib_studio.session import MagpylibStudioSession
-s = MagpylibStudioSession()
-s.load_example("halbach")
-json.dump(s.to_dict(), open(sys.argv[1], "w"), indent=2)
-`,
-    file,
-  ]);
+  execFileSync(PYTHON, [HELPER, "scene", file, EXAMPLE]);
   return file;
 }
 
-function profile() {
+/** The settings; written again with the other theme, VS Code applies it live. */
+function profile(theme) {
   fs.writeFileSync(
     path.join(user, "User", "settings.json"),
     JSON.stringify({
-      "workbench.colorTheme": "Default Dark Modern",
+      "workbench.colorTheme": theme,
       "workbench.startupEditor": "none",
       "workbench.welcomePage.walkthroughs.openOnInstall": false,
       "workbench.secondarySideBar.defaultVisibility": "hidden",
@@ -144,16 +147,9 @@ function profile() {
   );
 }
 
-/** One message to the window's DevTools endpoint, answered by id. */
-async function devtools(port) {
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-  const page = targets.find(
-    (target) => target.type === "page" && /workbench/.test(target.url),
-  );
-  if (!page) {
-    throw new Error("no workbench window among the DevTools targets");
-  }
-  const socket = new WebSocket(page.webSocketDebuggerUrl);
+/** One message to a DevTools target, answered by id. */
+async function connect(target) {
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
     socket.onopen = resolve;
     socket.onerror = reject;
@@ -171,34 +167,101 @@ async function devtools(port) {
       pending.set(id, resolve);
       socket.send(JSON.stringify({ id, method, params }));
     });
-  return { send, close: () => socket.close() };
+  // the value of an expression, evaluated in the target's page
+  const evaluate = async (expression) =>
+    (
+      await send("Runtime.evaluate", {
+        expression,
+        returnByValue: true,
+        awaitPromise: true,
+      })
+    ).result?.result?.value;
+  return { send, evaluate, close: () => socket.close() };
 }
 
-/** 256 colours when Pillow is there; the PNG as taken when it is not. */
-function finish(raw) {
-  const reduced = spawnSync(
-    PYTHON,
-    [
-      "-c",
-      `
-import sys
-from PIL import Image
-image = Image.open(sys.argv[1]).convert("RGB")
-image.quantize(256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.FLOYDSTEINBERG).save(sys.argv[2], optimize=True)
-`,
-      raw,
-      out,
-    ],
-    { encoding: "utf8" },
+const targets = async (port) =>
+  (await fetch(`http://127.0.0.1:${port}/json`)).json();
+
+/** The window itself. */
+async function workbench(port) {
+  const page = (await targets(port)).find(
+    (target) => target.type === "page" && /workbench/.test(target.url),
   );
-  if (reduced.status !== 0) {
-    fs.copyFileSync(raw, out);
-    console.log("no Pillow in .venv: written as taken");
+  if (!page) {
+    throw new Error("no workbench window among the DevTools targets");
   }
+  return connect(page);
+}
+
+/** In a webview's frame: the window its content runs in, inside its host. */
+const CONTENT = `(document.querySelector("iframe#active-frame")?.contentWindow ?? window)`;
+
+/** Makes the content's `requestAnimationFrame` hand every frame the time in
+ *  `shotClock.now`, so what the 3D view draws at a time is set from here. Once
+ *  a page: a webview loaded again needs it again. */
+const HOLD = `(() => {
+  const view = ${CONTENT};
+  if (!view.shotClock) {
+    const ask = view.requestAnimationFrame.bind(view);
+    view.shotClock = { now: view.performance.now() };
+    view.requestAnimationFrame = (draw) => ask(() => draw(view.shotClock.now));
+  }
+  return view.shotClock.now;
+})()`;
+
+/** What a person would do in the 3D view before taking it, done through its
+ *  own buttons: frame everything again at the window's new size, and hide
+ *  the bore's arrows from the legend, so that only its field lines show. */
+const DRESS = `(async () => {
+  const view = ${CONTENT};
+  const deep = (root, selector) => [
+    ...root.querySelectorAll(selector),
+    ...[...root.querySelectorAll("*")].flatMap((el) => (el.shadowRoot ? deep(el.shadowRoot, selector) : [])),
+  ];
+  const button = (name) =>
+    deep(view.document, "button").find((b) => (b.title || b.getAttribute("aria-label") || "").startsWith(name));
+  const pause = () => new Promise((resolve) => view.setTimeout(resolve, 600));
+  const done = [];
+  button("Legend")?.click();
+  await pause();
+  const row = deep(view.document, ".magpy-legend-row").find((r) => /^bore's pixels/.test(r.title));
+  if (row) {
+    row.querySelector(".magpy-legend-eye").click();
+    done.push("pixels hidden");
+  }
+  await pause();
+  button("Legend")?.click();
+  button("Frame everything")?.click();
+  if (button("Frame everything")) done.push("framed");
+  await pause();
+  return done;
+})()`;
+
+/** The 3D view's webview: of the webviews, the one with the largest canvas. */
+async function sceneView(port) {
+  let best = null;
+  for (const target of await targets(port)) {
+    if (target.type !== "iframe") continue;
+    const frame = await connect(target);
+    const area = await frame.evaluate(`(() => {
+      const view = ${CONTENT};
+      return Math.max(0, ...[...view.document.querySelectorAll("canvas")].map((c) => c.width * c.height));
+    })()`);
+    if (area > (best?.area ?? 0)) {
+      best?.frame.close();
+      best = { frame, area };
+    } else {
+      frame.close();
+    }
+  }
+  if (!best) {
+    throw new Error("no webview with a canvas among the DevTools targets");
+  }
+  return best.frame;
 }
 
 install();
-profile();
+profile("Default Dark Modern");
 const file = scene();
 const env = { ...process.env, SHOT_DIR: results, SHOT_SCENE: file };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -214,6 +277,9 @@ const child = spawn(
     "--skip-welcome",
     "--skip-release-notes",
     `--remote-debugging-port=${port}`,
+    // a window behind others is hidden to its pages, which then draw no
+    // frames: the lines would not flow while someone works in front of it
+    "--disable-backgrounding-occluded-windows",
   ],
   { env, stdio: "ignore", detached: true },
 );
@@ -226,7 +292,7 @@ try {
     }
     await wait(500);
   }
-  const window = await devtools(port);
+  const window = await workbench(port);
   await window.send("Emulation.setDeviceMetricsOverride", {
     width: WIDTH,
     height: HEIGHT,
@@ -235,15 +301,59 @@ try {
   });
   // the webviews lay out again at the new size, and the 3D view redraws
   await wait(4000);
-  const shot = await window.send("Page.captureScreenshot", { format: "png" });
-  window.close();
-  if (!shot.result) {
-    throw new Error(`capture failed: ${JSON.stringify(shot.error)}`);
+  const view = await sceneView(port);
+  const dressed = await view.evaluate(DRESS);
+  if (!dressed?.includes("pixels hidden") || !dressed.includes("framed")) {
+    throw new Error(`the 3D view was not dressed: ${JSON.stringify(dressed)}`);
   }
-  const raw = path.join(base, "raw.png");
-  fs.writeFileSync(raw, Buffer.from(shot.result.data, "base64"));
-  finish(raw);
-  console.log(`screenshot: ${out}`);
+  await wait(1500);
+  // the cut goes through the middle of the 3D view: the largest webview
+  const [x, y] = await window.evaluate(`(() => {
+    const [r] = [...document.querySelectorAll("iframe")]
+      .map((frame) => frame.getBoundingClientRect())
+      .sort((a, b) => b.width * b.height - a.width * a.height);
+    return [(r.x + r.width / 2) / ${WIDTH}, (r.y + r.height / 2) / ${HEIGHT}];
+  })()`);
+  // each theme's frames on a whole period of their own, later than any
+  // time the view has drawn at, so its clock only goes forward
+  let period = 0;
+  const takeFrames = async (theme) => {
+    const held = await view.evaluate(HOLD);
+    if (held === undefined) {
+      throw new Error("could not hold the 3D view's clock");
+    }
+    period = Math.max(period, Math.ceil((held + 5000) / PERIOD_MS));
+    for (let k = 0; k < FRAMES; k++) {
+      const now = (period + k / FRAMES) * PERIOD_MS;
+      if ((await view.evaluate(`${CONTENT}.shotClock.now = ${now}`)) !== now) {
+        throw new Error("the 3D view's clock was let go");
+      }
+      await wait(250);
+      const shot = await window.send("Page.captureScreenshot", {
+        format: "png",
+      });
+      if (!shot.result) {
+        throw new Error(`capture failed: ${JSON.stringify(shot.error)}`);
+      }
+      fs.writeFileSync(
+        path.join(base, `${theme}-${k}.png`),
+        Buffer.from(shot.result.data, "base64"),
+      );
+    }
+    period += 2;
+  };
+  await takeFrames("dark");
+  // the workbench and the webviews take the theme, and the 3D view redraws
+  profile("Default Light Modern");
+  await wait(4000);
+  await takeFrames("light");
+  view.close();
+  window.close();
+  execFileSync(
+    PYTHON,
+    [HELPER, "join", base, FRAMES, x, y, out, gif].map(String),
+  );
+  console.log(`screenshot: ${out}, ${gif}`);
 } catch (error) {
   failed = true;
   console.error(`screenshot: ${error.message}`);
