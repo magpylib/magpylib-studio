@@ -96,6 +96,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import hashlib
 import json
 import math
 import os
@@ -2572,6 +2573,14 @@ class MagpylibStudioSession:
         #: what stays, computed once for the gesture. See `_field_lines`.
         self._moving: set | None = set()
         self._field_cache: dict = {}
+        #: Per sensor, the field its lines were last drawn from at rest, and
+        #: what the sources were (`_sources_written`): drawn again from it
+        #: while they are the same and its pixels are on its grid. See
+        #: `_field_lines`.
+        self._rest_lines: dict = {}
+        #: While `_build` folds the log: the objects created and not yet
+        #: added, per parent id -- see `_add_waiting`. None otherwise.
+        self._adding: dict | None = None
         #: Inside a gesture: the ``ranges`` and ``labels`` of its first frame,
         #: drawn whole -- which a later frame, drawing only what the gesture
         #: moves, extends rather than recomputes. See `get_scene`.
@@ -2656,6 +2665,7 @@ class MagpylibStudioSession:
         self._parents = {}  # id -> parent id or None
         self._broken = []  # events the fold could not apply, in order
         self.scene = magpy.Collection()
+        self._adding = {}
         for event in self._folded_events():
             try:
                 self._apply(event)
@@ -2671,6 +2681,8 @@ class MagpylibStudioSession:
                         "error": f"{type(e).__name__}: {e}",
                     }
                 )
+        self._add_waiting()
+        self._adding = None
         # The object tree is a projection of the log, rebuilt here rather than
         # stored: two representations of the same structure would drift.
         self._objects_view = self._project()
@@ -2716,6 +2728,10 @@ class MagpylibStudioSession:
     def _apply(self, event):
         """Fold one event into the scene being built."""
         op = event.get("op", "rotate_from_angax")
+        if op != "create" or event.get("children"):
+            # anything else reads the tree, and a collection given its
+            # children takes them from where they stand: both see it whole
+            self._add_waiting()
         if op == "create":
             self._create(event)
             return
@@ -2766,7 +2782,23 @@ class MagpylibStudioSession:
         self._specs[object_id] = spec
         parent = event.get("parent")
         self._parents[object_id] = parent
-        (self._objs[parent] if parent else self.scene).add(obj)
+        # A parent the build has not got, or that is no collection, is this
+        # step's failure, added now so that it is reported as this step's.
+        waits = parent is None or isinstance(self._objs.get(parent), magpy.Collection)
+        if self._adding is not None and waits:
+            self._adding.setdefault(parent, []).append(obj)
+        else:
+            (self._objs[parent] if parent else self.scene).add(obj)
+
+    def _add_waiting(self):
+        """Add the objects a run of creates left waiting, each parent's in
+        one call: magpylib's `add` goes through every child a collection
+        holds each time, so one at a time costs the square of the count: a
+        body meshed into thousands of cells."""
+        if self._adding:
+            for parent, children in self._adding.items():
+                (self._objs[parent] if parent else self.scene).add(*children)
+            self._adding.clear()
 
     def _remove(self, object_id):
         """A remove event: the object and everything under it stop existing
@@ -3628,21 +3660,49 @@ class MagpylibStudioSession:
                 out[f"written_{op}"] = written
         return out
 
-    def _last_written(self, object_id, op, key):
+    def _last_written(self, object_id, op, key, last=None, spec=None):
         """The last pose event of this kind on this object, if it holds an
-        expression — the form to edit, as opposed to what it came out to."""
-        for event in reversed(self.doc.get("events") or []):
-            if event["target"] == object_id and event.get("op") == op:
-                value = event.get(key)
-                return value if expressions.contains_expression(value) else None
+        expression — the form to edit, as opposed to what it came out to.
+
+        `last` (`_last_events`) and the object's `spec`, from a caller asking
+        this of every object: looked up, rather than the log and the document
+        searched again for each."""
+        if last is None:
+            event = next(
+                (
+                    e
+                    for e in reversed(self.doc.get("events") or [])
+                    if e["target"] == object_id and e.get("op") == op
+                ),
+                None,
+            )
+        else:
+            event = last.get((object_id, op))
+        if event is not None:
+            value = event.get(key)
+            return value if expressions.contains_expression(value) else None
         if op == "position":
             # no event pinned it, so the constructor param is what wrote it
             try:
-                value = self._spec(object_id).get("params", {}).get("position")
+                spec = spec or self._spec(object_id)
             except KeyError:
                 return None
+            value = spec.get("params", {}).get("position")
             return value if expressions.contains_expression(value) else None
         return None
+
+    def _last_events(self):
+        """The last event of each kind on each object, ``{(target, op):
+        event}``: the log read once, for a caller asking of every object."""
+        return {(e["target"], e.get("op")): e for e in self.doc.get("events") or []}
+
+    def _events_of(self):
+        """Each object's events in the log's order, ``{target: [event,
+        ...]}``: the log read once, for a caller asking of every object."""
+        out = {}
+        for event in self.doc.get("events") or []:
+            out.setdefault(event.get("target"), []).append(event)
+        return out
 
     def get_values(self, object_id):
         obj = self._objs[object_id]
@@ -4028,6 +4088,13 @@ class MagpylibStudioSession:
         (`fieldlines.holds`). A variable moves anything: then the whole field
         is computed every frame, on the coarser grid.
 
+        At rest the field is kept, and a sensor's lines are drawn from it
+        again while the sources are as they were and its pixels on its grid:
+        a sensor dragged past a magnet meshed into thousands of cells is let
+        go without the field computed again, and a drag that moves sensors
+        alone starts from it, at its finer grid, rather than a coarser one
+        computed for the gesture.
+
         `readings` are the sensors' pixel fields, where the scene has them.
         """
         from magpylib_studio import fieldlines
@@ -4045,6 +4112,13 @@ class MagpylibStudioSession:
             from magpylib.graphics.backend import pixel_fields
 
             readings = pixel_fields(self.scene)
+        digest = []  # `_sources_written`, once, where asked for
+
+        def written():
+            if not digest:
+                digest.append(self._sources_written())
+            return digest[0]
+
         items = []
         for sensor in sensors:
             key = key_of.get(id(sensor))
@@ -4053,6 +4127,43 @@ class MagpylibStudioSession:
             kind = fieldlines.kind_of(sensor)
             seeds = fieldlines.seeds_of(sensor)
             cache = self._field_cache.get(key)
+            # kept from rest: drawn from at rest, and a gesture's start
+            rest = self._rest_lines.get(key) if not (gesture and cache) else None
+            if not (
+                rest is not None
+                and rest["kind"] == kind
+                and rest["sources"] == written()
+                and fieldlines.holds(rest["grid"], seeds)
+            ):
+                rest = None
+            if rest is not None and not gesture:
+                items.append(
+                    fieldlines.item(
+                        sensor,
+                        key,
+                        rest["grid"],
+                        rest["values"],
+                        rest["within"],
+                        seeds,
+                        readings.get(sensor),
+                        rest["encoded"],
+                    )
+                )
+                continue
+            if (
+                cache is None
+                and rest is not None
+                and names is not None
+                and not self._sources_named(sources, names, key_of)
+            ):
+                # a gesture moving no source: the field at rest is its field
+                cache = self._field_cache[key] = {
+                    "grid": rest["grid"],
+                    "names": names,
+                    "field": rest["values"],
+                    "inside": rest["within"],
+                    "encoded": rest["encoded"],
+                }
             follows = names is None or key in names
             if not gesture:
                 budget = fieldlines.REST_POINTS
@@ -4087,6 +4198,16 @@ class MagpylibStudioSession:
                 encoded = held.setdefault(
                     "encoded", fieldlines.encoded_field(grid, values, within)
                 )
+            elif not gesture:
+                encoded = fieldlines.encoded_field(grid, values, within)
+                self._rest_lines[key] = {
+                    "sources": written(),
+                    "kind": kind,
+                    "grid": grid,
+                    "values": values,
+                    "within": within,
+                    "encoded": encoded,
+                }
             else:
                 encoded = None
             items.append(
@@ -4102,6 +4223,22 @@ class MagpylibStudioSession:
                 )
             )
         return items
+
+    def _sources_written(self):
+        """What the field of the sources follows from: the log less the
+        sensors' own steps, the variables, and how far the log is folded --
+        as a digest, since a body meshed into thousands of cells writes
+        megabytes. The same digest is the same field (`_field_lines`)."""
+        sensors = {k for k, o in self._objs.items() if isinstance(o, magpy.Sensor)}
+        events = [
+            e for e in self.doc.get("events") or [] if e.get("target") not in sensors
+        ]
+        text = json.dumps(
+            [events, self.doc.get("variables"), self._rollback],
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(text.encode()).hexdigest()
 
     @staticmethod
     def _keeps_to_plane(sources, seeds, kind):
@@ -4188,11 +4325,12 @@ class MagpylibStudioSession:
             ]
             return texts if any(t is not None for t in texts) else None
 
+        last = self._last_events()
         for spec, _ in self._iter_specs():
             object_id = spec["id"]
             fields = {}
             for op, key in (("position", "value"), ("orientation", "rotvec")):
-                written = self._last_written(object_id, op, key)
+                written = self._last_written(object_id, op, key, last, spec)
                 found = None if written is None else texts(written)
                 if found is not None:
                     fields[op] = found
@@ -4217,10 +4355,10 @@ class MagpylibStudioSession:
         view say what is about to be lost before the drag rather than after.
         """
         out = {}
-        events = self.doc.get("events") or []
+        events_of = self._events_of()
         for spec, _ in self._iter_specs():
             params = spec.get("params") or {}
-            mine = [e for e in events if e.get("target") == spec["id"]]
+            mine = events_of.get(spec["id"], [])
             fields = {}
             for field, (keys, ops) in _DRAG_WRITES.items():
                 sources = [params.get(key) for key in keys] + [
@@ -6574,11 +6712,15 @@ class MagpylibStudioSession:
         ]
         return sources[spent[-1] + 1 :] if spent else sources
 
-    def _object_sources(self, spec):
+    def _object_sources(self, spec, events_of=None):
         """One object's values, grouped by the field they decide, with what a
-        later step overrules already dropped."""
-        events = self.doc.get("events") or []
-        mine = [e for e in events if e.get("target") == spec["id"]]
+        later step overrules already dropped. `events_of` (`_events_of`) from
+        a caller asking this of every object."""
+        if events_of is None:
+            events = self.doc.get("events") or []
+            mine = [e for e in events if e.get("target") == spec["id"]]
+        else:
+            mine = events_of.get(spec["id"], [])
         params = dict(spec.get("params") or {})
         out = {}
         for field, (keys, ops) in _DRAG_WRITES.items():
@@ -6601,8 +6743,9 @@ class MagpylibStudioSession:
         must not say about a slider that no longer moves anything.
         """
         live = set()
+        events_of = self._events_of()
         for spec, _ in self._iter_specs():
-            for sources in self._object_sources(spec).values():
+            for sources in self._object_sources(spec, events_of).values():
                 live |= set(expressions.referenced_names(sources))
         # The steps themselves: counts, pitches, angles. A create's parameters
         # are the object's own and were read above; the ops that write a pose
@@ -6643,7 +6786,7 @@ class MagpylibStudioSession:
         the expression set aside (see _overwrite_param). Those entries carry
         it as `overridden`, and name the parameter as their field.
         """
-        events = self.doc.get("events") or []
+        events_of = self._events_of()
         out = {}
         for spec, _ in self._iter_specs():
             params = spec.get("params") or {}
@@ -6656,7 +6799,7 @@ class MagpylibStudioSession:
                         out.setdefault(name, []).append(
                             {"object_id": spec["id"], "field": param, "overridden": was}
                         )
-            mine = [e for e in events if e.get("target") == spec["id"]]
+            mine = events_of.get(spec["id"], [])
             for field, (keys, ops) in _DRAG_WRITES.items():
                 names = expressions.referenced_names([params.get(key) for key in keys])
                 shadows = [

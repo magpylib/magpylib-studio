@@ -6,6 +6,7 @@ from __future__ import annotations
 import magpylib as magpy
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from magpylib_studio import fieldlines, rpc
 from magpylib_studio.widget import SceneWidget
@@ -88,16 +89,37 @@ def test_the_switch_is_the_documents(tmp_path):
 
 
 def test_field_in_chunks_matches_one_call(monkeypatch):
-    """B, H and the inside of many sources, a slice of the grid at a time, are
-    what one magpylib call gives."""
+    """B, H and the inside of many sources, in slices of the sources and the
+    grid, on threads, are what one magpylib call gives -- on a cuboid's faces
+    and corners too, which the inside is tested on without magpylib."""
     cells = [
         magpy.magnet.Cuboid(
             dimension=(1, 1, 1), polarization=(0, 0.3, 1), position=(i, 0, 0)
         )
         for i in range(7)
     ]
-    points = np.random.default_rng(0).uniform(-2, 8, size=(50, 3))
-    monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 30)  # 4 points a call
+    cells += [
+        magpy.magnet.Cuboid(
+            dimension=(1, 2, 0.5),
+            polarization=(1, 0, 0),
+            position=(3, 3, 0),
+            orientation=Rotation.from_rotvec((0.3, -0.7, 1.1)),
+        ),
+        magpy.magnet.Cuboid(dimension=(1, 1, 1), polarization=(0, 0, 0)),
+        magpy.current.Polyline(current=2, vertices=[(0, -2, 0), (6, -2, 0), (6, 4, 1)]),
+    ]
+    rotated = cells[7]
+    corners = rotated.position + rotated.orientation.apply(
+        [(0.5, 1, 0.25), (-0.5, 0, 0.25), (0, -1, 0)]
+    )
+    points = np.concatenate(
+        [
+            np.random.default_rng(0).uniform(-2, 8, size=(50, 3)),
+            [(0.5, 0.5, 0.5), (1.5, 0, 0), (6.5, 0.5, -0.5)],
+            corners,
+        ]
+    )
+    monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 30)  # several calls each way
     for kind, get in (("B", magpy.getB), ("H", magpy.getH)):
         np.testing.assert_allclose(
             fieldlines.field(cells, points, kind), get(cells, points, sumup=True)
@@ -107,10 +129,10 @@ def test_field_in_chunks_matches_one_call(monkeypatch):
 
 
 def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
-    """The field of magnets that stand still is computed once in a drag of
-    the sensor, on a grid fixed in the world: its lines are traced from
-    where the pixels are now, until the drag takes them off the grid's
-    plane."""
+    """The field of magnets that stand still is the field at rest, kept for
+    a drag of the sensor and after it, on a grid fixed in the world: its
+    lines are traced from where the pixels are now, until the drag takes
+    them off the grid's plane, or a magnet moves."""
     widget = view()
     computed = []
     field = fieldlines.field
@@ -127,10 +149,20 @@ def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
         return item
 
     widget._reply({"method": "begin_interaction"})
-    first = step([0.001, 0, 0])
     computed.clear()
+    first = step([0.001, 0, 0])
     later = step([0.002, 0, 0])
-    assert not computed  # the field stood still
     assert later["origin"] == first["origin"] and later["seeds"] != first["seeds"]
+    widget._reply({"method": "end_interaction"})
+    widget._session.get_scene()
+    assert not computed  # the field at rest, from the drag's start to after it
+    widget._reply({"method": "begin_interaction"})
     step([0.002, 0.001, 0])  # off the plane the grid lies in
     assert computed
+    widget._reply({"method": "end_interaction"})
+    widget._session.get_scene()
+    computed.clear()
+    edit = {"objectId": "cube", "position": [0, 0, 0.001]}
+    widget._reply({"method": "apply_edits", "params": {"edits": [edit]}})
+    widget._session.get_scene()
+    assert computed  # a magnet moved

@@ -70,15 +70,29 @@ def _tolist(value):
     return _zeroed(value).tolist() if isinstance(value, np.ndarray) else value
 
 
+class _Ids(set):
+    """Ids in use, and per base the number `_unique_id` gave last: every
+    number below it is taken, and the set only grows, so the next one is
+    looked for from there -- a thousand cells all called ``obj`` would
+    otherwise each count up from ``obj`` again."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.last = {}
+
+
 def _unique_id(base, used):
     base = re.sub(r"\W|^(?=\d)", "_", str(base)) or "obj"
     if keyword.iskeyword(base):
         base += "_"
-    candidate, n = base, 1
+    n = used.last.get(base, 1) if isinstance(used, _Ids) else 1
+    candidate = base if n == 1 else f"{base}_{n}"
     while candidate in used:
         n += 1
         candidate = f"{base}_{n}"
     used.add(candidate)
+    if isinstance(used, _Ids):
+        used.last[base] = n
     return candidate
 
 
@@ -176,7 +190,7 @@ def _document_from_named(named, names):
             unique_top.append((name, obj))
     if not unique_top:
         raise ValueError("script produced no magpylib objects")
-    used_ids, unnamed, left_out = set(), [], []
+    used_ids, unnamed, left_out = _Ids(), [], []
     objects = [
         _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names, left_out)
         for name, obj in unique_top

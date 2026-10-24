@@ -5,6 +5,23 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>A magnet meshed into thousands of cells, with its field lines</summary>
+
+A scene of thousands of objects -- a magnet meshed into cells and solved by
+magpylib-material-response -- opens and drags in seconds or less where it took
+minutes. Its field lines are computed once and drawn again while the sources
+stay as they were: a sensor dragged past the cells and let go costs no new
+field. Measured on the U-core of material-response's docs at 5,888 cells, with
+field lines: open 47 → 8 s, a scene at rest 39 → 1.3 s, a drag step of the
+sensor 5 → 0.7 s. The field is computed a slice of the sources at a time, on
+four threads, and whether a point lies inside a cuboid is answered without
+magpylib, as it would answer it.
+
+</details>
+
 ## [0.7.2]
 
 ### Changed

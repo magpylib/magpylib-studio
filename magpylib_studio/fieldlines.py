@@ -32,6 +32,8 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import magpylib as magpy
 import numpy as np
@@ -213,26 +215,77 @@ def points_of(grid):
     return grid["origin"] + local @ grid["axes"]
 
 
-#: Source-point pairs per magpylib call. Magpylib evaluates every pair of a
-#: call at once, with about a kilobyte of temporaries each: a meshed body of
+#: Element-point pairs per magpylib call, a wire's segments and a mesh's faces
+#: each an element (`_weight`). Magpylib evaluates every pair of a call at once, with about a kilobyte of temporaries each: a meshed body of
 #: a thousand cells against a grid at rest took 8 GB in one call. Measured on
 #: that body (1,056 cells, 8,000 points): 25,000 pairs a call took 6.7 s,
 #: 100,000 4.6 s, 200,000 4.4 s in 0.44 GB, and 1 or 2 million no less time in
 #: 1.4 and 2.2 GB. Hence a constant and no option: past the knee only memory
 #: grows. Set it at run time if you must; each call reads it.
 PAIRS_PER_CALL = 200_000
+#: Threads the calls of `_in_chunks` run on: magpylib's kernels are numpy,
+#: which lets go of the GIL. Four, which a small laptop has too: a meshed
+#: U-core's field (5,888 cells, 8,280 points) took 14 s on one, 4.8 on four
+#: and 3.5 on eight, each holding its own call's memory.
+THREADS = min(4, os.cpu_count() or 1)
+
+
+def _weight(source):
+    """About how many elements magpylib evaluates `source` as: a mesh its
+    faces, a wire its segments, anything else one."""
+    faces = getattr(source, "faces", None)
+    if faces is not None:
+        return max(1, len(faces))
+    vertices = getattr(source, "vertices", None)
+    if vertices is not None and np.ndim(vertices) == 2:
+        return max(1, len(vertices) - 1)
+    return 1
 
 
 def _in_chunks(get, sources, points):
-    """`get(sources, points, sumup=True)`, a slice of the points at a time so
-    that no call holds more than `PAIRS_PER_CALL` source-point pairs."""
+    """`get(sources, points, sumup=True)`, in calls of no more than
+    `PAIRS_PER_CALL` element-point pairs, on `THREADS` threads.
+
+    A call takes a slice of the sources and as many points as it can --
+    all of them, mostly: magpylib reads each source of a call in Python
+    before it computes, so slicing the points instead read a body meshed
+    into thousands of cells once per slice, a third of the time. A source
+    on a path is answered step by step, so there the points are sliced, as
+    before, to keep those answers as they come."""
     points = np.asarray(points, dtype=float).reshape(-1, 3)
-    step = max(1, PAIRS_PER_CALL // max(len(sources), 1))
-    parts = [
-        np.asarray(get(sources, points[i : i + step], sumup=True)).reshape(-1, 3)
-        for i in range(0, len(points), step)
+    if any(np.ndim(s.position) > 1 for s in sources):
+        step = max(1, PAIRS_PER_CALL // max(len(sources), 1))
+        parts = [
+            np.asarray(get(sources, points[i : i + step], sumup=True)).reshape(-1, 3)
+            for i in range(0, len(points), step)
+        ]
+        return np.concatenate(parts) if parts else np.zeros((0, 3))
+    n = len(points)
+    groups, group, load = [], [], 0
+    for source in sources:
+        weight = _weight(source)
+        if group and (load + weight) * n > PAIRS_PER_CALL:
+            groups.append((group, load))
+            group, load = [], 0
+        group.append(source)
+        load += weight
+    if group:
+        groups.append((group, load))
+    calls = [
+        (group, i, min(n, i + max(1, PAIRS_PER_CALL // load)))
+        for group, load in groups
+        for i in range(0, n, max(1, PAIRS_PER_CALL // load))
     ]
-    return np.concatenate(parts) if parts else np.zeros((0, 3))
+
+    def call(task):
+        group, i, j = task
+        return i, j, np.asarray(get(group, points[i:j], sumup=True)).reshape(-1, 3)
+
+    out = np.zeros((n, 3))
+    with ThreadPoolExecutor(max(1, min(THREADS, len(calls)))) as pool:
+        for i, j, part in pool.map(call, calls):
+            out[i:j] += part
+    return out
 
 
 def field(sources, points, kind="B"):
@@ -244,11 +297,76 @@ def field(sources, points, kind="B"):
 
 def inside(sources, points):
     """Which `points` are inside a magnet: where its polarization is not
-    zero, as magpylib knows its shape. Currents have no inside."""
+    zero, as magpylib knows its shape. Currents have no inside.
+
+    Cuboids are tested here, each point against the cuboids round it
+    (`_inside_cuboids`): magpylib's `getJ` tests every point against every
+    cuboid, which for a body meshed into thousands of cells cost a third as
+    much as its field. Every other shape is magpylib's."""
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    within = np.zeros(len(points), dtype=bool)
     if not sources:
-        return np.zeros(len(points), dtype=bool)
-    polarization = _in_chunks(magpy.getJ, sources, points)
-    return np.linalg.norm(polarization, axis=1) > 0
+        return within
+    if any(np.ndim(s.position) > 1 for s in sources):
+        # a source on a path: magpylib answers step by step, as it does for
+        # `field`, and the two are kept alike
+        return np.linalg.norm(_in_chunks(magpy.getJ, sources, points), axis=1) > 0
+    cuboids = [s for s in sources if _cuboid(s)]
+    others = [s for s in sources if not _cuboid(s)]
+    if cuboids:
+        within |= _inside_cuboids(cuboids, points)
+    if others:
+        within |= np.linalg.norm(_in_chunks(magpy.getJ, others, points), axis=1) > 0
+    return within
+
+
+def _cuboid(source):
+    return isinstance(source, magpy.magnet.Cuboid) and source.polarization is not None
+
+
+#: How far, relative to a half-side, a point may stand outside a cuboid and
+#: still be in it: magpylib's own ``RTOL_SURFACE``, so the answer is getJ's.
+_SURFACE = 1e-15
+
+
+def _inside_cuboids(cuboids, points):
+    """`inside` for cuboids, each in one pose, as magpylib's getJ answers it:
+    in the cuboid's own frame, within its half-sides, polarization not zero.
+    Each point is tested only against the cuboids whose centres are within
+    the largest half-diagonal of it -- a meshed body's neighbours -- found
+    with a k-d tree; a cuboid far larger than the rest is tested against
+    every point, so that one does not widen the search for all."""
+    centres = np.array([c.position for c in cuboids], dtype=float)
+    halves = np.abs(np.array([c.dimension for c in cuboids], dtype=float)) / 2
+    turns = Rotation.concatenate([c.orientation for c in cuboids])
+    live = np.array([np.any(c.polarization) for c in cuboids])
+    reach = np.linalg.norm(halves, axis=1)
+    large = reach > 4 * np.median(reach)
+    pairs = []
+    small = np.flatnonzero(~large & live)
+    if len(small):
+        # a hair wider: a corner is a half-diagonal off, which rounding can
+        # put just past it; the test below decides
+        wide = reach[small].max() * (1 + 1e-9)
+        near = cKDTree(centres[small]).query_ball_point(points, wide)
+        counts = np.fromiter((len(n) for n in near), dtype=int, count=len(points))
+        pairs.append(
+            (
+                np.repeat(np.arange(len(points)), counts),
+                small[np.fromiter((i for n in near for i in n), dtype=int)],
+            )
+        )
+    for index in np.flatnonzero(large & live):
+        pairs.append((np.arange(len(points)), np.full(len(points), index)))
+    within = np.zeros(len(points), dtype=bool)
+    for at, which in pairs:
+        if not len(at):
+            continue
+        local = turns[which].apply(points[at] - centres[which], inverse=True)
+        half = halves[which]
+        hit = np.all(np.abs(local) - half < _SURFACE * half, axis=1)
+        within[at[hit]] = True
+    return within
 
 
 def colours(sensor, readings):
