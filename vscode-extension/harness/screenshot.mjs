@@ -8,8 +8,8 @@
  * downloaded, with a fresh profile: no AI features, no tips -- beside the
  * driver in `screenshot-driver/`, which opens the scene and lays the window
  * out. The scene is the Halbach design of `examples/marimo_demo.py` with its
- * field lines, as dense as its `density` goes (`screenshot.py scene`). VS Code
- * then renders its own window through its DevTools protocol, so no
+ * field lines, its `density` at the top of its slider (`screenshot.py scene`).
+ * VS Code then renders its own window through its DevTools protocol, so no
  * screen-recording permission is needed and nothing else on the screen can end
  * up in the picture.
  *

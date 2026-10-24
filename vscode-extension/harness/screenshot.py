@@ -4,8 +4,10 @@
     python harness/screenshot.py join FRAMES COUNT X Y PNG GIF
 
 ``scene`` writes OUT, a ``.magpy.json``: the Halbach design of the marimo
-notebook EXAMPLE, its cell run alone, at the most pixels its ``density`` allows
-and with the field lines on.
+notebook EXAMPLE, its cell run alone, its ``density`` at the top of its slider
+and the field lines on. Denser than that, the pixels are closer than the view
+fills the plane with lines in its 400 (``FIELD_LINES_MOST``), which then stop
+short of the rings.
 
 ``join`` cuts each pair FRAMES/dark-K.png, FRAMES/light-K.png (K from 0 to
 COUNT - 1, one period of the flow) along a diagonal through X, Y (fractions of
@@ -54,7 +56,7 @@ def scene(out, example):
     exec(compile(ast.Module(body, []), example, "exec"), names)  # noqa: S102
     session = names["halbach"].build().session
     session.set_variable(
-        "density", session.to_dict()["variable_bounds"]["density"]["max"]
+        "density", session.to_dict()["variable_bounds"]["density"]["soft_max"]
     )
     session.set_field_lines(True)
     out.write_text(json.dumps(session.to_dict(), indent=2))
