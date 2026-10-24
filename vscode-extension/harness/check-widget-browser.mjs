@@ -33,6 +33,8 @@
  * - a current's flow: moving on screen, resting off it, gone when off; a
  *   saved page's field lines flowing too, and standing when it is off;
  * - a field line picking its sensor, but not a magnet's click through it;
+ * - many magnets drawn as one batch, each still picked, hidden, faded and
+ *   selected on its own (`many.html`, from `widget_scenes.py`);
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -700,6 +702,97 @@ async function linesPick(port, base) {
       }
     },
   );
+}
+
+/** A hundred magnets, enough to be drawn as one batch: each one's own traces
+ *  kept on the layer the camera skips, and still what a click picks; one
+ *  hidden goes from the picture, and one faded or selected is drawn apart. */
+async function manyMagnets(port, base) {
+  await check("many magnets drawn as one, each still its own", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/many.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size >= 100`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      // per magnet, whether its traces are batched: on the layer the camera
+      // skips (mask 2), not the one it draws (1)
+      const batched = (ids) => `(${JSON.stringify(ids)}).map((id) =>
+        window.scene3d.byObjectId.get(id).children.some((p) => p.isMesh && p.layers.mask === 2))`;
+      const front = await tab.evaluate(`
+        const s = window.scene3d;
+        const ids = [...s.byObjectId.keys()];
+        const camera = s.byObjectId.get(ids[0]).parent.children
+          .find((c) => c.isTransformControlsRoot).controls.camera;
+        const rect = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+        const centre = (id) => {
+          const node = s.byObjectId.get(id);
+          node.updateWorldMatrix(true, true);
+          const mesh = node.children.find((p) => p.isMesh);
+          if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+          return mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld);
+        };
+        // the cube nearest the eye: nothing stands in front of its middle
+        const id = ids.reduce((a, b) =>
+          centre(a).distanceTo(camera.position) <= centre(b).distanceTo(camera.position) ? a : b);
+        const q = centre(id).project(camera);
+        const at = { x: rect.left + ((q.x + 1) / 2) * rect.width, y: rect.top + ((1 - q.y) / 2) * rect.height };
+        const host = ${VIEW}.querySelector("canvas").parentElement;
+        window.picked = [];
+        host.addEventListener("objectpick", (e) => window.picked.push(e.detail.objectId));
+        // the colour drawn there, from a copy of the view
+        window.colourAt = (point) => {
+          const copy = s.still();
+          const scale = copy.width / rect.width;
+          const pixel = copy.getContext("2d").getImageData(
+            Math.round((point.x - rect.left) * scale), Math.round((point.y - rect.top) * scale), 1, 1).data;
+          return [...pixel].slice(0, 3).join(",");
+        };
+        return { id, at, others: ids.filter((each) => each !== id).slice(0, 2), all: ids.length };`);
+      const before = await tab.evaluate(
+        `return ${batched([front.id, ...front.others])}`,
+      );
+      if (!before.every(Boolean))
+        return `not batched: ${JSON.stringify(before)}`;
+      await tab.click(front.at);
+      const picked = await tab.evaluate(
+        "return window.picked.splice(0)[0] ?? 'nothing'",
+      );
+      if (picked !== front.id) return `a click on ${front.id} picked ${picked}`;
+      const shown = await tab.evaluate(
+        `return colourAt(${JSON.stringify(front.at)})`,
+      );
+      await tab.evaluate(
+        `window.scene3d.setHidden([${JSON.stringify(front.id)}])`,
+      );
+      const hidden = await tab.evaluate(
+        `return colourAt(${JSON.stringify(front.at)})`,
+      );
+      if (hidden === shown)
+        return `hidden, ${front.id} is still drawn (${shown})`;
+      await tab.evaluate(`window.scene3d.setHidden([])`);
+      const back = await tab.evaluate(
+        `return colourAt(${JSON.stringify(front.at)})`,
+      );
+      if (back !== shown)
+        return `shown again, ${front.id} draws ${back}, not ${shown}`;
+      const [faded, selected] = front.others;
+      await tab.evaluate(`
+        window.scene3d.setFades({ ${JSON.stringify(faded)}: 0.3 });
+        window.scene3d.highlight([${JSON.stringify(selected)}]);`);
+      const apart = await tab.evaluate(
+        `return ${batched([faded, selected, front.id])}`,
+      );
+      if (apart[0] || apart[1] || !apart[2]) {
+        return `faded, selected, other batched: ${JSON.stringify(apart)}`;
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 /** A dragged sensor redrawn from an answer a round trip old -- the pose the
@@ -3524,6 +3617,7 @@ try {
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
   await linesPick(browser.port, base);
+  await manyMagnets(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);
