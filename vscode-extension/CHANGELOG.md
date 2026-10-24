@@ -19,7 +19,7 @@ jumps. The scale bar moves to the middle of the view's foot, low beside the
 arrows. A view first looks from where matplotlib's does, 30 degrees up and -60
 round: +x runs down to the right and +y up to the right, as in magpylib's other
 backends (#79). The arrows say which way they point: an arrow coming toward you
-ends in a larger head and name, and one going away fades.
+ends in a larger head and name, and one going away fades (#81).
 
 </details>
 
