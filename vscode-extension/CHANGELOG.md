@@ -15,7 +15,7 @@ its still magnets in one go instead of one at a time: orbiting the U-core of
 magpylib-material-response's docs at 5,888 cells takes 2.3 ms a frame instead of
 15, and with the computer four times slower 10 instead of 70. Each magnet is
 still picked, outlined, hidden and faded on its own; one selected, faded or
-hidden is drawn apart, and a scene that plays paths is drawn as before.
+hidden is drawn apart, and a scene that plays paths is drawn as before (#87).
 
 </details>
 
