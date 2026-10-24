@@ -253,8 +253,9 @@ direction, a size and a colour per pixel, that the renderer draws as instances
 of one shape, sized and coloured as magpylib sizes and colours them
 ([0021](decisions.md#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances));
 the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
-drawing. It picks, multi-selects, drags with handles (move, turn, resize, aim a
-polarization; world or object axes; one-axis locks; snapping), hides, fades by
+drawing. It picks -- a sensor by its field lines too, where nothing else is
+under the pointer -- multi-selects, drags with handles (move, turn, resize, aim
+a polarization; world or object axes; one-axis locks; snapping), hides, fades by
 id (`setFades`: a share of each object's own opacity, looked through by a click;
 [0031](decisions.md#0031-the-legends-eye-fades-as-a-view-setting)), plays paths,
 and has one keys table both hosts use. Currents flow: `threejs._mark_flows`

@@ -32,6 +32,7 @@
  * - what a selection is drawn with: a shape's edges, its path apart.
  * - a current's flow: moving on screen, resting off it, gone when off; a
  *   saved page's field lines flowing too, and standing when it is off;
+ * - a field line picking its sensor, but not a magnet's click through it;
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -605,6 +606,100 @@ async function savedLines(port, base) {
       await tab.close();
     }
   });
+}
+
+/** A sensor whose pixels are hidden is its field lines, and a click on one
+ *  picks it -- but not where a magnet is behind the line: the magnet takes
+ *  that click, as it would from a faded object. */
+async function linesPick(port, base) {
+  await check(
+    "a field line picks its sensor, and not over a magnet",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/lines.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        // a point on a line with the cube behind it, and one with the cube
+        // nowhere along the ray
+        const spots = await tab.evaluate(`
+        const s = window.scene3d;
+        s.setHidden(["plane/pixels", "plane/axes"]);
+        const node = s.byObjectId.get("plane");
+        const camera = node.parent.children.find((c) => c.isTransformControlsRoot).controls.camera;
+        const rect = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+        const page = (p) => {
+          const q = p.clone().project(camera);
+          return { x: rect.left + ((q.x + 1) / 2) * rect.width, y: rect.top + ((1 - q.y) / 2) * rect.height };
+        };
+        const eye = camera.position;
+        // the cube as drawn, in whatever unit the page draws in
+        const cube = [...s.byObjectId.keys()].find((id) => id !== "plane");
+        let box = null;
+        s.byObjectId.get(cube).traverse((part) => {
+          if (!part.isMesh) return;
+          part.geometry.computeBoundingBox();
+          const each = part.geometry.boundingBox.clone().applyMatrix4(part.matrixWorld);
+          box = box ? box.union(each) : each;
+        });
+        const middle = box.getCenter(eye.clone());
+        const half = box.getSize(eye.clone()).multiplyScalar(0.5);
+        // where the ray from the eye through p meets the cube, grown by
+        // \`grow\`: [in, out], 1 being p, or null where it misses
+        const through = (p, grow) => {
+          let near = -Infinity, far = Infinity;
+          for (const axis of ["x", "y", "z"]) {
+            const d = p[axis] - eye[axis];
+            const lo = middle[axis] - grow * half[axis] - eye[axis];
+            const hi = middle[axis] + grow * half[axis] - eye[axis];
+            near = Math.max(near, Math.min(lo / d, hi / d));
+            far = Math.min(far, Math.max(lo / d, hi / d));
+          }
+          return near <= far && far > 0 ? [near, far] : null;
+        };
+        let over = null, clear = null;
+        node.traverse((part) => {
+          if (!part.userData.field) return;
+          const start = part.geometry.attributes.instanceStart;
+          for (let i = 0; i < start.count; i++) {
+            const p = node.position.clone().fromBufferAttribute(start, i).applyMatrix4(part.matrixWorld);
+            const at = page(p);
+            // inside the view, away from its edges and the tools over them
+            const inside =
+              Math.abs(at.x - (rect.left + rect.width / 2)) < rect.width / 3 &&
+              Math.abs(at.y - (rect.top + rect.height / 2)) < rect.height / 3;
+            if (!inside) continue;
+            if (!over && through(p, 1)?.[0] > 1.05) over = at;
+            // clear of the cube by half its size again, for the click's reach
+            if (!clear && !through(p, 1.5)) clear = at;
+          }
+        });
+        const host = ${VIEW}.querySelector("canvas").parentElement;
+        window.picked = [];
+        host.addEventListener("objectpick", (e) => window.picked.push(e.detail.objectId));
+        return { over, clear, cube };`);
+        if (!spots.over || !spots.clear) {
+          return `no line to click: ${JSON.stringify(spots)}`;
+        }
+        const picks = async (at) => {
+          await tab.click(at);
+          return tab.evaluate("return window.picked.splice(0)[0] ?? 'nothing'");
+        };
+        const clear = await picks(spots.clear);
+        if (clear !== "plane") return `a click on a field line picked ${clear}`;
+        const over = await picks(spots.over);
+        if (over !== spots.cube) {
+          return `a click on the cube, through a line, picked ${over}`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** A dragged sensor redrawn from an answer a round trip old -- the pose the
@@ -3428,6 +3523,7 @@ try {
   await savedView(browser.port, base, out, expected);
   await firstLook(browser.port, base, expected);
   await savedLines(browser.port, base);
+  await linesPick(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);

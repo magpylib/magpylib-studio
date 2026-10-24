@@ -53,6 +53,17 @@ edit (#78).
 
 </details>
 
+<details>
+<summary>A sensor's field lines select it</summary>
+
+With a sensor's pixels hidden from the legend, nothing of it could be clicked
+but its axes, a few millimetres across, so there was no way to put the handles
+on it and move it. A click on one of its field lines now selects the sensor.
+Where a magnet is behind the line, the magnet takes the click, as it does
+through a faded object.
+
+</details>
+
 ## [0.7.1]
 
 ### Fixed
