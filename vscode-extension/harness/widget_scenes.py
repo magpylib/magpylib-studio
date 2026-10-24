@@ -42,6 +42,8 @@ Writes into OUT:
   with, per object: for the view's own object panel;
 * ``lines.html`` -- a cube and a sensor in its plane of symmetry, saved with
   its field lines, which the page integrates from the grid it carries;
+* ``many.html`` -- a hundred cubes, enough to be drawn as one batch, each
+  still picked, hidden, faded and selected on its own;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -458,6 +460,18 @@ def main(out):
     plane = magpy.Sensor(pixel=[(x, 0, z) for x in across for z in across])
     plane.style.pixel.field.source = "B"
     SceneWidget(cube, plane, field_lines=True).write_html(out / "lines.html")
+    # A hundred cubes, past the count a batch is drawn from (`BATCH_FROM` in
+    # scene3d.mjs): one draw for them all, each its own when looked at
+    rows = np.arange(-2, 3) * 0.008
+    many = [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.005,) * 3, position=(x, y, z)
+        )
+        for x in rows
+        for y in rows
+        for z in np.arange(4) * 0.008
+    ]
+    SceneWidget(*many).write_html(out / "many.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
     far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
     for sensor in (near, far):

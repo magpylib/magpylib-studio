@@ -27,6 +27,10 @@ let camera = null;
 let controls = null;
 let renderer = null;
 const raycaster = new THREE.Raycaster();
+// The layer a trace drawn in a batch is kept on: picked, never drawn
+// (`rebatch`).
+const BATCHED = 1;
+raycaster.layers.enable(BATCHED);
 const byObjectId = new Map();
 // What the host has hidden. By id, and held here rather than on the nodes:
 // every redraw and every frame of a run rebuilds those, and a visibility set
@@ -2357,6 +2361,7 @@ function setHidden(objectIds) {
 function setFades(levels) {
   fades = new Map(Object.entries(levels ?? {}));
   for (const node of byObjectId.values()) dress(node);
+  rebatch(); // a faded object is drawn on its own, see-through
 }
 
 /** Show `node` and fade it as `hiddenIds` and `fades` say. A sensor drawn
@@ -2754,7 +2759,178 @@ function buildMesh(item) {
   mesh.userData.trace = true;
   // coloured face by face: a sensor's axes, or its arrows by the field
   mesh.userData.faceColoured = Boolean(item.facecolor);
+  // one of many drawn alike, which a batch may draw for it (`rebatch`)
+  if (!item.facecolor && !item.back_uv && !item.streams && !item.arrows) {
+    if (!(item.opacity < 1)) {
+      const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
+      mesh.userData.batch = lut
+        ? lutKey(lut)
+        : `#${options.color.getHexString()}`;
+      mesh.userData.lut = lut ?? null;
+    }
+  }
   return mesh;
+}
+
+// --- many magnets, few draws --------------------------------------------
+// A scene of thousands of magnets -- a body meshed into cells -- drew each
+// as a draw call of its own: 16 ms a frame to orbit a U-core of 5,888
+// cells, five times that on a slow laptop. Its traces still hang on their
+// objects' nodes, where they are picked, outlined, framed and snapped to,
+// but on a layer the camera does not draw (`BATCHED`); what it draws is a
+// copy of the still ones merged, one mesh per colouring. Whatever moves,
+// fades, hides or is selected is taken out and drawn on its own; a scene
+// with paths plays them as it did. A colouring of fewer than `BATCH_FROM`
+// traces is drawn as it was: a few draws cost nothing to merge away.
+const BATCH_FROM = 64;
+// Kept for the next batch, never disposed: a material disposed takes its
+// shader program with it, and the next frame compiles it again (#44).
+const batchMaterials = new Map();
+const lutKeys = new WeakMap(); // a colour table -> its key, computed once
+let batches = []; // the merged meshes in the scene
+let batchedFrom = new Set(); // the traces the last `rebatch` was asked about
+
+function lutKey(lut) {
+  let key = lutKeys.get(lut);
+  if (key === undefined) {
+    key = `lut ${Array.from(lut).join(",")}`;
+    lutKeys.set(lut, key);
+  }
+  return key;
+}
+
+/** The traces a batch may draw now: built to be (`buildMesh`), drawn, opaque,
+ *  not selected or carried by what is -- a drag moves those -- and in a
+ *  scene that plays no path. */
+function stillTraces() {
+  const still = new Set();
+  if (Object.keys(paths).length || tracked.length || changing.length) {
+    return still;
+  }
+  const moving = new Set(selectedIds);
+  for (const objectId of selectedIds) {
+    for (const each of collections[objectId] ?? []) moving.add(each);
+  }
+  for (const [objectId, node] of byObjectId) {
+    if (moving.has(objectId) || !node.visible) continue;
+    for (const part of node.children) {
+      if (
+        part.userData.batch &&
+        part.visible &&
+        !part.material.transparent &&
+        shown(part)
+      ) {
+        still.add(part);
+      }
+    }
+  }
+  return still;
+}
+
+/** Draw the still traces in batches, after anything that may change which
+ *  they are: a payload, a selection, a hide or a fade. Merged again only
+ *  when they changed -- not on a drag's later frames, which redraw only
+ *  what the drag moves, and that is selected. */
+function rebatch() {
+  const still = stillTraces();
+  if (
+    still.size === batchedFrom.size &&
+    [...still].every((part) => batchedFrom.has(part))
+  ) {
+    return;
+  }
+  batchedFrom = still;
+  for (const batch of batches) {
+    scene.remove(batch);
+    batch.geometry.dispose();
+  }
+  batches = [];
+  for (const node of byObjectId.values()) {
+    for (const part of node.children) part.layers.set(0);
+  }
+  const kinds = new Map();
+  for (const part of still) {
+    const key = part.userData.batch;
+    if (!kinds.has(key)) kinds.set(key, []);
+    kinds.get(key).push(part);
+  }
+  for (const [key, parts] of kinds) {
+    if (parts.length < BATCH_FROM) continue;
+    const batch = new THREE.Mesh(merged(parts), batchMaterial(key, parts[0]));
+    batch.matrixAutoUpdate = false;
+    scene.add(batch);
+    batches.push(batch);
+    for (const part of parts) part.layers.set(BATCHED);
+  }
+}
+
+const IDENTITY = new THREE.Matrix4();
+
+/** One geometry of `parts`, as they stand in the world. */
+function merged(parts) {
+  let vertices = 0;
+  let corners = 0;
+  for (const part of parts) {
+    const count = part.geometry.attributes.position.count;
+    vertices += count;
+    corners += part.geometry.index ? part.geometry.index.count : count;
+  }
+  const withUv = Boolean(parts[0].geometry.attributes.uv);
+  const position = new Float32Array(3 * vertices);
+  const normal = new Float32Array(3 * vertices);
+  const uv = withUv ? new Float32Array(2 * vertices) : null;
+  const index = new Uint32Array(corners);
+  const turn = new THREE.Matrix3();
+  const point = new THREE.Vector3();
+  let at = 0;
+  let k = 0;
+  for (const part of parts) {
+    part.updateWorldMatrix(true, false);
+    const world = part.matrixWorld;
+    const attributes = part.geometry.attributes;
+    const count = attributes.position.count;
+    if (world.equals(IDENTITY)) {
+      position.set(attributes.position.array.subarray(0, 3 * count), 3 * at);
+      normal.set(attributes.normal.array.subarray(0, 3 * count), 3 * at);
+    } else {
+      turn.getNormalMatrix(world);
+      for (let v = 0; v < count; v++) {
+        point.fromBufferAttribute(attributes.position, v).applyMatrix4(world);
+        point.toArray(position, 3 * (at + v));
+        point.fromBufferAttribute(attributes.normal, v).applyMatrix3(turn);
+        point.normalize().toArray(normal, 3 * (at + v));
+      }
+    }
+    if (uv) uv.set(attributes.uv.array.subarray(0, 2 * count), 2 * at);
+    const own = part.geometry.index;
+    if (own) {
+      for (let c = 0; c < own.count; c++) index[k++] = at + own.getX(c);
+    } else {
+      for (let c = 0; c < count; c++) index[k++] = at + c;
+    }
+    at += count;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
+  geometry.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+  if (uv) geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geometry.setIndex(new THREE.BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** The material a batch of `key` is drawn with: the traces' own, but with a
+ *  colour table of its own, since each trace's goes with it when it is
+ *  freed (`free`). */
+function batchMaterial(key, sample) {
+  let material = batchMaterials.get(key);
+  if (!material) {
+    material = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
+    if (sample.userData.lut) material.map = lutTexture(sample.userData.lut);
+    else material.color.copy(sample.material.color);
+    batchMaterials.set(key, material);
+  }
+  return material;
 }
 
 /** Bound a trace by the points that are actually points.
@@ -3739,6 +3915,7 @@ function highlight(objectIds) {
   );
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   drawOutlines();
+  rebatch(); // what is selected is drawn on its own, to be dragged
 }
 
 /** Outline the selection afresh, round whatever is drawn for it now. */
@@ -5356,6 +5533,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   if (!held.size) highlight(selectedIds);
   else drawOutlines();
   drawHints();
+  rebatch();
 }
 
 /** `api`, each of whose functions asks for a frame once it has run.
