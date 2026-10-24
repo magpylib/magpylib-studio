@@ -4288,15 +4288,25 @@ const CORNER_MARGIN = 8; // from the view's edges, as the widget's tools sit
 // How far in from an edge a press means the edge rather than the face, as a
 // share of a side: the faces keep most of the cube, the edges stay easy to hit.
 const CUBE_EDGE = 0.2;
-// How far the square sees from the cube's middle, in cube sides: at rest, as
-// far as the axes and their names reach turned any way; grown, the arrows
-// past the cube and their names past them.
+// How far the square sees from the cube's middle, in cube sides, at the
+// middle's depth: at rest, as far as the axes and their names reach turned
+// any way; grown, the arrows past the cube and their names past them.
 const CORNER_REACH = { rest: 1.4, grown: 1.3 };
+// The corner is seen in perspective, whatever the view is seen in: an arrow
+// coming toward the eye ends in a larger head than one going away, which is
+// what says which is which when the arrows alone are up. Narrow enough that
+// what comes nearest still stands inside the square.
+const CORNER_FOV = 30;
 const CORNER_GROWTH_MS = 50; // the time constant it grows and shrinks by
 // The axes start just outside the cube's -x, -y, -z corner and run along its
 // edges and past them. At rest, with no cube, they stand about the middle.
 const AXES_FROM = { rest: -0.34, grown: -0.56 };
 const AXIS_LENGTH = 1.36;
+// How much of an axis is left where it runs straight away from the eye: an
+// arrow fades along its length as it goes behind, its name with its tip, and
+// one in the screen's plane or coming nearer is drawn whole. Its name has to
+// stay readable as it fades, on a dark page too.
+const AXIS_FAR = 0.4;
 // The handles' red, green and blue, dark enough to read on a light face and
 // light enough on a dark one.
 const AXIS_INKS = { x: "#e5484d", y: "#2f9e44", z: "#3b82f6" };
@@ -4315,6 +4325,7 @@ let grown = 0; // how far the corner has grown, from 0 at rest to 1
 let bar = null; // the scale bar's canvas, and what was last painted on it
 let insets = { right: 0, bottom: 0 }; // how far in the host pushes the square
 const cubeRay = new THREE.Raycaster();
+const cornerEye = new THREE.Vector3(); // toward the eye, for `aimCorner`
 
 // The cube is drawn from where a point is on it, so that a face's name is
 // looked up along the face's own two axes and the part a click would look
@@ -4388,6 +4399,35 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// An axis's arrow, each point of it as faint as it is far behind where the
+// three start: whole level with that and in front of it, AXIS_FAR an arrow's
+// length behind.
+const AXIS_VERTEX = `
+uniform float span;
+varying float vToward;
+void main() {
+  vec4 at = modelViewMatrix * vec4(position, 1.0);
+  vec4 from = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vToward = (at.z - from.z) / span; // -1 an arrow's length behind, 1 in front
+  gl_Position = projectionMatrix * at;
+}`;
+const AXIS_FRAGMENT = `
+uniform vec3 ink;
+uniform float far;
+uniform float opacity;
+varying float vToward;
+void main() {
+  gl_FragColor = vec4(ink, opacity * mix(far, 1.0, clamp(1.0 + vToward, 0.0, 1.0)));
+  #include <colorspace_fragment>
+}`;
+
+/** How much of an axis is drawn where it is `toward` the eye, from -1 an
+ *  arrow's length behind where the axes start to 0 level with it: what the
+ *  arrows' shader says, for their names. */
+function axisFade(toward) {
+  return AXIS_FAR + (1 - AXIS_FAR) * THREE.MathUtils.clamp(1 + toward, 0, 1);
+}
+
 /** The axes and the cube, in the colours the view wears now: made when
  *  first wanted, and again when the theme changes under it. */
 function dressCorner() {
@@ -4433,7 +4473,6 @@ function dressCorner() {
   const axes = cornerAxes(dark);
   const cornerScene = new THREE.Scene();
   cornerScene.add(body, axes);
-  const reach = CORNER_REACH.grown; // `poseCorner` sets it as it grows
   corner = {
     ink,
     paper,
@@ -4442,7 +4481,8 @@ function dressCorner() {
     axes,
     uniforms,
     scene: cornerScene,
-    camera: new THREE.OrthographicCamera(-reach, reach, reach, -reach, 0.1, 10),
+    camera: new THREE.PerspectiveCamera(CORNER_FOV, 1, 0.1, 10),
+    distance: 0, // the camera's from the middle: `poseCorner` sets it as it grows
   };
   placeMark();
   poseCorner();
@@ -4481,8 +4521,8 @@ function cubeNames(ink) {
   return texture;
 }
 
-/** The x, y and z arrows, each named at its tip. What the cube hides of
- *  them is drawn again, faintly, where it hides it. */
+/** The x, y and z arrows, each named at its tip, fading as they go behind.
+ *  What the cube hides of them is drawn again, faintly, where it hides it. */
 function cornerAxes(dark) {
   const axes = new THREE.Group();
   const head = { radius: 0.072, length: 0.2 };
@@ -4502,11 +4542,20 @@ function cornerAxes(dark) {
     const ink = new THREE.Color(AXIS_INKS[name]);
     if (dark) ink.lerp(new THREE.Color("#ffffff"), 0.08);
     const arrow = new THREE.Group();
-    const solid = new THREE.MeshBasicMaterial({ color: ink });
-    const faint = new THREE.MeshBasicMaterial({
-      color: ink,
-      transparent: true,
-      opacity: 0.3,
+    const shaded = (opacity) =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          ink: { value: ink },
+          far: { value: AXIS_FAR },
+          opacity: { value: opacity },
+          span: { value: AXIS_LENGTH },
+        },
+        vertexShader: AXIS_VERTEX,
+        fragmentShader: AXIS_FRAGMENT,
+        transparent: true,
+      });
+    const solid = shaded(1);
+    const faint = Object.assign(shaded(0.3), {
       depthFunc: THREE.GreaterDepth, // only behind what is drawn already
       depthWrite: false,
     });
@@ -4518,6 +4567,7 @@ function cornerAxes(dark) {
     arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
     const label = axisName(name, `#${ink.getHexString()}`);
     label.position.copy(along).multiplyScalar(AXIS_LENGTH + 0.13);
+    label.userData.along = along; // for `aimCorner` to fade it by
     axes.add(arrow, label);
   });
   return axes;
@@ -4556,11 +4606,22 @@ function axisName(name, ink) {
   return label;
 }
 
-/** Turn the corner's camera as the view's is turned. */
+/** Turn the corner's camera as the view's is turned, and fade each axis's
+ *  name as its tip goes behind. */
 function aimCorner() {
   corner.camera.quaternion.copy(camera.quaternion);
-  corner.camera.position.set(0, 0, 3).applyQuaternion(camera.quaternion);
+  corner.camera.position
+    .set(0, 0, corner.distance)
+    .applyQuaternion(camera.quaternion);
   corner.camera.updateMatrixWorld();
+  const eye = cornerEye.set(0, 0, 1).applyQuaternion(camera.quaternion);
+  for (const part of corner.axes.children) {
+    if (!part.userData.along) continue;
+    const fade = axisFade(part.userData.along.dot(eye));
+    const [whole, hidden] = part.children; // as `axisName` makes them
+    whole.material.opacity = fade;
+    hidden.material.opacity = 0.3 * fade;
+  }
 }
 
 /** How far the corner has grown, eased in and out: 0 at rest, 1 grown. */
@@ -4581,13 +4642,7 @@ function poseCorner() {
   const eased = easedGrowth();
   const { rest, grown: full } = CORNER_REACH;
   const reach = rest + (full - rest) * eased;
-  Object.assign(corner.camera, {
-    left: -reach,
-    right: reach,
-    top: reach,
-    bottom: -reach,
-  });
-  corner.camera.updateProjectionMatrix();
+  corner.distance = reach / Math.tan(THREE.MathUtils.degToRad(CORNER_FOV) / 2);
   corner.body.visible = eased > 0.01;
   corner.body.scale.setScalar(Math.max(eased, 0.01));
   corner.axes.position.setScalar(

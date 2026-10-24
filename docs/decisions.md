@@ -43,7 +43,8 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0032](#0032-field-lines-are-switched-in-the-scenes-document)                                  | Field lines are switched in the scene's document             | accepted 2026-10-18, for the field-lines prototype                   |
 | [0033](#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting)                          | The colour bar cuts a sensor's colours, as a view setting    | accepted 2026-10-23, as built (#66)                                  |
 | [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#77)                                            |
-| [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)                            | The corner shows the axes, and grows the cube on hover       | accepted 2026-10-23, as built                                        |
+| [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)                            | The corner shows the axes, and grows the cube on hover       | accepted 2026-10-23, as built; its arrows' look superseded by 0036   |
+| [0036](#0036-the-corners-axes-say-which-way-they-point)                                        | The corner's axes say which way they point                   | accepted 2026-10-24, as built                                        |
 
 ---
 
@@ -1823,7 +1824,8 @@ scene function dropped every trace, with a warning.
 
 **Status:** accepted 2026-10-23, with Alex, as built; supersedes the look of
 [0027](#0027-the-scale-is-said-round-the-scene-or-in-its-corner)'s cube and its
-snap, whose other rules carry over.
+snap, whose other rules carry over. Its arrows' flat look superseded by
+[0036](#0036-the-corners-axes-say-which-way-they-point).
 
 ### Context
 
@@ -1885,3 +1887,45 @@ others start near it.
   corner and the bar in the middle, low beside them.
 - **Plotly's first view, or pyvista's**: each is magpylib's to set, and both
   start near matplotlib's, which the widget now takes exactly.
+
+## 0036. The corner's axes say which way they point
+
+**Status:** accepted 2026-10-24, with Alex, as built; supersedes the flat look
+of [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)'s arrows,
+whose other rules carry over.
+
+### Context
+
+At rest the corner showed three arrows drawn flat, one colour each, in a
+parallel view. Nothing in that picture said which end of an arrow was nearer: an
+arrow coming toward the eye and one going away at the same angle were drawn the
+same, and the cross read as well from below as from above. Alex found it had no
+sense of depth. The arrows are thin at rest -- a shaft under two CSS pixels, a
+head about four -- so a cue has to show at that size. Six looks were rendered
+side by side, at four views and in both themes: as it was, faded with depth,
+faded and shaded, in perspective, in perspective and faded, and that with the
+names grown with depth.
+
+### Decision
+
+- **The corner is seen in perspective**, through 30 degrees, whatever the view
+  is seen in. An arrow coming toward the eye ends in a larger head and name than
+  one going away. The square sees as far round the cube's middle as it did, at
+  the middle's depth; 30 degrees is narrow enough that what comes nearest still
+  stands inside it. The cube, grown, is seen the same way.
+- **An arrow fades as it goes behind**, along its length: whole where the axes
+  start, down to 40 % where it would be an arrow's length behind. Its name fades
+  with its tip. In the screen's plane, or coming nearer, it is drawn whole.
+
+### Rejected
+
+- **Shading the arrows**, lit as the cube is: at rest a shaft is under two
+  pixels across, and no light shows on it.
+- **Growing the names with depth**, past what perspective does: the near name
+  came out too large for the corner.
+- **A stronger fade**, eased down to 35 %: in the first view y points away, and
+  its name was hard to read on a dark page.
+- **The corner in the view's own projection**, parallel in a parallel view: the
+  depth the arrows say would go, in the view where nothing else says it.
+- **Fading toward the page's colour, as fog**: over a magnet behind the corner,
+  a faded arrow would show the page's colour instead of the magnet.
