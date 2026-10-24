@@ -1,9 +1,10 @@
 # Roadmap — what studio becomes, and in what order
 
 **Status:** written 2026-10-05, amended 2026-10-06 and 2026-10-07, restructured
-2026-10-08, R9 taken up 2026-10-11. This is the one list of what is next: each
-step says what it is, why, and when it is done. What is built is in the
-[changelog](../vscode-extension/CHANGELOG.md) and
+2026-10-08, R9 taken up 2026-10-11 and built 2026-10-12, brought up to date
+2026-10-24, R5's and R7's order decided that day. This is the one list of what
+is next: each step says what it is, why, and when it is done. What is built is
+in the [changelog](../vscode-extension/CHANGELOG.md) and
 [architecture.md](architecture.md); why the project is shaped this way is in
 [direction.md](direction.md); each decision taken on the way is a record in
 [decisions.md](decisions.md).
@@ -12,6 +13,13 @@ The positioning the order serves (direction.md §1): studio is the verifiable
 magnetics design loop. Humans, code and agents edit one parametric document;
 every candidate gets an exact field in milliseconds; FEM validation is one step
 away; the log replays.
+
+**Where it stands, 2026-10-24.** R1, R2, R3's step 1 and R9 are built. Releases
+0.5 to 0.7 went to the notebook widget and the 3D view: the panels inside the
+widget, the view cube and the scale, overlaps, field lines, the colour bar,
+drags on a slow machine (decisions 0018–0036, and the changelog). None of that
+is a step below. R3's step 2, R4's next round and R5 have not moved since
+2026-10-08; R7's order changed on 2026-10-24 (0037).
 
 ---
 
@@ -99,12 +107,19 @@ marimo-lens's paper says its effects "remain to be established".
 **Started 2026-10-07:** [evals/](../evals/README.md), the runner and the first
 ten tasks. First pass 2026-10-08, one run each, sonnet: plain 8/8, studio 10/10,
 studio at 1.9× the cost on the shared tasks, most of it on the open design,
-where the agent searched one guess per turn. **Next:** a multi-variable search
-in the skill, measured again; three runs each for a spread; the other ten tasks.
+where the agent searched one guess per turn. A Haiku pass the same day
+([notes](../evals/results/2026-10-08-haiku-agent-fixes/notes.md)) found two
+misreadings, of `spin` and of how to open a saved scene, both fixed in the skill
+and the error messages; studio still cost about twice plain on a one-off sweep.
+Its reading: for a one-off calculation an agent with plain magpylib is cheaper;
+studio's case is the design a person goes on working on. **Next:** a
+multi-variable search in the skill, measured again; three runs each for a
+spread; the other ten tasks.
 
 ### R5 — Pointing at the scene, then the view in the chat
 
 **Amended 2026-10-06** after marimo-lens: attention first, the chat second.
+**Order decided 2026-10-24:** pointing first.
 
 **What, first: the person points, and the agent points back.** Mark a magnet, a
 collection or a region of the 3D view and leave a note; the agent receives the
@@ -143,25 +158,33 @@ and, once R5 exists, how to point and be pointed at. Present tense and current
 capability only (`plans/fem.md` §13.1): authoring and the field now, the open
 scene when step 2 exists, FEM when FEM exists.
 
-### R7 — FEM, with the order amended
+### R7 — FEM, through material-response, Maxwell after
 
-`plans/fem.md` as planned, in this order:
+**Decided 2026-10-24**:
+[decision 0037](decisions.md#0037-fem-is-material-responses-extra-and-studio-calls-it).
+magpylib-material-response took FEM on as an optional `[fem]` extra on NGSolve,
+scoped to verification
+([material-response#82](https://github.com/magpylib/magpylib-material-response/issues/82)):
+what `plans/fem.md` put in a `magpylib-fem` package of its own (M1 to M4) is
+built there. Studio builds no solver. In this order:
 
 1. units (R2) ✅;
-2. the physics layer (M1);
-3. the pyAEDT emitter (M6), **checked at tier 0 on the Maxwell seat against
-   magpylib**, with the signature conformance (§8.4) and golden text (§8.3) in
-   CI — written one scene to one design, so a folder of scenes can later become
-   one AEDT project of several designs (R9), a scene's variants a parametric
-   table so one Maxwell run solves each;
-4. the open solver (M2–M4) after, for validation CI can run and for tiers 1+.
+2. material-response's first milestone: magnets and soft parts in a uniform
+   field, `fem_study` and `compare` (its work, not studio's);
+3. studio calls it (M7): a scene's objects to `fem_study`, a comparison across a
+   variable through `sweep()`, the solve as a job off the engine's loop (V3),
+   refusals before results (V4, `plans/fem.md` §12–13); `susceptibility` carried
+   in the document (M1 below);
+4. the pyAEDT emitter (M6) after, for people who check a design in Ansys (R8),
+   with the signature conformance (§8.4) and golden text (§8.3) in CI, written
+   one scene to one design, so a folder of scenes can later become one AEDT
+   project of several designs (R9), a scene's variants a parametric table so one
+   Maxwell run solves each; its tier 0 checked against magpylib and the open
+   solver both.
 
-**Why the change.** `plans/fem.md` §7 puts the open solver first so the
-translation is never validated by eye. But tier 0's oracle is magpylib itself,
-exact for μr = 1, so checking the Maxwell export against it is numerical, not
-visual. **The cost:** until the open solver exists, validation is a manual run
-on a licensed seat (§8.6), not CI. Why an emitter and not an LLM translating:
-`plans/fem.md` §15.
+**Why this order.** CI can run the open route, and material-response is building
+it anyway; a Maxwell check is a manual run on a licensed seat (`plans/fem.md`
+§8.6). Why an emitter and not an LLM translating: `plans/fem.md` §15.
 
 ### R8 — Values and results back from Ansys
 
@@ -176,53 +199,16 @@ and use; and **Maxwell's field at the sensor points**, into the comparison view
 booleans, iron, nonlinear B-H, windings, boundaries, mesh settings. Mapping that
 back is lossy and wrong without saying so.
 
-### R9 — Several scenes: a project is a folder, a scene is a file
+### R9 — Several scenes: a project is a folder, a scene is a file ✅
 
-**Taken up 2026-10-11, ahead of R7:**
-[plans/several-scenes.md](plans/several-scenes.md), revised that day after an
-adversarial review. Decided with Alex that day: a project is a folder of scene
-files, no container format; undo stays the studio's own; the side bar's tree
-holds every open scene; objects copy and drag across scenes, a copy keeping its
-own variables, never sharing one; VS Code 1.109 is the floor; a file changed on
-disk comes into its tab as one undo step; a prototype first, then the tabs and
-the tree as one release. Variants came in this step and are built
+Done 2026-10-12 ([#35](https://github.com/magpylib/magpylib-studio/pull/35)) and
+released in 0.5.0, as [plans/several-scenes.md](plans/several-scenes.md) planned
+it: no container format; a tab per `.magpy.json`, the studio as a VS Code custom
+editor; the side bar holding every open scene; one engine, a session per open
+scene; objects copied, cut and dragged across scenes with their variables;
+unsaved work offered back after a crash; scripts run outside the engine.
+Variants came in this step
 ([0026](decisions.md#0026-variants-are-named-value-sets-inside-a-scene), #32).
-The prototype ran the same day on VS Code 1.109, 1.131 and 1.141 (the plan's
-§8); from it, the studio keeps a recovery copy of each open scene, since VS
-Code's own restore after a crash misses recent edits.
-
-**What.** No container format. A scene is one `.magpy.json` (and the scene
-script it came from, where there is one); a project is the folder that holds
-them. Several projects open is several windows or a multi-root workspace, and
-needs nothing built. Several scenes open is the work:
-
-- **one tab per scene** — the studio as a VS Code custom editor for
-  `.magpy.json`, so opening a scene file opens it in the studio, side by side
-  with others;
-- **the side bar holds every open scene** — the tree lists them, each with its
-  objects; Variables, Inspector and Undo show the scene in front;
-- **one engine, a session per open scene** — every request naming its session.
-  The sessions are independent already (each notebook view has its own), so this
-  is cheaper than a process per scene; scripts run outside it, in a short-lived
-  process, so one cannot take every scene down;
-- **objects copy across scenes**, their variables with them.
-
-**Why a folder and not a file of scenes.** It is what Godot and Unity do, what
-notebooks do and what VS Code is built around; `plans/instancing.md` already
-decided that a definition lives in its own file; and one scene per file is one
-diff per scene.
-
-**Not separate scenes:** variants, named value sets inside the scene, as
-OpenSCAD's Customizer keeps presets (built, 0026), and parameters shared across
-scenes (wait for instancing).
-
-**When.** Now, ahead of R7: nothing before R7 needs it, and nothing in R7 waits
-on it either. Today the extension holds one engine, one panel and one scene file
-as module-level state, and the engine serves one session; the refactor touches
-all of it. The plan's order: a throwaway prototype of the custom editor (done),
-the engine's sessions, every view and request carrying its scene, then tabs,
-tree and crash safety as one release, then copying across scenes, then scripts
-out of the engine.
 
 ### R10 and later
 
@@ -241,7 +227,9 @@ out of the engine.
 - **A scene as a page anyone can open** — `to_html` with the views for listed
   variable values computed ahead, as marimo-studio's prepared exports do; and
   the widget inside a marimo-studio view. A scene's variants are the obvious
-  list.
+  list. Editing in the page itself, with Pyodide loaded on demand, was probed
+  and parked ([#69](https://github.com/magpylib/magpylib-studio/issues/69)):
+  about 43 MB and 11 s before the first edit, paid again on each open.
 - **More from variants**: the field per variant (`sweep` over variants,
   recording nothing), and two variants side by side, a view of one scene at
   another variant's values.
@@ -257,8 +245,10 @@ so that older notes still read:
   `physical`-mode input (`plans/fem.md` §3.2). Without a shared convention the
   exporter invents its own home for μr and it differs from
   `magpylib-material-response`'s, and tier 1's three-way comparison silently
-  compares magnets that are not the same magnet. Done when merged upstream, or a
-  documented studio-side convention exists that material-response also reads.
+  compares magnets that are not the same magnet. **Settled by 0037:**
+  material-response's documented `obj.susceptibility`, a scalar or one value per
+  axis, is the convention. Left: studio's document carries it, which it does not
+  yet.
 - **M2 — Public constructor-parameter introspection in magpylib.** Studio
   hardcodes `_PARAM_ATTRS`; the physics layer needs the identical table, so a
   new magnet class in core would fall silently through both copies. Done when
@@ -267,8 +257,7 @@ so that older notes still read:
   notifications, a job id space, cancellation. `serve()` is a strictly serial
   blocking loop, so a solve through it freezes the whole UI; mesh reorientation
   already blocks it for 16 s. Shared with R3 step 2's "the scene changed"
-  message, and its worker is first built for scripts (R9: scripts outside the
-  engine).
+  message. Scripts already run outside the engine (R9).
 - **V4 — Refusal-first job API.** Errors, not warnings, on a residual without
   convergence metadata, a solve past budget, a comparison mixing `ideal` and
   `physical` (`plans/fem.md` §13.5). Decide the shape early even if the work
@@ -280,9 +269,8 @@ so that older notes still read:
   (direction.md §5.4): the right answer and the expensive one. Nothing forces
   the choice yet.
 
-**Not scheduled, and why:** anything downstream of `plans/fem.md`'s G3 spike
-(the solver is undecided until measured); the skill's FEM part (a skill may only
-describe an API that exists).
+**Not scheduled, and why:** the skill's FEM part (a skill may only describe an
+API that exists).
 
 ## 3. Decisions waiting on Alex
 
@@ -293,5 +281,6 @@ maintainer's yes.
 Ask each one as a plain question with a recommended answer; the R3 four went
 unanswered for two days because nobody asked them.
 
-- **The order in R7:** tier 0 on the Maxwell seat before the open solver.
-- **R5's order:** pointing at the scene before the view in the chat.
+None open. Decided 2026-10-24, on Alex's go-ahead: R7's open solver is
+material-response's `[fem]` extra, before the Maxwell emitter (0037); R5's
+pointing comes before the view in the chat.

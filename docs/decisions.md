@@ -45,6 +45,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0034](#0034-a-model3d-trace-is-kept-as-data)                                                  | A model3d trace is kept, as data                             | accepted 2026-10-23 (#77)                                            |
 | [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)                            | The corner shows the axes, and grows the cube on hover       | accepted 2026-10-23, as built; its arrows' look superseded by 0036   |
 | [0036](#0036-the-corners-axes-say-which-way-they-point)                                        | The corner's axes say which way they point                   | accepted 2026-10-24, as built                                        |
+| [0037](#0037-fem-is-material-responses-extra-and-studio-calls-it)                              | FEM is material-response's extra, and studio calls it        | accepted 2026-10-24                                                  |
 
 ---
 
@@ -1929,3 +1930,59 @@ names grown with depth.
   depth the arrows say would go, in the view where nothing else says it.
 - **Fading toward the page's colour, as fog**: over a magnet behind the corner,
   a faded arrow would show the page's colour instead of the magnet.
+
+## 0037. FEM is material-response's extra, and studio calls it
+
+**Status:** accepted 2026-10-24, on Alex's go-ahead; amends `plans/fem.md` §4,
+§5 and §9 and the order of [roadmap](roadmap.md) R7.
+
+### Context
+
+`plans/fem.md` §4 split FEM at its seam: a `magpylib-fem` package for what works
+on magpylib objects (the physics layer, solver drivers, the comparison), studio
+for what needs the document (variables, `sweep()`, the residual view). Roadmap
+R7 then put tier 0 on a Maxwell seat before any open solver, because the open
+solver was far off and tier 0's oracle is magpylib itself.
+
+On 2026-10-23 magpylib-material-response took FEM on as an optional `[fem]`
+extra on NGSolve, scoped to verification: `fem_study` and `compare` beside
+`mesh_study`, the same magpylib objects in, each value with its error
+([material-response#82](https://github.com/magpylib/magpylib-material-response/issues/82)).
+Its first milestone is magnets and soft parts in a uniform field; coils and
+saturation follow. NGSolve at order 4 met tier 0 on the first mesh tried, 0.31 %
+on a 10 mm cube, and its moments agree with material-response's within their
+errors (#56 here; the refinement and domain sweeps G3 also asks for are still
+owed).
+
+### Decision
+
+- **The objects' half of §4 is material-response's `[fem]` extra**, not a
+  package of its own. Studio builds no solver: its validation calls `fem_study`
+  on the objects a scene builds, and adds what needs the document -- a
+  comparison across a variable through `sweep()`, the solve as a job off the
+  engine's loop (V3), refusals before results (V4). M1 to M4 of §9 are
+  material-response's work, under #82.
+- **The solver is NGSolve**, the answer to §5's spike, with G3's sweeps owed in
+  material-response.
+- **The open route comes first, the pyAEDT emitter (M6) after.** CI can run it,
+  and it is being built anyway. The emitter stays, for people who check a design
+  in Ansys (R8), and its tier 0 is checked against magpylib and the open solver
+  both, as G6 planned.
+- **μr is material-response's documented attribute**, `obj.susceptibility`, a
+  scalar or one value per axis: the shared convention §11.1 asked for. Studio's
+  part is to carry it in the document, which it does not yet.
+
+What would reverse it: studio needing FEM for what verification is not -- a
+field the method of moments cannot give, eddy currents, hysteresis -- which is
+the case material-response#82 names for a `magpylib-fem` of its own.
+
+### Rejected
+
+- **A solver in studio** (§4's option B): a second NGSolve integration beside
+  material-response's, two to keep in step, and solver wheels in a package whose
+  point is a light engine.
+- **`magpylib-fem` now** (§4's option A): material-response#82 keeps it for FEM
+  that does what the method of moments cannot, and nothing here asks for that.
+- **Maxwell first**, as R7 had it: its reason was an open solver far off. A
+  Maxwell check is a manual run on a licensed seat, and the open route no longer
+  waits on anything studio does.
