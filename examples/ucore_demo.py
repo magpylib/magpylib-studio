@@ -53,19 +53,24 @@ def _(mo):
     mo.md("""
     # A U-core meshed into cells
 
-    Set **cells** and press *solve*: the core is meshed into about that
-    many cells and solved, 1,000 giving 768 and 6,500 giving 5,888. Click
-    a field line to take the probe, and drag it through the core's plane.
+    Meshed into as many **cells** as chosen, and solved again when you
+    choose another: a few tenths of a second at 768, about twenty at 5,888.
+    Click a field line to take the probe, and drag it through the core's
+    plane.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    target = mo.ui.number(start=50, stop=20000, step=50, value=1000, label="cells")
-    solve = mo.ui.run_button(label="solve")
-    mo.hstack([target, solve], justify="start")
-    return solve, target
+    # what mesh_all is asked for, by the cells it gives
+    target = mo.ui.dropdown(
+        options={"270": 250, "768": 1000, "2,520": 3000, "5,888": 6500},
+        value="768",
+        label="cells",
+    )
+    target
+    return (target,)
 
 
 @app.cell
@@ -107,8 +112,7 @@ def _(create_polyline_fillet, magpy, move_grid_along_polyline, np):
 
 
 @app.cell
-def _(apply_demag, magpy, mesh_all, mo, np, solve, target, time, ucore):
-    mo.stop(not solve.value, mo.md("Press *solve*."))
+def _(apply_demag, magpy, mesh_all, np, target, time, ucore):
     t0 = time.perf_counter()
     core, coil = ucore()
     meshed = mesh_all(magpy.Collection(core, coil), target_elems=target.value)
