@@ -5,9 +5,12 @@ as decisions land. Where a decision is made, the reason it was made _and_ the
 reason the alternative was rejected are both recorded — the alternatives here
 are all defensible, so a bare verdict would be re-litigated in six months.
 
-Status: **units are built** (§6, as `roadmap.md` R2); nothing else is. The order
-is amended in `roadmap.md` R7: tier 0 on the Maxwell seat before the open
-solver.
+Status: **units are built** (§6, as `roadmap.md` R2); nothing else is. **Amended
+2026-10-24 by
+[decision 0037](../decisions.md#0037-fem-is-material-responses-extra-and-studio-calls-it):**
+what §4 put in `magpylib-fem` is magpylib-material-response's `[fem]` extra; the
+solver is NGSolve (§5); the open route comes before the Maxwell emitter
+(`roadmap.md` R7). The rest stands as written.
 
 ---
 

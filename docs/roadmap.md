@@ -2,9 +2,9 @@
 
 **Status:** written 2026-10-05, amended 2026-10-06 and 2026-10-07, restructured
 2026-10-08, R9 taken up 2026-10-11 and built 2026-10-12, brought up to date
-2026-10-24. This is the one list of what is next: each step says what it is,
-why, and when it is done. What is built is in the
-[changelog](../vscode-extension/CHANGELOG.md) and
+2026-10-24, R5's and R7's order decided that day. This is the one list of what
+is next: each step says what it is, why, and when it is done. What is built is
+in the [changelog](../vscode-extension/CHANGELOG.md) and
 [architecture.md](architecture.md); why the project is shaped this way is in
 [direction.md](direction.md); each decision taken on the way is a record in
 [decisions.md](decisions.md).
@@ -18,8 +18,8 @@ away; the log replays.
 0.5 to 0.7 went to the notebook widget and the 3D view: the panels inside the
 widget, the view cube and the scale, overlaps, field lines, the colour bar,
 drags on a slow machine (decisions 0018–0036, and the changelog). None of that
-is a step below. R3's step 2, R4's next round, R5 and R7 have not moved since
-2026-10-08.
+is a step below. R3's step 2, R4's next round and R5 have not moved since
+2026-10-08; R7's order changed on 2026-10-24 (0037).
 
 ---
 
@@ -119,6 +119,7 @@ spread; the other ten tasks.
 ### R5 — Pointing at the scene, then the view in the chat
 
 **Amended 2026-10-06** after marimo-lens: attention first, the chat second.
+**Order decided 2026-10-24:** pointing first.
 
 **What, first: the person points, and the agent points back.** Mark a magnet, a
 collection or a region of the 3D view and leave a note; the agent receives the
@@ -157,35 +158,33 @@ and, once R5 exists, how to point and be pointed at. Present tense and current
 capability only (`plans/fem.md` §13.1): authoring and the field now, the open
 scene when step 2 exists, FEM when FEM exists.
 
-### R7 — FEM, with the order amended
+### R7 — FEM, through material-response, Maxwell after
 
-`plans/fem.md` as planned, in this order:
+**Decided 2026-10-24**:
+[decision 0037](decisions.md#0037-fem-is-material-responses-extra-and-studio-calls-it).
+magpylib-material-response took FEM on as an optional `[fem]` extra on NGSolve,
+scoped to verification
+([material-response#82](https://github.com/magpylib/magpylib-material-response/issues/82)):
+what `plans/fem.md` put in a `magpylib-fem` package of its own (M1 to M4) is
+built there. Studio builds no solver. In this order:
 
 1. units (R2) ✅;
-2. the physics layer (M1);
-3. the pyAEDT emitter (M6), **checked at tier 0 on the Maxwell seat against
-   magpylib**, with the signature conformance (§8.4) and golden text (§8.3) in
-   CI — written one scene to one design, so a folder of scenes can later become
-   one AEDT project of several designs (R9), a scene's variants a parametric
-   table so one Maxwell run solves each;
-4. the open solver (M2–M4) after, for validation CI can run and for tiers 1+.
+2. material-response's first milestone: magnets and soft parts in a uniform
+   field, `fem_study` and `compare` (its work, not studio's);
+3. studio calls it (M7): a scene's objects to `fem_study`, a comparison across a
+   variable through `sweep()`, the solve as a job off the engine's loop (V3),
+   refusals before results (V4, `plans/fem.md` §12–13); `susceptibility` carried
+   in the document (M1 below);
+4. the pyAEDT emitter (M6) after, for people who check a design in Ansys (R8),
+   with the signature conformance (§8.4) and golden text (§8.3) in CI, written
+   one scene to one design, so a folder of scenes can later become one AEDT
+   project of several designs (R9), a scene's variants a parametric table so one
+   Maxwell run solves each; its tier 0 checked against magpylib and the open
+   solver both.
 
-**Why the change.** `plans/fem.md` §7 puts the open solver first so the
-translation is never validated by eye. But tier 0's oracle is magpylib itself,
-exact for μr = 1, so checking the Maxwell export against it is numerical, not
-visual. **The cost:** until the open solver exists, validation is a manual run
-on a licensed seat (§8.6), not CI. Why an emitter and not an LLM translating:
-`plans/fem.md` §15.
-
-**Since, in magpylib-material-response (2026-10-23).** FEM is decided there as
-an optional `[fem]` extra on NGSolve, scoped to verification: `fem_study` and
-`compare` beside `mesh_study`, the same magpylib objects in, each value with its
-error
-([material-response#82](https://github.com/magpylib/magpylib-material-response/issues/82)).
-Its milestones are magnets and soft parts in a uniform field, then coils, then
-saturation; #56 here measured NGSolve for it. That covers much of what item 4's
-open solver was for. Whether item 4 becomes a call to that extra, and whether it
-then comes before the Maxwell emitter, is asked in §3.
+**Why this order.** CI can run the open route, and material-response is building
+it anyway; a Maxwell check is a manual run on a licensed seat (`plans/fem.md`
+§8.6). Why an emitter and not an LLM translating: `plans/fem.md` §15.
 
 ### R8 — Values and results back from Ansys
 
@@ -246,8 +245,10 @@ so that older notes still read:
   `physical`-mode input (`plans/fem.md` §3.2). Without a shared convention the
   exporter invents its own home for μr and it differs from
   `magpylib-material-response`'s, and tier 1's three-way comparison silently
-  compares magnets that are not the same magnet. Done when merged upstream, or a
-  documented studio-side convention exists that material-response also reads.
+  compares magnets that are not the same magnet. **Settled by 0037:**
+  material-response's documented `obj.susceptibility`, a scalar or one value per
+  axis, is the convention. Left: studio's document carries it, which it does not
+  yet.
 - **M2 — Public constructor-parameter introspection in magpylib.** Studio
   hardcodes `_PARAM_ATTRS`; the physics layer needs the identical table, so a
   new magnet class in core would fall silently through both copies. Done when
@@ -268,9 +269,8 @@ so that older notes still read:
   (direction.md §5.4): the right answer and the expensive one. Nothing forces
   the choice yet.
 
-**Not scheduled, and why:** anything downstream of `plans/fem.md`'s G3 spike
-until §3's FEM question is answered (#56 measured NGSolve, and material-response
-took it); the skill's FEM part (a skill may only describe an API that exists).
+**Not scheduled, and why:** the skill's FEM part (a skill may only describe an
+API that exists).
 
 ## 3. Decisions waiting on Alex
 
@@ -281,8 +281,6 @@ maintainer's yes.
 Ask each one as a plain question with a recommended answer; the R3 four went
 unanswered for two days because nobody asked them.
 
-- **The order in R7:** tier 0 on the Maxwell seat before the open solver.
-- **R5's order:** pointing at the scene before the view in the chat.
-- **R7's open solver** (asked 2026-10-24): item 4 becomes a call to
-  material-response's `[fem]` extra, with no solver of studio's own; and with
-  that, it comes before the Maxwell emitter, since CI can run it.
+None open. Decided 2026-10-24, on Alex's go-ahead: R7's open solver is
+material-response's `[fem]` extra, before the Maxwell emitter (0037); R5's
+pointing comes before the view in the chat.
