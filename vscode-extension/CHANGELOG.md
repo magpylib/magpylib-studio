@@ -18,7 +18,9 @@ field. Measured on the U-core of material-response's docs at 5,888 cells, with
 field lines: open 47 → 8 s, a scene at rest 39 → 1.3 s, a drag step of the
 sensor 5 → 0.7 s. The field is computed a slice of the sources at a time, on
 four threads, and whether a point lies inside a cuboid is answered without
-magpylib, as it would answer it (#86).
+magpylib, as it would answer it. Copying such a body into a view to edit no
+longer warns that its cells were made in a loop and should be patterned: only
+copies of one object are said to be that, and solved cells are not (#86).
 
 </details>
 

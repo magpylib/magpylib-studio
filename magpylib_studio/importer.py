@@ -14,9 +14,11 @@ from __future__ import annotations
 import contextlib
 import dis
 import io
+import json
 import keyword
 import re
 import sys
+from collections import Counter
 
 import magpylib as magpy
 import numpy as np
@@ -100,11 +102,10 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # An object the script never bound to a variable was built inline — in a
     # loop, a comprehension, a helper. Executing the script keeps what it
     # built and loses how, so this is the one trace of the structure that went
-    # missing, and the caller is told rather than left to notice.
-    if id(obj) not in names:
-        unnamed.append(
-            "Collection" if isinstance(obj, magpy.Collection) else _dotted_type(obj)
-        )
+    # missing, and the caller is told rather than left to notice: a leaf with
+    # what it is made of, so that `_flattening_warnings` can tell copies apart.
+    if id(obj) not in names and isinstance(obj, magpy.Collection):
+        unnamed.append(("Collection", None))
     if isinstance(obj, magpy.Collection):
         spec = {
             "id": object_id,
@@ -144,6 +145,9 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
         if np.any(position):
             params["position"] = position.tolist()
         spec = {"id": object_id, "type": _dotted_type(obj), "params": params}
+        if id(obj) not in names:
+            made_of = {k: v for k, v in params.items() if k != "position"}
+            unnamed.append((spec["type"], json.dumps(made_of, sort_keys=True)))
         if moved is not None:
             spec["transforms"] = [{"op": "move", "displacement": moved, "start": 0}]
         rotvec = np.atleast_2d(obj.orientation.as_rotvec(degrees=True))
@@ -251,10 +255,21 @@ def _flattening_warnings(unnamed):
     anybody writes a one-off, while eight unnamed Circles are a loop that no
     longer exists. Saying so matters most to a caller that is about to edit
     them — they are eight separate objects now, and changing one changes one.
+
+    Only copies count: objects made of the same values, placed apart, which
+    is what a loop of one object built and a pattern builds back. A body
+    meshed into cells and solved, each cell its own polarization, or a coil
+    whose every winding has its own vertices, is many objects no pattern
+    makes, and the advice to pattern them would be noise. `unnamed` holds
+    ``(type, what it is made of)``; a collection's is None, and counts.
     """
+    made = {}
+    for kind, made_of in unnamed:
+        made.setdefault(kind, []).append(made_of)
     warnings = []
-    for type_name in dict.fromkeys(unnamed):  # first-seen order, deduplicated
-        count = unnamed.count(type_name)
+    for type_name, values in made.items():  # first-seen order
+        times = Counter(values)
+        count = sum(1 for value in values if value is None or times[value] > 1)
         if count > 1:
             warnings.append(
                 f"{count} {type_name} objects were built without a variable of "

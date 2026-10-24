@@ -14,6 +14,7 @@ import re
 import sys
 import tempfile
 import types
+import warnings
 from typing import Annotated
 
 import magpylib as magpy
@@ -1107,6 +1108,33 @@ def test_the_view_is_shipped_with_the_package():
 
 
 # --- editing: SceneWidget(..., editable=True), over a session in the kernel -
+
+
+@pytest.mark.parametrize(
+    ("polarizations", "said"),
+    [
+        ([(0, 0, 1)] * 3, True),  # copies, as a loop of one magnet makes them
+        ([(0, 0, 1), (0, 0.5, 1), (0.2, 0, 1)], False),  # as a solved mesh's cells
+    ],
+)
+def test_unnamed_objects_are_said_to_be_a_loop_only_when_copies(polarizations, said):
+    """Unnamed copies of one object are a loop a pattern builds back, and the
+    view says so as it copies them; unnamed objects each made of their own
+    values, as a meshed body's solved cells are, are not, and it says
+    nothing."""
+    cells = magpy.Collection(
+        *(
+            magpy.magnet.Cuboid(
+                polarization=p, dimension=(0.01, 0.01, 0.01), position=(0.02 * i, 0, 0)
+            )
+            for i, p in enumerate(polarizations)
+        )
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        widget.SceneWidget(cells, editable=True)
+    loop = [w for w in caught if "without a variable" in str(w.message)]
+    assert bool(loop) == said
 
 
 def _studio(**traits):
