@@ -55,6 +55,16 @@ density -- no longer computes the field of the sources again (#88).
 
 </details>
 
+<details>
+<summary>A pulse round the view while Python works</summary>
+
+When an answer from Python takes longer than a third of a second -- a drag past
+thousands of cells, a slider that builds the scene again -- a pulse of current
+runs round the view's edge in the theme's accent colour, until the last answer
+is in. A drag answered at pointer rate never shows it (#88).
+
+</details>
+
 ## [0.7.2]
 
 ### Changed

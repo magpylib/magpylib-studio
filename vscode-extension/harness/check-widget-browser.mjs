@@ -21,6 +21,8 @@
  * - the object panel, against a fake kernel: the selection's parameters and
  *   pose, a value typed read through the engine, a bare name made at the
  *   value it replaces and said (`widget-pages/inspector.html`);
+ * - a ring round the view while python is slow to answer, and not while it
+ *   is quick (`widget-pages/busy.html`);
  * - a panel of its own, the variables and the object kinds against a fake
  *   model: the rows, a drag's previews and release, the rows read again when
  *   the view moves on, the selection followed (`widget-pages/own-panel.html`);
@@ -2182,6 +2184,32 @@ async function objectPanelMixed(port, base) {
   });
 }
 
+/** While python is slow to answer, a ring of current runs round the view; a
+ *  quick answer -- a drag's, at pointer rate -- never shows it. */
+async function busyRing(port, base) {
+  await check(
+    "a slow answer rings the view, a quick one does not",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/busy.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const { exists, quick, early, waiting, answeredAfter } = result;
+        if (!exists) return "no ring";
+        if (quick) return "a quick answer showed the ring";
+        if (early) return "the ring came on before the answer was late";
+        if (!waiting) return "a slow answer did not show the ring";
+        if (answeredAfter > 1600)
+          return `the ring stayed on ${answeredAfter} ms`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A panel of its own (`ScenePanel`): the variables kind lists the rows,
  *  sends a slider's values under the pointer as previews and the release as
  *  the edit, and reads the rows again when the view's revision moves; the
@@ -3826,6 +3854,7 @@ try {
   await variablesPanel(browser.port, base);
   await objectPanel(browser.port, base);
   await objectPanelMixed(browser.port, base);
+  await busyRing(browser.port, base);
   await panelWidget(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
