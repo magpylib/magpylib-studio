@@ -28,11 +28,12 @@ copies of one object are said to be that, and solved cells are not (#86).
 <summary>Thousands of magnets turn smoothly</summary>
 
 A scene of many magnets -- a body meshed into cells, or a large array -- draws
-its still magnets in one go instead of one at a time: orbiting the U-core of
-magpylib-material-response's docs at 5,888 cells takes 2.3 ms a frame instead of
-15, and with the computer four times slower 10 instead of 70. Each magnet is
-still picked, outlined, hidden and faded on its own; one selected, faded or
-hidden is drawn apart, and a scene that plays paths is drawn as before (#87).
+its magnets a colouring at a time instead of one by one: orbiting the U-core of
+magpylib-material-response's docs at 5,888 cells takes 2.5 ms a frame instead of
+15, and with the computer four times slower 11 instead of 68. Selecting or
+hiding one of them takes 4 to 15 ms instead of 20 to 30. Each magnet is still
+picked, outlined, selected, dragged and played along its path on its own; a
+hidden one is not drawn, and a faded one is drawn apart, see-through (#87).
 
 </details>
 

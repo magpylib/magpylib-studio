@@ -43,7 +43,9 @@ Writes into OUT:
 * ``lines.html`` -- a cube and a sensor in its plane of symmetry, saved with
   its field lines, which the page integrates from the grid it carries;
 * ``many.html`` -- a hundred cubes, enough to be drawn as one batch, each
-  still picked, hidden, faded and selected on its own;
+  still picked, hidden, faded, selected and dragged on its own;
+* ``many-run.html`` -- those cubes and one more on a path above them, a run
+  that plays as motion: the batch draws the moving one where it is;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -472,6 +474,12 @@ def main(out):
         for z in np.arange(4) * 0.008
     ]
     SceneWidget(*many).write_html(out / "many.html")
+    traveller = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.005,) * 3)
+    traveller.position = np.linspace((-0.016, 0, 0.04), (0.016, 0, 0.04), 10)
+    run = SceneWidget(*many, traveller, animation=True)
+    if not run.payload.get("tracks"):
+        raise SystemExit("many-run.html: the traveller should play as motion")
+    run.write_html(out / "many-run.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
     far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
     for sensor in (near, far):
