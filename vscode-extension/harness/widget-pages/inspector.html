@@ -43,6 +43,12 @@
       // `?coloured`: a colour set on the magnet already, for a look at the
       // title line's reset
       if (query.has("coloured")) styles.m.set.color = "#ff0000";
+      // `?mixed`: opacity differing among the parts of a sealed collection,
+      // as the engine says it of one
+      if (query.has("mixed")) {
+        styles.m.mixed = ["opacity"];
+        delete styles.m.resolved.opacity;
+      }
 
       const asked = [];
       const listeners = {};
@@ -213,6 +219,13 @@
         style.rows = styleRows().map(
           (r) => r.querySelector("label").textContent,
         );
+        const opacity = styleRows()
+          .find((r) => r.querySelector("label").textContent === "opacity")
+          ?.querySelector("input[type=number]");
+        style.opacity = opacity && {
+          value: opacity.value,
+          placeholder: opacity.placeholder,
+        };
         const colour = styleRows()
           .find((r) => r.querySelector("label").textContent === "color")
           ?.querySelector("input[type=text]");

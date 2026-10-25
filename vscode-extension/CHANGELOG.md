@@ -44,11 +44,13 @@ A collection marked `sealed = True` -- a magnet meshed into cells, as
 magpylib-material-response makes one -- is one object: one row in the legend,
 its cells counted, picked by a click on any of them, moved and hidden whole. Its
 cells are its data, with no ids, steps or variables of their own, and the script
-writes them as its parts. On the U-core of material-response's docs at 5,888
-cells, a drag of the probe sends 113 KB a step instead of 1,963, and orbiting
-with the whole body selected takes 10 ms a frame instead of 155 with the
-computer four times slower. Any large selection is now outlined as one, sealed
-or not (#88).
+writes them as its parts. It is styled as one magnet is: a property set on it is
+set on every cell that has it, one its cells differ in shows as mixed, and a
+reset gives each cell its own back. On the U-core of material-response's docs at
+5,888 cells, a drag of the probe sends 113 KB a step instead of 1,963, and
+orbiting with the whole body selected takes 10 ms a frame instead of 155 with
+the computer four times slower. Any large selection is now outlined as one,
+sealed or not (#88).
 
 </details>
 

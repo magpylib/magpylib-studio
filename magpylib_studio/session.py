@@ -95,6 +95,7 @@ Protocol surface (all JSON-serializable in/out):
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 import hashlib
 import json
@@ -2182,10 +2183,11 @@ def _event_source(event):
     return f"{target}.{_op_source(event)}"
 
 
-def _parts_source(parts, indent):
+def _parts_source(parts, indent, over=()):
     """A sealed collection's parts as lines of its constructor call: one part
     a line, a collection among them with its own parts indented under it.
-    Plain values, written as they are, and a turn as the rotation it is."""
+    Plain values, written as they are, and a turn as the rotation it is. A
+    part's style is written but where the shared one is `over` it."""
     lines = []
     for part in parts:
         args = [
@@ -2194,17 +2196,33 @@ def _parts_source(parts, indent):
             else f"{key}={_lit(value)}"
             for key, value in (part.get("params") or {}).items()
         ]
-        if part.get("style"):
-            given = {p: _style_arg(p, v) for p, v in part["style"].items()}
+        own = {p: v for p, v in (part.get("style") or {}).items() if p not in over}
+        if own:
+            given = {p: _style_arg(p, v) for p, v in own.items()}
             args.append(f"style={_nest(given)!r}")
         if part["type"] == "Collection":
             lines.append(f"{indent}magpy.Collection(")
-            lines += _parts_source(part.get("parts") or [], indent + "    ")
+            lines += _parts_source(part.get("parts") or [], indent + "    ", over)
             lines += [f"{indent}    {arg}," for arg in args]
             lines.append(f"{indent}),")
         else:
             lines.append(f"{indent}magpy.{part['type']}({', '.join(args)}),")
     return lines
+
+
+def _parts_of_sealed(obj):
+    """A sealed collection's parts that are no collections, however deep."""
+    return [part for part in obj.children_all if not isinstance(part, magpy.Collection)]
+
+
+def _merge_properties(into, more):
+    """Merge a style schema's `properties` into another's, depth first."""
+    for name, spec in more.items():
+        mine = into.get(name)
+        if mine is None:
+            into[name] = spec
+        elif "properties" in mine and "properties" in spec:
+            _merge_properties(mine["properties"], spec["properties"])
 
 
 def _parts_turned(parts):
@@ -2867,6 +2885,11 @@ class MagpylibStudioSession:
             obj = magpy.Collection(*adopted, *parts, **params)
             if event.get("sealed"):
                 obj.sealed = True
+            if event.get("parts_style"):
+                # one style for its parts, over each part's own: where a part
+                # has the property, as magpylib's `set_children_styles` does
+                layer = {p: _style_arg(p, v) for p, v in event["parts_style"].items()}
+                obj.set_children_styles(_nest(layer))
             if parts and event.get("visible") is False:
                 # hidden as `set_visible` hides a leaf, which its parts are
                 # not: they have no create steps to write it on
@@ -3525,7 +3548,10 @@ class MagpylibStudioSession:
         return {"pixels": list(pixel.shape[:2])} if pixel.ndim == 3 else {}
 
     def get_schema(self, object_id):
-        schema = type(self._objs[object_id].style).schema()
+        obj = self._objs[object_id]
+        if threejs.is_sealed(obj):
+            return self._sealed_schema(obj)
+        schema = type(obj.style).schema()
         # magpylib's schema does not say what a pixel field source may be —
         # only that it is one. We know: it is the set the engine evaluates.
         # Without this the inspector has nothing to build a widget from and
@@ -3828,8 +3854,54 @@ class MagpylibStudioSession:
             out.setdefault(event.get("target"), []).append(event)
         return out
 
+    def _sealed_schema(self, obj):
+        """A sealed collection's style, as one magnet's would be: its own --
+        label, description, legend -- and every property any of its parts
+        has, set for all of them at once (`apply_edit`)."""
+        schema = copy.deepcopy(type(obj.style).schema())
+        merged = schema["properties"]
+        for kind in {type(part.style) for part in _parts_of_sealed(obj)}:
+            _merge_properties(merged, copy.deepcopy(kind.schema()["properties"]))
+        return schema
+
+    def _sealed_values(self, obj, create):
+        """A sealed collection's style values, as one magnet's would be:
+        what is set on it or on all its parts, each property's value where
+        every part that has it agrees, and the properties where they do not
+        (``mixed``). Parts alike are read once: a meshed body's thousands of
+        cells are mostly one style."""
+        own = get_style(obj, magpy.defaults).as_dict(flatten=True)
+        groups = {}
+        for part in _parts_of_sealed(obj):
+            key = (
+                type(part.style),
+                json.dumps(_style_values(part), sort_keys=True, default=str),
+            )
+            groups.setdefault(key, part)
+        looks = [
+            get_style(part, magpy.defaults).as_dict(flatten=True)
+            for part in groups.values()
+        ]
+        resolved, mixed = {}, []
+        for path in sorted({path for look in looks for path in look}):
+            if threejs.sealed_own(path):
+                continue
+            seen = [look[path] for look in looks if path in look]
+            if all(value == seen[0] for value in seen):
+                resolved[path] = seen[0]
+            else:
+                mixed.append(path)
+        resolved.update({p: v for p, v in own.items() if threejs.sealed_own(p)})
+        set_ = {
+            p: v for p, v in obj.style.set_values().items() if threejs.sealed_own(p)
+        }
+        set_.update(create.get("parts_style") or {})
+        return {"set": set_, "resolved": resolved, "mixed": mixed}
+
     def get_values(self, object_id):
         obj = self._objs[object_id]
+        if threejs.is_sealed(obj):
+            return self._sealed_values(obj, self._create_event(object_id))
         return {
             "set": obj.style.set_values(),  # explicitly set (dotted keys)
             # effective values: the set ones merged over the defaults
@@ -5006,6 +5078,8 @@ class MagpylibStudioSession:
         copies as they were until the next rebuild. Tried on the live object
         first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
+        if threejs.is_sealed(obj) and not threejs.sealed_own(path):
+            return self._edit_parts_style(object_id, obj, path, value)
         try:
             obj.style.set(path, _style_arg(path, value))
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
@@ -5015,6 +5089,29 @@ class MagpylibStudioSession:
         def mutate(doc):
             self._create_event(object_id)["style"] = style
             doc["objects"] = self._project()  # keep the projection in step
+
+        return self._mutate_doc(mutate, f"edit {object_id} {path}")
+
+    def _edit_parts_style(self, object_id, obj, path, value):
+        """Set style `path` for every part of a sealed collection that has
+        it, as one step: in the layer over the parts' own styles
+        (``parts_style``), so that a reset gives each its own back. Tried on
+        a part first, for magpylib's own words when a value is refused."""
+        holders = [p for p in _parts_of_sealed(obj) if threejs.has_style(p, path)]
+        if not holders:
+            return {
+                "ok": False,
+                "error": f"no part of {object_id!r} has a style {path!r}",
+            }
+        try:
+            holders[0].style.set(path, _style_arg(path, value))
+        except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
+            return {"ok": False, "error": str(e)}
+        written = _style_values(holders[0]).get(path, _plain(value))
+
+        def mutate(doc):
+            self._create_event(object_id).setdefault("parts_style", {})[path] = written
+            doc["objects"] = self._project()
 
         return self._mutate_doc(mutate, f"edit {object_id} {path}")
 
@@ -6339,7 +6436,7 @@ class MagpylibStudioSession:
 
         spec = self._spec(object_id)
         inside = {s["id"] for s, _ in self._iter_specs([spec])} - {object_id}
-        parts = importer._parts_of(self._objs[object_id], object_id, [])
+        parts, shared = importer.sealed_parts(self._objs[object_id], object_id, [])
 
         def mutate(doc):
             doc["events"] = [
@@ -6353,6 +6450,8 @@ class MagpylibStudioSession:
             create.pop("children", None)
             create["sealed"] = True
             create["parts"] = parts
+            if shared:
+                create["parts_style"] = shared
 
         return self._mutate_doc(mutate, f"seal {object_id}")
 
@@ -6478,7 +6577,8 @@ class MagpylibStudioSession:
         """Reset one style path (or all styles) to defaults by dropping it
         from the doc and rebuilding — the property tree has no unset."""
         spec = self._spec(object_id)
-        if path is not None and path not in spec.get("style", {}):
+        layer = spec.get("parts_style") or {}
+        if path is not None and path not in spec.get("style", {}) and path not in layer:
             return {
                 "ok": False,
                 "error": f"style path {path!r} is not set on {object_id!r}",
@@ -6488,6 +6588,12 @@ class MagpylibStudioSession:
             create = self._create_event(object_id)
             if path is None:
                 create.pop("style", None)
+                create.pop("parts_style", None)
+            elif path in (create.get("parts_style") or {}):
+                # a sealed collection's parts take their own back
+                del create["parts_style"][path]
+                if not create["parts_style"]:
+                    del create["parts_style"]
             else:
                 del create["style"][path]
 
@@ -8234,9 +8340,13 @@ class MagpylibStudioSession:
                 # sealed, then what it is made of, one part a line
                 if spec.get("sealed"):
                     lines.append(f"{target}.sealed = True")
+                layer = spec.get("parts_style") or {}
                 lines.append(f"{target}.add(")
-                lines.extend(_parts_source(spec["parts"], "    "))
+                lines.extend(_parts_source(spec["parts"], "    ", over=layer))
                 lines.append(")")
+                if layer:
+                    given = {p: _style_arg(p, v) for p, v in layer.items()}
+                    lines.append(f"{target}.set_children_styles({_nest(given)!r})")
             if parent_of.get(target) is not None:
                 lines.append(f"{parent_of[target]}.add({target})")
 

@@ -1304,6 +1304,7 @@ class _ScriptWriter:
                 "hidden_style",
                 "sealed",
                 "parts",
+                "parts_style",
             ):
                 self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
         params = dict(event.get("params") or {})
@@ -1342,7 +1343,15 @@ class _ScriptWriter:
             # (`recording._Recorder.adopt`).
             if event.get("sealed"):
                 lines.append(f"{name}.sealed = True")
-            lines += [f"{name}.add(", *self.write_parts(event["parts"], "    "), ")"]
+            layer = event.get("parts_style") or {}
+            lines += [
+                f"{name}.add(",
+                *self.write_parts(event["parts"], "    ", over=layer),
+                ")",
+            ]
+            if layer:
+                given = {p: _style_arg(p, v) for p, v in layer.items()}
+                lines.append(f"{name}.set_children_styles({_nested(given)!r})")
         # The recorder names it by the variable it is assigned to; only where
         # that cannot be its id -- a name the script has for something else
         # -- does the script say the id outright.
@@ -1353,10 +1362,11 @@ class _ScriptWriter:
             lines.append(f"{self.names[parent]}.add({name})")
         return lines
 
-    def write_parts(self, parts, indent):
+    def write_parts(self, parts, indent, over=()):
         """A sealed collection's parts as lines of its call: plain values,
         a turn as the rotation it is, a collection among them with its own
-        parts under it (`session._parts_source`, in this script's words)."""
+        parts under it, and a part's style but where the shared one is
+        `over` it (`session._parts_source`, in this script's words)."""
         lines = []
         for part in parts:
             args = []
@@ -1367,12 +1377,15 @@ class _ScriptWriter:
                 else:
                     code = self.value(value)
                 args.append((key, code))
-            if part.get("style"):
-                given = {p: _style_arg(p, v) for p, v in part["style"].items()}
+            own = {p: v for p, v in (part.get("style") or {}).items() if p not in over}
+            if own:
+                given = {p: _style_arg(p, v) for p, v in own.items()}
                 args.append(("style", repr(_nested(given))))
             if part["type"] == "Collection":
                 lines.append(f"{indent}{self.alias['magpy']}.Collection(")
-                lines += self.write_parts(part.get("parts") or [], indent + "    ")
+                lines += self.write_parts(
+                    part.get("parts") or [], indent + "    ", over
+                )
                 lines += [f"{indent}    {key}={code}," for key, code in args]
                 lines.append(f"{indent}),")
             else:

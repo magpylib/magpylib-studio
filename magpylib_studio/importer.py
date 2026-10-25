@@ -25,7 +25,7 @@ import numpy as np
 
 from magpylib_studio import units
 from magpylib_studio.session import _is_data, _style_values
-from magpylib_studio.threejs import is_sealed
+from magpylib_studio.threejs import has_style, is_sealed, sealed_own
 
 # Constructor kwargs worth introspecting, tried in order per object.
 # magnetization is intentionally absent: it is derived from polarization.
@@ -99,19 +99,51 @@ def _unique_id(base, used):
     return candidate
 
 
-def _parts_of(collection, object_id, left_out):
-    """A sealed collection's children as its parts: specs with no id, which
-    no edit, pick or legend row can name. A nested collection is a part made
-    of parts."""
+def sealed_parts(collection, object_id, left_out):
+    """A sealed collection's children as its parts, and the style they share.
+
+    Parts are specs with no id, which no edit, pick or legend row can name;
+    a nested collection is a part made of parts. What every part that has a
+    style property sets alike is said once, as the collection's
+    ``parts_style``, and each part keeps only what is its own: a body meshed
+    into cells made alike carries one style, a collection of differing
+    objects keeps their differences. Its own label, description, legend and
+    traces are the collection's, and are not shared (`sealed_own`)."""
+    leaves = []
+    parts = _parts_of(collection, object_id, left_out, leaves)
+    shared = {}
+    candidates = {path for part, _ in leaves for path in part.get("style", {})}
+    for path in sorted(candidates):
+        if sealed_own(path):
+            continue
+        holders = [part for part, child in leaves if has_style(child, path)]
+        values = [part.get("style", {}).get(path, _UNSET) for part in holders]
+        if any(value is _UNSET or value != values[0] for value in values):
+            continue  # mixed: each part keeps its own
+        shared[path] = values[0]
+        for part in holders:
+            del part["style"][path]
+            if not part["style"]:
+                del part["style"]
+    return parts, shared
+
+
+_UNSET = object()
+
+
+def _parts_of(collection, object_id, left_out, leaves):
+    """`sealed_parts`'s parts, with each that is no collection put in
+    `leaves` beside the object it was read from."""
     parts = []
     for child in collection.children:
         if isinstance(child, magpy.Collection):
             part = {
                 "type": "Collection",
-                "parts": _parts_of(child, object_id, left_out),
+                "parts": _parts_of(child, object_id, left_out, leaves),
             }
         else:
             part = _part_spec(child)
+            leaves.append((part, child))
         style = _style_values(child)
         for path in [path for path, value in style.items() if not _is_data(value)]:
             del style[path]
@@ -151,11 +183,13 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # A sealed collection's parts are none of that: they are what it is made
     # of, and come across as its data.
     if is_sealed(obj):
+        parts, shared = sealed_parts(obj, object_id, left_out)
         spec = {
             "id": object_id,
             "type": "Collection",
             "sealed": True,
-            "parts": _parts_of(obj, object_id, left_out),
+            "parts": parts,
+            **({"parts_style": shared} if shared else {}),
         }
     elif isinstance(obj, magpy.Collection):
         spec = {

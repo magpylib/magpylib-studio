@@ -144,9 +144,14 @@
           "items": { "$ref": "#/definitions/spec" }
         },
         "sealed": { "$ref": "#/definitions/sealed" },
-        "parts": { "$ref": "#/definitions/parts" }
+        "parts": { "$ref": "#/definitions/parts" },
+        "parts_style": { "$ref": "#/definitions/partsStyle" }
       },
       "additionalProperties": true
+    },
+    "partsStyle": {
+      "type": "object",
+      "description": "Collections only: one style for a sealed collection's parts, by dotted path, over each part's own and set on every part that has the property, as `collection.set_children_styles` does."
     },
     "sealed": {
       "type": "boolean",
@@ -246,7 +251,8 @@
                 "description": "Collections only: ids that already exist and are adopted."
               },
               "sealed": { "$ref": "#/definitions/sealed" },
-              "parts": { "$ref": "#/definitions/parts" }
+              "parts": { "$ref": "#/definitions/parts" },
+              "parts_style": { "$ref": "#/definitions/partsStyle" }
             }
           }
         },

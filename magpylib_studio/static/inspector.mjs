@@ -368,16 +368,27 @@ export function createInspector(
       .catch(refused);
   }
 
-  function makeWidget(path, spec, value) {
+  /** A property's widget, showing `value` -- or, `mixed`, that the parts of
+   *  a sealed collection differ in it: empty, saying so, until set for all. */
+  function makeWidget(path, spec, value, mixed = false) {
     const wrap = element("div", "magpy-ins-widget");
     const types = [].concat(spec.type || []);
     const enums = (spec.enum || []).filter((v) => typeof v === "string");
+    const unsaid = mixed ? "mixed" : "default";
+    // a choice the parts differ in: said first, and not to be chosen again
+    const differing = (sel) => {
+      if (!mixed) return;
+      const option = new Option("mixed", "\u0000mixed");
+      option.disabled = true;
+      sel.prepend(option);
+      option.selected = true;
+    };
 
     if (spec.format === "color") {
       const text = element("input");
       text.type = "text";
       text.value = value ?? "";
-      text.placeholder = "default";
+      text.placeholder = unsaid;
       text.addEventListener("change", () => {
         if (text.value) applyEdit(path, text.value);
       });
@@ -387,7 +398,11 @@ export function createInspector(
       // in the scene -- which the view knows, and the swatch shows, rather
       // than the black an empty colour box shows.
       const shown = value ?? hexOf(drawnColor(objectId));
-      if (/^#[0-9a-fA-F]{6}$/.test(shown || "")) pick.value = shown;
+      if (mixed) {
+        // no one colour to show: a grey that is none of them
+        pick.value = "#808080";
+        pick.title = "its parts differ in it";
+      } else if (/^#[0-9a-fA-F]{6}$/.test(shown || "")) pick.value = shown;
       pick.addEventListener("change", () => applyEdit(path, pick.value));
       wrap.append(text, pick);
     } else if (enums.length) {
@@ -395,6 +410,7 @@ export function createInspector(
       sel.append(new Option("(default)", ""));
       for (const opt of enums) sel.append(new Option(opt, opt));
       sel.value = typeof value === "string" ? value : "";
+      differing(sel);
       sel.addEventListener("change", () => {
         if (sel.value) applyEdit(path, sel.value);
         else if (path in values.set) resetPath(path);
@@ -408,6 +424,7 @@ export function createInspector(
         new Option("false", "false"),
       );
       sel.value = value === true ? "true" : value === false ? "false" : "";
+      differing(sel);
       sel.addEventListener("change", () => {
         if (sel.value) applyEdit(path, sel.value === "true");
         else if (path in values.set) resetPath(path);
@@ -417,6 +434,7 @@ export function createInspector(
       const num = element("input", "magpy-ins-num");
       num.type = "number";
       num.step = "any";
+      num.placeholder = mixed ? unsaid : "";
       if (value !== null && value !== undefined) num.value = value;
       num.addEventListener("change", () => {
         if (num.value !== "") applyEdit(path, parseFloat(num.value));
@@ -449,7 +467,7 @@ export function createInspector(
       const text = element("input");
       text.type = "text";
       text.value = value ?? "";
-      text.placeholder = "default";
+      text.placeholder = unsaid;
       text.addEventListener("change", () => {
         if (text.value) applyEdit(path, text.value);
         else if (path in values.set) resetPath(path);
@@ -478,7 +496,8 @@ export function createInspector(
       const rows = [];
       for (const [path, leafSpec] of leaves) {
         if (filter && !path.toLowerCase().includes(filter)) continue;
-        const widget = makeWidget(path, leafSpec, values.resolved[path]);
+        const mixed = (values.mixed || []).includes(path);
+        const widget = makeWidget(path, leafSpec, values.resolved[path], mixed);
         if (!widget) continue;
         const row = element(
           "div",
@@ -493,6 +512,9 @@ export function createInspector(
           (leafSpec.description ? " — " + leafSpec.description : "") +
           (path in values.set
             ? " — set in this scene; ↺ goes back to the default"
+            : "") +
+          (mixed
+            ? " — its parts differ in it; set here, it is set for all"
             : "");
         const reset = element("button", "magpy-ins-reset", "↺");
         reset.type = "button";
@@ -1183,11 +1205,12 @@ export function createInspector(
       listed && listed.label && listed.label !== listed.type
         ? listed.label
         : id;
-    const what = !listed
-      ? ""
-      : label === id
-        ? listed.type
-        : listed.type + "  ·  " + id;
+    // a sealed collection says what it is made of
+    const kind =
+      listed && listed.parts
+        ? `${listed.type}, sealed: ${listed.parts} parts`
+        : listed?.type;
+    const what = !listed ? "" : label === id ? kind : kind + "  ·  " + id;
     headerEl.appendChild(element("div", "magpy-ins-name", label));
     if (what) headerEl.appendChild(element("div", "magpy-ins-what", what));
     if (generatedFrom) {

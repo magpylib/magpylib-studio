@@ -1192,10 +1192,12 @@ def test_a_sealed_collection_is_one_object(editable):
 )
 def test_a_sealed_collection_survives_its_script(tmp_path, script, load):
     """Written as its parts, sealed, and read back as the same one object,
-    field and all."""
+    field, shared style and each part's own all."""
     from magpylib_studio.session import MagpylibStudioSession
 
     body = _body()
+    body.children[0].style.magnetization.color.north = "#0000ff"
+    body.set_children_styles(opacity=0.5)
     session = widget.SceneWidget(body, editable=True)._session
     path = tmp_path / "scene.py"
     path.write_text(getattr(session, script)())
@@ -1203,10 +1205,37 @@ def test_a_sealed_collection_survives_its_script(tmp_path, script, load):
     assert getattr(again, load)(str(path))["ok"]
     (entry,) = again.list_objects()
     assert entry["id"] == "body" and entry["parts"] == 3
+    create = again._create_event("body")
+    assert create["parts_style"] == {"opacity": 0.5}
+    assert create["parts"][0]["style"] == {"magnetization.color.north": "#0000ff"}
     point = (0.004, 0.012, 0.003)
     np.testing.assert_allclose(
         magpy.getB(again._objs["body"], point), magpy.getB(body, point), rtol=1e-12
     )
+
+
+def test_a_sealed_collection_is_styled_as_one():
+    """One style for its parts, over their own: what all that have a property
+    share is said once, what they differ in is mixed, a value set reaches
+    every part that has it, and a reset gives each its own back."""
+    north = "magnetization.color.north"
+    body = _body()
+    for cell, colour in zip(
+        body.children, ("#ff0000", "#0000ff", "#0000ff"), strict=True
+    ):
+        cell.style.set(north, colour)
+        cell.style.opacity = 0.5
+    session = widget.SceneWidget(body, editable=True)._session
+    create = session._create_event("body")
+    assert create["parts_style"] == {"opacity": 0.5}
+    assert session.get_values("body")["mixed"] == [north]
+    assert session.apply_edit("body", north, "#00ff00")["ok"]
+    assert session.apply_edit("body", "opacity", 0.3)["ok"]
+    values = session.get_values("body")
+    assert values["resolved"][north] == "#00ff00" and not values["mixed"]
+    assert {m["opacity"] for m in session.get_scene()["meshes"]} == {0.3}
+    assert session.reset_style("body", north)["ok"]
+    assert session.get_values("body")["mixed"] == [north]
 
 
 def test_a_sealed_collections_parts_overlap_nothing_but_others():

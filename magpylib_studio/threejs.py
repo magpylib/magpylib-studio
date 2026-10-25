@@ -1280,6 +1280,29 @@ def is_sealed(obj):
     return isinstance(obj, magpy.Collection) and getattr(obj, "sealed", False) is True
 
 
+#: What a sealed collection keeps as its own style: what names it, lists it
+#: and draws for it alone. The rest set on it is its parts', in one layer.
+SEALED_OWN = ("label", "description", "legend", "model3d")
+
+
+def sealed_own(path):
+    """Whether a style `path` set on a sealed collection is its own, rather
+    than its parts' (`SEALED_OWN`)."""
+    return path.split(".", 1)[0] in SEALED_OWN
+
+
+def has_style(obj, path):
+    """Whether `obj`'s style has the property `path`: a magnet's has
+    ``magnetization.color.north``, a wire's does not."""
+    node = obj.style
+    for name in path.split("."):
+        try:
+            node = getattr(node, name)
+        except AttributeError:
+            return False
+    return True
+
+
 def _leaf_count(collection):
     """How many objects that are not collections `collection` holds."""
     return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
