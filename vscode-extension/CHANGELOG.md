@@ -19,7 +19,7 @@ tetrahedra and meshed cells; a hollow shape such as a ring segment is marked
 round only. An overlap blinks twice as it appears; with reduced motion asked
 for, it does not. A view left still draws nothing. A view drawn read only counts
 a sealed collection's overlap once, where it counted it once for each of its
-cells.
+cells (#90).
 
 </details>
 
