@@ -50,7 +50,8 @@ reset gives each cell its own back. On the U-core of material-response's docs at
 5,888 cells, a drag of the probe sends 113 KB a step instead of 1,963, and
 orbiting with the whole body selected takes 10 ms a frame instead of 155 with
 the computer four times slower. Any large selection is now outlined as one,
-sealed or not (#88).
+sealed or not, and sliding a variable only a sensor follows -- its pixels'
+density -- no longer computes the field of the sources again (#88).
 
 </details>
 

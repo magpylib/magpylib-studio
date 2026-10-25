@@ -4493,18 +4493,31 @@ class MagpylibStudioSession:
 
     def _sources_written(self):
         """What the field of the sources follows from: the log less the
-        sensors' own steps, the variables, how far the log is folded, and
-        what the mesh files it reads held, from the folder they are read in
-        -- as a digest, since a body meshed into thousands of cells writes
-        megabytes. The same digest is the same field (`_field_lines`)."""
+        sensors' own steps, the variables those steps are written in -- and
+        those are, to the end -- how far the log is folded, and what the mesh
+        files it reads held, from the folder they are read in -- as a digest,
+        since a body meshed into thousands of cells writes megabytes. The
+        same digest is the same field (`_field_lines`): a variable only a
+        sensor follows, its pixels' density, changes none of it."""
         sensors = {k for k, o in self._objs.items() if isinstance(o, magpy.Sensor)}
         events = [
             e for e in self.doc.get("events") or [] if e.get("target") not in sensors
         ]
+        variables = self.doc.get("variables") or {}
+        named = set(expressions.referenced_names(events))
+        while more := (
+            set(
+                expressions.referenced_names(
+                    [variables[name] for name in named if name in variables]
+                )
+            )
+            - named
+        ):
+            named |= more
         text = json.dumps(
             [
                 events,
-                self.doc.get("variables"),
+                {name: variables[name] for name in sorted(named) if name in variables},
                 self._rollback,
                 self._base_dir,
                 sorted(self._mesh_read.items()),

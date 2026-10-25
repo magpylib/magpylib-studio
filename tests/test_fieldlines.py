@@ -217,3 +217,37 @@ def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch, seal
     widget._reply({"method": "apply_edits", "params": {"edits": [edit]}})
     widget._session.get_scene()
     assert computed  # a magnet moved
+
+
+def test_a_variable_only_a_sensor_follows_keeps_the_field(monkeypatch):
+    """The field of the sources is kept across a change of a variable that
+    only a sensor follows -- its pixels' density -- and computed again for
+    one a source follows."""
+    from typing import Annotated
+
+    from magpylib_studio import Count, Length, grid, scene
+
+    @scene
+    def lines(
+        density: Annotated[int, Count(3, 9)] = 5,
+        height: Annotated[float, Length(0.006, 0.02)] = 0.01,
+    ):
+        cube = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01, height), style_label="cube"
+        )
+        probe = magpy.Sensor(pixel=grid(0.02, density, plane="xz"), style_label="probe")
+        probe.style.pixel.field.source = "B"
+        return cube, probe
+
+    session = SceneWidget(lines.build(), field_lines=True)._session
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines, "field", lambda *a, **k: computed.append(1) or field(*a, **k)
+    )
+    assert session.set_variable("density", 7)["ok"]
+    (item,) = session.get_scene()["fieldlines"]
+    assert not computed and len(item["seeds"]) > 0
+    assert session.set_variable("height", 0.012)["ok"]
+    session.get_scene()
+    assert computed  # the cube changed
