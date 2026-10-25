@@ -6,22 +6,24 @@ Needs the widget extra, marimo and magpylib-material-response:
 
 The U-core of material-response's docs: three soft-iron cuboids (chi = 999)
 wound with a coil of sixteen turns, meshed into about as many cells as asked
-for and solved for each cell's polarization. The cells are shown with the
-coil and the field lines of a probe in the plane y = 0, the core's plane of
-symmetry, and the time each step took is said under the view: a scene of
-thousands of objects, which the view, its field lines and a drag have to keep
-up with.
+for and solved for each cell's polarization. The cells are sealed into one
+body and shown with the coil and the field lines of a probe in the plane
+y = 0, the core's plane of symmetry, `density` by `density` of them, a
+variable of the scene. The time each step took is said under the view: a
+scene of thousands of objects, which the view, its field lines and a drag
+have to keep up with.
 """
 
 import marimo
 
-__generated_with = "0.25.1"
+__generated_with = "0.25.2"
 app = marimo.App(width="full", app_title="U-core in the studio")
 
 
 @app.cell
 def _():
     import time
+    from typing import Annotated
 
     import magpylib as magpy
     import marimo as mo
@@ -33,17 +35,22 @@ def _():
         move_grid_along_polyline,
     )
 
+    from magpylib_studio import Count, grid, scene
     from magpylib_studio.widget import SceneWidget
 
     return (
+        Annotated,
+        Count,
         SceneWidget,
         apply_demag,
         create_polyline_fillet,
+        grid,
         magpy,
         mesh_all,
         mo,
         move_grid_along_polyline,
         np,
+        scene,
         time,
     )
 
@@ -55,8 +62,9 @@ def _(mo):
 
     Meshed into as many **cells** as chosen, and solved again when you
     choose another: a few tenths of a second at 768, about twenty at 5,888.
-    Click a field line to take the probe, and drag it through the core's
-    plane.
+    The cells are one body: a click on any picks it whole. Slide **density**
+    in the variables panel for more or fewer field lines, click one to take
+    the probe, and drag it through the core's plane.
     """)
     return
 
@@ -112,7 +120,7 @@ def _(create_polyline_fillet, magpy, move_grid_along_polyline, np):
 
 
 @app.cell
-def _(apply_demag, magpy, mesh_all, np, target, time, ucore):
+def _(apply_demag, magpy, mesh_all, target, time, ucore):
     t0 = time.perf_counter()
     core, coil = ucore()
     meshed = mesh_all(magpy.Collection(core, coil), target_elems=target.value)
@@ -120,31 +128,61 @@ def _(apply_demag, magpy, mesh_all, np, target, time, ucore):
     solved = apply_demag(meshed)
     t2 = time.perf_counter()
     cells = [s for s in solved.sources_all if isinstance(s, magpy.magnet.Cuboid)]
-    iron = magpy.Collection(*cells, override_parent=True, style_label="U-core")
-    windings = magpy.Collection(
-        *(s for s in solved.sources_all if isinstance(s, magpy.current.Polyline)),
-        override_parent=True,
-        style_label="coil",
-    )
-    # a probe of 15 x 14 pixels in the core's plane, drawn as its field lines
-    x, z = np.meshgrid(
-        np.linspace(-0.07, 0.07, 15), np.linspace(-0.035, 0.1, 14), indexing="ij"
-    )
-    probe = magpy.Sensor(
-        pixel=np.stack([x, np.zeros_like(x), z], axis=-1),
-        style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
-    )
+    windings = [
+        s.vertices for s in solved.sources_all if isinstance(s, magpy.current.Polyline)
+    ]
     solved_in = (
         f"{len(cells)} cells, meshed in {t1 - t0:.2f} s and solved in {t2 - t1:.1f} s"
     )
-    return iron, probe, solved_in, windings
+    return cells, solved_in, windings
 
 
 @app.cell
-def _(SceneWidget, iron, mo, probe, solved_in, time, windings):
+def _(Annotated, Count, cells, grid, magpy, scene, windings):
+    @scene(model_unit="mm", field_unit="mT")
+    def ucore_scene(density: Annotated[int, Count(4, 40, slider=(5, 25))] = 15):
+        """The solved core, sealed into one body made of its cells; the coil;
+        and a probe in the core's plane of symmetry, `density` by `density`
+        pixels across 140 mm, drawn as its field lines."""
+        coil = magpy.Collection(
+            *(magpy.current.Polyline(current=25, vertices=v) for v in windings),
+            style_label="coil",
+        )
+        probe = magpy.Sensor(
+            position=(0, 0, 0.0325),
+            pixel=grid(0.07, density, plane="xz"),
+            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
+        )
+        # Made last: every step a scene records builds what is made before it
+        # again, and the core is thousands of cells -- 2.4 s to build at
+        # 5,888 made last, 7.5 made first.
+        iron = magpy.Collection(style_label="U-core")
+        iron.sealed = True  # before its cells are added: they are its data
+        iron.add(
+            *(
+                magpy.magnet.Cuboid(
+                    dimension=cell.dimension,
+                    polarization=cell.polarization,
+                    position=cell.position,
+                    orientation=cell.orientation,
+                )
+                for cell in cells
+            )
+        )
+        return iron, coil, probe
+
+    return (ucore_scene,)
+
+
+@app.cell
+def _(SceneWidget, mo, solved_in, time, ucore_scene):
     t3 = time.perf_counter()
     view = SceneWidget(
-        iron, windings, probe, field_lines=True, editable=True, height=720
+        ucore_scene.build(),
+        editable=True,
+        field_lines=True,
+        open_panel="variables",
+        height=720,
     )
     shown_in = time.perf_counter() - t3
     mo.vstack(

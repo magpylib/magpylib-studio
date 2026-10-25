@@ -2499,20 +2499,25 @@ const wideMaterials = new Set();
  * wire -- never on a shape, where it says the magnetization, or on a marker
  * coloured by the field.
  *
- * Each part hangs on the trace it marks, so it moves with it.
+ * Each part hangs on the trace it marks, so it moves with it -- or, where
+ * many shapes are outlined, on the first of them (`outlineShapes`).
  */
 function outline(objectIds, opacity, copyOpacity = opacity) {
   const added = [];
   const hang = hanger(added);
+  const shapes = shapesTo(hang, SELECTION_COLOUR);
   for (const objectId of drawnFor(objectIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue; // a handle, or another node
       const own = trace.userData.copy ? copyOpacity : opacity;
-      outlineTrace(trace, own, hang, SELECTION_COLOUR, true);
+      if (!shapes.take(trace, own)) {
+        outlineTrace(trace, own, hang, SELECTION_COLOUR, true);
+      }
     }
   }
+  shapes.done();
   return added;
 }
 
@@ -2525,16 +2530,109 @@ function outlineOverlaps(objectIds) {
   const wanted = new Set(objectIds);
   if (!wanted.size) return added;
   const hang = hanger(added);
+  const shapes = shapesTo(hang, OVERLAP_COLOUR);
   for (const [objectId, node] of byObjectId) {
     if (!node.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue;
-      if (wanted.has(trace.userData.copy ?? objectId)) {
+      if (
+        wanted.has(trace.userData.copy ?? objectId) &&
+        !shapes.take(trace, 1)
+      ) {
         outlineTrace(trace, 1, hang, OVERLAP_COLOUR, false); // a path is not what overlaps
       }
     }
   }
+  shapes.done();
   return added;
+}
+
+/** The shapes of an outline, gathered to be outlined at once: each on its
+ *  own, as `outlineShape` does, or -- `BATCH_FROM` of them and more at one
+ *  opacity -- all as one (`outlineShapes`). A body meshed into 5,888 cells
+ *  was 11,776 lines to draw, a frame taking 167 ms with the CPU four times
+ *  slower against 11 with nothing selected. `take` says whether it took a
+ *  trace: not one that is no shape, nor one hidden, which keeps an outline
+ *  of its own as before. Traces playing a run are gathered by their track,
+ *  which moves them together: a sealed body on a path is one track. */
+function shapesTo(hang, colour) {
+  const gathered = new Map(); // an opacity and a track -> its shapes
+  const trackOf = new Map(tracked.map(({ built, track }) => [built, track]));
+  return {
+    take(trace, opacity) {
+      if (!trace.isMesh || !shown(trace)) return false;
+      const key = `${opacity} ${trackOf.get(trace) ?? ""}`;
+      if (!gathered.has(key)) gathered.set(key, { opacity, meshes: [] });
+      gathered.get(key).meshes.push(trace);
+      return true;
+    },
+    done() {
+      for (const { opacity, meshes } of gathered.values()) {
+        if (meshes.length < BATCH_FROM) {
+          for (const mesh of meshes) outlineShape(mesh, opacity, hang, colour);
+        } else {
+          outlineShapes(meshes, opacity, hang, colour);
+        }
+      }
+    },
+  };
+}
+
+/** A merged outline's lines, by the trace they hang on: kept while the same
+ *  traces are outlined, so that a drag's redraw -- every step of it -- does
+ *  not put a quarter of a million points through the GPU again. Let go
+ *  when that trace is freed (`free`). */
+const mergedOutlines = new WeakMap(); // a trace -> { meshes, geometry }
+
+/** Many shapes' edges as one outline, hung on the first of them. It moves
+ *  with them as long as they move together, which is how they move: a drag
+ *  carries everything selected as one rigid motion, and a trace that plays a
+ *  run of its own is never among them (`shapesTo`). */
+function outlineShapes(meshes, opacity, hang, colour) {
+  const on = meshes[0];
+  const kept = mergedOutlines.get(on);
+  if (
+    kept?.meshes.length === meshes.length &&
+    kept.meshes.every((mesh, k) => mesh === meshes[k])
+  ) {
+    hangMerged(on, kept.geometry, opacity, hang, colour);
+    return;
+  }
+  kept?.geometry.dispose();
+  on.updateWorldMatrix(true, false);
+  const back = on.matrixWorld.clone().invert();
+  const each = meshes.map((mesh) => edgesOf(mesh));
+  const pairs = new Float32Array(
+    each.reduce((n, edges) => n + edges.length, 0),
+  );
+  const into = new THREE.Matrix4();
+  let at = 0;
+  meshes.forEach((mesh, k) => {
+    mesh.updateWorldMatrix(true, false);
+    const e = into.multiplyMatrices(back, mesh.matrixWorld).elements;
+    const edges = each[k];
+    for (let i = 0; i < edges.length; i += 3, at += 3) {
+      const [x, y, z] = [edges[i], edges[i + 1], edges[i + 2]];
+      pairs[at] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      pairs[at + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      pairs[at + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+  });
+  const geometry = new LineSegmentsGeometry().setPositions(pairs);
+  mergedOutlines.set(on, { meshes, geometry });
+  hangMerged(on, geometry, opacity, hang, colour);
+}
+
+/** A merged outline's two lines, in front and faint through, on one kept
+ *  geometry that `free` leaves to `mergedOutlines`. */
+function hangMerged(on, geometry, opacity, hang, colour) {
+  for (const line of [
+    wideLines(geometry, OUTLINE_WIDTH, opacity, true, colour),
+    wideLines(geometry, HIDDEN_WIDTH, opacity * 0.35, false, colour),
+  ]) {
+    line.userData.borrowed = true;
+    hang(on, line);
+  }
 }
 
 /** How an outline's parts are hung on what they mark, and kept in `added`
@@ -2576,6 +2674,53 @@ function outlineTrace(trace, opacity, hang, colour, markers) {
  *  face, which is a sensor's: its axes, or its arrows coloured by the field,
  *  every small part of which would be outlined on its own. */
 function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
+  const pairs = edgesOf(mesh);
+  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
+  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
+}
+
+/** Edges by shape, across redraws: drawn again, a scene's traces are new
+ *  geometries, while a body's thousands of cells are a few shapes placed
+ *  apart. By the vertices taken from the first, to a ten-thousandth of the
+ *  shape's size; kept from that vertex. */
+const edgeShapes = new Map();
+const EDGE_SHAPES = 4096; // a scene's worth; past it, begun again
+
+/** A key for the shape of `mesh`'s geometry wherever it stands, and the
+ *  vertex it is taken from. */
+function shapeKey(mesh) {
+  const position = mesh.geometry.getAttribute("position");
+  if (!position || position.count > 512) return null; // a mesh: its own
+  const a = position.array;
+  let size = 0;
+  for (let i = 3; i < a.length; i++) {
+    size = Math.max(size, Math.abs(a[i] - a[i % 3]));
+  }
+  const step = size / 1e4 || 1;
+  const values = [mesh.userData.faceColoured ? "f" : "s", position.count];
+  for (let i = 0; i < a.length; i++)
+    values.push(Math.round((a[i] - a[i % 3]) / step));
+  const index = mesh.geometry.index?.array;
+  if (index) values.push("i", ...index);
+  return { key: values.join(","), at: [a[0], a[1], a[2]] };
+}
+
+/** A shape's edges, as `wideSegments` takes them, worked out once per
+ *  geometry and once per shape (`edgeShapes`): the selection of a meshed
+ *  body comes and goes with each click and each redraw, and finding the
+ *  edges of 5,888 cells took a third of a second. */
+function edgesOf(mesh) {
+  const kept = mesh.geometry.userData.edges;
+  if (kept) return kept;
+  const shape = shapeKey(mesh);
+  const known = shape && edgeShapes.get(shape.key);
+  if (known) {
+    const pairs = new Float32Array(known.length);
+    for (let i = 0; i < known.length; i++)
+      pairs[i] = known[i] + shape.at[i % 3];
+    mesh.geometry.userData.edges = pairs;
+    return pairs;
+  }
   let pairs;
   if (!mesh.userData.faceColoured) {
     const edges = new THREE.EdgesGeometry(mesh.geometry, EDGE_ANGLE);
@@ -2586,8 +2731,15 @@ function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     pairs = boxEdges(mesh.geometry.boundingBox);
   }
-  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
-  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
+  if (shape) {
+    if (edgeShapes.size >= EDGE_SHAPES) edgeShapes.clear();
+    const relative = new Float32Array(pairs.length);
+    for (let i = 0; i < pairs.length; i++)
+      relative[i] = pairs[i] - shape.at[i % 3];
+    edgeShapes.set(shape.key, relative);
+  }
+  mesh.geometry.userData.edges = pairs;
+  return pairs;
 }
 
 /** Lines from `pairs` -- each six numbers, a segment's two ends -- `width`
@@ -2596,6 +2748,17 @@ function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
  *  that an edge is not lost in the faces it bounds; otherwise they show
  *  through everything. */
 function wideSegments(pairs, width, opacity, shown, colour = SELECTION_COLOUR) {
+  return wideLines(
+    new LineSegmentsGeometry().setPositions(pairs),
+    width,
+    opacity,
+    shown,
+    colour,
+  );
+}
+
+/** `wideSegments` on a geometry of segments made already. */
+function wideLines(geometry, width, opacity, shown, colour = SELECTION_COLOUR) {
   const material = new LineMaterial({
     linewidth: width,
     transparent: opacity < 1,
@@ -2608,10 +2771,7 @@ function wideSegments(pairs, width, opacity, shown, colour = SELECTION_COLOUR) {
   material.color = new THREE.Color(colour);
   if (renderer) renderer.getSize(material.resolution);
   wideMaterials.add(material);
-  return new LineSegments2(
-    new LineSegmentsGeometry().setPositions(pairs),
-    material,
-  );
+  return new LineSegments2(geometry, material);
 }
 
 /** A line's points as the segments that join them, skipping a pen lift --
@@ -5175,6 +5335,8 @@ function paintBar(text, pixels) {
  *  mesh, and the program stays for the next one like it. */
 function free(part) {
   if (part.userData.batch) batchesStale = true;
+  mergedOutlines.get(part)?.geometry.dispose();
+  mergedOutlines.delete(part);
   flowLines.delete(part);
   flowArrows.delete(part);
   if (!part.userData.borrowed) part.geometry?.dispose();

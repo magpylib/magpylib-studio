@@ -107,13 +107,22 @@ def seeds_of(sensor):
 def frame_of(seeds):
     """The axes the grid is laid along, as rows, and whether the seeds lie in
     a plane -- the plane of the first two. A line of pixels, or one, is not a
-    plane: its lines have no plane to keep to."""
+    plane: its lines have no plane to keep to.
+
+    Only the plane's normal is the seeds' own; across it the grid is laid
+    along the world's axis nearest the plane, and the one at right angles to
+    it. The seeds' spread gives no direction where they are a square grid
+    -- the SVD's two are any two at right angles -- and a grid turned 45°
+    by chance put its points on a meshed core's plane of symmetry, along the
+    edges of its cells."""
     if len(seeds) >= 3:
         _, spread, axes = np.linalg.svd(seeds - seeds.mean(axis=0))
         if spread[1] > 1e-3 * spread[0] and spread[2] <= 1e-6 * spread[0]:
-            if np.linalg.det(axes) < 0:
-                axes[2] = -axes[2]
-            return axes, True
+            normal = axes[2]
+            world = np.eye(3)[np.argmin(np.abs(np.eye(3) @ normal))]
+            across = world - (world @ normal) * normal
+            across /= np.linalg.norm(across)
+            return np.array([across, np.cross(normal, across), normal]), True
     return np.eye(3), False
 
 
@@ -330,10 +339,15 @@ def _in_chunks(get, sources, points):
 
 
 def field(sources, points, kind="B"):
-    """B, or H, at `points` from `sources`, summed; zero for no sources."""
+    """B, or H, at `points` from `sources`, summed; zero for no sources.
+    Zero too where magpylib says NaN -- a point within rounding of a
+    cuboid's edge, which it takes for one off it -- as it says on the edge
+    itself: one NaN made the whole grid's scale NaN, and not a line was
+    drawn."""
     if not sources:
         return np.zeros((len(points), 3))
-    return _in_chunks(magpy.getH if kind == "H" else magpy.getB, sources, points)
+    values = _in_chunks(magpy.getH if kind == "H" else magpy.getB, sources, points)
+    return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def inside(sources, points):

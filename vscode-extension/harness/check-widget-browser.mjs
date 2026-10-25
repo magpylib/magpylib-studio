@@ -21,6 +21,8 @@
  * - the object panel, against a fake kernel: the selection's parameters and
  *   pose, a value typed read through the engine, a bare name made at the
  *   value it replaces and said (`widget-pages/inspector.html`);
+ * - a ring round the view while python is slow to answer, and not while it
+ *   is quick (`widget-pages/busy.html`);
  * - a panel of its own, the variables and the object kinds against a fake
  *   model: the rows, a drag's previews and release, the rows read again when
  *   the view moves on, the selection followed (`widget-pages/own-panel.html`);
@@ -35,7 +37,8 @@
  * - a field line picking its sensor, but not a magnet's click through it;
  * - many magnets drawn as one batch, each still picked, hidden, faded,
  *   selected and dragged on its own, and played on a path (`many.html` and
- *   `many-run.html`, from `widget_scenes.py`);
+ *   `many-run.html`, from `widget_scenes.py`), and as many sealed into one
+ *   body, picked, outlined and hidden whole (`sealed.html`);
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -840,6 +843,94 @@ async function manyMagnets(port, base) {
       await tab.close();
     }
   });
+}
+
+/** A hundred cubes sealed into one body, as a meshed magnet's cells are: one
+ *  node, which a click on any cell picks, outlined once round every cell
+ *  rather than once each, and gone from the picture when hidden. */
+async function sealedBody(port, base) {
+  await check(
+    "a sealed body is picked, outlined and hidden whole",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/sealed.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const front = await tab.evaluate(`
+        const s = window.scene3d;
+        const ids = [...s.byObjectId.keys()];
+        const node = s.byObjectId.get(ids[0]);
+        const camera = node.parent.children
+          .find((c) => c.isTransformControlsRoot).controls.camera;
+        const rect = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+        const cells = node.children.filter((p) => p.isMesh);
+        const centre = (mesh) => {
+          if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+          mesh.updateWorldMatrix(true, false);
+          return mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld);
+        };
+        // the cell nearest the eye: nothing stands in front of its middle
+        const near = cells.reduce((a, b) =>
+          centre(a).distanceTo(camera.position) <= centre(b).distanceTo(camera.position) ? a : b);
+        const q = centre(near).project(camera);
+        const at = { x: rect.left + ((q.x + 1) / 2) * rect.width, y: rect.top + ((1 - q.y) / 2) * rect.height };
+        const host = ${VIEW}.querySelector("canvas").parentElement;
+        window.picked = [];
+        host.addEventListener("objectpick", (e) => window.picked.push(e.detail.objectId));
+        window.colourAt = (point) => {
+          const copy = s.still();
+          const scale = copy.width / rect.width;
+          return [...copy.getContext("2d").getImageData(
+            Math.round((point.x - rect.left) * scale), Math.round((point.y - rect.top) * scale), 1, 1).data].slice(0, 3).join(",");
+        };
+        return { id: ids[0], nodes: ids.length, cells: cells.length, at };`);
+        if (front.nodes !== 1 || front.cells !== 100) {
+          return `${front.nodes} nodes, ${front.cells} cells on the first`;
+        }
+        // one row, what it is made of counted
+        const rows = await tab.evaluate(
+          `return [...document.querySelectorAll(".magpy-legend-row")].map((r) =>
+          [r.querySelector(".magpy-legend-label").textContent, r.querySelector(".magpy-legend-count")?.textContent || ""]);`,
+        );
+        if (JSON.stringify(rows) !== '[["body","100"]]') {
+          return `the legend lists ${JSON.stringify(rows)}`;
+        }
+        await tab.click(front.at);
+        const picked = await tab.evaluate(
+          "return window.picked.splice(0)[0] ?? 'nothing'",
+        );
+        if (picked !== front.id) return `a click on a cell picked ${picked}`;
+        const lines = await tab.evaluate(`
+        const s = window.scene3d;
+        s.highlight([${JSON.stringify(front.id)}]);
+        s.still();
+        let n = 0;
+        s.byObjectId.get(${JSON.stringify(front.id)}).traverse((o) => {
+          if (o.userData.outline) n++;
+        });
+        return n;`);
+        // one line in front and one faint through it, round all hundred
+        if (lines !== 2) return `outlined by ${lines} lines, not 2`;
+        const shown = await tab.evaluate(
+          `return colourAt(${JSON.stringify(front.at)})`,
+        );
+        await tab.evaluate(
+          `window.scene3d.highlight([]); window.scene3d.setHidden([${JSON.stringify(front.id)}])`,
+        );
+        const hidden = await tab.evaluate(
+          `return colourAt(${JSON.stringify(front.at)})`,
+        );
+        if (hidden === shown) return `hidden, it is still drawn (${shown})`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** A hundred magnets and one on a path, played as motion: the moving one
@@ -2065,6 +2156,52 @@ async function objectPanel(port, base) {
         ) {
           return `the sheet did not grow the widget under a whole view: ${JSON.stringify(sheet)}`;
         }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** A property the parts of a sealed collection differ in, as the engine
+ *  says (`mixed`): its field shows no value, and says why. */
+async function objectPanelMixed(port, base) {
+  await check("a sealed collection's mixed style says so", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/inspector.html?mixed`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "never finished";
+      const { opacity } = result.style;
+      if (opacity?.placeholder !== "mixed" || opacity.value !== "") {
+        return `the opacity field showed ${JSON.stringify(opacity)}`;
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** While python is slow to answer, a ring of current runs round the view; a
+ *  quick answer -- a drag's, at pointer rate -- never shows it. */
+async function busyRing(port, base) {
+  await check(
+    "a slow answer rings the view, a quick one does not",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/busy.html`);
+        const result = await tab.until("return window.result", 20_000);
+        if (!result) return "never finished";
+        const { exists, quick, early, waiting, answeredAfter } = result;
+        if (!exists) return "no ring";
+        if (quick) return "a quick answer showed the ring";
+        if (early) return "the ring came on before the answer was late";
+        if (!waiting) return "a slow answer did not show the ring";
+        if (answeredAfter > 1600)
+          return `the ring stayed on ${answeredAfter} ms`;
         return thrown(tab);
       } finally {
         await tab.close();
@@ -3716,6 +3853,8 @@ try {
   await pencil(browser.port, base);
   await variablesPanel(browser.port, base);
   await objectPanel(browser.port, base);
+  await objectPanelMixed(browser.port, base);
+  await busyRing(browser.port, base);
   await panelWidget(browser.port, base);
   await collection(browser.port, base);
   await selection(browser.port, base);
@@ -3726,6 +3865,7 @@ try {
   await linesPick(browser.port, base);
   await manyMagnets(browser.port, base);
   await manyRun(browser.port, base);
+  await sealedBody(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);

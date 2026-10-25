@@ -7,6 +7,7 @@ import math
 import pathlib
 import re
 import sys
+import warnings
 from typing import Annotated, Literal
 
 import magpylib as magpy
@@ -1555,3 +1556,40 @@ def test_a_builder_script_keeps_the_saved_variants_as_it_keeps_the_values(tmp_pa
     doc["variants"] = {"wide": {"n": 14}, "mine": {"n": 9}}
     path.write_text(json.dumps(doc), encoding="utf-8")
     assert run() == {"wide": {"n": 14}, "mine": {"n": 9}}
+
+
+def _cells(*xs):
+    return [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.004,) * 3, position=(x, 0, 0)
+        ).rotate_from_angax(15 * i, "z")
+        for i, x in enumerate(xs)
+    ]
+
+
+@pytest.mark.parametrize("sealed_first", [True, False])
+def test_a_sealed_body_in_a_scene_is_its_parts_moved_once(sealed_first):
+    """A collection sealed in a scene function -- before its parts are added
+    or after -- is one object made of them, moved by its own steps once, as
+    magpylib moves it: its field is the plain objects' field."""
+
+    def make():
+        body = magpy.Collection(style_label="body")
+        if sealed_first:
+            body.sealed = True
+        body.add(*_cells(0, 0.005))
+        body.move((0, 0, 0.01))
+        body.rotate_from_angax(30, "x", anchor=0)
+        if not sealed_first:
+            body.sealed = True
+        return body
+
+    with warnings.catch_warnings(record=True) as said:
+        warnings.simplefilter("always")
+        session = scene(make).build().session
+    # sealed first, a turned part is its data and nothing is said; added
+    # before, it is said to be placed already, as it was then
+    assert not said or not sealed_first
+    (entry,) = session.list_objects()
+    assert entry["parts"] == 2
+    assert np.allclose(field(session), plain_field(make()))

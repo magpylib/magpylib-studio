@@ -14,11 +14,25 @@ from magpylib_studio.widget import SceneWidget
 PIXELS = np.linspace(-0.02, 0.02, 5)
 
 
-def view(plane="y=0", source="B", colormap=None, tilt=0):
+def view(plane="y=0", source="B", colormap=None, tilt=0, sealed=False):
     """A cube polarized along z and a sensor of 5 x 5 pixels: in y = 0, a
     plane of the cube's symmetry -- or tilted out of it by `tilt` degrees --
-    or 12 mm above it, which the field crosses."""
+    or 12 mm above it, which the field crosses. `sealed`, the cube is a
+    sealed collection of its two halves, as a meshed body is of its cells."""
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    if sealed:
+        cube = magpy.Collection(
+            *(
+                magpy.magnet.Cuboid(
+                    polarization=(0, 0, 1),
+                    dimension=(0.005, 0.01, 0.01),
+                    position=(x, 0, 0),
+                )
+                for x in (-0.0025, 0.0025)
+            ),
+            style_label="cube",
+        )
+        cube.sealed = True
     if plane == "y=0":
         pixel = [(x, 0, z) for x in PIXELS for z in PIXELS]
     else:
@@ -163,12 +177,14 @@ def test_a_sensor_let_go_far_off_takes_its_grid_along(monkeypatch):
     )
 
 
-def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
+@pytest.mark.parametrize("sealed", [False, True])
+def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch, sealed):
     """The field of magnets that stand still is the field at rest, kept for
     a drag of the sensor and after it, on a grid fixed in the world: its
     lines are traced from where the pixels are now, until the drag takes
-    them off the grid's plane, or a magnet moves."""
-    widget = view()
+    them off the grid's plane, or a magnet moves. A sealed collection's
+    parts, which have no ids of their own, stand still with it."""
+    widget = view(sealed=sealed)
     computed = []
     field = fieldlines.field
     monkeypatch.setattr(
@@ -201,3 +217,63 @@ def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
     widget._reply({"method": "apply_edits", "params": {"edits": [edit]}})
     widget._session.get_scene()
     assert computed  # a magnet moved
+
+
+def test_a_variable_only_a_sensor_follows_keeps_the_field(monkeypatch):
+    """The field of the sources is kept across a change of a variable that
+    only a sensor follows -- its pixels' density -- and computed again for
+    one a source follows."""
+    from typing import Annotated
+
+    from magpylib_studio import Count, Length, grid, scene
+
+    @scene
+    def lines(
+        density: Annotated[int, Count(3, 9)] = 5,
+        height: Annotated[float, Length(0.006, 0.02)] = 0.01,
+    ):
+        cube = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01, height), style_label="cube"
+        )
+        probe = magpy.Sensor(pixel=grid(0.02, density, plane="xz"), style_label="probe")
+        probe.style.pixel.field.source = "B"
+        return cube, probe
+
+    session = SceneWidget(lines.build(), field_lines=True)._session
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines, "field", lambda *a, **k: computed.append(1) or field(*a, **k)
+    )
+    assert session.set_variable("density", 7)["ok"]
+    (item,) = session.get_scene()["fieldlines"]
+    assert not computed and len(item["seeds"]) > 0
+    assert session.set_variable("height", 0.012)["ok"]
+    session.get_scene()
+    assert computed  # the cube changed
+
+
+@pytest.mark.parametrize("density", [11, 12, 13])
+def test_a_square_of_pixels_is_drawn_on_a_grid_along_the_world(density):
+    """A square grid of pixels gives its plane, not a direction across it:
+    the grid is laid along the world's axes, not turned by chance -- turned
+    45°, it put points on a meshed core's cell edges."""
+    from magpylib_studio import grid
+
+    seeds = np.asarray(grid(0.07, density, plane="xz")) + np.array([0, 0, 0.0325])
+    axes, planar = fieldlines.frame_of(seeds)
+    assert planar
+    np.testing.assert_allclose(np.abs(axes[:2]), [[1, 0, 0], [0, 0, 1]], atol=1e-12)
+
+
+def test_a_point_on_a_cells_edge_reads_no_nan():
+    """Within rounding of a cuboid's edge magpylib says NaN, where on it it
+    says zero: the field lines' field says zero there too, and one point no
+    longer makes the whole grid's scale NaN, and every line go."""
+    cell = magpy.magnet.Cuboid(
+        polarization=(0.25, 0, 0),
+        dimension=(0.004545454545454546, 0.005, 0.005),
+        position=(0.0022727272727272665, -0.0024999999999999996, -0.0075),
+    )
+    point = [[1.4414090374556621e-18, 0.0, -0.008453260901015891]]
+    assert np.isfinite(fieldlines.field([cell], point)).all()

@@ -110,6 +110,17 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   `mesh_source` instead of vertices
   ([0002](decisions.md#0002-record-the-call-not-the-result)). What an object
   _is_ is edited on its create event; what happened _to_ it is appended.
+- **A sealed collection** (`sealed: true` on its create,
+  `collection.sealed = True` in a script) is one object made of `parts`: data on
+  its create, a type, plain `params` with the pose among them (`position`,
+  `orientation` as a rotation vector in degrees) and a `style` each, no id, step
+  or variable. A part's pose is kept in the collection's frame where it was
+  made, so the collection's own steps put it where it is. `parts_style` is one
+  style over every part that has the property, as magpylib's
+  `set_children_styles`; on import what every part sets alike goes there and
+  each keeps its differences. Its own label, description, legend and traces stay
+  its own. A view draws it as one node, its parts' traces keyed to it; a scene
+  function's parts are taken in as data, never made objects.
 - **Any numeric value may be an expression**: a string starting with `=`, over
   `variables` ([0003](decisions.md#0003-expressions-are-hermetic)). A run of
   points may be a `sampled` node, a formula of `t` with a `count` and a range,
@@ -140,6 +151,8 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
 - **Hidden objects** stay in the scene and in the field: hiding sets magpylib's
   own `model3d.showdefault` and `path.show` on the leaf specs, keeping the prior
   values in `hidden_style` for an exact restore, so nothing else is recoloured.
+  A sealed collection is a leaf here: the switches go on its own style, and its
+  parts take them from it when built.
 - **A `model3d` trace** is held as the values set on it, numpy as lists, its
   `args` a tuple again where magpylib takes it; one made at show time
   (`updatefunc`) is code, left out by an import or a recording, which says so

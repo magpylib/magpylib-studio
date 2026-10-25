@@ -967,7 +967,14 @@ def frame_payload(scene, index, live=None, derived=None):
         "frames": len(scene.frames),
         # how long the whole run should take, which is what the view paces to
         "duration": scene.animation.time,
-        **_by_kind(_keyed(scene.frames[index].traces, live, derived)),
+        **_by_kind(
+            _keyed(
+                scene.frames[index].traces,
+                live,
+                derived,
+                sealed=None if live else _sealed_in(scene),
+            )
+        ),
     }
 
 
@@ -1049,7 +1056,8 @@ def played_payload(scene):
     payload = view_payload(scene, traces=tagged)
     payload["tracks"] = tracks
     if changing:
-        payload["changes"] = [_keyed(runs[n]) for n in changing]
+        sealed = _sealed_in(scene)
+        payload["changes"] = [_keyed(runs[n], sealed=sealed) for n in changing]
         if len(json.dumps(payload["changes"], allow_nan=False)) > _CARRY_LIMIT:
             return None
         _shared(payload)
@@ -1237,14 +1245,15 @@ def _shared(payload):
     return payload
 
 
-def _keyed(traces, live=None, derived=None):
+def _keyed(traces, live=None, derived=None, sealed=None):
     """Traces converted, each under the id the view will address it by.
 
     With `live` -- the session's ``{studio id: object}`` map -- that is the
     studio id, for the reasons `scene_payload` gives. Without it there is
     nothing to key to, and magpylib's own ``id(obj)`` is kept, as a string:
     enough to hang one object's traces on one node, and no more. See
-    `view_payload`.
+    `view_payload`. A sealed collection's part is keyed to the collection
+    there too, by `sealed` (`_sealed_parts`).
     """
     payload = [
         _CONVERT[kind](t) | {role: t[role] for role in _ROLES if role in t}
@@ -1253,8 +1262,10 @@ def _keyed(traces, live=None, derived=None):
         if t["type"] == kind
     ]
     if live is None:
+        sealed = sealed or {}
         for item in payload:
-            item["object_id"] = str(item["object_id"])
+            raw = item["object_id"]
+            item["object_id"] = str(id(sealed[raw]) if raw in sealed else raw)
         return payload
     key_of = _key_map(live, derived)
     for item in payload:
@@ -1266,6 +1277,61 @@ def _keyed(traces, live=None, derived=None):
         if own != item["object_id"]:
             item["copy"] = own
     return payload
+
+
+def is_sealed(obj):
+    """Whether `obj` is a sealed collection: one object made of parts, as a
+    magnet meshed into cells is -- picked, moved and styled whole, its parts
+    never on their own. Said by the collection itself, ``sealed = True``, so
+    that it travels with it into any view."""
+    return isinstance(obj, magpy.Collection) and getattr(obj, "sealed", False) is True
+
+
+#: What a sealed collection keeps as its own style: what names it, lists it
+#: and draws for it alone. The rest set on it is its parts', in one layer.
+SEALED_OWN = ("label", "description", "legend", "model3d")
+
+
+def sealed_own(path):
+    """Whether a style `path` set on a sealed collection is its own, rather
+    than its parts' (`SEALED_OWN`)."""
+    return path.split(".", 1)[0] in SEALED_OWN
+
+
+def has_style(obj, path):
+    """Whether `obj`'s style has the property `path`: a magnet's has
+    ``magnetization.color.north``, a wire's does not."""
+    node = obj.style
+    for name in path.split("."):
+        try:
+            node = getattr(node, name)
+        except AttributeError:
+            return False
+    return True
+
+
+def _leaf_count(collection):
+    """How many objects that are not collections `collection` holds."""
+    return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
+
+
+def _sealed_in(scene):
+    """`_sealed_parts` of what a captured `scene` draws: every view of it
+    with no session keys a sealed collection's parts to it, frame by frame
+    as at the first (`view_payload`, `played_payload`, `frame_payload`)."""
+    return _sealed_parts(obj for panel in scene.panels for obj in panel.objects)
+
+
+def _sealed_parts(objects):
+    """``id(part)`` -> the sealed collection holding it, for every part under
+    `objects`: the outermost such collection, as the one a view draws."""
+    held = {}
+    for obj in objects:
+        for each in (obj, *getattr(obj, "children_all", ())):
+            if is_sealed(each) and id(each) not in held:
+                for part in each.children_all:
+                    held.setdefault(id(part), each)
+    return held
 
 
 def _key_map(live, derived=None):
@@ -1570,13 +1636,18 @@ def object_tree(objects, apart=()):
         key = str(id(obj))
         found[key] = obj
         sensor = isinstance(obj, magpy.Sensor)
+        sealed = is_sealed(obj)
         return {
             "id": key,
             "label": getattr(obj.style, "label", None) or type(obj).__name__,
             "kind": type(obj).__name__,
-            "children": [node(child) for child in getattr(obj, "children", ())]
+            "children": [
+                node(child)
+                for child in (() if sealed else getattr(obj, "children", ()))
+            ]
             + (part_nodes(obj, key, apart=key in apart) if sensor else []),
             **({"colors": tip_colors(obj)} if sensor else {}),
+            **({"parts": _leaf_count(obj)} if sealed else {}),
         }
 
     roots = [
@@ -1779,7 +1850,7 @@ def view_payload(scene, index=None, traces=None, pixels=()):
         traces = [t for frame in frames for t in frame.traces]
     reach = None if panel.ranges is None else panel.ranges.tolist()
     return {
-        **_by_kind([*_keyed(traces), *pixels]),
+        **_by_kind([*_keyed(traces, sealed=_sealed_in(scene)), *pixels]),
         "ranges": _ranges_with_pixels(reach, pixels),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no
@@ -1841,7 +1912,9 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
 
     `collections` gives each Collection what it holds, by the ids above: a
     collection draws nothing of its own, so a view that puts handles on one
-    makes it a node, and carries these on it while it is dragged.
+    makes it a node, and carries these on it while it is dragged. A sealed
+    one is not among them: its parts have no ids, their traces are keyed to
+    it (`_key_map`), and a view draws it as the one object it is.
 
     `fields` is what `magpylib.graphics.backend.pixel_fields` gives for
     `objects`, where the caller has it already: computed here otherwise.
@@ -1867,12 +1940,13 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
             {*only, *(key for key, obj in live.items() if _reads_the_field(obj))}
         )
         # a collection draws nothing of its own, and captured it would draw
-        # everything it holds
+        # everything it holds -- which, for a sealed one, is what it draws
         drawn = [
             live[key]
             for node in redrawn
             for key in (node, *derived.get(node, ()))
-            if key in live and not isinstance(live[key], magpy.Collection)
+            if key in live
+            and (not isinstance(live[key], magpy.Collection) or is_sealed(live[key]))
         ]
     try:
         scene = None
@@ -1995,8 +2069,8 @@ def _collections(live, derived, source_of):
     collections, split = {}, []
     for key, obj in live.items():
         children = getattr(obj, "children_all", None)
-        if children is None or key in source_of:
-            continue
+        if children is None or key in source_of or is_sealed(obj):
+            continue  # a sealed one draws its parts on its own node
         held = [key_of[id(child)] for child in children if id(child) in key_of]
         collections[key] = list(dict.fromkeys(source_of.get(k, k) for k in held))
         inside = set(held)

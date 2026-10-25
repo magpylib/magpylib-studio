@@ -304,6 +304,11 @@ const NO_ANSWER =
   "running. Run the cell again to play this run.";
 
 /** What a view says when python does not answer an edit. */
+/** How long, in ms, an answer from python may take before the view says it
+ *  is being waited on (`watchBusy`): long enough that a drag answered at
+ *  pointer rate never shows it, short enough to say so before one wonders. */
+const BUSY_AFTER = 350;
+
 const NO_EDIT_ANSWER =
   "No answer from Python for this edit yet: the kernel may be busy or not " +
   "running. The view catches up if it answers.";
@@ -467,7 +472,11 @@ function render({ model, el }) {
   view.style.height = `${model.get("height")}px`;
   const legendEl = document.createElement("div");
   legendEl.className = "magpy-scene-legend";
-  stage.append(view, legendEl);
+  // A pulse of current round the view's edge, as round a coil, while python
+  // is slow to answer (`watchBusy`): out of sight the rest of the time.
+  const busyRing = document.createElement("div");
+  busyRing.className = "magpy-scene-busy";
+  stage.append(view, legendEl, busyRing);
 
   // --- controls ---------------------------------------------------------
   // Over the view, as Plotly's are, rather than in a bar beneath it: the
@@ -1883,23 +1892,27 @@ function render({ model, el }) {
   // `display` of it -- would otherwise take each other's answers.
   const caller = Math.random().toString(36).slice(2, 10);
   let nextCall = 0;
-  const calls = new Map(); // id -> { timer, settle }
+  const calls = new Map(); // id -> { timer, sent, settle }
   let dragActive = false; // between a drag's first move and its release
   function call(method, params = {}, { preview = false, scene = false } = {}) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
       const timer = setTimeout(() => {
         calls.delete(id);
+        watchBusy();
         unheard();
         reject(new Error(NO_EDIT_ANSWER));
       }, 4000);
       calls.set(id, {
         timer,
+        sent: performance.now(),
         settle(message) {
           if (message.error) reject(new Error(message.error.message));
           else resolve(message.result);
         },
       });
+      // waited on past BUSY_AFTER, it shows the ring
+      setTimeout(() => calls.has(id) && watchBusy(), BUSY_AFTER);
       // `preview` marks a value the pointer is still on: python applies
       // it and says nothing to the notebook, as for a pose mid-drag.
       // `scene` asks for the scene in the same answer, sparing a second
@@ -1915,11 +1928,23 @@ function render({ model, el }) {
     });
   }
 
+  /** The ring round the view on while a call has waited past `BUSY_AFTER`,
+   *  off once none has: by each call's age, not by whether any is out -- a
+   *  quick drag always has one out, answered in a few milliseconds. */
+  function watchBusy() {
+    const now = performance.now();
+    let slow = false;
+    for (const { sent } of calls.values())
+      slow ||= now - sent >= BUSY_AFTER - 1;
+    busyRing.classList.toggle("on", slow);
+  }
+
   function answer(message) {
     const pending = calls.get(message.id);
     if (!pending) return; // given up on already
     calls.delete(message.id);
     clearTimeout(pending.timer);
+    watchBusy();
     if (notice.textContent === NO_EDIT_ANSWER) notice.classList.remove("shown");
     pending.settle(message);
   }

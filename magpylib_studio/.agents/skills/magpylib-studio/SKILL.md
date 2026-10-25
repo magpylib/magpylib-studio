@@ -118,6 +118,11 @@ s.save("halbach.magpy.json")
   to its group before anything else happens to it: added after a move or a turn,
   it is moved into the group with its position frozen as numbers, and a
   `UserWarning` says so.
+- **Sealed bodies:** `body.sealed = True` on a collection makes it one object
+  made of parts, as a magnet meshed into cells by magpylib-material-response is:
+  listed once with `"parts": n`, picked, moved and hidden whole. Its parts have
+  no ids, steps or variables: plain values, edited by building the body again.
+  Seal it before adding its parts.
 - **Steps:** `move`, `rotate_from_angax(angle, axis, anchor=...)`,
   `rotate_from_rotvec`, `rotate` (with a scipy `Rotation`), `obj.position =`,
   `copy()`, as in magpylib, applied in the order written. A step on a collection

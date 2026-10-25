@@ -1451,14 +1451,18 @@ def _overlaps_of(objects):
 
     from magpylib_studio import collisions
 
+    # a sealed collection's parts under its key, as the payload draws them,
+    # and what overlaps inside it left to it
     leaves = [
-        (key, obj)
+        (key, each)
         for key, obj in objects.items()
-        if not isinstance(obj, magpy.Collection)
+        for each in (obj.children_all if threejs.is_sealed(obj) else (obj,))
+        if not isinstance(each, magpy.Collection)
     ]
     plain = [obj for _, obj in leaves]
     try:
-        found = collisions.find_overlaps(plain, depths=True)
+        keys = [key for key, _ in leaves]
+        found = collisions.find_overlaps(plain, depths=True, groups=keys)
         out = {
             "overlaps": [[leaves[i][0], leaves[j][0]] for i, j, _ in found],
             "overlap_depths": [None if d is None else float(d) for _, _, d in found],
@@ -1466,7 +1470,7 @@ def _overlaps_of(objects):
         if collisions.path_length(plain) > 1:
             out["overlaps_by_step"] = [
                 [[leaves[i][0], leaves[j][0]] for i, j in step]
-                for step in collisions.overlaps_along(plain)
+                for step in collisions.overlaps_along(plain, groups=keys)
             ]
     except Exception:  # noqa: BLE001 - an optional check must not cost the picture
         return {}

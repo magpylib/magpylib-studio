@@ -95,6 +95,7 @@ Protocol surface (all JSON-serializable in/out):
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 import hashlib
 import json
@@ -1525,7 +1526,9 @@ _DOC_KEYS = (
 # What the engine itself puts on a create event and on the spec projected from
 # it. Anything else on either belongs to something we do not know about — a
 # newer format, a hand-written file, another tool — and is carried rather than
-# dropped, so opening a document here does not quietly strip it.
+# dropped, so opening a document here does not quietly strip it. A sealed
+# collection's `sealed` and `parts` travel the same way: on its create event,
+# and on its spec, where `to_script` reads them.
 _CREATE_KEYS = (
     "id",
     "op",
@@ -2158,6 +2161,9 @@ def _event_source(event):
         if event.get("parent"):
             args.append(f"parent={event['parent']!r}")
         ctor = "Collection" if event["type"] == "Collection" else event["type"]
+        if event.get("parts"):
+            # one line for a history list, however many parts it is made of
+            args.insert(0, f"<{_parts_count(event['parts'])} parts>")
         return f"{target} = magpy.{ctor}{factory}({', '.join(args)})"
     if op == "remove":
         return f"remove {target}"
@@ -2175,6 +2181,85 @@ def _event_source(event):
     if op == "mirror":
         return f"{target} mirrored in {event.get('plane') or event.get('normal')}"
     return f"{target}.{_op_source(event)}"
+
+
+def _parts_source(parts, indent, over=(), lit=_lit, magpy="magpy", rotation="R"):
+    """A sealed collection's parts as lines of its constructor call: one part
+    a line, a collection among them with its own parts indented under it.
+    Plain values, written as they are (`lit`), and a turn as the rotation it
+    is. A part's style is written but where the shared one is `over` it.
+    The words are a script's own: `magpy` and `rotation` as it imports them,
+    for the plain script and the builder's (`build`) alike."""
+    lines = []
+    for part in parts:
+        args = [
+            f"{key}={rotation}.from_rotvec({lit(value)}, degrees=True)"
+            if key == "orientation"
+            else f"{key}={lit(value)}"
+            for key, value in (part.get("params") or {}).items()
+        ]
+        own = {p: v for p, v in (part.get("style") or {}).items() if p not in over}
+        if own:
+            given = {p: _style_arg(p, v) for p, v in own.items()}
+            args.append(f"style={_nest(given)!r}")
+        if part["type"] == "Collection":
+            lines.append(f"{indent}{magpy}.Collection(")
+            lines += _parts_source(
+                part.get("parts") or [], indent + "    ", over, lit, magpy, rotation
+            )
+            lines += [f"{indent}    {arg}," for arg in args]
+            lines.append(f"{indent}),")
+        else:
+            lines.append(f"{indent}{magpy}.{part['type']}({', '.join(args)}),")
+    return lines
+
+
+def _apply_parts_style(collection, layer):
+    """One style for a sealed collection's parts, over each part's own:
+    where a part has the property, as magpylib's `set_children_styles` does,
+    at a third of its cost -- which properties a kind of part has is asked
+    once per kind, not of every part at every rebuild."""
+    layer = {path: _style_arg(path, value) for path, value in layer.items()}
+    kinds = {}
+    for part in _parts_of_sealed(collection):
+        paths = kinds.get(type(part.style))
+        if paths is None:
+            paths = [(p, v) for p, v in layer.items() if threejs.has_style(part, p)]
+            kinds[type(part.style)] = paths
+        for path, value in paths:
+            part.style.set(path, value)
+
+
+def _parts_of_sealed(obj):
+    """A sealed collection's parts that are no collections, however deep."""
+    return [part for part in obj.children_all if not isinstance(part, magpy.Collection)]
+
+
+def _merge_properties(into, more):
+    """Merge a style schema's `properties` into another's, depth first."""
+    for name, spec in more.items():
+        mine = into.get(name)
+        if mine is None:
+            into[name] = spec
+        elif "properties" in mine and "properties" in spec:
+            _merge_properties(mine["properties"], spec["properties"])
+
+
+def _parts_turned(parts):
+    """Whether any part, however deep, is turned: its script needs `R`."""
+    return any(
+        "orientation" in (part.get("params") or {})
+        or _parts_turned(part.get("parts") or [])
+        for part in parts
+    )
+
+
+def _parts_count(parts):
+    """How many parts that are not collections there are, however deep."""
+    return sum(
+        _parts_count(part["parts"]) if part["type"] == "Collection" else 1
+        for part in parts
+    )
 
 
 def _uncreated(events):
@@ -2239,6 +2324,28 @@ def _resolve_type(type_str):
     if cls is None:
         raise ValueError(f"unknown object type {type_str!r}")
     return cls
+
+
+def _built_parts(spec):
+    """A sealed collection's parts, made from the data its create step
+    carries (`importer._parts_of`): plain values with the pose among them,
+    never a variable. They are what the collection is made of, not objects
+    the scene names, so nothing else ever reaches them."""
+    made = []
+    for part in spec.get("parts") or ():
+        if part["type"] == "Collection":
+            obj = magpy.Collection(*_built_parts(part))
+        else:
+            params = dict(part.get("params") or {})
+            if "orientation" in params:
+                params["orientation"] = R.from_rotvec(
+                    params["orientation"], degrees=True
+                )
+            obj = _resolve_type(part["type"])(**params)
+        for path, value in (part.get("style") or {}).items():
+            obj.style.set(path, _style_arg(path, value))
+        made.append(obj)
+    return made
 
 
 def _nest(flat):
@@ -2792,8 +2899,25 @@ class MagpylibStudioSession:
         params = self._resolve_params(event.get("params") or {}, object_id)
         if event["type"] == "Collection":
             # Positional children, the form a script uses: they exist already.
+            # A sealed collection's parts are made here, from its own data.
             adopted = [self._objs[c] for c in event.get("children") or []]
-            obj = magpy.Collection(*adopted, **params)
+            parts = _built_parts(event)
+            obj = magpy.Collection(*adopted, *parts, **params)
+            if event.get("sealed"):
+                obj.sealed = True
+            if event.get("parts_style"):
+                _apply_parts_style(obj, event["parts_style"])
+            own = event.get("style") or {}
+            if parts and (
+                event.get("visible") is False
+                or all(own.get(path) == value for path, value in _HIDE_STYLE.items())
+            ):
+                # hidden, alone or with a group, as `set_visible` hides a
+                # leaf: on its own style, which its parts take from it, since
+                # they have no create steps of their own to write it on
+                for part in obj.children_all:
+                    for path, value in _HIDE_STYLE.items():
+                        part.style.set(path, value)
             for child in event.get("children") or []:
                 self._parents[child] = object_id
         else:
@@ -3377,6 +3501,13 @@ class MagpylibStudioSession:
                         if spec["id"] in self._mesh_status
                         else {}
                     ),
+                    # what a sealed collection is made of: parts with no
+                    # entries of their own, which nothing can name
+                    **(
+                        {"parts": _parts_count(spec["parts"])}
+                        if spec.get("parts")
+                        else {}
+                    ),
                     # the copies this object's pattern made, when they are
                     # being counted rather than listed
                     **(
@@ -3439,7 +3570,10 @@ class MagpylibStudioSession:
         return {"pixels": list(pixel.shape[:2])} if pixel.ndim == 3 else {}
 
     def get_schema(self, object_id):
-        schema = type(self._objs[object_id].style).schema()
+        obj = self._objs[object_id]
+        if threejs.is_sealed(obj):
+            return self._sealed_schema(obj)
+        schema = type(obj.style).schema()
         # magpylib's schema does not say what a pixel field source may be —
         # only that it is one. We know: it is the set the engine evaluates.
         # Without this the inspector has nothing to build a widget from and
@@ -3663,6 +3797,8 @@ class MagpylibStudioSession:
                 # the copies its pattern makes, which are drawn on it and
                 # not listed: the legend counts them
                 **({"copies": entry["copies"]} if entry.get("copies") else {}),
+                # and the parts a sealed collection is made of, likewise
+                **({"parts": entry["parts"]} if entry.get("parts") else {}),
             }
             for entry in entries
         }
@@ -3740,8 +3876,59 @@ class MagpylibStudioSession:
             out.setdefault(event.get("target"), []).append(event)
         return out
 
+    def _sealed_schema(self, obj):
+        """A sealed collection's style, as one magnet's would be: its own --
+        label, description, legend -- and every property any of its parts
+        has, set for all of them at once (`apply_edit`)."""
+        schema = copy.deepcopy(type(obj.style).schema())
+        merged = schema["properties"]
+        for kind in {type(part.style) for part in _parts_of_sealed(obj)}:
+            _merge_properties(merged, copy.deepcopy(kind.schema()["properties"]))
+        return schema
+
+    def _sealed_values(self, obj, create):
+        """A sealed collection's style values, as one magnet's would be:
+        what is set on it or on all its parts, each property's value where
+        every part that has it agrees, and the properties where they do not
+        (``mixed``). Parts alike are read once: a meshed body's thousands of
+        cells are mostly one style."""
+        own = get_style(obj, magpy.defaults).as_dict(flatten=True)
+        groups = {}
+        for part in _parts_of_sealed(obj):
+            # what is its own -- a label each, say -- no part's style shows
+            style = {
+                p: v
+                for p, v in _style_values(part).items()
+                if not threejs.sealed_own(p)
+            }
+            key = (type(part.style), json.dumps(style, sort_keys=True, default=str))
+            groups.setdefault(key, part)
+        looks = [
+            get_style(part, magpy.defaults).as_dict(flatten=True)
+            for part in groups.values()
+        ]
+        resolved, mixed = {}, []
+        for path in sorted({path for look in looks for path in look}):
+            if threejs.sealed_own(path):
+                continue
+            seen = [look[path] for look in looks if path in look]
+            if all(value == seen[0] for value in seen):
+                resolved[path] = seen[0]
+            else:
+                mixed.append(path)
+        resolved.update({p: v for p, v in own.items() if threejs.sealed_own(p)})
+        set_ = {
+            p: v for p, v in obj.style.set_values().items() if threejs.sealed_own(p)
+        }
+        set_.update(create.get("parts_style") or {})
+        return {"set": set_, "resolved": resolved, "mixed": mixed}
+
     def get_values(self, object_id):
         obj = self._objs[object_id]
+        if threejs.is_sealed(obj):
+            # a pattern's copy has no create of its own: its source's
+            create = self._create_event(self._origin_of(object_id))
+            return self._sealed_values(obj, create)
         return {
             "set": obj.style.set_values(),  # explicitly set (dotted keys)
             # effective values: the set ones merged over the defaults
@@ -3841,6 +4028,16 @@ class MagpylibStudioSession:
                 # the nodes they are drawn on: a copy is drawn on its source's
                 source_of = {c: s for s, made in self._derived.items() for c in made}
                 only = {source_of.get(name, name) for name in names}
+                # A sealed body moved by the drag is carried by the view on
+                # its own node, its cells and all; drawn again, its thousands
+                # of cells would be sent to be thrown away (`drag.mjs`). One
+                # with copies is the exception: only a rebuild places those.
+                only = {
+                    name
+                    for name in only
+                    if not threejs.is_sealed(self._objs.get(name))
+                    or self._derived.get(name)
+                }
         scene = threejs.scene_payload(
             self._drawn(),
             live=self._objs,
@@ -3911,7 +4108,9 @@ class MagpylibStudioSession:
                     for pair in self._named_pairs(leaves, step_pairs)
                     if frozenset(pair) not in marked
                 ]
-                for step_pairs in collisions.overlaps_along([obj for _, obj in leaves])
+                for step_pairs in collisions.overlaps_along(
+                    [obj for _, obj in leaves], groups=[owner for owner, _ in leaves]
+                )
             ]
         return out
 
@@ -3938,17 +4137,25 @@ class MagpylibStudioSession:
         leaves = self._overlap_leaves()
         marked = self._intended_pairs()
         objects = [obj for _, obj in leaves]
+        # what overlaps inside one object -- a sealed collection's cells,
+        # touching by construction -- is not asked at all
+        owners = [owner for owner, _ in leaves]
         # Not mid-drag: a depth is a search, 1.6 ms a pair on every frame of a
         # drag into a neighbour, against 0.3 ms for finding the pairs at all.
         # The scene sent at the release says it.
         if details and self._interaction is None:
-            found = collisions.find_overlaps(objects, depths=True)
+            found = collisions.find_overlaps(objects, depths=True, groups=owners)
         else:
-            found = [(i, j, None) for i, j in collisions.find_overlaps(objects)]
+            found = [
+                (i, j, None)
+                for i, j in collisions.find_overlaps(objects, groups=owners)
+            ]
         pairs, seen = [], set()
         for i, j, depth in found:
             pair = [leaves[i][0], leaves[j][0]]
-            if (key := tuple(pair)) in seen:
+            # two parts of one sealed collection are one object's own
+            # business: its cells touch, by construction
+            if pair[0] == pair[1] or (key := tuple(pair)) in seen:
                 continue
             seen.add(key)
             meant = frozenset(pair) in marked
@@ -3990,7 +4197,7 @@ class MagpylibStudioSession:
         out = []
         for i, j in index_pairs:
             pair = [leaves[i][0], leaves[j][0]]
-            if pair not in out:
+            if pair[0] != pair[1] and pair not in out:
                 out.append(pair)
         return out
 
@@ -4058,40 +4265,24 @@ class MagpylibStudioSession:
             if key not in self._objs:
                 return {"ok": False, "error": f"no object {key!r} in the scene"}
         leaves = self._overlap_leaves()
-        mine = {
-            key: [obj for owner, obj in leaves if owner == key or self._holds(key, obj)]
-            for key in (a, b)
-        }
-        best = None
-        for x in mine[a]:
-            for y in mine[b]:
-                found = collisions.separation(x, y)
-                if found is None:
-                    continue
-                state, value = found
-                rank = {"overlap": 0, "touch": 1, "gap": 2}[state]
-                if (
-                    best is None
-                    or rank < best[0]
-                    or (rank == best[0] == 0 and (value or 0) > (best[2] or 0))
-                    or (rank == best[0] == 2 and value < best[2])
-                ):
-                    best = (rank, state, value)
+        mine = {}
+        for key in (a, b):
+            # once per group, not once per leaf: a sealed one is thousands
+            held = {id(child) for child in getattr(self._objs[key], "children_all", ())}
+            mine[key] = [
+                obj for owner, obj in leaves if owner == key or id(obj) in held
+            ]
+        # the nearest pair, found without measuring every one (`nearest`)
+        best = collisions.nearest(mine[a], mine[b])
         if best is None:
             return {"ok": False, "error": "nothing there to measure"}
-        _, state, value = best
+        state, value = best
         out = {"ok": True, "state": state, "shown": self._shown("length")}
         if state == "gap":
             out["distance"] = float(value)
         elif state == "overlap":
             out["depth"] = None if value is None else float(value)
         return out
-
-    def _holds(self, key, obj):
-        group = self._objs.get(key)
-        return isinstance(group, magpy.Collection) and any(
-            child is obj for child in group.children_all
-        )
 
     def _moved(self, ids):
         """What the gesture in progress moves: `ids`, or anything (None)."""
@@ -4140,7 +4331,7 @@ class MagpylibStudioSession:
             self._forget_gesture()
         sources = fieldlines.sources_of(self.scene)
         names = self._moving_names() if gesture else None
-        key_of = {id(obj): key for key, obj in self._objs.items()}
+        key_of = self._names_of_objects()
         sensors = fieldlines.sensors_of(self.scene)
         if not sensors:
             return []
@@ -4302,18 +4493,31 @@ class MagpylibStudioSession:
 
     def _sources_written(self):
         """What the field of the sources follows from: the log less the
-        sensors' own steps, the variables, how far the log is folded, and
-        what the mesh files it reads held, from the folder they are read in
-        -- as a digest, since a body meshed into thousands of cells writes
-        megabytes. The same digest is the same field (`_field_lines`)."""
+        sensors' own steps, the variables those steps are written in -- and
+        those are, to the end -- how far the log is folded, and what the mesh
+        files it reads held, from the folder they are read in -- as a digest,
+        since a body meshed into thousands of cells writes megabytes. The
+        same digest is the same field (`_field_lines`): a variable only a
+        sensor follows, its pixels' density, changes none of it."""
         sensors = {k for k, o in self._objs.items() if isinstance(o, magpy.Sensor)}
         events = [
             e for e in self.doc.get("events") or [] if e.get("target") not in sensors
         ]
+        variables = self.doc.get("variables") or {}
+        named = set(expressions.referenced_names(events))
+        while more := (
+            set(
+                expressions.referenced_names(
+                    [variables[name] for name in named if name in variables]
+                )
+            )
+            - named
+        ):
+            named |= more
         text = json.dumps(
             [
                 events,
-                self.doc.get("variables"),
+                {name: variables[name] for name in sorted(named) if name in variables},
                 self._rollback,
                 self._base_dir,
                 sorted(self._mesh_read.items()),
@@ -4349,7 +4553,7 @@ class MagpylibStudioSession:
                 fieldlines.field(sources, points, kind),
                 fieldlines.inside(sources, points),
             )
-        key_of = {id(obj): k for k, obj in self._objs.items()}
+        key_of = self._names_of_objects()
         moving = self._sources_named(sources, names, key_of)
         cache = self._field_cache.get(key)
         if cache is None or cache["names"] != names or cache["grid"] is not grid:
@@ -4374,7 +4578,7 @@ class MagpylibStudioSession:
         where that is anything."""
         if self._moving is None:
             return None
-        name_of = {id(o): k for k, o in self._objs.items()}
+        name_of = self._names_of_objects()
         names = set()
         for name in self._moving:
             names.add(name)
@@ -4382,6 +4586,18 @@ class MagpylibStudioSession:
             for child in getattr(self._objs.get(name), "children_all", ()):
                 names.add(name_of.get(id(child)))
         return frozenset(names - {None})
+
+    def _names_of_objects(self):
+        """``id(obj)`` -> its id, for every object the session names -- and
+        for a sealed collection's parts, the collection's: what a part does,
+        its collection does, and it moves and stays with it."""
+        names = {}
+        for key, obj in self._objs.items():
+            names[id(obj)] = key
+            if threejs.is_sealed(obj):
+                for part in obj.children_all:
+                    names.setdefault(id(part), key)
+        return names
 
     @staticmethod
     def _sources_named(sources, names, key_of):
@@ -4584,12 +4800,20 @@ class MagpylibStudioSession:
                 out.append(meshes.complaint(label, status))
         return out
 
+    def _objects_and_parts(self):
+        """Every object the session names, and a sealed collection's parts,
+        which are where it stands and how big it is."""
+        for obj in self._objs.values():
+            yield obj
+            if threejs.is_sealed(obj):
+                yield from obj.children_all
+
     def _object_size(self):
         """How big the objects themselves are — what stands in for a span
         when there is none, as for the single magnet at the origin that half
         the field examples are."""
         sizes = []
-        for obj in self._objs.values():
+        for obj in self._objects_and_parts():
             for attr in ("dimension", "diameter"):
                 value = getattr(obj, attr, None)
                 if value is not None:
@@ -4613,7 +4837,7 @@ class MagpylibStudioSession:
         """
         points = [
             np.atleast_2d(np.array(obj.position, dtype=float))
-            for obj in self._objs.values()
+            for obj in self._objects_and_parts()
         ]
         if not points:
             return 1.0, np.zeros(3)
@@ -4899,6 +5123,8 @@ class MagpylibStudioSession:
         copies as they were until the next rebuild. Tried on the live object
         first, for magpylib's own words when a value is refused."""
         obj = self._objs[object_id]
+        if threejs.is_sealed(obj) and not threejs.sealed_own(path):
+            return self._edit_parts_style(object_id, obj, path, value)
         try:
             obj.style.set(path, _style_arg(path, value))
         except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
@@ -4908,6 +5134,29 @@ class MagpylibStudioSession:
         def mutate(doc):
             self._create_event(object_id)["style"] = style
             doc["objects"] = self._project()  # keep the projection in step
+
+        return self._mutate_doc(mutate, f"edit {object_id} {path}")
+
+    def _edit_parts_style(self, object_id, obj, path, value):
+        """Set style `path` for every part of a sealed collection that has
+        it, as one step: in the layer over the parts' own styles
+        (``parts_style``), so that a reset gives each its own back. Tried on
+        a part first, for magpylib's own words when a value is refused."""
+        holders = [p for p in _parts_of_sealed(obj) if threejs.has_style(p, path)]
+        if not holders:
+            return {
+                "ok": False,
+                "error": f"no part of {object_id!r} has a style {path!r}",
+            }
+        try:
+            holders[0].style.set(path, _style_arg(path, value))
+        except Exception as e:  # noqa: BLE001 - report validation errors, don't crash
+            return {"ok": False, "error": str(e)}
+        written = _style_values(holders[0]).get(path, _plain(value))
+
+        def mutate(doc):
+            self._create_event(object_id).setdefault("parts_style", {})[path] = written
+            doc["objects"] = self._project()
 
         return self._mutate_doc(mutate, f"edit {object_id} {path}")
 
@@ -4923,8 +5172,8 @@ class MagpylibStudioSession:
     ):
         if any(s["id"] == object_id for s, _ in self._iter_specs()):
             return {"ok": False, "error": f"object id {object_id!r} already exists"}
-        if parent is not None and self._spec(parent)["type"] != "Collection":
-            return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+        if parent is not None and (refused := self._no_room(parent)):
+            return {"ok": False, "error": refused}
         params = self._stamped_mesh_source(params)
 
         def mutate(doc):
@@ -5557,9 +5806,9 @@ class MagpylibStudioSession:
         if (
             parent is not _BESIDE
             and parent is not None
-            and (self._spec(parent)["type"] != "Collection")
+            and (refused := self._no_room(parent))
         ):
-            return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+            return {"ok": False, "error": refused}
         new_id = self._unique_id(object_id)
         label = self._next_label(self._objs[object_id].style.label or src["type"])
 
@@ -5772,11 +6021,8 @@ class MagpylibStudioSession:
         """
         if parent is not None:
             try:
-                if self._spec(parent)["type"] != "Collection":
-                    return {
-                        "ok": False,
-                        "error": f"parent {parent!r} is not a Collection",
-                    }
+                if refused := self._no_room(parent):
+                    return {"ok": False, "error": refused}
             except KeyError:
                 return {"ok": False, "error": f"unknown object id {parent!r}"}
         plan = {"ids": set(), "variables": {}, "bounds": {}, "twins": {}}
@@ -6144,9 +6390,14 @@ class MagpylibStudioSession:
         leaving the object out of the figure: the object still takes its slot
         in magpylib's colour sequence, so hiding one thing cannot recolour the
         others. Display only — hidden sources still contribute to the field.
-        Hiding a Collection hides every leaf beneath it."""
+        Hiding a Collection hides every leaf beneath it -- a sealed one
+        among them, which is one object, its parts hidden with it."""
         spec = self._spec(object_id)
-        leaves = [s for s, _ in self._iter_specs([spec]) if s["type"] != "Collection"]
+        leaves = [
+            s
+            for s, _ in self._iter_specs([spec])
+            if s["type"] != "Collection" or s.get("parts")
+        ]
 
         def mutate(doc):
             create = self._create_event(object_id)
@@ -6176,6 +6427,16 @@ class MagpylibStudioSession:
         state = "show" if visible else "hide"
         return self._mutate_doc(mutate, f"{state} {object_id}")
 
+    def _no_room(self, parent):
+        """Why `parent` cannot take an object of the scene, or None: it is no
+        Collection, or a sealed one, made of parts and holding no objects."""
+        spec = self._spec(parent)
+        if spec["type"] != "Collection":
+            return f"parent {parent!r} is not a Collection"
+        if spec.get("parts"):
+            return f"{parent!r} is sealed: it is made of parts and holds no objects"
+        return None
+
     def _adopt_fresh(self, object_id, parent):
         """`parent.add(child)` written in code (`scene.py`): a child nothing has
         happened to since it was made is created inside `parent` -- its create
@@ -6191,8 +6452,8 @@ class MagpylibStudioSession:
                     "ok": False,
                     "error": f"cannot move {object_id!r} into its own subtree",
                 }
-            if self._spec(parent)["type"] != "Collection":
-                return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+            if refused := self._no_room(parent):
+                return {"ok": False, "error": refused}
         family = {s["id"] for s, _ in self._iter_specs([spec])}
         events = self.doc.get("events") or []
         creates = [
@@ -6221,6 +6482,35 @@ class MagpylibStudioSession:
 
         result = self._mutate_doc(mutate, f"adopt {object_id}")
         return {**result, "fresh": True} if result["ok"] else result
+
+    def _write_parts(self, object_id, parts, shared, dropped=(), hidden=False):
+        """A sealed collection's parts, and the style they share, written as
+        its data (`recording`, from what a scene function adds to it). The
+        objects of the scene `dropped` into it stop being that, their steps
+        going with them. `hidden`, its parts were all hidden: it is."""
+        dropped = set(dropped)
+
+        def mutate(doc):
+            if dropped:
+                doc["events"] = [
+                    e for e in doc.get("events") or [] if e.get("target") not in dropped
+                ]
+            if dropped and doc.get("intended_overlaps"):
+                doc["intended_overlaps"] = [
+                    pair for pair in doc["intended_overlaps"] if not set(pair) & dropped
+                ]
+            create = self._create_event(object_id)
+            create.pop("children", None)
+            create["sealed"] = True
+            create["parts"] = parts
+            if shared:
+                create["parts_style"] = shared
+            else:
+                create.pop("parts_style", None)
+            if hidden:
+                create.setdefault("style", {}).update(_HIDE_STYLE)
+
+        return self._mutate_doc(mutate, f"seal {object_id}")
 
     def _rename_ids(self, renames):
         """Give objects other ids, every step that names them following: the
@@ -6288,8 +6578,8 @@ class MagpylibStudioSession:
                     "ok": False,
                     "error": f"cannot move {object_id!r} into its own subtree",
                 }
-            if self._spec(parent)["type"] != "Collection":
-                return {"ok": False, "error": f"parent {parent!r} is not a Collection"}
+            if refused := self._no_room(parent):
+                return {"ok": False, "error": refused}
         obj = self._objs[object_id]
         world_pos = np.array(obj.position, dtype=float)
         world_rot = obj.orientation
@@ -6344,7 +6634,8 @@ class MagpylibStudioSession:
         """Reset one style path (or all styles) to defaults by dropping it
         from the doc and rebuilding — the property tree has no unset."""
         spec = self._spec(object_id)
-        if path is not None and path not in spec.get("style", {}):
+        layer = spec.get("parts_style") or {}
+        if path is not None and path not in spec.get("style", {}) and path not in layer:
             return {
                 "ok": False,
                 "error": f"style path {path!r} is not set on {object_id!r}",
@@ -6354,6 +6645,12 @@ class MagpylibStudioSession:
             create = self._create_event(object_id)
             if path is None:
                 create.pop("style", None)
+                create.pop("parts_style", None)
+            elif path in (create.get("parts_style") or {}):
+                # a sealed collection's parts take their own back
+                del create["parts_style"][path]
+                if not create["parts_style"]:
+                    del create["parts_style"]
             else:
                 del create["style"][path]
 
@@ -8000,7 +8297,11 @@ class MagpylibStudioSession:
         ]
         events = [e for e in log if e.get("op") != "create"]
         mirrors = [e for e in events if e.get("op") == "mirror"]
-        needs_scipy = mirrors or any(e.get("op") == "orientation" for e in events)
+        needs_scipy = (
+            mirrors
+            or any(e.get("op") == "orientation" for e in events)
+            or any(_parts_turned(spec.get("parts") or []) for spec in spec_of.values())
+        )
         # A mesh read from a file is written as `pv.read(...)`, which is the
         # one import the studio does not itself need — see _mesh_source_lit.
         # A superquadric is written as the helper that computes it, magpylib
@@ -8092,6 +8393,24 @@ class MagpylibStudioSession:
                 parts.append(f"style={_nest(given)!r}")
             ctor = "Collection" if spec["type"] == "Collection" else spec["type"]
             lines.append(f"{target} = magpy.{ctor}{factory}({', '.join(parts)})")
+            if spec.get("parts"):
+                # sealed, then what it is made of, one part a line
+                if spec.get("sealed"):
+                    lines.append(f"{target}.sealed = True")
+                layer = spec.get("parts_style") or {}
+                lines.append(f"{target}.add(")
+                lines.extend(_parts_source(spec["parts"], "    ", over=layer))
+                lines.append(")")
+                own = spec.get("style") or {}
+                if spec.get("visible") is False or all(
+                    own.get(path) == value for path, value in _HIDE_STYLE.items()
+                ):
+                    # hidden: magpylib draws what a collection holds whatever
+                    # the collection's own style says, so its parts say it too
+                    layer = {**layer, **_HIDE_STYLE}
+                if layer:
+                    given = {p: _style_arg(p, v) for p, v in layer.items()}
+                    lines.append(f"{target}.set_children_styles({_nest(given)!r})")
             if parent_of.get(target) is not None:
                 lines.append(f"{parent_of[target]}.add({target})")
 
