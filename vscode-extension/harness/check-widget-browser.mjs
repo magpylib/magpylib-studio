@@ -845,7 +845,7 @@ async function manyMagnets(port, base) {
   });
 }
 
-/** Page code, on `overlap.html`: its three cubes by label, where a point of
+/** Page code, on `overlap.html`: its shapes by label, where a point of
  *  the scene is on the page, and the colour the view draws there. */
 const CUBES = `
   const s = window.scene3d;
@@ -898,15 +898,15 @@ async function marks(port, base) {
   const open = async (tab) => {
     await tab.navigate(`${base}/out/overlap.html`);
     const drawn = await tab.until(
-      `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size === 3`,
+      `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size === 5`,
       20_000,
     );
-    return drawn && (await tab.evaluate(CUBES)) === "a,b,clear";
+    return drawn && (await tab.evaluate(CUBES)) === "a,b,clear,t,u";
   };
   await check("the pointer marks what it is on, faintly", async () => {
     const tab = await openTab(port);
     try {
-      if (!(await open(tab))) return "the page never drew its three cubes";
+      if (!(await open(tab))) return "the page never drew its five shapes";
       const at = await tab.evaluate(`
         const box = boxOf(cubes.clear);
         const centre = onPage(box.getCenter(box.min.clone()));
@@ -946,17 +946,24 @@ async function marks(port, base) {
     }
   });
   await check(
-    "two overlapping cubes are shaded where they interpenetrate",
+    "overlapping solids are shaded where they interpenetrate",
     async () => {
       const tab = await openTab(port);
       try {
-        if (!(await open(tab))) return "the page never drew its three cubes";
+        if (!(await open(tab))) return "the page never drew its five shapes";
+        // two cubes, and a cube in a tetrahedron's corner -- outside its
+        // box's middle, which a convex solid's inside was once taken from
         const region = await tab.evaluate(`
-          const regions = [];
-          for (const { node } of Object.values(cubes)) {
-            node.traverse((o) => { if (o.userData.region && !o.isLineSegments2) regions.push(o); });
-          }
-          if (regions.length !== 1) return { count: regions.length };
+          const hatched = (...names) => {
+            const found = [];
+            for (const name of names) {
+              cubes[name].node.traverse((o) => { if (o.userData.region && o.material.uniforms?.period) found.push(o); });
+            }
+            return found;
+          };
+          const regions = hatched("a", "b");
+          const count = regions.length + hatched("t", "u").length;
+          if (regions.length !== 1 || count !== 2) return { count };
           const [shading] = regions;
           shading.updateWorldMatrix(true, false);
           shading.geometry.computeBoundingBox();
@@ -969,8 +976,8 @@ async function marks(port, base) {
           shading.visible = false;
           const bare = colourAt(middle);
           shading.visible = true;
-          return { count: 1, off, shaded, bare };`);
-        if (region.count !== 1) return `${region.count} shaded regions, not 1`;
+          return { count, off, shaded, bare };`);
+        if (region.count !== 2) return `${region.count} shaded regions, not 2`;
         if (region.off > 1e-3) {
           return `the shading is ${region.off} of its size off the cubes' shared box`;
         }

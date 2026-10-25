@@ -49,8 +49,9 @@ Writes into OUT:
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
 * ``overlap.html`` -- two cubes, one pushed a quarter of its side into the
-  other, and a third clear of both: an overlap shaded where it is, and a cube
-  the pointer can mark on its own;
+  other, a third clear of both, and a small cube in the corner of a
+  tetrahedron: overlaps shaded where they are, and a cube the pointer can mark
+  on its own;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -505,6 +506,19 @@ def main(out):
             ("b", (0.0075, 0, 0)),
             ("clear", (0, 0.03, 0)),
         )
+    ]
+    # a tetrahedron whose box's middle lies outside it, a cube in its corner
+    corner = [(0.04, 0, 0), (0.05, 0, 0), (0.04, 0.01, 0), (0.04, 0, 0.01)]
+    pushed += [
+        magpy.magnet.Tetrahedron(
+            polarization=(0, 0, 1), vertices=corner, style_label="t"
+        ),
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1),
+            dimension=(0.004,) * 3,
+            position=(0.041, 0.001, 0.001),
+            style_label="u",
+        ),
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")

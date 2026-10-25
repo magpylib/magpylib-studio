@@ -259,9 +259,25 @@ function drawPicture(now = performance.now()) {
   keepBatches();
   const cues = cuesAt(now);
   lookOfOverlaps(cues);
-  renderer.render(scene, camera);
+  // The handles go over the marks, which would otherwise be laid over them
+  // where they cross a selection's outline: drawn last, on their own. They
+  // are drawn through everything anyway (`HANDLE_LOOK`).
+  const handles = [gizmo?.getHelper(), grips, dots, snapMark].filter(
+    (root) => root?.visible,
+  );
+  for (const root of handles) root.visible = false;
+  try {
+    renderer.render(scene, camera);
+  } finally {
+    for (const root of handles) root.visible = true;
+  }
   drawRegions();
-  drawMarks(cues);
+  drawMarks();
+  if (handles.length) {
+    renderer.autoClear = false;
+    for (const root of handles) renderer.render(root, camera);
+    renderer.autoClear = true;
+  }
 }
 
 /** Take a step of what is on its way -- a turn to an axis view, the corner
@@ -2193,10 +2209,7 @@ function watchPicks() {
   // What is under the pointer is looked for once a frame, however often the
   // pointer moves: a pick goes through every trace drawn.
   let looking = null; // the last move, while a look is due
-  element.addEventListener("pointermove", (event) => {
-    if (event.buttons) return;
-    hoverCorner(event);
-    markCube(cubeTarget(event));
+  const lookSoon = (event) => {
     if (!looking) {
       requestAnimationFrame(() => {
         const event = looking;
@@ -2205,7 +2218,15 @@ function watchPicks() {
       });
     }
     looking = event;
+  };
+  element.addEventListener("pointermove", (event) => {
+    if (event.buttons) return;
+    hoverCorner(event);
+    markCube(cubeTarget(event));
+    lookSoon(event);
   });
+  // an orbit or a zoom moves the scene under a pointer that stays put
+  element.addEventListener("wheel", lookSoon, { passive: true });
   element.addEventListener("pointerleave", () => {
     hoverCorner(null);
     markCube(null);
@@ -2217,6 +2238,7 @@ function watchPicks() {
     // a drag may have ended off the cube
     hoverCorner(event);
     markCube(cubeTarget(event));
+    lookSoon(event);
     // orbiting also ends in a pointerup: only a press that stayed put is a click
     if (down.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 4) {
       return;
@@ -2291,7 +2313,6 @@ function hover(objectId) {
   const now = objectId ?? null;
   if (now === hoveredId) return;
   hoveredId = now;
-  cueTimes.hovered = performance.now();
   drawHints();
   redraw();
 }
@@ -2660,7 +2681,7 @@ function shapesTo(hang) {
  *  traces are marked, so that a drag's redraw -- every step of it -- does
  *  not put a body's every cell through the GPU again. Let go when that
  *  trace is freed (`free`). */
-const mergedMarks = new WeakMap(); // a trace -> { meshes, geometry }
+const mergedMarks = new WeakMap(); // a trace -> its channel -> { meshes, geometry }
 
 /** Many shapes marked as one, hung on the first of them. It moves with them
  *  as long as they move together, which is how they move: a drag carries
@@ -2668,16 +2689,20 @@ const mergedMarks = new WeakMap(); // a trace -> { meshes, geometry }
  *  its own is never among them (`shapesTo`). */
 function markShapes(meshes, channel, hang) {
   const on = meshes[0];
-  let kept = mergedMarks.get(on);
+  // by channel too: a body selected with another, and hinted alone, is two
+  // merges that start with the same cell
+  if (!mergedMarks.has(on)) mergedMarks.set(on, new Map());
+  const kept = mergedMarks.get(on);
+  let merged = kept.get(channel);
   if (
-    kept?.meshes.length !== meshes.length ||
-    kept.meshes.some((mesh, k) => mesh !== meshes[k])
+    merged?.meshes.length !== meshes.length ||
+    merged.meshes.some((mesh, k) => mesh !== meshes[k])
   ) {
-    kept?.geometry.dispose();
-    kept = { meshes, geometry: mergedShape(on, meshes) };
-    mergedMarks.set(on, kept);
+    merged?.geometry.dispose();
+    merged = { meshes, geometry: mergedShape(on, meshes) };
+    kept.set(channel, merged);
   }
-  markShape(on, channel, hang, kept.geometry);
+  markShape(on, channel, hang, merged.geometry);
 }
 
 /** `meshes` as one geometry, in the frame of `on`: their corners only,
@@ -2726,6 +2751,16 @@ function markShape(mesh, channel, hang, geometry = mesh.geometry) {
   part.layers.set(MARK);
   part.userData.mark = true;
   part.userData.borrowed = true; // the shape's geometry, or `mergedMarks`'
+  // at its middle, shown while it is small on screen (`markedBox`)
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const dot = new THREE.Points(DOT_GEOMETRY, MARK_DOTS[channel]);
+  geometry.boundingBox.getCenter(dot.position);
+  dot.layers.set(MARK);
+  dot.visible = false;
+  dot.frustumCulled = false;
+  dot.raycast = () => {};
+  part.add(dot);
+  part.userData.dot = dot;
   hang(mesh, part);
 }
 
@@ -2858,7 +2893,7 @@ function facesOf(geometry) {
   if (!geometry.boundingBox) geometry.computeBoundingBox();
   const size = geometry.boundingBox.getSize(new THREE.Vector3()).length();
   if (!size) return null;
-  const centre = geometry.boundingBox.getCenter(new THREE.Vector3());
+  const centre = middleOf(geometry);
   const corner = (k) =>
     new THREE.Vector3().fromBufferAttribute(
       position,
@@ -2897,6 +2932,21 @@ function facesOf(geometry) {
   }
   geometry.userData.faces = Float64Array.from(faces);
   return geometry.userData.faces;
+}
+
+/** The mean of a geometry's corners, in its own frame: inside a convex solid,
+ *  as the middle of its box is not -- a tetrahedron's corner of a cube. */
+function middleOf(geometry) {
+  if (!geometry.userData.middle) {
+    const position = geometry.attributes.position;
+    const middle = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    for (let v = 0; v < position.count; v++) {
+      middle.add(p.fromBufferAttribute(position, v));
+    }
+    geometry.userData.middle = middle.divideScalar(position.count || 1);
+  }
+  return geometry.userData.middle;
 }
 
 /** `faces` carried by `matrix` into the world. */
@@ -2954,8 +3004,9 @@ function within(p, faces, margin) {
  *  each. A face clear of the box is passed over unclipped: of a cylinder's
  *  hundreds, a cell of a meshed body reaches a few. A face with one of
  *  `beside` -- the other cells of its body, `{ box, faces }` -- just outside
- *  it lies between two cells, inside the region, and is left out. */
-function clipShape(points, mesh, faces, box, margin, beside) {
+ *  it lies between two cells, inside the region, and is left out; and, where
+ *  `shared`, one lying in a face of the other solid, which has given it. */
+function clipShape(points, mesh, faces, box, margin, beside, shared) {
   const position = mesh.geometry.attributes.position;
   const index = mesh.geometry.index;
   const corners = index ? index.count : position.count;
@@ -2973,10 +3024,15 @@ function clipShape(points, mesh, faces, box, margin, beside) {
   const clear = (polygon, i) =>
     polygon.every((p) => p[i] < min.getComponent(i) - margin) ||
     polygon.every((p) => p[i] > max.getComponent(i) + margin);
-  if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-  const middle = mesh.geometry.boundingBox
-    .getCenter(new THREE.Vector3())
-    .applyMatrix4(mesh.matrixWorld);
+  const middle = middleOf(mesh.geometry).clone().applyMatrix4(mesh.matrixWorld);
+  const lying = (polygon) => {
+    for (let k = 0; k < faces.length; k += 4) {
+      const [nx, ny, nz, d] = faces.subarray(k, k + 4);
+      const off = (p) => Math.abs(nx * p[0] + ny * p[1] + nz * p[2] + d);
+      if (polygon.every((p) => off(p) <= 10 * margin)) return true;
+    }
+    return false;
+  };
   const out = new THREE.Vector3();
   const [n, across] = [new THREE.Vector3(), new THREE.Vector3()];
   const step = 1e3 * margin;
@@ -2993,7 +3049,7 @@ function clipShape(points, mesh, faces, box, margin, beside) {
     for (let k = 0; k < faces.length && polygon.length > 2; k += 4) {
       polygon = clipped(polygon, faces, k, margin);
     }
-    if (polygon.length < 3) continue;
+    if (polygon.length < 3 || (shared && lying(polygon))) continue;
     if (beside.length) {
       out.set(0, 0, 0);
       for (const corner of polygon) out.add(across.set(...corner));
@@ -3067,11 +3123,21 @@ function sharedRegion(as, bs) {
       if (!one.box.intersectsBox(other.box)) continue;
       const margin = 1e-6 * one.box.getSize(new THREE.Vector3()).length();
       clipShape(points, one.mesh, facesIn(other), other.box, margin, cellsA);
-      clipShape(points, other.mesh, facesIn(one), one.box, margin, cellsB);
+      clipShape(
+        points,
+        other.mesh,
+        facesIn(one),
+        one.box,
+        margin,
+        cellsB,
+        true,
+      );
     }
   }
   return points;
 }
+
+let regionsDrawn = false; // whether any region is hung: see `drawRegions`
 
 /** Each pair's region, kept while neither of the two moves or is drawn
  *  again: a selection, a hint or a frame redraws the marks, and a region
@@ -3113,14 +3179,19 @@ function shadeOverlaps(pairs) {
       keptRegions.set(key, kept);
     }
     if (!kept.geometry) continue;
-    hang(kept.on, new THREE.Mesh(kept.geometry, REGION_MATERIAL));
+    // its nearest faces' depths first, then the hatch on those alone
+    hang(kept.on, new THREE.Mesh(kept.geometry, REGION_DEPTH));
+    const shading = new THREE.Mesh(kept.geometry, REGION_MATERIAL);
+    shading.renderOrder = 1;
+    hang(kept.on, shading);
     if (kept.edges) {
       // in front of the shading, hidden by it where it is behind
       const line = wideLines(kept.edges, 1.25, 0.9, true, overlapColour());
-      line.renderOrder = 1;
+      line.renderOrder = 2;
       hang(kept.on, line);
     }
   }
+  regionsDrawn = added.length > 0;
   for (const [key, kept] of keptRegions) {
     if (shaded.has(key)) continue;
     dropRegion(kept);
@@ -3177,6 +3248,14 @@ function regionEdges(geometry) {
   return pairs;
 }
 
+/** A region's depths, drawn first and nothing else: the hatch is then drawn
+ *  only on the nearest face, once a pixel -- a little toward the eye, since
+ *  two programs place a vertex a rounding apart. */
+const REGION_DEPTH = new THREE.MeshBasicMaterial({
+  colorWrite: false,
+  side: THREE.DoubleSide,
+});
+
 /** An overlap's shading: stripes across the screen, the draughtsman's hatch
  *  for a section, in the overlap's colour. Drawn on depths of its own, so a
  *  pixel shows the region's nearest face only, however many lie behind. */
@@ -3200,6 +3279,10 @@ const REGION_MATERIAL = new THREE.ShaderMaterial({
       #include <colorspace_fragment>
     }`,
   transparent: true,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1,
   side: THREE.DoubleSide,
 });
 
@@ -3210,7 +3293,7 @@ const REGION = 4;
 /** Draw the overlaps' regions over the picture, through what stands in front
  *  of them, each pixel its nearest face. */
 function drawRegions() {
-  if (!overlaps.length) return;
+  if (!regionsDrawn) return;
   const kept = {
     autoClear: renderer.autoClear,
     background: scene.background,
@@ -3249,8 +3332,8 @@ function lookOfOverlaps({ blink }) {
 // the user is looking at. The outline is the silhouette only, not every edge
 // a shape has: those read as a wireframe, and a meshed body's cells as a
 // mesh. It is bold, three pixels and a short halo: a glow with a thin line
-// was barely there, and the rest faded dimmed field lines being dragged. See
-// decision 0038.
+// was barely there, and the rest faded dimmed field lines being dragged
+// (docs/decisions.md#0038-the-selection-is-outlined).
 //
 // The shapes marked are drawn flat into a mask. It says, pixel by pixel,
 // which marks a shape there carries -- red for the selection, green for a
@@ -3278,23 +3361,58 @@ const FLAT_VERTEX = `
 
 /** A mark's shape in its channel of the mask, a little toward the eye so
  *  that it is not hidden by itself, drawn black beneath it. */
-const MARK_MATERIALS = [
+const CHANNELS = [
   [1, 0, 0],
   [0, 1, 0],
   [0, 0, 1],
-].map(
+];
+/** How strongly a mark is drawn into the mask: in full where it shows, and
+ *  faintly where something hides it, which is drawn first (`drawMarks`). */
+const MARK_LEVEL = { value: 1 };
+const HIDDEN_LEVEL = 0.4;
+const MARK_FRAGMENT = `
+  uniform vec3 channel;
+  uniform float level;
+  void main() { gl_FragColor = vec4(channel * level, 1.0); }`;
+const MARK_MATERIALS = CHANNELS.map(
   (channel) =>
     new THREE.ShaderMaterial({
-      uniforms: { channel: { value: new THREE.Vector3(...channel) } },
+      uniforms: {
+        channel: { value: new THREE.Vector3(...channel) },
+        level: MARK_LEVEL,
+      },
       vertexShader: FLAT_VERTEX,
-      fragmentShader: `
-        uniform vec3 channel;
-        void main() { gl_FragColor = vec4(channel, 1.0); }`,
+      fragmentShader: MARK_FRAGMENT,
       side: THREE.DoubleSide,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     }),
+);
+
+/** A dot in a mark's channel, a few pixels across, for a shape too small on
+ *  screen to cover a pixel of the mask: what is selected always shows. */
+const DOT_SIZE = { value: 4 }; // the screen's pixels: see `drawMarks`
+const MARK_DOTS = CHANNELS.map(
+  (channel) =>
+    new THREE.ShaderMaterial({
+      uniforms: {
+        channel: { value: new THREE.Vector3(...channel) },
+        level: MARK_LEVEL,
+        size: DOT_SIZE,
+      },
+      vertexShader: `
+        uniform float size;
+        void main() {
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size;
+        }`,
+      fragmentShader: MARK_FRAGMENT,
+    }),
+);
+const DOT_GEOMETRY = new THREE.BufferGeometry().setAttribute(
+  "position",
+  new THREE.Float32BufferAttribute([0, 0, 0], 3),
 );
 
 /** Every opaque shape, in black: in the mask's alpha, and in its depth. */
@@ -3409,11 +3527,15 @@ const MARKS_MATERIAL = new THREE.ShaderMaterial({
       // nothing marked near -- most of the box -- in one read
       if (max(reach.r, max(reach.g, reach.b)) < 0.002) discard;
       vec4 here = at();
-      vec3 outside = 1.0 - here.rgb;
+      // a mark here, shown or hidden (\`HIDDEN_LEVEL\`): no halo on it
+      vec3 covered = min(here.rgb * 4.0, vec3(1.0));
+      vec3 outside = 1.0 - covered;
       // held back over another shape, a neighbour in a ring
-      vec3 other = clamp(here.a - here.rgb, 0.0, 1.0);
+      vec3 other = clamp(here.a - covered, 0.0, 1.0);
       vec3 glow = reach * outside * mix(vec3(1.0), vec3(neighbour), other) * halo;
-      vec3 line = clamp(rim() * outside * edge + glow, 0.0, 1.0);
+      // the line where the mark steps down: in full round what shows, faint
+      // round what is hidden
+      vec3 line = clamp((rim() - here.rgb) * edge + glow, 0.0, 1.0);
       vec4 sum = over(over(over(vec4(0.0), warn, line.b), faint, line.g), strong, line.r);
       if (sum.a < 0.002) discard;
       gl_FragColor = vec4(sum.rgb / sum.a, sum.a);
@@ -3467,11 +3589,13 @@ function markedBox(width, height, margin) {
   const box = new THREE.Box2();
   const corner = new THREE.Vector3();
   const eye = new THREE.Vector3();
+  const own = new THREE.Box2();
   for (const { part } of [...outlines, ...hints]) {
     if (!part.userData.mark || !shown(part)) continue;
     const { geometry } = part;
     if (!geometry.boundingBox) geometry.computeBoundingBox();
     const { min, max } = geometry.boundingBox;
+    own.makeEmpty();
     for (let i = 0; i < 8; i++) {
       corner
         .set(
@@ -3485,8 +3609,15 @@ function markedBox(width, height, margin) {
         return { x: 0, y: 0, width, height };
       }
       corner.project(camera);
-      box.expandByPoint(new THREE.Vector2(corner.x, corner.y));
+      own.expandByPoint(new THREE.Vector2(corner.x, corner.y));
     }
+    box.union(own);
+    // a shape a few pixels across is marked by its dot as well
+    const across = Math.max(
+      ((own.max.x - own.min.x) / 2) * width,
+      ((own.max.y - own.min.y) / 2) * height,
+    );
+    part.userData.dot.visible = across < 4 * renderer.getPixelRatio();
   }
   if (box.isEmpty()) return null;
   const x0 = Math.max(0, Math.floor(((box.min.x + 1) / 2) * width - margin));
@@ -3500,34 +3631,30 @@ function markedBox(width, height, margin) {
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
-/** When each kind of mark last changed: a new selection, the pointer on
- *  something new, an overlap that was not there. Each settles in once
- *  (`cuesAt`) and then holds still: a mark that has settled asks for no
- *  frame, as nothing in an idle view does (`redraw`). */
-const cueTimes = { hovered: -Infinity, warned: -Infinity };
-const SETTLE_MS = { hovered: 150, warned: 1400 };
+/** When an overlap that was not there came: its shading blinks twice
+ *  (`cuesAt`) and then holds still, asking for no frame, as nothing in an
+ *  idle view does (`redraw`). */
+const cueTimes = { warned: -Infinity };
+const BLINK_MS = 1400;
 
-/** How the marks look at `now`: a faint mark fades in, an overlap's shading
- *  blinks twice. */
+/** How the overlaps' shading looks at `now`. */
 function cuesAt(now) {
-  const age = (cue) =>
-    lessMotion ? 1 : Math.max(0, (now - cueTimes[cue]) / SETTLE_MS[cue]);
-  const hovered = age("hovered");
-  const warned = age("warned");
+  const warned = lessMotion
+    ? 1
+    : Math.max(0, (now - cueTimes.warned) / BLINK_MS);
   return {
-    shown: hovered < 1 ? 1 - (1 - hovered) ** 3 : 1,
     blink: warned < 1 ? Math.max(0, Math.sin(4 * Math.PI * warned)) : 0,
-    settling: hovered < 1 || warned < 1,
+    settling: warned < 1,
   };
 }
 
-/** Whether a mark is still settling, and wants the next frame. */
+/** Whether a blink is under way, and wants the next frame. */
 function settling(now) {
-  return (marking || overlaps.length > 0) && cuesAt(now).settling;
+  return regionsDrawn && cuesAt(now).settling;
 }
 
 /** Lay the marks over the picture just drawn. */
-function drawMarks({ shown }) {
+function drawMarks() {
   if (!marking) {
     if (markTargets) {
       for (const target of Object.values(markTargets)) target.dispose();
@@ -3580,8 +3707,20 @@ function drawMarks({ shown }) {
     camera.layers.set(MASK);
     renderer.render(scene, camera);
     scene.overrideMaterial = null;
+    // the marks faintly through what hides them, then in full where they show
     camera.layers.set(MARK);
-    renderer.render(scene, camera);
+    DOT_SIZE.value = 4 * pixel;
+    for (const [level, depthTest] of [
+      [HIDDEN_LEVEL, false],
+      [1, true],
+    ]) {
+      MARK_LEVEL.value = level;
+      for (const material of [...MARK_MATERIALS, ...MARK_DOTS]) {
+        material.depthTest = depthTest;
+        material.uniformsNeedUpdate = true;
+      }
+      renderer.render(scene, camera);
+    }
     camera.layers.mask = kept.layers;
     BLUR_MATERIAL.uniforms.source.value = mask.texture;
     BLUR_MATERIAL.uniforms.stride.value.set(
@@ -3603,8 +3742,8 @@ function drawMarks({ shown }) {
     uniforms.strong.value.set(colours[0]);
     uniforms.faint.value.set(colours[0]);
     uniforms.warn.value.set(colours[1]);
-    uniforms.edge.value.set(1, 0.45 * shown, 0.8);
-    uniforms.halo.value.set(1.8, 0.6 * shown, 0.5);
+    uniforms.edge.value.set(1, 0.45, 0.8);
+    uniforms.halo.value.set(1.8, 0.6, 0.5);
     renderer.setScissor(
       box.x / pixel,
       box.y / pixel,
@@ -4902,11 +5041,9 @@ function sceneSphere(objectIds) {
 /** Select `objectIds`: mark them, and put the handles on them. A line round
  *  each, never a colour on it: see `drawMarks`. */
 function highlight(objectIds) {
-  const chosen = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(
+  selectedIds = (Array.isArray(objectIds) ? objectIds : [objectIds]).filter(
     Boolean,
   );
-  // a new selection settles in (`cuesAt`); the same one drawn again does not
-  selectedIds = chosen;
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   drawOutlines();
   if (hoveredId) drawHints(); // selected now, it is marked in full instead
@@ -6124,7 +6261,9 @@ function paintBar(text, pixels) {
  *  mesh, and the program stays for the next one like it. */
 function free(part) {
   if (part.userData.batch) batchesStale = true;
-  mergedMarks.get(part)?.geometry.dispose();
+  for (const { geometry } of mergedMarks.get(part)?.values() ?? []) {
+    geometry.dispose();
+  }
   mergedMarks.delete(part);
   flowLines.delete(part);
   flowArrows.delete(part);
@@ -6243,11 +6382,20 @@ function poseFrame(index) {
   const turned = shown !== overlaps;
   overlaps = shown;
   // What moved carries its marks; what was built again needs new ones, and
-  // where two overlap the region they share moves as either does.
-  if (changing.length || turned || overlaps.length) {
+  // where two overlap and either moves, the region they share moves with it.
+  if (changing.length || turned || overlapMoves()) {
     drawOutlines();
     drawHints();
   }
+}
+
+/** Whether either of an overlapping pair plays a run of its own. */
+function overlapMoves() {
+  if (!overlaps.length || !tracked.length) return false;
+  const moving = new Set(
+    tracked.map(({ built }) => built.userData.copy ?? ownerOf(built)),
+  );
+  return overlaps.some((pair) => pair.some((id) => moving.has(id)));
 }
 
 /** Whether the run can be played here, by `poseFrame`, with nothing to ask
@@ -6423,7 +6571,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const background = cssColor("--vscode-editor-background", "#1e1e1e");
   scene.background = new THREE.Color(background);
   // a pulse's head lit toward white where that stands out: on a dark scene
-  flowGlow.value = scene.background.getHSL({}).l < 0.5 ? 0.45 : 0;
+  flowGlow.value = darkScene() ? 0.45 : 0;
   orientations = payload.orientations || {};
   anchors = payload.anchors || {};
   paths = payload.paths || {};

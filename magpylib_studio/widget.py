@@ -1467,7 +1467,13 @@ def _overlaps_of(objects):
         # a session says it (`Session.get_overlaps`)
         named = {}
         for i, j, depth in found:
-            named.setdefault((keys[i], keys[j]), depth)
+            key = (keys[i], keys[j])
+            # its parts each meet the other: the deepest says how deep it goes
+            if depth is None:
+                named.setdefault(key, None)
+            else:
+                known = named.get(key)
+                named[key] = depth if known is None else max(known, depth)
         out = {
             "overlaps": [list(pair) for pair in named],
             "overlap_depths": [None if d is None else float(d) for d in named.values()],

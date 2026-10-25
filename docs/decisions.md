@@ -2015,9 +2015,12 @@ apart matters.
   pixels wide, and a halo fading out from it over some ten more: its silhouette,
   not every edge, so a meshed body is one shape and not a mesh; never a colour
   on its faces. The shapes are drawn flat into a mask -- every opaque shape in
-  black first, so a line is hidden behind what stands in front -- the line drawn
-  where the mask changes, and the halo from the mask blurred at half size. Over
-  another shape the halo is held to half.
+  black first, then each mark faintly through it and in full where it shows --
+  the line drawn where the mask steps down, faint round what something in front
+  hides, as the old edges were drawn through it; the halo from the mask blurred
+  at half size, held to half over another shape. A shape too small on screen to
+  cover a pixel of the mask is marked by a dot as well. The handles are drawn
+  over the marks.
 - **Drawn only where something is marked**: the passes run while a shape is
   marked, kept to the box round the marks on screen, and their targets are let
   go when nothing is.
@@ -2028,9 +2031,10 @@ apart matters.
   drawn through what stands in front of it, with an amber line round each. The
   view works it out from the shapes it draws, for convex solids -- each clipped
   by the other's faces -- so a ring segment is marked round only.
-- **Motion once, then still**: a faint line comes in over 0.15 s, an overlap
-  blinks twice as it appears. Nothing pulses: a pulse draws every frame for as
-  long as anything is selected. Reduced motion stills both.
+- **Motion once, then still**: an overlap blinks twice as it appears; a mark
+  comes at once -- a hover's fade-in, shared by every faint mark, flickered them
+  all as the pointer moved. Nothing pulses: a pulse draws every frame for as
+  long as anything is selected. Reduced motion stills the blink.
 - **The selection stays neon green**, `#39ff14`, on dark scenes and light. Amber
   stays the overlap's.
 

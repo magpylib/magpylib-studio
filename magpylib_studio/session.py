@@ -4150,26 +4150,34 @@ class MagpylibStudioSession:
                 (i, j, None)
                 for i, j in collisions.find_overlaps(objects, groups=owners)
             ]
-        pairs, seen = [], set()
+        pairs, seen = [], {}
         for i, j, depth in found:
             pair = [leaves[i][0], leaves[j][0]]
             # two parts of one sealed collection are one object's own
             # business: its cells touch, by construction
-            if pair[0] == pair[1] or (key := tuple(pair)) in seen:
+            if pair[0] == pair[1]:
                 continue
-            seen.add(key)
+            key = tuple(pair)
+            if key in seen:
+                # a sealed collection's parts each meet the other: the
+                # deepest says how deep it goes
+                entry = seen[key]
+                if entry is not None and depth is not None:
+                    entry["depth"] = max(entry["depth"] or 0.0, float(depth))
+                continue
             meant = frozenset(pair) in marked
             if details:
-                pairs.append(
-                    {
-                        "a": pair[0],
-                        "b": pair[1],
-                        "depth": None if depth is None else float(depth),
-                        "intended": meant,
-                    }
-                )
-            elif meant == bool(intended):
-                pairs.append(pair)
+                seen[key] = {
+                    "a": pair[0],
+                    "b": pair[1],
+                    "depth": None if depth is None else float(depth),
+                    "intended": meant,
+                }
+                pairs.append(seen[key])
+            else:
+                seen[key] = None
+                if meant == bool(intended):
+                    pairs.append(pair)
         return pairs
 
     def _overlap_leaves(self):
