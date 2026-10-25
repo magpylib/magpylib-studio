@@ -500,7 +500,11 @@ def main(out):
         magpy.magnet.Cuboid(
             polarization=(0, 0, 1), dimension=(0.01,) * 3, position=at, style_label=name
         )
-        for name, at in (("a", (0, 0, 0)), ("b", (0.0075, 0, 0)), ("clear", (0, 0.03, 0)))
+        for name, at in (
+            ("a", (0, 0, 0)),
+            ("b", (0.0075, 0, 0)),
+            ("clear", (0, 0.03, 0)),
+        )
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
