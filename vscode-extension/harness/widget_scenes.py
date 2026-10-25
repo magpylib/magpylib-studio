@@ -48,6 +48,9 @@ Writes into OUT:
   that plays as motion: the batch draws the moving one where it is;
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
+* ``overlap.html`` -- two cubes, one pushed a quarter of its side into the
+  other, and a third clear of both: an overlap shaded where it is, and a cube
+  the pointer can mark on its own;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -493,6 +496,13 @@ def main(out):
     )
     body.sealed = True
     SceneWidget(body).write_html(out / "sealed.html")
+    pushed = [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=at, style_label=name
+        )
+        for name, at in (("a", (0, 0, 0)), ("b", (0.0075, 0, 0)), ("clear", (0, 0.03, 0)))
+    ]
+    SceneWidget(*pushed).write_html(out / "overlap.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
     far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
     for sensor in (near, far):

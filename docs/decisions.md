@@ -46,6 +46,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0035](#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover)                            | The corner shows the axes, and grows the cube on hover       | accepted 2026-10-23, as built; its arrows' look superseded by 0036   |
 | [0036](#0036-the-corners-axes-say-which-way-they-point)                                        | The corner's axes say which way they point                   | accepted 2026-10-24, as built                                        |
 | [0037](#0037-fem-is-material-responses-extra-and-studio-calls-it)                              | FEM is material-response's extra, and studio calls it        | accepted 2026-10-24                                                  |
+| [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
 
 ---
 
@@ -1986,3 +1987,70 @@ the case material-response#82 names for a `magpylib-fem` of its own.
 - **Maxwell first**, as R7 had it: its reason was an open solver far off. A
   Maxwell check is a manual run on a licensed seat, and the open route no longer
   waits on anything studio does.
+
+---
+
+## 0038. The selection is outlined
+
+**Status:** accepted 2026-10-25, as built; Alex chose it in steps -- a glow from
+a page of five looks, the overlap's hatching with it, then neon green and the
+rest faded, the glow alone being barely visible; then an outline in place of the
+glow, and no fade, since dragging a sensor's field lines faded everything else;
+then the outline bolder, with a short halo, to be seen.
+
+### Context
+
+The view marked a selection by drawing every edge of its shapes in neon green,
+and the edges they hid faintly through them; an overlap the same way in amber.
+Alex found it old-fashioned, and nothing happened when the pointer was on an
+object. The edges had been chosen over a glow for three reasons, written at
+`highlight`: colour is the data -- a magnetization's direction, a field's size
+-- and must not be painted over; a glow is a second render of every frame; and
+its halo bleeds onto the neighbours in a ring of magnets, where telling them
+apart matters.
+
+### Decision
+
+- **A neon green line round the outline of each selected shape**, three CSS
+  pixels wide, and a halo fading out from it over some ten more: its silhouette,
+  not every edge, so a meshed body is one shape and not a mesh; never a colour
+  on its faces. The shapes are drawn flat into a mask -- every opaque shape in
+  black first, so a line is hidden behind what stands in front -- the line drawn
+  where the mask changes, and the halo from the mask blurred at half size. Over
+  another shape the halo is held to half.
+- **Drawn only where something is marked**: the passes run while a shape is
+  marked, kept to the box round the marks on screen, and their targets are let
+  go when nothing is.
+- **What the pointer is on gets a faint line and halo**, as a legend row under
+  it did: looked for once a frame while the pointer moves, never through a
+  handle, a grip or the view cube.
+- **An overlap is hatched where it is**: the region the two share, in amber,
+  drawn through what stands in front of it, with an amber line round each. The
+  view works it out from the shapes it draws, for convex solids -- each clipped
+  by the other's faces -- so a ring segment is marked round only.
+- **Motion once, then still**: a faint line comes in over 0.15 s, an overlap
+  blinks twice as it appears. Nothing pulses: a pulse draws every frame for as
+  long as anything is selected. Reduced motion stills both.
+- **The selection stays neon green**, `#39ff14`, on dark scenes and light. Amber
+  stays the overlap's.
+
+Measured on an M4 Pro at 2×, orbiting with a magnet selected, each frame read
+back to its last pixel: a ring of eight magnets 3.3 ms against 2.8 with the
+edges, and 3.8 against 2.9 with the CPU four times slower -- the mask's passes
+cost a millisecond however little is marked; a body sealed from 5,888 cubes 8.6
+against 9.7, and 17.0 against 18.4 at four times slower. Looking for what is
+under the pointer over that body takes 1.3 ms at four times slower. A still view
+draws no frame.
+
+### Rejected
+
+- **The edges, thinner and softer**: still a wireframe, only quieter.
+- **A glow round the selection with a thin line**, in a mint or in neon: barely
+  visible. **A line of two pixels alone**: not enough.
+- **Everything else faded while something is selected**: it stood the selection
+  out, but dragging a sensor's field lines faded everything else.
+- **The whole selection tinted**: a red face turned orange; the colours lied.
+- **A glow in from the edge, over the faces**: it blurred them.
+- **Brackets round the object**: loose round a turned shape, crowded in a ring.
+- **A pulse**: a frame drawn every frame, and the eye drawn to it all the time.
+- **An overlapping pair outlined only**: it says that two overlap, not where.

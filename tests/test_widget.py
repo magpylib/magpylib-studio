@@ -1255,14 +1255,19 @@ def test_a_sealed_collection_is_styled_as_one():
     assert copy["mixed"] == source["mixed"] and copy["resolved"] == source["resolved"]
 
 
-def test_a_sealed_collections_parts_overlap_nothing_but_others():
+@pytest.mark.parametrize("editable", [True, False])
+def test_a_sealed_collections_parts_overlap_nothing_but_others(editable):
     """Its parts may cut into each other as their maker placed them, and no
-    overlap among them is said; a magnet cutting into one overlaps it."""
-    intruder = magpy.magnet.Sphere(
-        polarization=(0, 0, 1), diameter=0.004, position=(0.026, 0, 0)
+    overlap among them is said; a magnet cutting into it overlaps it once,
+    however many of its parts it cuts into."""
+    intruder = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=(0.03, 0.002, 0.002),
+        position=(0.01, 0, 0.004),
     )
-    session = widget.SceneWidget(_body(), intruder, editable=True)._session
-    assert [sorted(pair) for pair in session.get_overlaps()] == [["body", "intruder"]]
+    payload = widget.SceneWidget(_body(), intruder, editable=editable).payload
+    assert len(payload["overlaps"]) == len(payload["overlap_depths"]) == 1
+    assert set(payload["overlaps"][0]) == {m["object_id"] for m in payload["meshes"]}
 
 
 def test_a_sealed_collection_hides_and_drags_whole():
