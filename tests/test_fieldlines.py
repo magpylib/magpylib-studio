@@ -251,3 +251,29 @@ def test_a_variable_only_a_sensor_follows_keeps_the_field(monkeypatch):
     assert session.set_variable("height", 0.012)["ok"]
     session.get_scene()
     assert computed  # the cube changed
+
+
+@pytest.mark.parametrize("density", [11, 12, 13])
+def test_a_square_of_pixels_is_drawn_on_a_grid_along_the_world(density):
+    """A square grid of pixels gives its plane, not a direction across it:
+    the grid is laid along the world's axes, not turned by chance -- turned
+    45°, it put points on a meshed core's cell edges."""
+    from magpylib_studio import grid
+
+    seeds = np.asarray(grid(0.07, density, plane="xz")) + np.array([0, 0, 0.0325])
+    axes, planar = fieldlines.frame_of(seeds)
+    assert planar
+    np.testing.assert_allclose(np.abs(axes[:2]), [[1, 0, 0], [0, 0, 1]], atol=1e-12)
+
+
+def test_a_point_on_a_cells_edge_reads_no_nan():
+    """Within rounding of a cuboid's edge magpylib says NaN, where on it it
+    says zero: the field lines' field says zero there too, and one point no
+    longer makes the whole grid's scale NaN, and every line go."""
+    cell = magpy.magnet.Cuboid(
+        polarization=(0.25, 0, 0),
+        dimension=(0.004545454545454546, 0.005, 0.005),
+        position=(0.0022727272727272665, -0.0024999999999999996, -0.0075),
+    )
+    point = [[1.4414090374556621e-18, 0.0, -0.008453260901015891]]
+    assert np.isfinite(fieldlines.field([cell], point)).all()
