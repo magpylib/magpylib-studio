@@ -2054,26 +2054,6 @@ async function variablesPanel(port, base) {
  *  along. The dock it opens in is a column beside the view, named for the
  *  panel, with the readout put away; a 480px view has it as a sheet below,
  *  the view keeping its height and the widget growing by the sheet. */
-/** A property the parts of a sealed collection differ in, as the engine
- *  says (`mixed`): its field shows no value, and says why. */
-async function objectPanelMixed(port, base) {
-  await check("a sealed collection's mixed style says so", async () => {
-    const tab = await openTab(port);
-    try {
-      await tab.navigate(`${base}/pages/inspector.html?mixed`);
-      const result = await tab.until("return window.result", 20_000);
-      if (!result) return "never finished";
-      const { opacity } = result.style;
-      if (opacity?.placeholder !== "mixed" || opacity.value !== "") {
-        return `the opacity field showed ${JSON.stringify(opacity)}`;
-      }
-      return thrown(tab);
-    } finally {
-      await tab.close();
-    }
-  });
-}
-
 async function objectPanel(port, base) {
   await check(
     "the object panel edits the selection through the session",
@@ -2180,6 +2160,26 @@ async function objectPanel(port, base) {
       }
     },
   );
+}
+
+/** A property the parts of a sealed collection differ in, as the engine
+ *  says (`mixed`): its field shows no value, and says why. */
+async function objectPanelMixed(port, base) {
+  await check("a sealed collection's mixed style says so", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/inspector.html?mixed`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "never finished";
+      const { opacity } = result.style;
+      if (opacity?.placeholder !== "mixed" || opacity.value !== "") {
+        return `the opacity field showed ${JSON.stringify(opacity)}`;
+      }
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 /** A panel of its own (`ScenePanel`): the variables kind lists the rows,

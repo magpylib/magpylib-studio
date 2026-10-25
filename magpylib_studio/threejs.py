@@ -967,7 +967,14 @@ def frame_payload(scene, index, live=None, derived=None):
         "frames": len(scene.frames),
         # how long the whole run should take, which is what the view paces to
         "duration": scene.animation.time,
-        **_by_kind(_keyed(scene.frames[index].traces, live, derived)),
+        **_by_kind(
+            _keyed(
+                scene.frames[index].traces,
+                live,
+                derived,
+                sealed=None if live else _sealed_in(scene),
+            )
+        ),
     }
 
 
@@ -1049,7 +1056,7 @@ def played_payload(scene):
     payload = view_payload(scene, traces=tagged)
     payload["tracks"] = tracks
     if changing:
-        sealed = _sealed_parts(obj for each in scene.panels for obj in each.objects)
+        sealed = _sealed_in(scene)
         payload["changes"] = [_keyed(runs[n], sealed=sealed) for n in changing]
         if len(json.dumps(payload["changes"], allow_nan=False)) > _CARRY_LIMIT:
             return None
@@ -1306,6 +1313,13 @@ def has_style(obj, path):
 def _leaf_count(collection):
     """How many objects that are not collections `collection` holds."""
     return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
+
+
+def _sealed_in(scene):
+    """`_sealed_parts` of what a captured `scene` draws: every view of it
+    with no session keys a sealed collection's parts to it, frame by frame
+    as at the first (`view_payload`, `played_payload`, `frame_payload`)."""
+    return _sealed_parts(obj for panel in scene.panels for obj in panel.objects)
 
 
 def _sealed_parts(objects):
@@ -1835,9 +1849,8 @@ def view_payload(scene, index=None, traces=None, pixels=()):
         frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
         traces = [t for frame in frames for t in frame.traces]
     reach = None if panel.ranges is None else panel.ranges.tolist()
-    sealed = _sealed_parts(obj for each in scene.panels for obj in each.objects)
     return {
-        **_by_kind([*_keyed(traces, sealed=sealed), *pixels]),
+        **_by_kind([*_keyed(traces, sealed=_sealed_in(scene)), *pixels]),
         "ranges": _ranges_with_pixels(reach, pixels),
         "labels": panel.labels,
         # The studio's view carries these; this one has no gizmo to place, no

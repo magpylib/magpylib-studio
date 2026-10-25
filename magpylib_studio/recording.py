@@ -544,6 +544,15 @@ class _Recorder:
         #: Objects a step with a variable in it has placed: their pose is
         #: the variables' now, and a read of it is a number.
         self.moved_by_variables = set()
+        #: Objects made and not in the scene yet, each with the turn it was
+        #: made with: in it at the next thing recorded, in the order made,
+        #: unless a sealed collection takes it in first as its data
+        #: (`take_in`) -- its parts never are objects of the scene.
+        self.waiting = []
+        #: The sealed collections that took parts in since their data was
+        #: last written, each with the ids of objects of the scene among
+        #: them, whose steps go: written once, at the next thing recorded.
+        self.sealing = {}
 
     # -- values
 
@@ -564,6 +573,10 @@ class _Recorder:
     # -- objects
 
     def known(self, obj):
+        self.flush()
+        return self._found(obj)
+
+    def _found(self, obj):
         found = self.objects.get(id(obj))
         if found is None:
             raise BuildError(
@@ -594,11 +607,92 @@ class _Recorder:
                 self.document, type_, object_id, expressions.normalized(params), style
             )
         self.document._objects.append(recorded)
-        recorded._enter()
+        self.waiting.append([recorded, obj, None])
         self.objects[id(obj)] = recorded
         self.live[object_id] = obj
         self.seen[object_id] = _flat_style(style)
+        # where it was made: a sealed collection's parts are kept as they
+        # stand in its frame then (`_frame`)
+        recorded.born = (np.array(obj.position, dtype=float), obj.orientation)
         return recorded
+
+    def turn_later(self, recorded, rotvec):
+        """The turn an object was made with: a step, recorded when the
+        object goes into the scene (`flush`), and not at all where a sealed
+        collection takes it in, its turn part of its data."""
+        for entry in self.waiting:
+            if entry[0] is recorded:
+                entry[2] = rotvec
+                return
+        recorded.set_transform(orientation=rotvec)
+
+    def flush(self, but=()):
+        """What waits, into the scene: sealed collections' parts written,
+        then the objects made since the last step, in the order made -- all
+        but those in `but`, which a sealed collection is about to take in."""
+        self._write_parts()
+        left = []
+        for entry in self.waiting:
+            recorded, obj, turn = entry
+            if id(obj) in but:
+                left.append(entry)
+                continue
+            recorded._enter()
+            if turn is not None:
+                recorded.set_transform(orientation=turn)
+        self.waiting = left
+
+    def take_in(self, group, children):
+        """`group.add(...)` on a sealed collection: what it adds is its data,
+        and stops being objects of the scene -- one made just now never was;
+        one already in it goes, its steps with it. Written at the next thing
+        recorded, once for as many as are added until then: a loop of adds
+        is one step, not one each."""
+        inside = set()
+        for child in children:
+            inside.update(
+                id(each) for each in (child, *getattr(child, "children_all", ()))
+            )
+        self.flush(but=inside)
+        recorded = self._found(group)
+        dropped = self.sealing.setdefault(recorded.id, set())
+        waiting = {id(obj) for _, obj, _ in self.waiting}
+        for key in inside:
+            gone = self.objects.pop(key, None)
+            if gone is None:
+                continue
+            if key not in waiting:
+                dropped.add(gone.id)  # in the scene already: its steps go
+            self.live.pop(gone.id, None)
+            self.seen.pop(gone.id, None)
+            self.document._ids.discard(gone.id)
+        self.waiting = [entry for entry in self.waiting if id(entry[1]) not in inside]
+        self.document._objects = [
+            o for o in self.document._objects if o.id in self.live
+        ]
+        self.made = [(key, base) for key, base in self.made if key not in inside]
+        self.held = {
+            name: [key for key in held if key not in inside]
+            for name, held in self.held.items()
+        }
+
+    def _write_parts(self):
+        """Each sealed collection's parts as they stand now, written as its
+        data, in its frame where it was made (`_frame`) -- one step each."""
+        from magpylib_studio import importer
+
+        sealing, self.sealing = self.sealing, {}
+        for object_id, dropped in sealing.items():
+            group = self.live[object_id]
+            to_frame = _frame(self.objects[id(group)].born, group)
+            parts, shared = importer.sealed_parts(group, object_id, [], to_frame)
+            hidden = importer._hidden_parts(parts, shared)
+            with hook.nested():
+                result = self.session._write_parts(
+                    object_id, parts, shared, dropped, hidden=hidden
+                )
+            if not result["ok"]:
+                raise BuildError(result["error"])
 
     def rename(self, obj, object_id):
         self.by_hand.add(id(obj))
@@ -621,22 +715,22 @@ class _Recorder:
         """`parent.add(child)`: a child nothing has touched since it was made
         is created inside the collection; one with steps is moved there,
         which keeps its pose as numbers, and says so."""
+        if threejs.is_sealed(parent):
+            self.take_in(parent, [child])
+            return
         recorded, group = self.known(child), self.known(parent)
         with hook.nested():
             result = self.session._adopt_fresh(recorded.id, group.id)
         if not result["ok"]:
             raise BuildError(result["error"])
         if not result["fresh"]:
-            # a sealed collection's part is data, its pose taken as built
-            # (`seal`): nothing of it is left to follow a variable
-            if not threejs.is_sealed(parent):
-                warnings.warn(
-                    f"{recorded.id!r} is already placed, so adding it to "
-                    f"{group.id!r} moves it and keeps its pose as numbers: a "
-                    f"position written in variables stops following them. Add "
-                    f"it before anything else touches it.",
-                    stacklevel=4,
-                )
+            warnings.warn(
+                f"{recorded.id!r} is already placed, so adding it to "
+                f"{group.id!r} moves it and keeps its pose as numbers: a "
+                f"position written in variables stops following them. Add "
+                f"it before anything else touches it.",
+                stacklevel=4,
+            )
             self.call(recorded, "move_object", recorded.id, parent=group.id)
 
     def call(self, recorded, method, *args, **kwargs):
@@ -671,6 +765,16 @@ class _Recorder:
 
     def on_event(self, event):
         self.watch()
+        if (
+            event.kind == "call"
+            and event.name == "add"
+            and threejs.is_sealed(event.obj)
+            and id(event.obj) in self.objects
+        ):
+            self.take_in(event.obj, event.args)
+            return
+        if event.kind != "new":
+            self.flush()
         self.flush_styles()
         getattr(self, f"_on_{event.kind}")(event)
 
@@ -717,7 +821,7 @@ class _Recorder:
         if orientation is not None:
             # The pose it was made with, not a turn: a path of orientations
             # is the object's path, as `obj.orientation = ...` sets it.
-            recorded.set_transform(orientation=_rotvec(orientation))
+            self.turn_later(recorded, _rotvec(orientation))
         for child in children:
             self.adopt(child, event.obj)
 
@@ -874,7 +978,10 @@ class _Recorder:
     # -- style, read between the calls
 
     def flush_styles(self):
+        waiting = {recorded.id for recorded, _, _ in self.waiting}
         for object_id, obj in list(self.live.items()):
+            if object_id in waiting:
+                continue  # its style goes in with it
             now, before = _style_set(obj), self.seen.get(object_id, {})
             for path in sorted(now):
                 if path in before and _same(before[path], now[path]):
@@ -972,43 +1079,51 @@ class _Recorder:
         self.moved_by_variables = {renames.get(i, i) for i in self.moved_by_variables}
 
     def seal(self):
-        """Each collection the function marked ``sealed = True``: one object
-        made of parts, what it held no longer objects of the scene but its
-        data (`session._seal_fresh`). The outermost first, which takes in
-        any sealed one inside it."""
+        """Each collection marked ``sealed = True`` after what it holds was
+        added: what it holds is taken in as its data, as an `add` to it
+        would have. The outermost first, which takes in any sealed one
+        inside it."""
         recorded = sorted(
             self.objects.values(),
             key=lambda r: -len(getattr(self.live.get(r.id), "children_all", ())),
         )
         for each in recorded:
             obj = self.live.get(each.id)
-            if not threejs.is_sealed(obj):
-                continue
-            inside = {id(child) for child in obj.children_all}
-            with hook.nested():
-                result = self.session._seal_fresh(each.id)
-            if not result["ok"]:
-                raise BuildError(result["error"])
-            for key in inside:
-                gone = self.objects.pop(key, None)
-                if gone is not None:
-                    self.live.pop(gone.id, None)
-                    self.seen.pop(gone.id, None)
-                    self.document._ids.discard(gone.id)
-            self.document._objects = [
-                o for o in self.document._objects if o.id in self.live
-            ]
-            self.made = [(key, base) for key, base in self.made if key not in inside]
-            self.held = {
-                name: [key for key in held if key not in inside]
-                for name, held in self.held.items()
-            }
+            if (
+                threejs.is_sealed(obj)
+                and id(obj) in self.objects
+                # what it holds still objects of the scene: not taken in yet
+                and any(id(child) in self.objects for child in obj.children_all)
+            ):
+                self.take_in(obj, list(obj.children))
+                self.sealing.setdefault(each.id, set())
+        self.flush()
 
     def finish(self):
         self.watch()
+        self.flush()
         self.flush_styles()
         self.seal()
         self.name_by_variables()
+
+
+def _frame(born, group):
+    """From where a collection stands now back to where it was made: the
+    frame its parts are kept in, so that its steps since, replayed on them,
+    put them where they are -- once."""
+    p0 = np.atleast_2d(born[0])[-1]
+    r0 = born[1] if born[1].single else born[1][-1]
+    p1 = np.atleast_2d(np.asarray(group.position, dtype=float))[-1]
+    turns = group.orientation
+    r1 = turns if turns.single else turns[-1]
+    back = r0 * r1.inv()
+
+    def to_frame(position, orientation):
+        return p0 + back.apply(
+            np.asarray(position, dtype=float) - p1
+        ), back * orientation
+
+    return to_frame
 
 
 def _descendants(obj):
@@ -1272,7 +1387,7 @@ def TriangularMesh(mesh_source, **kwargs):
             kwargs.get("style"),
         )
         if orientation is not None:
-            recorded.set_transform(orientation=_rotvec(orientation))
+            recorder.turn_later(recorded, _rotvec(orientation))
     return obj
 
 

@@ -1461,23 +1461,16 @@ def _overlaps_of(objects):
     ]
     plain = [obj for _, obj in leaves]
     try:
-        found = [
-            (i, j, d)
-            for i, j, d in collisions.find_overlaps(plain, depths=True)
-            if leaves[i][0] != leaves[j][0]
-        ]
+        keys = [key for key, _ in leaves]
+        found = collisions.find_overlaps(plain, depths=True, groups=keys)
         out = {
             "overlaps": [[leaves[i][0], leaves[j][0]] for i, j, _ in found],
             "overlap_depths": [None if d is None else float(d) for _, _, d in found],
         }
         if collisions.path_length(plain) > 1:
             out["overlaps_by_step"] = [
-                [
-                    [leaves[i][0], leaves[j][0]]
-                    for i, j in step
-                    if leaves[i][0] != leaves[j][0]
-                ]
-                for step in collisions.overlaps_along(plain)
+                [[leaves[i][0], leaves[j][0]] for i, j in step]
+                for step in collisions.overlaps_along(plain, groups=keys)
             ]
     except Exception:  # noqa: BLE001 - an optional check must not cost the picture
         return {}

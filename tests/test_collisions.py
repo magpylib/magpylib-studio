@@ -13,7 +13,9 @@ import warnings
 import magpylib as magpy
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
+from magpylib_studio import collisions
 from magpylib_studio.collisions import find_overlaps, overlaps_along, separation
 from magpylib_studio.session import MagpylibStudioSession
 
@@ -462,3 +464,28 @@ def test_a_view_nobody_edits_says_what_overlaps():
     a, c = cuboid((10, 10, 10)), cuboid((10, 10, 10), (9.9, 0, 0))
     view = SceneWidget(a, c)
     assert view.payload["overlaps"] == [[str(id(a)), str(id(c))]]
+
+
+@pytest.mark.parametrize("apart", [3.0, 0.9, 0.0])
+def test_nearest_is_the_nearest_pair(apart):
+    """Measured only where boxes could be nearer, the nearest pair of two
+    groups is the one measuring every pair finds: a gap, a touch, an
+    overlap."""
+    rng = np.random.default_rng(7)
+
+    def group(at):
+        return [
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1),
+                dimension=rng.uniform(0.2, 1, 3),
+                position=at + rng.normal(0, 0.8, 3),
+                orientation=Rotation.random(random_state=rng),
+            )
+            for _ in range(8)
+        ]
+
+    a, b = group(np.zeros(3)), group(np.array([apart, 0, 0]))
+    every = min(
+        (collisions.separation(x, y) for x in a for y in b), key=collisions._rank
+    )
+    assert collisions.nearest(a, b) == pytest.approx(every)

@@ -24,7 +24,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import units
-from magpylib_studio.session import _is_data, _style_values
+from magpylib_studio.session import _HIDE_STYLE, _is_data, _style_values
 from magpylib_studio.threejs import has_style, is_sealed, sealed_own
 
 # Constructor kwargs worth introspecting, tried in order per object.
@@ -99,7 +99,7 @@ def _unique_id(base, used):
     return candidate
 
 
-def sealed_parts(collection, object_id, left_out):
+def sealed_parts(collection, object_id, left_out, to_frame=None):
     """A sealed collection's children as its parts, and the style they share.
 
     Parts are specs with no id, which no edit, pick or legend row can name;
@@ -108,9 +108,13 @@ def sealed_parts(collection, object_id, left_out):
     ``parts_style``, and each part keeps only what is its own: a body meshed
     into cells made alike carries one style, a collection of differing
     objects keeps their differences. Its own label, description, legend and
-    traces are the collection's, and are not shared (`sealed_own`)."""
+    traces are the collection's, and are not shared (`sealed_own`).
+
+    `to_frame` takes a part's pose where it stands to the one it is kept
+    as: the collection's frame where it was made, for a collection with
+    steps of its own (`recording._frame`). Without it, where it stands."""
     leaves = []
-    parts = _parts_of(collection, object_id, left_out, leaves)
+    parts = _parts_of(collection, object_id, left_out, leaves, to_frame)
     shared = {}
     candidates = {path for part, _ in leaves for path in part.get("style", {})}
     for path in sorted(candidates):
@@ -131,7 +135,7 @@ def sealed_parts(collection, object_id, left_out):
 _UNSET = object()
 
 
-def _parts_of(collection, object_id, left_out, leaves):
+def _parts_of(collection, object_id, left_out, leaves, to_frame=None):
     """`sealed_parts`'s parts, with each that is no collection put in
     `leaves` beside the object it was read from."""
     parts = []
@@ -139,10 +143,14 @@ def _parts_of(collection, object_id, left_out, leaves):
         if isinstance(child, magpy.Collection):
             part = {
                 "type": "Collection",
-                "parts": _parts_of(child, object_id, left_out, leaves),
+                "parts": _parts_of(child, object_id, left_out, leaves, to_frame),
             }
+        elif _dotted_type(child) is None:
+            # a class a document cannot name: said, as a style it cannot hold
+            left_out.append(f"{object_id}'s part {type(child).__name__} (left out)")
+            continue
         else:
-            part = _part_spec(child)
+            part = _part_spec(child, to_frame)
             leaves.append((part, child))
         style = _style_values(child)
         for path in [path for path, value in style.items() if not _is_data(value)]:
@@ -154,7 +162,7 @@ def _parts_of(collection, object_id, left_out, leaves):
     return parts
 
 
-def _part_spec(obj):
+def _part_spec(obj, to_frame=None):
     """A part that holds none: its type and parameters, its pose among them.
     A part has no steps of its own to be moved and turned by, as an object
     has, so where it stands is as plain as what it is: `position`, a path's
@@ -165,10 +173,13 @@ def _part_spec(obj):
         value = getattr(obj, attr, None)
         if value is not None:
             params[attr] = _tolist(value)
-    position = np.asarray(obj.position)
+    position, orientation = np.asarray(obj.position, dtype=float), obj.orientation
+    if to_frame is not None:
+        position, orientation = to_frame(position, orientation)
+    position = np.where(np.abs(position) < 1e-15, 0.0, position)  # a round trip's dust
     if np.any(position):
         params["position"] = _tolist(position)
-    rotvec = obj.orientation.as_rotvec(degrees=True)
+    rotvec = orientation.as_rotvec(degrees=True)
     if np.any(np.abs(rotvec) > 1e-9):
         params["orientation"] = _zeroed(rotvec.round(9)).tolist()
     return {"type": _dotted_type(obj), "params": params}
@@ -184,6 +195,7 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # of, and come across as its data.
     if is_sealed(obj):
         parts, shared = sealed_parts(obj, object_id, left_out)
+        hidden = _hidden_parts(parts, shared)
         spec = {
             "id": object_id,
             "type": "Collection",
@@ -256,9 +268,43 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     for path in [path for path, value in style.items() if not _is_data(value)]:
         del style[path]
         left_out.append(f"{object_id}'s {path}")
+    if is_sealed(obj) and hidden:
+        style.update(_HIDE_STYLE)  # the parts' hiding is the body's
     if style:
         spec["style"] = style
     return spec
+
+
+def _hidden_parts(parts, shared):
+    """Whether every part of a sealed collection is hidden, by the switches
+    `set_visible` hides a leaf with, on each or in the style they share
+    (`shared`): the body is, as a script writes it (`session.to_script`).
+    If so, they come off the parts and the shared style, the body's own
+    style to carry."""
+    leaves = []
+
+    def walk(parts):
+        for part in parts:
+            if part["type"] == "Collection":
+                walk(part.get("parts") or [])
+            else:
+                leaves.append(part)
+
+    walk(parts)
+    if not leaves or not all(
+        shared.get(path) == value
+        or all((part.get("style") or {}).get(path) == value for part in leaves)
+        for path, value in _HIDE_STYLE.items()
+    ):
+        return False
+    for path in _HIDE_STYLE:
+        shared.pop(path, None)
+        for part in leaves:
+            (part.get("style") or {}).pop(path, None)
+    for part in leaves:
+        if "style" in part and not part["style"]:
+            del part["style"]
+    return True
 
 
 def _document_from_named(named, names, script=True):
@@ -307,7 +353,14 @@ def _inert_warnings(objects):
         for spec in specs:
             if spec.get("type") == "misc.CustomSource":
                 yield spec["id"]
+            if any(_custom_parts(spec.get("parts") or ())):
+                yield f"{spec['id']}'s parts"
             yield from walk(spec.get("children", ()))
+
+    def _custom_parts(parts):
+        for part in parts:
+            yield part["type"] == "misc.CustomSource"
+            yield from _custom_parts(part.get("parts") or ())
 
     names = list(walk(objects))
     if not names:
@@ -326,12 +379,25 @@ def _style_warnings(left_out):
     function when `show()` runs (`updatefunc`) is code. Writing it into the
     document ended the import with a TypeError the caller never saw.
     """
-    if not left_out:
-        return []
-    return [
-        f"{', '.join(left_out)}: made by a function, which a document cannot "
-        "hold, so it did not come across. The object is drawn without it."
+    parts = [
+        what.removesuffix(" (left out)")
+        for what in left_out
+        if what.endswith(" (left out)")
     ]
+    styles = [what for what in left_out if not what.endswith(" (left out)")]
+    out = []
+    if styles:
+        out.append(
+            f"{', '.join(styles)}: made by a function, which a document cannot "
+            "hold, so it did not come across. The object is drawn without it."
+        )
+    if parts:
+        # a sealed collection's part of a class a scene has no name for
+        out.append(
+            f"{', '.join(parts)}: a kind of object a scene cannot hold, so it "
+            "did not come across. The rest of the body did."
+        )
+    return out
 
 
 def _made_of(spec):

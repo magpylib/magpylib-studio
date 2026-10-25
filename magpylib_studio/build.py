@@ -37,6 +37,8 @@ from magpylib_studio.session import (
     MagpylibStudioSession,
     _arange_lit,
     _linspace_lit,
+    _parts_source,
+    _parts_turned,
     _style_arg,
     _variant_problem,
 )
@@ -854,7 +856,7 @@ _WORDS = (
     "Count",
     "Bounds",
 )
-_RESERVED = (*_WORDS, "pi", "tau", "e", "Annotated", "Literal", "np", "magpy", "R")
+_RESERVED = (*_WORDS, "pi", "tau", "e", "Annotated", "Literal", "np", "magpy")
 
 
 def _nested(flat):
@@ -894,6 +896,15 @@ class _ScriptWriter:
         self.alias = {
             word: f"{word}_" if word in self.variables else word for word in _RESERVED
         }
+        # scipy's Rotation, for a sealed collection's turned parts: named
+        # only where one is, by a name nothing in the scene has
+        targets = {e.get("target") for e in self.events}
+        if any(_parts_turned(e.get("parts") or []) for e in self.events):
+            self.alias["R"] = next(
+                name
+                for name in ("R", "Rotation", "R_")
+                if name not in self.variables and name not in targets
+            )
         taken = importer._Ids(set(self.variables) | set(self.alias.values()))
         self.function = next(
             fn for fn in ("design", "the_scene", "studio_scene") if fn not in taken
@@ -1363,35 +1374,18 @@ class _ScriptWriter:
         return lines
 
     def write_parts(self, parts, indent, over=()):
-        """A sealed collection's parts as lines of its call: plain values,
-        a turn as the rotation it is, a collection among them with its own
-        parts under it, and a part's style but where the shared one is
-        `over` it (`session._parts_source`, in this script's words)."""
-        lines = []
-        for part in parts:
-            args = []
-            for key, value in (part.get("params") or {}).items():
-                if key == "orientation":
-                    self.rotation = True
-                    code = f"{self.alias['R']}.from_rotvec({self.value(value)}, degrees=True)"
-                else:
-                    code = self.value(value)
-                args.append((key, code))
-            own = {p: v for p, v in (part.get("style") or {}).items() if p not in over}
-            if own:
-                given = {p: _style_arg(p, v) for p, v in own.items()}
-                args.append(("style", repr(_nested(given))))
-            if part["type"] == "Collection":
-                lines.append(f"{indent}{self.alias['magpy']}.Collection(")
-                lines += self.write_parts(
-                    part.get("parts") or [], indent + "    ", over
-                )
-                lines += [f"{indent}    {key}={code}," for key, code in args]
-                lines.append(f"{indent}),")
-            else:
-                call = f"{self.alias['magpy']}.{part['type']}"
-                lines.append(f"{indent}{call}({self.keywords(args)}),")
-        return lines
+        """A sealed collection's parts as lines of its call, in this
+        script's words (`session._parts_source`)."""
+        if _parts_turned(parts):
+            self.rotation = True
+        return _parts_source(
+            parts,
+            indent,
+            over,
+            lit=self.value,
+            magpy=self.alias["magpy"],
+            rotation=self.alias.get("R", "R"),
+        )
 
     def write_step(self, event, name):
         op, target = event.get("op"), event.get("target")

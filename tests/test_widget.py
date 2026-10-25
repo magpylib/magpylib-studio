@@ -1191,14 +1191,17 @@ def test_a_sealed_collection_is_one_object(editable):
     [("to_script", "load_script"), ("to_builder_script", "apply_builder_script")],
 )
 def test_a_sealed_collection_survives_its_script(tmp_path, script, load):
-    """Written as its parts, sealed, and read back as the same one object,
-    field, shared style and each part's own all."""
+    """Written as its parts, sealed, and read back as the same one object --
+    moved once, where it was moved to, hidden, and with its shared style and
+    each part's own."""
     from magpylib_studio.session import MagpylibStudioSession
 
     body = _body()
     body.children[0].style.magnetization.color.north = "#0000ff"
     body.set_children_styles(opacity=0.5)
     session = widget.SceneWidget(body, editable=True)._session
+    session.apply_edits([{"objectId": "body", "position": [0, 0, 0.05]}])
+    session.set_visible("body", False)
     path = tmp_path / "scene.py"
     path.write_text(getattr(session, script)())
     again = MagpylibStudioSession()
@@ -1208,10 +1211,15 @@ def test_a_sealed_collection_survives_its_script(tmp_path, script, load):
     create = again._create_event("body")
     assert create["parts_style"] == {"opacity": 0.5}
     assert create["parts"][0]["style"] == {"magnetization.color.north": "#0000ff"}
-    point = (0.004, 0.012, 0.003)
+    point = (0.004, 0.012, 0.053)
     np.testing.assert_allclose(
-        magpy.getB(again._objs["body"], point), magpy.getB(body, point), rtol=1e-12
+        magpy.getB(again._objs["body"], point),
+        magpy.getB(session._objs["body"], point),
+        rtol=1e-12,
     )
+    assert not again.get_scene().get("meshes")  # hidden as it was
+    assert again.set_visible("body", True)["ok"]
+    assert len(again.get_scene()["meshes"]) == 3
 
 
 def test_a_sealed_collection_is_styled_as_one():
@@ -1236,6 +1244,15 @@ def test_a_sealed_collection_is_styled_as_one():
     assert {m["opacity"] for m in session.get_scene()["meshes"]} == {0.3}
     assert session.reset_style("body", north)["ok"]
     assert session.get_values("body")["mixed"] == [north]
+    # a pattern's copy of it reads its source's style
+    session.add_object("ring", "Collection")
+    session.move_object("body", parent="ring")
+    session.duplicate_around("body", 2)
+    copy, source = session.get_values("body#1"), session.get_values("body")
+    assert copy["resolved"].pop("label") == "body #1" and source["resolved"].pop(
+        "label"
+    )
+    assert copy["mixed"] == source["mixed"] and copy["resolved"] == source["resolved"]
 
 
 def test_a_sealed_collections_parts_overlap_nothing_but_others():
@@ -1249,18 +1266,49 @@ def test_a_sealed_collections_parts_overlap_nothing_but_others():
 
 
 def test_a_sealed_collection_hides_and_drags_whole():
-    """Hidden, none of its parts is drawn; dragged, all of them are drawn
-    again at each step, as the one object it is."""
-    session = widget.SceneWidget(_body(), editable=True)._session
+    """Hidden, alone or in a group, none of its parts is drawn; dragged, it
+    is the view's to carry, and a step sends none of its cells again."""
+    probe = magpy.Sensor(pixel=[(0, 0.02, 0)], style_label="probe")
+    probe.style.pixel.field.source = "B"
+    session = widget.SceneWidget(_body(), probe, editable=True)._session
     session.begin_interaction()
     for z in (0.001, 0.002):  # the first step is drawn whole; the next, what moved
         session.apply_edits([{"objectId": "body", "position": [0, 0, z]}])
         step = session.get_scene(partial=True)
     session.end_interaction()
-    assert step["partial"] == ["body"]
-    assert [m["object_id"] for m in step["meshes"]] == ["body"] * 3
+
+    def drawn(scene):
+        return [m for m in scene.get("meshes", []) if m["object_id"] == "body"]
+
+    assert step["partial"] == ["probe"]  # the reading, not the body
+    assert not drawn(step)
     session.set_visible("body", False)
-    assert not session.get_scene().get("meshes")
+    assert not drawn(session.get_scene())
+    session.set_visible("body", True)
+    session.add_object("group", "Collection")
+    session.move_object("body", parent="group")
+    session.set_visible("group", False)
+    assert not drawn(session.get_scene())
+    # and it holds no object of the scene: it is made of parts
+    assert "sealed" in session.move_object("probe", parent="body")["error"]
+
+
+def test_a_sealed_collection_says_what_it_cannot_carry():
+    """A part of a class a scene has no name for is left out, and a custom
+    source's field function, as an object's is: each said."""
+
+    class Mine(magpy.magnet.Cuboid):
+        pass
+
+    body = _body()
+    body.add(
+        Mine(polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.02, 0)),
+        magpy.misc.CustomSource(field_func=lambda field, observers: observers * 0),
+    )
+    doc, warnings = importer.document_from_objects([body], {}, script=False)
+    assert [p["type"] for p in doc["objects"][0]["parts"]][-1] == "misc.CustomSource"
+    assert any("part Mine" in w for w in warnings)
+    assert any("body's parts: a CustomSource" in w for w in warnings)
 
 
 def _studio(**traits):

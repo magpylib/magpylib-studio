@@ -1234,6 +1234,10 @@ def separation(a, b, tol=TOL, step=None):
     A, B = _body(a, tol, step), _body(b, tol, step)
     if A is None or B is None:
         return None
+    return _separation(A, B, tol)
+
+
+def _separation(A, B, tol):
     proof = _overlap(A, B, tol)
     if proof:
         return ("overlap", _depth(proof, tol))
@@ -1243,7 +1247,70 @@ def separation(a, b, tol=TOL, step=None):
     return ("touch", 0.0) if d <= tol else ("gap", d)
 
 
-def find_overlaps(objects, tol=TOL, step=None, depths=False):
+def _rank(found):
+    """How near `separation`'s answer is, nearest first: the deepest
+    overlap, then a touch, then the smallest gap."""
+    state, value = found
+    if state == "overlap":
+        return (0, -(value or 0.0))
+    return (1, 0.0) if state == "touch" else (2, value)
+
+
+def nearest(group_a, group_b, tol=TOL, step=None):
+    """How two groups of objects stand to each other, as `separation` says
+    it of their nearest pair: the deepest overlap, else a touch, else the
+    smallest gap -- or None where either has no shape.
+
+    Only the pairs whose boxes could beat what is found are measured: the
+    pair whose boxes are nearest gives a bound, and only pairs whose boxes
+    come within it are asked, nearest first, until the boxes alone are
+    farther apart than the gap in hand. A magnet meshed into 5,888 cells
+    against another is 35 million pairs, nearly all too far apart to count."""
+    A = [body for obj in group_a if (body := _body(obj, tol, step)) is not None]
+    B = [body for obj in group_b if (body := _body(obj, tol, step)) is not None]
+    if not A or not B:
+        return None
+    lo_a, hi_a = np.array([b.lo for b in A]), np.array([b.hi for b in A])
+    lo_b, hi_b = np.array([b.lo for b in B]), np.array([b.hi for b in B])
+    rows = max(1, 2_000_000 // len(B))  # a few million box pairs at a time
+    chunks = range(0, len(A), rows)
+
+    def apart(start):
+        """How far the boxes of A's rows from `start` are from each of B's."""
+        stop = min(start + rows, len(A))
+        axis = np.maximum(
+            0.0,
+            np.maximum(
+                lo_b[None] - hi_a[start:stop, None], lo_a[start:stop, None] - hi_b[None]
+            ),
+        )
+        return np.linalg.norm(axis, axis=2)
+
+    near = None
+    for start in chunks:
+        d = apart(start)
+        k = int(d.argmin())
+        if near is None or d.flat[k] < near[0]:
+            near = (float(d.flat[k]), start + k // len(B), k % len(B))
+    best = _separation(A[near[1]], B[near[2]], tol)
+    bound = max(best[1] if best[0] == "gap" else 0.0, tol)
+    pairs = []
+    for start in chunks:
+        d = apart(start)
+        hit = np.nonzero(d <= bound)
+        pairs += zip(
+            d[hit].tolist(), (hit[0] + start).tolist(), hit[1].tolist(), strict=True
+        )
+    for box, i, j in sorted(pairs):
+        if best[0] == "gap" and box > best[1]:
+            break  # no pair left whose boxes are nearer than the gap in hand
+        found = _separation(A[i], B[j], tol)
+        if _rank(found) < _rank(best):
+            best = found
+    return best
+
+
+def find_overlaps(objects, tol=TOL, step=None, depths=False, groups=None):
     """The pairs of `objects` that overlap, as index pairs `(i, j)`, `i < j`;
     with `depths`, as ``(i, j, depth)``, depth in metres or None where it is
     not known.
@@ -1253,7 +1320,9 @@ def find_overlaps(objects, tol=TOL, step=None, depths=False):
     leaves. What has no shape to overlap with -- a sensor, a dipole, a custom
     source, a shape not yet given its geometry -- is never in a pair, and
     neither are two wires or two sheets, which have no thickness. Each object
-    is taken where it is at `step` of its path, the last by default.
+    is taken where it is at `step` of its path, the last by default. Objects
+    of one of `groups`, given one per object -- a sealed collection's parts --
+    are not asked of each other: what overlaps inside a group is its own.
     """
     bodies = [_body(obj, tol, step) for obj in objects]
     index = [k for k, body in enumerate(bodies) if body is not None]
@@ -1264,6 +1333,8 @@ def find_overlaps(objects, tol=TOL, step=None, depths=False):
     found = {}
     for a, b in zip(*_candidates(lo, hi), strict=True):
         i, j = sorted((index[a], index[b]))
+        if groups is not None and groups[i] is not None and groups[i] == groups[j]:
+            continue
         proof = _decided(bodies[i], bodies[j], tol)
         if proof:
             found[(i, j)] = (
@@ -1306,11 +1377,11 @@ def _measured(A, B, proof, tol):
     return _depths[key]
 
 
-def overlaps_along(objects, tol=TOL):
+def overlaps_along(objects, tol=TOL, groups=None):
     """The pairs that overlap at each step of the longest path among
     `objects`: a list with an entry per step, each as `find_overlaps` gives
     it. Pairs of objects that stand still are decided once; only pairs with
-    something moving are asked again at each step."""
+    something moving are asked again at each step. `groups` as there."""
     steps = path_length(objects)
     moving = {
         k
@@ -1320,7 +1391,12 @@ def overlaps_along(objects, tol=TOL):
     }
     still = [k for k in range(len(objects)) if k not in moving]
     fixed = [
-        (still[i], still[j]) for i, j in find_overlaps([objects[k] for k in still], tol)
+        (still[i], still[j])
+        for i, j in find_overlaps(
+            [objects[k] for k in still],
+            tol,
+            groups=None if groups is None else [groups[k] for k in still],
+        )
     ]
     along = []
     for step in range(steps):
@@ -1332,6 +1408,12 @@ def overlaps_along(objects, tol=TOL):
             hi = np.array([bodies[k].hi for k in index])
             for a, b in zip(*_candidates(lo, hi), strict=True):
                 i, j = sorted((index[a], index[b]))
+                if (
+                    groups is not None
+                    and groups[i] is not None
+                    and groups[i] == groups[j]
+                ):
+                    continue
                 if (i in moving or j in moving) and _overlap(bodies[i], bodies[j], tol):
                     found.add((i, j))
         along.append(sorted(found))
