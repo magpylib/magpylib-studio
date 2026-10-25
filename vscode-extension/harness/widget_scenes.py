@@ -46,6 +46,8 @@ Writes into OUT:
   still picked, hidden, faded, selected and dragged on its own;
 * ``many-run.html`` -- those cubes and one more on a path above them, a run
   that plays as motion: the batch draws the moving one where it is;
+* ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
+  cells are: picked, outlined and hidden whole;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -480,6 +482,17 @@ def main(out):
     if not run.payload.get("tracks"):
         raise SystemExit("many-run.html: the traveller should play as motion")
     run.write_html(out / "many-run.html")
+    body = magpy.Collection(
+        *(
+            magpy.magnet.Cuboid(
+                polarization=(0, 0, 1), dimension=(0.005,) * 3, position=cube.position
+            )
+            for cube in many
+        ),
+        style_label="body",
+    )
+    body.sealed = True
+    SceneWidget(body).write_html(out / "sealed.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
     far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
     for sensor in (near, far):

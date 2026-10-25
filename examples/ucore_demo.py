@@ -121,6 +121,8 @@ def _(apply_demag, magpy, mesh_all, np, target, time, ucore):
     t2 = time.perf_counter()
     cells = [s for s in solved.sources_all if isinstance(s, magpy.magnet.Cuboid)]
     iron = magpy.Collection(*cells, override_parent=True, style_label="U-core")
+    # one body made of its cells: picked, moved and hidden whole
+    iron.sealed = True
     windings = magpy.Collection(
         *(s for s in solved.sources_all if isinstance(s, magpy.current.Polyline)),
         override_parent=True,

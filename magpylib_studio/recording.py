@@ -69,7 +69,7 @@ import magpylib as magpy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from magpylib_studio import build, expressions, hook, meshes
+from magpylib_studio import build, expressions, hook, meshes, threejs
 from magpylib_studio.build import BuildError, Expression, Sampled, _arg, _value
 from magpylib_studio.session import _is_data, _style_values
 
@@ -627,13 +627,16 @@ class _Recorder:
         if not result["ok"]:
             raise BuildError(result["error"])
         if not result["fresh"]:
-            warnings.warn(
-                f"{recorded.id!r} is already placed, so adding it to "
-                f"{group.id!r} moves it and keeps its pose as numbers: a "
-                f"position written in variables stops following them. Add "
-                f"it before anything else touches it.",
-                stacklevel=4,
-            )
+            # a sealed collection's part is data, its pose taken as built
+            # (`seal`): nothing of it is left to follow a variable
+            if not threejs.is_sealed(parent):
+                warnings.warn(
+                    f"{recorded.id!r} is already placed, so adding it to "
+                    f"{group.id!r} moves it and keeps its pose as numbers: a "
+                    f"position written in variables stops following them. Add "
+                    f"it before anything else touches it.",
+                    stacklevel=4,
+                )
             self.call(recorded, "move_object", recorded.id, parent=group.id)
 
     def call(self, recorded, method, *args, **kwargs):
@@ -968,9 +971,43 @@ class _Recorder:
         self.seen = {renames.get(i, i): style for i, style in self.seen.items()}
         self.moved_by_variables = {renames.get(i, i) for i in self.moved_by_variables}
 
+    def seal(self):
+        """Each collection the function marked ``sealed = True``: one object
+        made of parts, what it held no longer objects of the scene but its
+        data (`session._seal_fresh`). The outermost first, which takes in
+        any sealed one inside it."""
+        recorded = sorted(
+            self.objects.values(),
+            key=lambda r: -len(getattr(self.live.get(r.id), "children_all", ())),
+        )
+        for each in recorded:
+            obj = self.live.get(each.id)
+            if not threejs.is_sealed(obj):
+                continue
+            inside = {id(child) for child in obj.children_all}
+            with hook.nested():
+                result = self.session._seal_fresh(each.id)
+            if not result["ok"]:
+                raise BuildError(result["error"])
+            for key in inside:
+                gone = self.objects.pop(key, None)
+                if gone is not None:
+                    self.live.pop(gone.id, None)
+                    self.seen.pop(gone.id, None)
+                    self.document._ids.discard(gone.id)
+            self.document._objects = [
+                o for o in self.document._objects if o.id in self.live
+            ]
+            self.made = [(key, base) for key, base in self.made if key not in inside]
+            self.held = {
+                name: [key for key in held if key not in inside]
+                for name, held in self.held.items()
+            }
+
     def finish(self):
         self.watch()
         self.flush_styles()
+        self.seal()
         self.name_by_variables()
 
 

@@ -1158,6 +1158,82 @@ def test_unnamed_objects_are_said_to_be_a_loop_only_when_copies(objects, script,
         assert said == "Pattern them" or not any("Pattern them" in w for w in loop)
 
 
+def _body():
+    """Three cells sealed into one body, the middle one turned and cutting
+    into its neighbours, as a meshed body's cells are its maker's to place."""
+    cells = [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01), position=(x, 0, 0)
+        )
+        for x in (0, 0.01, 0.02)
+    ]
+    cells[1].rotate_from_angax(30, "z")
+    body = magpy.Collection(*cells, style_label="body")
+    body.sealed = True
+    return body
+
+
+@pytest.mark.parametrize("editable", [True, False])
+def test_a_sealed_collection_is_one_object(editable):
+    """One row, its parts counted and never listed, and one node: every
+    part's trace is under its id, which a click picks and the handles move,
+    and it is no collection for a view to carry."""
+    view = widget.SceneWidget(_body(), editable=editable)
+    (row,) = view.tree
+    assert row["children"] == [] and row["parts"] == 3
+    meshes = view.payload["meshes"]
+    assert len(meshes) == 3 and {m["object_id"] for m in meshes} == {row["id"]}
+    assert row["id"] not in view.payload["collections"]
+
+
+@pytest.mark.parametrize(
+    ("script", "load"),
+    [("to_script", "load_script"), ("to_builder_script", "apply_builder_script")],
+)
+def test_a_sealed_collection_survives_its_script(tmp_path, script, load):
+    """Written as its parts, sealed, and read back as the same one object,
+    field and all."""
+    from magpylib_studio.session import MagpylibStudioSession
+
+    body = _body()
+    session = widget.SceneWidget(body, editable=True)._session
+    path = tmp_path / "scene.py"
+    path.write_text(getattr(session, script)())
+    again = MagpylibStudioSession()
+    assert getattr(again, load)(str(path))["ok"]
+    (entry,) = again.list_objects()
+    assert entry["id"] == "body" and entry["parts"] == 3
+    point = (0.004, 0.012, 0.003)
+    np.testing.assert_allclose(
+        magpy.getB(again._objs["body"], point), magpy.getB(body, point), rtol=1e-12
+    )
+
+
+def test_a_sealed_collections_parts_overlap_nothing_but_others():
+    """Its parts may cut into each other as their maker placed them, and no
+    overlap among them is said; a magnet cutting into one overlaps it."""
+    intruder = magpy.magnet.Sphere(
+        polarization=(0, 0, 1), diameter=0.004, position=(0.026, 0, 0)
+    )
+    session = widget.SceneWidget(_body(), intruder, editable=True)._session
+    assert [sorted(pair) for pair in session.get_overlaps()] == [["body", "intruder"]]
+
+
+def test_a_sealed_collection_hides_and_drags_whole():
+    """Hidden, none of its parts is drawn; dragged, all of them are drawn
+    again at each step, as the one object it is."""
+    session = widget.SceneWidget(_body(), editable=True)._session
+    session.begin_interaction()
+    for z in (0.001, 0.002):  # the first step is drawn whole; the next, what moved
+        session.apply_edits([{"objectId": "body", "position": [0, 0, z]}])
+        step = session.get_scene(partial=True)
+    session.end_interaction()
+    assert step["partial"] == ["body"]
+    assert [m["object_id"] for m in step["meshes"]] == ["body"] * 3
+    session.set_visible("body", False)
+    assert not session.get_scene().get("meshes")
+
+
 def _studio(**traits):
     """A ring of three and a probe, edited; what the view says back is kept
     in `sent` rather than going to a comm."""

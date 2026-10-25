@@ -37,6 +37,21 @@ hidden one is not drawn, and a faded one is drawn apart, see-through (#87).
 
 </details>
 
+<details>
+<summary>A meshed magnet is one object: a sealed collection</summary>
+
+A collection marked `sealed = True` -- a magnet meshed into cells, as
+magpylib-material-response makes one -- is one object: one row in the legend,
+its cells counted, picked by a click on any of them, moved and hidden whole. Its
+cells are its data, with no ids, steps or variables of their own, and the script
+writes them as its parts. On the U-core of material-response's docs at 5,888
+cells, a drag of the probe sends 113 KB a step instead of 1,963, and orbiting
+with the whole body selected takes 10 ms a frame instead of 155 with the
+computer four times slower. Any large selection is now outlined as one, sealed
+or not (#88).
+
+</details>
+
 ## [0.7.2]
 
 ### Changed

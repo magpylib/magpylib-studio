@@ -14,11 +14,25 @@ from magpylib_studio.widget import SceneWidget
 PIXELS = np.linspace(-0.02, 0.02, 5)
 
 
-def view(plane="y=0", source="B", colormap=None, tilt=0):
+def view(plane="y=0", source="B", colormap=None, tilt=0, sealed=False):
     """A cube polarized along z and a sensor of 5 x 5 pixels: in y = 0, a
     plane of the cube's symmetry -- or tilted out of it by `tilt` degrees --
-    or 12 mm above it, which the field crosses."""
+    or 12 mm above it, which the field crosses. `sealed`, the cube is a
+    sealed collection of its two halves, as a meshed body is of its cells."""
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    if sealed:
+        cube = magpy.Collection(
+            *(
+                magpy.magnet.Cuboid(
+                    polarization=(0, 0, 1),
+                    dimension=(0.005, 0.01, 0.01),
+                    position=(x, 0, 0),
+                )
+                for x in (-0.0025, 0.0025)
+            ),
+            style_label="cube",
+        )
+        cube.sealed = True
     if plane == "y=0":
         pixel = [(x, 0, z) for x in PIXELS for z in PIXELS]
     else:
@@ -163,12 +177,14 @@ def test_a_sensor_let_go_far_off_takes_its_grid_along(monkeypatch):
     )
 
 
-def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch):
+@pytest.mark.parametrize("sealed", [False, True])
+def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch, sealed):
     """The field of magnets that stand still is the field at rest, kept for
     a drag of the sensor and after it, on a grid fixed in the world: its
     lines are traced from where the pixels are now, until the drag takes
-    them off the grid's plane, or a magnet moves."""
-    widget = view()
+    them off the grid's plane, or a magnet moves. A sealed collection's
+    parts, which have no ids of their own, stand still with it."""
+    widget = view(sealed=sealed)
     computed = []
     field = fieldlines.field
     monkeypatch.setattr(

@@ -854,7 +854,7 @@ _WORDS = (
     "Count",
     "Bounds",
 )
-_RESERVED = (*_WORDS, "pi", "tau", "e", "Annotated", "Literal", "np", "magpy")
+_RESERVED = (*_WORDS, "pi", "tau", "e", "Annotated", "Literal", "np", "magpy", "R")
 
 
 def _nested(flat):
@@ -883,6 +883,7 @@ class _ScriptWriter:
         #: note, since run they would fail the whole script at their line.
         self.broken = {entry["id"]: entry for entry in broken}
         self.numpy = False
+        self.rotation = False
         self.unwritten = []
         self.words = set()
         self.typing = set()
@@ -1097,6 +1098,10 @@ class _ScriptWriter:
         if self.numpy:
             lines.append(self._import("numpy", "np"))
         lines.append(self._import("magpylib", "magpy"))
+        if self.rotation:
+            lines.append(
+                f"from scipy.spatial.transform import Rotation as {self.alias['R']}"
+            )
         words = ", ".join(
             word if self.alias[word] == word else f"{word} as {self.alias[word]}"
             for word in sorted(self.words | self.constants)
@@ -1297,6 +1302,8 @@ class _ScriptWriter:
                 "parent",
                 "visible",
                 "hidden_style",
+                "sealed",
+                "parts",
             ):
                 self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
         params = dict(event.get("params") or {})
@@ -1328,6 +1335,14 @@ class _ScriptWriter:
         if nested:
             parts.append(("style", repr(_nested(nested))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
+        if event.get("parts"):
+            # Sealed first, then what it is made of, one part a line: the
+            # recorder takes in parts added to a sealed collection as its
+            # data, with no word about a part already turned
+            # (`recording._Recorder.adopt`).
+            if event.get("sealed"):
+                lines.append(f"{name}.sealed = True")
+            lines += [f"{name}.add(", *self.write_parts(event["parts"], "    "), ")"]
         # The recorder names it by the variable it is assigned to; only where
         # that cannot be its id -- a name the script has for something else
         # -- does the script say the id outright.
@@ -1336,6 +1351,33 @@ class _ScriptWriter:
         parent = event.get("parent")
         if parent:
             lines.append(f"{self.names[parent]}.add({name})")
+        return lines
+
+    def write_parts(self, parts, indent):
+        """A sealed collection's parts as lines of its call: plain values,
+        a turn as the rotation it is, a collection among them with its own
+        parts under it (`session._parts_source`, in this script's words)."""
+        lines = []
+        for part in parts:
+            args = []
+            for key, value in (part.get("params") or {}).items():
+                if key == "orientation":
+                    self.rotation = True
+                    code = f"{self.alias['R']}.from_rotvec({self.value(value)}, degrees=True)"
+                else:
+                    code = self.value(value)
+                args.append((key, code))
+            if part.get("style"):
+                given = {p: _style_arg(p, v) for p, v in part["style"].items()}
+                args.append(("style", repr(_nested(given))))
+            if part["type"] == "Collection":
+                lines.append(f"{indent}{self.alias['magpy']}.Collection(")
+                lines += self.write_parts(part.get("parts") or [], indent + "    ")
+                lines += [f"{indent}    {key}={code}," for key, code in args]
+                lines.append(f"{indent}),")
+            else:
+                call = f"{self.alias['magpy']}.{part['type']}"
+                lines.append(f"{indent}{call}({self.keywords(args)}),")
         return lines
 
     def write_step(self, event, name):

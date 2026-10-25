@@ -142,9 +142,29 @@
         "children": {
           "type": "array",
           "items": { "$ref": "#/definitions/spec" }
-        }
+        },
+        "sealed": { "$ref": "#/definitions/sealed" },
+        "parts": { "$ref": "#/definitions/parts" }
       },
       "additionalProperties": true
+    },
+    "sealed": {
+      "type": "boolean",
+      "description": "Collections only: one object made of its parts, picked, moved, hidden and styled whole. Said in a script as `collection.sealed = True`."
+    },
+    "parts": {
+      "type": "array",
+      "description": "Collections only: what a sealed collection is made of, as data. A part has no id, no steps and no variables: its pose is in its params, `position` and `orientation` (a rotation vector in degrees). A Collection part holds parts of its own.",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "$ref": "#/definitions/objectType" },
+          "params": { "type": "object" },
+          "style": { "type": "object" },
+          "parts": { "$ref": "#/definitions/parts" }
+        }
+      }
     },
     "overridden": {
       "description": "Constructor parameters a value was written over while they were expressions, as they were, so the variables they named can be restored. Not part of the script.",
@@ -224,7 +244,9 @@
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Collections only: ids that already exist and are adopted."
-              }
+              },
+              "sealed": { "$ref": "#/definitions/sealed" },
+              "parts": { "$ref": "#/definitions/parts" }
             }
           }
         },

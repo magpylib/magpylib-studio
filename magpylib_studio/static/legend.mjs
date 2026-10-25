@@ -189,9 +189,11 @@ const ICONS = {
 /** How many objects a row stands for in the view: itself and the copies its
  *  pattern makes, times what a patterned collection repeats. A pattern's
  *  copies are drawn on their source and not listed, so a ring of ten lists
- *  one magnet; the count says ten. */
+ *  one magnet; the count says ten. A sealed collection's parts are not
+ *  listed either, and are counted the same way. */
 function drawnUnder(node) {
   const own = 1 + (node.copies || 0);
+  if (node.parts) return own * node.parts;
   const held = node.children.filter((child) => !isPart(child));
   if (!held.length) return own;
   return own * held.reduce((sum, child) => sum + drawnUnder(child), 0);
@@ -457,7 +459,7 @@ export function createLegend(
     if (colour) swatch.style.background = colour;
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.
-    if (held.length) swatch.classList.add("collection");
+    if (held.length || node.parts) swatch.classList.add("collection");
     // a sensor, and its axes, drawn as the view draws them
     else if (["Sensor", "Axes"].includes(node.kind) && node.colors && colour) {
       swatch.classList.add("picture");
@@ -479,6 +481,14 @@ export function createLegend(
       if (drawn !== held.length) {
         count.title = `${held.length} listed, ${drawn} drawn: a pattern's copies are drawn on their source`;
       }
+      row.append(count);
+    } else if (node.parts) {
+      // A sealed collection: one row, what it is made of counted.
+      const count = part(
+        "magpy-legend-count",
+        `made of ${node.parts} parts, sealed: picked, moved and hidden whole`,
+      );
+      count.textContent = String(drawn);
       row.append(count);
     } else if (node.copies) {
       // The source of a pattern: one listed, this many drawn.

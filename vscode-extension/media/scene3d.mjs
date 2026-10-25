@@ -2499,20 +2499,25 @@ const wideMaterials = new Set();
  * wire -- never on a shape, where it says the magnetization, or on a marker
  * coloured by the field.
  *
- * Each part hangs on the trace it marks, so it moves with it.
+ * Each part hangs on the trace it marks, so it moves with it -- or, where
+ * many shapes are outlined, on the first of them (`outlineShapes`).
  */
 function outline(objectIds, opacity, copyOpacity = opacity) {
   const added = [];
   const hang = hanger(added);
+  const shapes = shapesTo(hang, SELECTION_COLOUR);
   for (const objectId of drawnFor(objectIds)) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue; // a handle, or another node
       const own = trace.userData.copy ? copyOpacity : opacity;
-      outlineTrace(trace, own, hang, SELECTION_COLOUR, true);
+      if (!shapes.take(trace, own)) {
+        outlineTrace(trace, own, hang, SELECTION_COLOUR, true);
+      }
     }
   }
+  shapes.done();
   return added;
 }
 
@@ -2525,16 +2530,79 @@ function outlineOverlaps(objectIds) {
   const wanted = new Set(objectIds);
   if (!wanted.size) return added;
   const hang = hanger(added);
+  const shapes = shapesTo(hang, OVERLAP_COLOUR);
   for (const [objectId, node] of byObjectId) {
     if (!node.visible) continue;
     for (const trace of node.children) {
       if (!trace.userData.trace) continue;
-      if (wanted.has(trace.userData.copy ?? objectId)) {
+      if (
+        wanted.has(trace.userData.copy ?? objectId) &&
+        !shapes.take(trace, 1)
+      ) {
         outlineTrace(trace, 1, hang, OVERLAP_COLOUR, false); // a path is not what overlaps
       }
     }
   }
+  shapes.done();
   return added;
+}
+
+/** The shapes of an outline, gathered to be outlined at once: each on its
+ *  own, as `outlineShape` does, or -- `BATCH_FROM` of them and more at one
+ *  opacity -- all as one (`outlineShapes`). A body meshed into 5,888 cells
+ *  was 11,776 lines to draw, a frame taking 167 ms with the CPU four times
+ *  slower against 11 with nothing selected. `take` says whether it took a
+ *  trace: not one that is no shape, nor one that moves on its own while a
+ *  run plays, which keeps an outline of its own to move with it. */
+function shapesTo(hang, colour) {
+  const gathered = new Map(); // an opacity -> its shapes
+  const playing = new Set(tracked.map(({ built }) => built));
+  return {
+    take(trace, opacity) {
+      if (!trace.isMesh || playing.has(trace)) return false;
+      if (!gathered.has(opacity)) gathered.set(opacity, []);
+      gathered.get(opacity).push(trace);
+      return true;
+    },
+    done() {
+      for (const [opacity, meshes] of gathered) {
+        if (meshes.length < BATCH_FROM) {
+          for (const mesh of meshes) outlineShape(mesh, opacity, hang, colour);
+        } else {
+          outlineShapes(meshes, opacity, hang, colour);
+        }
+      }
+    },
+  };
+}
+
+/** Many shapes' edges as one outline, hung on the first of them. It moves
+ *  with them as long as they move together, which is how they move: a drag
+ *  carries everything selected as one rigid motion, and a trace that plays a
+ *  run of its own is never among them (`shapesTo`). */
+function outlineShapes(meshes, opacity, hang, colour) {
+  const on = meshes[0];
+  on.updateWorldMatrix(true, false);
+  const back = on.matrixWorld.clone().invert();
+  const each = meshes.map((mesh) => edgesOf(mesh));
+  const pairs = new Float32Array(
+    each.reduce((n, edges) => n + edges.length, 0),
+  );
+  const into = new THREE.Matrix4();
+  let at = 0;
+  meshes.forEach((mesh, k) => {
+    mesh.updateWorldMatrix(true, false);
+    const e = into.multiplyMatrices(back, mesh.matrixWorld).elements;
+    const edges = each[k];
+    for (let i = 0; i < edges.length; i += 3, at += 3) {
+      const [x, y, z] = [edges[i], edges[i + 1], edges[i + 2]];
+      pairs[at] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      pairs[at + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      pairs[at + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+  });
+  hang(on, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
+  hang(on, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
 }
 
 /** How an outline's parts are hung on what they mark, and kept in `added`
@@ -2576,6 +2644,17 @@ function outlineTrace(trace, opacity, hang, colour, markers) {
  *  face, which is a sensor's: its axes, or its arrows coloured by the field,
  *  every small part of which would be outlined on its own. */
 function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
+  const pairs = edgesOf(mesh);
+  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
+  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
+}
+
+/** A shape's edges, as `wideSegments` takes them, worked out once per
+ *  geometry: the selection of a meshed body comes and goes with each click,
+ *  and finding the edges of 5,888 cells took a third of a second. */
+function edgesOf(mesh) {
+  const kept = mesh.geometry.userData.edges;
+  if (kept) return kept;
   let pairs;
   if (!mesh.userData.faceColoured) {
     const edges = new THREE.EdgesGeometry(mesh.geometry, EDGE_ANGLE);
@@ -2586,8 +2665,8 @@ function outlineShape(mesh, opacity, hang, colour = SELECTION_COLOUR) {
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     pairs = boxEdges(mesh.geometry.boundingBox);
   }
-  hang(mesh, wideSegments(pairs, OUTLINE_WIDTH, opacity, true, colour));
-  hang(mesh, wideSegments(pairs, HIDDEN_WIDTH, opacity * 0.35, false, colour));
+  mesh.geometry.userData.edges = pairs;
+  return pairs;
 }
 
 /** Lines from `pairs` -- each six numbers, a segment's two ends -- `width`

@@ -25,6 +25,7 @@ import numpy as np
 
 from magpylib_studio import units
 from magpylib_studio.session import _is_data, _style_values
+from magpylib_studio.threejs import is_sealed
 
 # Constructor kwargs worth introspecting, tried in order per object.
 # magnetization is intentionally absent: it is derived from polarization.
@@ -98,13 +99,65 @@ def _unique_id(base, used):
     return candidate
 
 
+def _parts_of(collection, object_id, left_out):
+    """A sealed collection's children as its parts: specs with no id, which
+    no edit, pick or legend row can name. A nested collection is a part made
+    of parts."""
+    parts = []
+    for child in collection.children:
+        if isinstance(child, magpy.Collection):
+            part = {
+                "type": "Collection",
+                "parts": _parts_of(child, object_id, left_out),
+            }
+        else:
+            part = _part_spec(child)
+        style = _style_values(child)
+        for path in [path for path, value in style.items() if not _is_data(value)]:
+            del style[path]
+            left_out.append(f"{object_id}'s parts' {path}")
+        if style:
+            part["style"] = style
+        parts.append(part)
+    return parts
+
+
+def _part_spec(obj):
+    """A part that holds none: its type and parameters, its pose among them.
+    A part has no steps of its own to be moved and turned by, as an object
+    has, so where it stands is as plain as what it is: `position`, a path's
+    every step where it has one, and `orientation` as a rotation vector in
+    degrees."""
+    params = {}
+    for attr in _PARAM_ATTRS:
+        value = getattr(obj, attr, None)
+        if value is not None:
+            params[attr] = _tolist(value)
+    position = np.asarray(obj.position)
+    if np.any(position):
+        params["position"] = _tolist(position)
+    rotvec = obj.orientation.as_rotvec(degrees=True)
+    if np.any(np.abs(rotvec) > 1e-9):
+        params["orientation"] = _zeroed(rotvec.round(9)).tolist()
+    return {"type": _dotted_type(obj), "params": params}
+
+
 def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     # An object the script never bound to a variable was built inline — in a
     # loop, a comprehension, a helper. Executing the script keeps what it
     # built and loses how, so this is the one trace of the structure that went
     # missing, and the caller is told rather than left to notice: a leaf with
     # what it is made of, so that `_flattening_warnings` can tell copies apart.
-    if isinstance(obj, magpy.Collection):
+    # A sealed collection's parts are none of that: they are what it is made
+    # of, and come across as its data.
+    if is_sealed(obj):
+        spec = {
+            "id": object_id,
+            "type": "Collection",
+            "sealed": True,
+            "parts": _parts_of(obj, object_id, left_out),
+        }
+    elif isinstance(obj, magpy.Collection):
         spec = {
             "id": object_id,
             "type": "Collection",

@@ -1525,7 +1525,9 @@ _DOC_KEYS = (
 # What the engine itself puts on a create event and on the spec projected from
 # it. Anything else on either belongs to something we do not know about — a
 # newer format, a hand-written file, another tool — and is carried rather than
-# dropped, so opening a document here does not quietly strip it.
+# dropped, so opening a document here does not quietly strip it. A sealed
+# collection's `sealed` and `parts` travel the same way: on its create event,
+# and on its spec, where `to_script` reads them.
 _CREATE_KEYS = (
     "id",
     "op",
@@ -2158,6 +2160,9 @@ def _event_source(event):
         if event.get("parent"):
             args.append(f"parent={event['parent']!r}")
         ctor = "Collection" if event["type"] == "Collection" else event["type"]
+        if event.get("parts"):
+            # one line for a history list, however many parts it is made of
+            args.insert(0, f"<{_parts_count(event['parts'])} parts>")
         return f"{target} = magpy.{ctor}{factory}({', '.join(args)})"
     if op == "remove":
         return f"remove {target}"
@@ -2175,6 +2180,48 @@ def _event_source(event):
     if op == "mirror":
         return f"{target} mirrored in {event.get('plane') or event.get('normal')}"
     return f"{target}.{_op_source(event)}"
+
+
+def _parts_source(parts, indent):
+    """A sealed collection's parts as lines of its constructor call: one part
+    a line, a collection among them with its own parts indented under it.
+    Plain values, written as they are, and a turn as the rotation it is."""
+    lines = []
+    for part in parts:
+        args = [
+            f"{key}=R.from_rotvec({_lit(value)}, degrees=True)"
+            if key == "orientation"
+            else f"{key}={_lit(value)}"
+            for key, value in (part.get("params") or {}).items()
+        ]
+        if part.get("style"):
+            given = {p: _style_arg(p, v) for p, v in part["style"].items()}
+            args.append(f"style={_nest(given)!r}")
+        if part["type"] == "Collection":
+            lines.append(f"{indent}magpy.Collection(")
+            lines += _parts_source(part.get("parts") or [], indent + "    ")
+            lines += [f"{indent}    {arg}," for arg in args]
+            lines.append(f"{indent}),")
+        else:
+            lines.append(f"{indent}magpy.{part['type']}({', '.join(args)}),")
+    return lines
+
+
+def _parts_turned(parts):
+    """Whether any part, however deep, is turned: its script needs `R`."""
+    return any(
+        "orientation" in (part.get("params") or {})
+        or _parts_turned(part.get("parts") or [])
+        for part in parts
+    )
+
+
+def _parts_count(parts):
+    """How many parts that are not collections there are, however deep."""
+    return sum(
+        _parts_count(part["parts"]) if part["type"] == "Collection" else 1
+        for part in parts
+    )
 
 
 def _uncreated(events):
@@ -2239,6 +2286,28 @@ def _resolve_type(type_str):
     if cls is None:
         raise ValueError(f"unknown object type {type_str!r}")
     return cls
+
+
+def _built_parts(spec):
+    """A sealed collection's parts, made from the data its create step
+    carries (`importer._parts_of`): plain values with the pose among them,
+    never a variable. They are what the collection is made of, not objects
+    the scene names, so nothing else ever reaches them."""
+    made = []
+    for part in spec.get("parts") or ():
+        if part["type"] == "Collection":
+            obj = magpy.Collection(*_built_parts(part))
+        else:
+            params = dict(part.get("params") or {})
+            if "orientation" in params:
+                params["orientation"] = R.from_rotvec(
+                    params["orientation"], degrees=True
+                )
+            obj = _resolve_type(part["type"])(**params)
+        for path, value in (part.get("style") or {}).items():
+            obj.style.set(path, _style_arg(path, value))
+        made.append(obj)
+    return made
 
 
 def _nest(flat):
@@ -2792,8 +2861,18 @@ class MagpylibStudioSession:
         params = self._resolve_params(event.get("params") or {}, object_id)
         if event["type"] == "Collection":
             # Positional children, the form a script uses: they exist already.
+            # A sealed collection's parts are made here, from its own data.
             adopted = [self._objs[c] for c in event.get("children") or []]
-            obj = magpy.Collection(*adopted, **params)
+            parts = _built_parts(event)
+            obj = magpy.Collection(*adopted, *parts, **params)
+            if event.get("sealed"):
+                obj.sealed = True
+            if parts and event.get("visible") is False:
+                # hidden as `set_visible` hides a leaf, which its parts are
+                # not: they have no create steps to write it on
+                for part in obj.children_all:
+                    for path, value in _HIDE_STYLE.items():
+                        part.style.set(path, value)
             for child in event.get("children") or []:
                 self._parents[child] = object_id
         else:
@@ -3377,6 +3456,13 @@ class MagpylibStudioSession:
                         if spec["id"] in self._mesh_status
                         else {}
                     ),
+                    # what a sealed collection is made of: parts with no
+                    # entries of their own, which nothing can name
+                    **(
+                        {"parts": _parts_count(spec["parts"])}
+                        if spec.get("parts")
+                        else {}
+                    ),
                     # the copies this object's pattern made, when they are
                     # being counted rather than listed
                     **(
@@ -3663,6 +3749,8 @@ class MagpylibStudioSession:
                 # the copies its pattern makes, which are drawn on it and
                 # not listed: the legend counts them
                 **({"copies": entry["copies"]} if entry.get("copies") else {}),
+                # and the parts a sealed collection is made of, likewise
+                **({"parts": entry["parts"]} if entry.get("parts") else {}),
             }
             for entry in entries
         }
@@ -3948,7 +4036,9 @@ class MagpylibStudioSession:
         pairs, seen = [], set()
         for i, j, depth in found:
             pair = [leaves[i][0], leaves[j][0]]
-            if (key := tuple(pair)) in seen:
+            # two parts of one sealed collection are one object's own
+            # business: its cells touch, by construction
+            if pair[0] == pair[1] or (key := tuple(pair)) in seen:
                 continue
             seen.add(key)
             meant = frozenset(pair) in marked
@@ -3990,7 +4080,7 @@ class MagpylibStudioSession:
         out = []
         for i, j in index_pairs:
             pair = [leaves[i][0], leaves[j][0]]
-            if pair not in out:
+            if pair[0] != pair[1] and pair not in out:
                 out.append(pair)
         return out
 
@@ -4058,10 +4148,13 @@ class MagpylibStudioSession:
             if key not in self._objs:
                 return {"ok": False, "error": f"no object {key!r} in the scene"}
         leaves = self._overlap_leaves()
-        mine = {
-            key: [obj for owner, obj in leaves if owner == key or self._holds(key, obj)]
-            for key in (a, b)
-        }
+        mine = {}
+        for key in (a, b):
+            # once per group, not once per leaf: a sealed one is thousands
+            held = {id(child) for child in getattr(self._objs[key], "children_all", ())}
+            mine[key] = [
+                obj for owner, obj in leaves if owner == key or id(obj) in held
+            ]
         best = None
         for x in mine[a]:
             for y in mine[b]:
@@ -4086,12 +4179,6 @@ class MagpylibStudioSession:
         elif state == "overlap":
             out["depth"] = None if value is None else float(value)
         return out
-
-    def _holds(self, key, obj):
-        group = self._objs.get(key)
-        return isinstance(group, magpy.Collection) and any(
-            child is obj for child in group.children_all
-        )
 
     def _moved(self, ids):
         """What the gesture in progress moves: `ids`, or anything (None)."""
@@ -4140,7 +4227,7 @@ class MagpylibStudioSession:
             self._forget_gesture()
         sources = fieldlines.sources_of(self.scene)
         names = self._moving_names() if gesture else None
-        key_of = {id(obj): key for key, obj in self._objs.items()}
+        key_of = self._names_of_objects()
         sensors = fieldlines.sensors_of(self.scene)
         if not sensors:
             return []
@@ -4349,7 +4436,7 @@ class MagpylibStudioSession:
                 fieldlines.field(sources, points, kind),
                 fieldlines.inside(sources, points),
             )
-        key_of = {id(obj): k for k, obj in self._objs.items()}
+        key_of = self._names_of_objects()
         moving = self._sources_named(sources, names, key_of)
         cache = self._field_cache.get(key)
         if cache is None or cache["names"] != names or cache["grid"] is not grid:
@@ -4374,7 +4461,7 @@ class MagpylibStudioSession:
         where that is anything."""
         if self._moving is None:
             return None
-        name_of = {id(o): k for k, o in self._objs.items()}
+        name_of = self._names_of_objects()
         names = set()
         for name in self._moving:
             names.add(name)
@@ -4382,6 +4469,18 @@ class MagpylibStudioSession:
             for child in getattr(self._objs.get(name), "children_all", ()):
                 names.add(name_of.get(id(child)))
         return frozenset(names - {None})
+
+    def _names_of_objects(self):
+        """``id(obj)`` -> its id, for every object the session names -- and
+        for a sealed collection's parts, the collection's: what a part does,
+        its collection does, and it moves and stays with it."""
+        names = {}
+        for key, obj in self._objs.items():
+            names[id(obj)] = key
+            if threejs.is_sealed(obj):
+                for part in obj.children_all:
+                    names.setdefault(id(part), key)
+        return names
 
     @staticmethod
     def _sources_named(sources, names, key_of):
@@ -4584,12 +4683,20 @@ class MagpylibStudioSession:
                 out.append(meshes.complaint(label, status))
         return out
 
+    def _objects_and_parts(self):
+        """Every object the session names, and a sealed collection's parts,
+        which are where it stands and how big it is."""
+        for obj in self._objs.values():
+            yield obj
+            if threejs.is_sealed(obj):
+                yield from obj.children_all
+
     def _object_size(self):
         """How big the objects themselves are — what stands in for a span
         when there is none, as for the single magnet at the origin that half
         the field examples are."""
         sizes = []
-        for obj in self._objs.values():
+        for obj in self._objects_and_parts():
             for attr in ("dimension", "diameter"):
                 value = getattr(obj, attr, None)
                 if value is not None:
@@ -4613,7 +4720,7 @@ class MagpylibStudioSession:
         """
         points = [
             np.atleast_2d(np.array(obj.position, dtype=float))
-            for obj in self._objs.values()
+            for obj in self._objects_and_parts()
         ]
         if not points:
             return 1.0, np.zeros(3)
@@ -6221,6 +6328,33 @@ class MagpylibStudioSession:
 
         result = self._mutate_doc(mutate, f"adopt {object_id}")
         return {**result, "fresh": True} if result["ok"] else result
+
+    def _seal_fresh(self, object_id):
+        """``collection.sealed = True`` written in code (`scene.py`): what the
+        collection holds becomes its parts -- data on its create step, as it
+        was built -- and stops being objects of the scene, their own steps
+        going with them. A part holds no variable: what a scene function
+        computed it from stays in the function."""
+        from magpylib_studio import importer
+
+        spec = self._spec(object_id)
+        inside = {s["id"] for s, _ in self._iter_specs([spec])} - {object_id}
+        parts = importer._parts_of(self._objs[object_id], object_id, [])
+
+        def mutate(doc):
+            doc["events"] = [
+                e for e in doc.get("events") or [] if e.get("target") not in inside
+            ]
+            if doc.get("intended_overlaps"):
+                doc["intended_overlaps"] = [
+                    pair for pair in doc["intended_overlaps"] if not set(pair) & inside
+                ]
+            create = self._create_event(object_id)
+            create.pop("children", None)
+            create["sealed"] = True
+            create["parts"] = parts
+
+        return self._mutate_doc(mutate, f"seal {object_id}")
 
     def _rename_ids(self, renames):
         """Give objects other ids, every step that names them following: the
@@ -8000,7 +8134,11 @@ class MagpylibStudioSession:
         ]
         events = [e for e in log if e.get("op") != "create"]
         mirrors = [e for e in events if e.get("op") == "mirror"]
-        needs_scipy = mirrors or any(e.get("op") == "orientation" for e in events)
+        needs_scipy = (
+            mirrors
+            or any(e.get("op") == "orientation" for e in events)
+            or any(_parts_turned(spec.get("parts") or []) for spec in spec_of.values())
+        )
         # A mesh read from a file is written as `pv.read(...)`, which is the
         # one import the studio does not itself need — see _mesh_source_lit.
         # A superquadric is written as the helper that computes it, magpylib
@@ -8092,6 +8230,13 @@ class MagpylibStudioSession:
                 parts.append(f"style={_nest(given)!r}")
             ctor = "Collection" if spec["type"] == "Collection" else spec["type"]
             lines.append(f"{target} = magpy.{ctor}{factory}({', '.join(parts)})")
+            if spec.get("parts"):
+                # sealed, then what it is made of, one part a line
+                if spec.get("sealed"):
+                    lines.append(f"{target}.sealed = True")
+                lines.append(f"{target}.add(")
+                lines.extend(_parts_source(spec["parts"], "    "))
+                lines.append(")")
             if parent_of.get(target) is not None:
                 lines.append(f"{parent_of[target]}.add({target})")
 
