@@ -8,6 +8,22 @@ Python package it runs on. Open an entry for its details.
 ### Changed
 
 <details>
+<summary>The selection is outlined; the pointer marks what it is on</summary>
+
+The 3D view marks what is selected with a bold neon green line round its outline
+and a short halo, where it drew every edge in neon green; its faces, whose
+colours say the magnetization, are left alone. What the pointer is on is marked
+faintly, so a click's target shows before the click. Where two magnets overlap,
+the region they share is hatched in amber -- for cuboids, cylinders, spheres,
+tetrahedra and meshed cells; a hollow shape such as a ring segment is marked
+round only. An overlap blinks twice as it appears; with reduced motion asked
+for, it does not. A view left still draws nothing. A view drawn read only counts
+a sealed collection's overlap once, where it counted it once for each of its
+cells (#90).
+
+</details>
+
+<details>
 <summary>A magnet meshed into thousands of cells, with its field lines</summary>
 
 A scene of thousands of objects -- a magnet meshed into cells and solved by

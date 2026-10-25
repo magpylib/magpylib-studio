@@ -267,9 +267,15 @@ of one shape, sized and coloured as magpylib sizes and colours them
 ([0021](decisions.md#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances));
 the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
 drawing. It picks -- a sensor by its field lines too, where nothing else is
-under the pointer -- multi-selects, drags with handles (move, turn, resize, aim
-a polarization; world or object axes; one-axis locks; snapping), hides, fades by
-id (`setFades`: a share of each object's own opacity, looked through by a click;
+under the pointer -- and marks what a click would pick, faintly, while the
+pointer is on it; marks the selection with a neon line round each shape's
+silhouette and a short halo, never a colour on its faces, faint where something
+in front hides it -- the marked shapes drawn flat into a mask after the picture,
+the mask's edges and blur laid over it, only near the marks and only while
+something is marked ([0038](decisions.md#0038-the-selection-is-outlined));
+multi-selects, drags with handles (move, turn, resize, aim a polarization; world
+or object axes; one-axis locks; snapping), hides, fades by id (`setFades`: a
+share of each object's own opacity, looked through by a click;
 [0031](decisions.md#0031-the-legends-eye-fades-as-a-view-setting)), plays paths,
 and has one keys table both hosts use. Currents flow: `threejs._mark_flows`
 marks each Circle's and Polyline's wire with the way its current runs, and each
@@ -284,17 +290,19 @@ B, from a phase of its own line's so that neighbours' pulses are out of step,
 and the lines' shared materials run a wider, brighter head along it. That is the
 one picture drawn unasked: the view draws frame after frame, at most sixty a
 second, only while something flowing is shown, the view on screen and its page
-visible, and leaves the pulses standing for `prefers-reduced-motion`. The
-widget's `flow` trait, kept by an export, puts the pulses away and the arrows
-back, and stands the field lines still. It says the scene's scale one of three
-ways (`setAxes`, the widget's `axes`): by default a view cube and a scale bar,
-drawn into the canvas's corner after the scene in the same frame -- at rest only
-the cube's x, y, z arrows, small, seen in perspective and fading where they
-point away, which grow with the cube round them while the pointer is on the
-corner -- the cube a click away from twenty-six views, turned to over a few
-frames (`axisView`, as the 1, 3 and 7 keys), and the bar a round length at the
-orbit centre, low in the middle of the foot beside the axes at rest, said in the
-unit that reads best, kept by the PNG where the corner is not; the graduated box
+visible, and leaves the pulses standing for `prefers-reduced-motion`. Beside it,
+only short motions ask for frames until they end: a turn to an axis view, the
+corner growing, an overlap's shading blinking twice as it appears. The widget's
+`flow` trait, kept by an export, puts the pulses away and the arrows back, and
+stands the field lines still. It says the scene's scale one of three ways
+(`setAxes`, the widget's `axes`): by default a view cube and a scale bar, drawn
+into the canvas's corner after the scene in the same frame -- at rest only the
+cube's x, y, z arrows, small, seen in perspective and fading where they point
+away, which grow with the cube round them while the pointer is on the corner --
+the cube a click away from twenty-six views, turned to over a few frames
+(`axisView`, as the 1, 3 and 7 keys), and the bar a round length at the orbit
+centre, low in the middle of the foot beside the axes at rest, said in the unit
+that reads best, kept by the PNG where the corner is not; the graduated box
 round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
 [0030](decisions.md#0030-the-view-cube-is-the-default-scale),
@@ -330,14 +338,15 @@ rebuilds only what moved. `get_overlaps` lists the pairs, `get_gap` measures two
 objects, `set_overlap_intended` marks a pair, kept in the document's
 `intended_overlaps` and carried through the script tab, and `list_objects` names
 each object's partners, which the Objects tree marks as it marks a broken mesh.
-The view outlines each overlapping object in amber, its own traces only, and in
-a run the pairs of the step shown; a selected one keeps its green. The legend
-marks each overlapping row, passed up to a folded collection, faint for a pair
-marked as meant; above the list it counts the pairs, a click stepping through
-them with a way to mark the one shown, and with two objects selected says how
-far apart they are. A read-only view works the overlaps out from the objects it
-was given, keyed as its payload. A check that fails leaves `overlaps` empty and
-says why in `overlaps_error`.
+The view marks each overlapping object in amber, its own traces only, and
+hatches the region two convex solids share, worked out from the shapes it draws;
+in a run, the pairs of the step shown. A selected one keeps its green. The
+legend marks each overlapping row, passed up to a folded collection, faint for a
+pair marked as meant; above the list it counts the pairs, a click stepping
+through them with a way to mark the one shown, and with two objects selected
+says how far apart they are. A read-only view works the overlaps out from the
+objects it was given, keyed as its payload. A check that fails leaves `overlaps`
+empty and says why in `overlaps_error`.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is

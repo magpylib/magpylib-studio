@@ -1463,13 +1463,27 @@ def _overlaps_of(objects):
     try:
         keys = [key for key, _ in leaves]
         found = collisions.find_overlaps(plain, depths=True, groups=keys)
+        # a sealed collection overlaps once, however many of its parts do, as
+        # a session says it (`Session.get_overlaps`)
+        named = {}
+        for i, j, depth in found:
+            key = (keys[i], keys[j])
+            # its parts each meet the other: the deepest says how deep it goes
+            if depth is None:
+                named.setdefault(key, None)
+            else:
+                known = named.get(key)
+                named[key] = depth if known is None else max(known, depth)
         out = {
-            "overlaps": [[leaves[i][0], leaves[j][0]] for i, j, _ in found],
-            "overlap_depths": [None if d is None else float(d) for _, _, d in found],
+            "overlaps": [list(pair) for pair in named],
+            "overlap_depths": [None if d is None else float(d) for d in named.values()],
         }
         if collisions.path_length(plain) > 1:
             out["overlaps_by_step"] = [
-                [[leaves[i][0], leaves[j][0]] for i, j in step]
+                [
+                    list(pair)
+                    for pair in dict.fromkeys((keys[i], keys[j]) for i, j in step)
+                ]
                 for step in collisions.overlaps_along(plain, groups=keys)
             ]
     except Exception:  # noqa: BLE001 - an optional check must not cost the picture

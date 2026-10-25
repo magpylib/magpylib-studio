@@ -845,8 +845,155 @@ async function manyMagnets(port, base) {
   });
 }
 
+/** Page code, on `overlap.html`: its shapes by label, where a point of
+ *  the scene is on the page, and the colour the view draws there. */
+const CUBES = `
+  const s = window.scene3d;
+  const nodes = [...s.byObjectId.values()];
+  const camera = nodes[0].parent.children
+    .find((c) => c.isTransformControlsRoot).controls.camera;
+  const rect = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+  window.viewRect = rect;
+  window.cubes = Object.fromEntries(nodes.map((node) => {
+    const mesh = node.children.find((c) => c.isMesh && c.userData.trace);
+    return [mesh.name.split(" ")[0], { node, mesh }];
+  }));
+  window.boxOf = ({ mesh }) => {
+    mesh.updateWorldMatrix(true, false);
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    return mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+  };
+  window.onPage = (point) => {
+    const q = point.clone().project(camera);
+    return { x: rect.left + ((q.x + 1) / 2) * rect.width, y: rect.top + ((1 - q.y) / 2) * rect.height };
+  };
+  window.colourAt = (point) => {
+    const copy = s.still();
+    const scale = copy.width / rect.width;
+    return [...copy.getContext("2d").getImageData(
+      Math.round((point.x - rect.left) * scale), Math.round((point.y - rect.top) * scale), 1, 1).data].slice(0, 3).join(",");
+  };
+  // the view's pixels in a box round \`r\` on the page, \`pad\` beyond it
+  window.pixelsAround = (r, pad) => {
+    const copy = s.still();
+    const scale = copy.width / rect.width;
+    const x = Math.round((r.left - pad - rect.left) * scale);
+    const y = Math.round((r.top - pad - rect.top) * scale);
+    const w = Math.round((r.right - r.left + 2 * pad) * scale);
+    const h = Math.round((r.bottom - r.top + 2 * pad) * scale);
+    return copy.getContext("2d").getImageData(x, y, w, h).data;
+  };
+  window.faintOn = (name) => {
+    let n = 0;
+    cubes[name].node.traverse((o) => {
+      if (o.userData.mark && o.material.uniforms.channel.value.y === 1) n++;
+    });
+    return n;
+  };
+  return Object.keys(cubes).sort().join();`;
+
+/** What the pointer is on is marked faintly, round it and only while it is;
+ *  two cubes that overlap are shaded where they interpenetrate. */
+async function marks(port, base) {
+  const open = async (tab) => {
+    await tab.navigate(`${base}/out/overlap.html`);
+    const drawn = await tab.until(
+      `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size === 5`,
+      20_000,
+    );
+    return drawn && (await tab.evaluate(CUBES)) === "a,b,clear,t,u";
+  };
+  await check("the pointer marks what it is on, faintly", async () => {
+    const tab = await openTab(port);
+    try {
+      if (!(await open(tab))) return "the page never drew its five shapes";
+      const at = await tab.evaluate(`
+        const box = boxOf(cubes.clear);
+        const centre = onPage(box.getCenter(box.min.clone()));
+        // just right of the cube on screen, where a glow round it falls
+        const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => onPage(box.min.clone().set(
+          i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)));
+        const xs = corners.map((c) => c.x);
+        const ys = corners.map((c) => c.y);
+        window.around = { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+        window.before = pixelsAround(around, 8);
+        const away = { x: viewRect.left + 12, y: viewRect.bottom - 12 };
+        return { centre, away };`);
+      await tab.hover(at.centre);
+      await wait(400);
+      const on = await tab.evaluate(
+        "return { clear: faintOn('clear'), others: faintOn('a') + faintOn('b') }",
+      );
+      if (!on.clear) return "nothing marks the cube under the pointer";
+      if (on.others) return `${on.others} marks on the cubes not under it`;
+      // drawn round it, not only listed: pixels about the cube have changed
+      const changed = await tab.evaluate(`
+        const after = pixelsAround(around, 8);
+        let n = 0;
+        for (let i = 0; i < after.length; i += 4) {
+          if (Math.abs(after[i] - before[i]) + Math.abs(after[i + 1] - before[i + 1]) + Math.abs(after[i + 2] - before[i + 2]) > 6) n++;
+        }
+        return n;`);
+      if (changed < 20)
+        return `${changed} pixels round the cube change with its mark`;
+      await tab.hover(at.away);
+      await wait(300);
+      const left = await tab.evaluate("return faintOn('clear')");
+      if (left) return "the mark stays once the pointer has left";
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+  await check(
+    "overlapping solids are shaded where they interpenetrate",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        if (!(await open(tab))) return "the page never drew its five shapes";
+        // two cubes, and a cube in a tetrahedron's corner -- outside its
+        // box's middle, which a convex solid's inside was once taken from
+        const region = await tab.evaluate(`
+          const hatched = (...names) => {
+            const found = [];
+            for (const name of names) {
+              cubes[name].node.traverse((o) => { if (o.userData.region && o.material.uniforms?.period) found.push(o); });
+            }
+            return found;
+          };
+          const regions = hatched("a", "b");
+          const count = regions.length + hatched("t", "u").length;
+          if (regions.length !== 1 || count !== 2) return { count };
+          const [shading] = regions;
+          shading.updateWorldMatrix(true, false);
+          shading.geometry.computeBoundingBox();
+          const got = shading.geometry.boundingBox.clone().applyMatrix4(shading.matrixWorld);
+          const want = boxOf(cubes.a).intersect(boxOf(cubes.b));
+          const size = want.getSize(want.min.clone()).length();
+          const off = Math.max(got.min.distanceTo(want.min), got.max.distanceTo(want.max)) / size;
+          const middle = onPage(want.getCenter(want.min.clone()));
+          const shaded = colourAt(middle);
+          shading.visible = false;
+          const bare = colourAt(middle);
+          shading.visible = true;
+          return { count, off, shaded, bare };`);
+        if (region.count !== 2) return `${region.count} shaded regions, not 2`;
+        if (region.off > 1e-3) {
+          return `the shading is ${region.off} of its size off the cubes' shared box`;
+        }
+        if (region.shaded === region.bare) {
+          return `the shading draws nothing: ${region.bare} either way`;
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A hundred cubes sealed into one body, as a meshed magnet's cells are: one
- *  node, which a click on any cell picks, outlined once round every cell
+ *  node, which a click on any cell picks, marked once round every cell
  *  rather than once each, and gone from the picture when hidden. */
 async function sealedBody(port, base) {
   await check(
@@ -904,7 +1051,7 @@ async function sealedBody(port, base) {
           "return window.picked.splice(0)[0] ?? 'nothing'",
         );
         if (picked !== front.id) return `a click on a cell picked ${picked}`;
-        const lines = await tab.evaluate(`
+        const marks = await tab.evaluate(`
         const s = window.scene3d;
         s.highlight([${JSON.stringify(front.id)}]);
         s.still();
@@ -913,8 +1060,8 @@ async function sealedBody(port, base) {
           if (o.userData.outline) n++;
         });
         return n;`);
-        // one line in front and one faint through it, round all hundred
-        if (lines !== 2) return `outlined by ${lines} lines, not 2`;
+        // one mark round all hundred
+        if (marks !== 1) return `marked by ${marks} parts, not 1`;
         const shown = await tab.evaluate(
           `return colourAt(${JSON.stringify(front.at)})`,
         );
@@ -2415,7 +2562,7 @@ async function editing(port, base) {
 }
 
 /** Page code: what marks the selection, by what it is hung on -- a shape's
- *  edges, a path's line and markers in the accent colour, or markers that
+ *  mark, a path's line and markers in the accent colour, or markers that
  *  are not a path's, which may be coloured by the field -- and how far the
  *  parts on shapes reach, in scene units. */
 const OUTLINED = `
@@ -2515,7 +2662,7 @@ async function selection(port, base) {
         }
         await wait(300);
         const found = await tab.evaluate(OUTLINED);
-        const magnets = found.shapes / 2; // each drawn in front and behind
+        const magnets = found.shapes; // one mark each
         return magnets === 12
           ? thrown(tab)
           : `${magnets} of the twelve magnets outlined`;
@@ -3866,6 +4013,7 @@ try {
   await manyMagnets(browser.port, base);
   await manyRun(browser.port, base);
   await sealedBody(browser.port, base);
+  await marks(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);
