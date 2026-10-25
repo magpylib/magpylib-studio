@@ -27,6 +27,10 @@ let camera = null;
 let controls = null;
 let renderer = null;
 const raycaster = new THREE.Raycaster();
+// The layer a trace drawn in a batch is kept on: picked, never drawn
+// (`rebatch`).
+const BATCHED = 1;
+raycaster.layers.enable(BATCHED);
 const byObjectId = new Map();
 // What the host has hidden. By id, and held here rather than on the nodes:
 // every redraw and every frame of a run rebuilds those, and a visibility set
@@ -233,6 +237,7 @@ function drawFrame(now) {
   lastDrawn = now;
   if (flows) flowClock.value = ((now / 1000) * FLOW_RATE) % 1;
   sizeGrips();
+  keepBatches();
   renderer.render(scene, camera);
   drawCorner(true);
 }
@@ -2394,6 +2399,7 @@ function dressParts() {
  *  stands behind it or inside it shows through whole. Not into another
  *  object's node, which a collection's carries while it is dragged. */
 function fade(part, level) {
+  relook.add(part);
   const material = part.material;
   if (material?.userData.own !== undefined) {
     material.opacity = material.userData.own * level;
@@ -2686,6 +2692,7 @@ function buildMesh(item) {
     side: THREE.DoubleSide,
   };
 
+  const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
   if (item.facecolor) {
     // per-triangle colours need one vertex per corner, so the index goes
     const pos = [];
@@ -2712,7 +2719,6 @@ function buildMesh(item) {
       new THREE.Float32BufferAttribute(item.position, 3),
     );
     geometry.setIndex(item.index);
-    const lut = typeof item.lut === "number" ? luts[item.lut] : item.lut;
     if (lut) {
       // interpolate the intensity across the face and look the colour up per
       // fragment: the scale is piecewise, so sampling it per vertex loses it
@@ -2754,7 +2760,225 @@ function buildMesh(item) {
   mesh.userData.trace = true;
   // coloured face by face: a sensor's axes, or its arrows by the field
   mesh.userData.faceColoured = Boolean(item.facecolor);
+  // one of many drawn alike, which a batch may draw for it (`rebatch`)
+  const alike =
+    !item.facecolor &&
+    !item.back_uv &&
+    !item.streams &&
+    !item.arrows &&
+    !(item.opacity < 1);
+  if (alike) {
+    mesh.userData.batch = lut
+      ? lutKey(lut)
+      : `#${options.color.getHexString()}`;
+    mesh.userData.lut = lut ?? null;
+  }
   return mesh;
+}
+
+// --- many magnets, few draws --------------------------------------------
+// A scene of thousands of magnets -- a body meshed into cells -- drew each
+// as a draw call of its own: 15 ms a frame to orbit a U-core of 5,888
+// cells, 68 with the CPU four times slower. Its traces still hang on their
+// objects' nodes, where they are picked, outlined, framed and snapped to,
+// but on a layer the camera does not draw (`BATCHED`); what it draws is one
+// `THREE.BatchedMesh` per colouring, holding each trace as an instance of
+// its own. An instance follows its trace's pose every frame while the trace
+// can move -- dragged, or playing a path -- and is not drawn while its
+// trace is hidden; a faded trace, see-through, is drawn on its own. A
+// colouring of fewer than `BATCH_FROM` traces is drawn as it was.
+//
+// Kept by flags, not calls: whatever builds or frees a trace marks the
+// batches out of date, whatever hides or fades one their looks, a new
+// selection what moves; `keepBatches`, before every draw, does what is due,
+// once, however many marked it.
+const BATCH_FROM = 64;
+const batches = new Map(); // a colouring -> { mesh, live, dead, size }
+const inBatch = new Map(); // a trace -> { key, instance, at }
+const lutKeys = new WeakMap(); // a colour table -> its key, computed once
+let batchesStale = false; // traces built or freed
+const relook = new Set(); // traces hidden, shown or faded since the last look
+let moversStale = false; // the selection, or what plays, changed
+let movers = []; // the batched traces whose pose a batch follows
+
+function lutKey(lut) {
+  let key = lutKeys.get(lut);
+  if (key === undefined) {
+    key = `lut ${Array.from(lut).join(",")}`;
+    lutKeys.set(lut, key);
+  }
+  return key;
+}
+
+/** Bring the batches up to what the flags say changed: before every draw. */
+function keepBatches() {
+  if (batchesStale) {
+    batchesStale = false;
+    rebatch();
+    moversStale = true;
+  }
+  for (const part of relook) look(part);
+  relook.clear();
+  if (moversStale) {
+    moversStale = false;
+    movers = [];
+    for (const objectId of drawnFor(selectedIds)) {
+      for (const part of byObjectId.get(objectId)?.children ?? []) {
+        if (inBatch.has(part)) movers.push(part);
+      }
+    }
+    for (const { built } of tracked) {
+      if (inBatch.has(built)) movers.push(built);
+    }
+  }
+  for (const part of movers) follow(part);
+}
+
+/** Draw a batched trace by its batch, or on its own while see-through,
+ *  or not at all while hidden. */
+function look(part) {
+  const entry = inBatch.get(part);
+  if (!entry) return;
+  const drawn = shown(part);
+  const clear = part.material.transparent;
+  batches.get(entry.key).mesh.setVisibleAt(entry.instance, drawn && !clear);
+  part.layers.set(drawn && clear ? 0 : BATCHED);
+}
+
+/** Put a trace's instance where the trace now stands, if it moved. */
+function follow(part) {
+  const entry = inBatch.get(part);
+  if (!entry) return;
+  part.updateWorldMatrix(true, false);
+  if (entry.at.equals(part.matrixWorld)) return;
+  entry.at.copy(part.matrixWorld);
+  batches.get(entry.key).mesh.setMatrixAt(entry.instance, entry.at);
+}
+
+/** Batch what may be batched now: the traces gone out of their batches,
+ *  the new ones in. An instance is deleted in place, its geometry left as
+ *  dead space; a batch more dead than live is built again whole, as after a
+ *  scene drawn afresh, whose traces are all new. */
+function rebatch() {
+  const kinds = new Map(); // a colouring -> its traces, drawn now
+  for (const node of byObjectId.values()) {
+    for (const part of node.children) {
+      const key = part.userData.batch;
+      if (!key) continue;
+      if (!kinds.has(key)) kinds.set(key, []);
+      kinds.get(key).push(part);
+    }
+  }
+  const now = new Set([...kinds.values()].flat());
+  for (const [part, entry] of inBatch) {
+    const kind = kinds.get(entry.key);
+    if (!now.has(part) || kind.length < BATCH_FROM) unbatch(part, entry);
+  }
+  // A batch built again keeps its material: a material disposed takes its
+  // shader program with it, and the next frame compiles it again (#44).
+  // One whose colouring is gone goes, colour table and all.
+  const spare = new Map();
+  for (const [key, batch] of batches) {
+    if (batch.live && batch.dead <= batch.live) continue;
+    for (const [part, entry] of inBatch) {
+      if (entry.key === key) unbatch(part, entry);
+    }
+    scene.remove(batch.mesh);
+    spare.set(key, batch.mesh.material);
+    batch.mesh.dispose();
+    batches.delete(key);
+  }
+  for (const [key, parts] of kinds) {
+    if (parts.length < BATCH_FROM) continue;
+    const joining = parts.filter((part) => !inBatch.has(part));
+    if (joining.length) join(key, joining, spare.get(key));
+    spare.delete(key);
+  }
+  for (const material of spare.values()) {
+    material.map?.dispose();
+    material.dispose();
+  }
+}
+
+function unbatch(part, entry) {
+  const batch = batches.get(entry.key);
+  batch.mesh.deleteInstance(entry.instance);
+  const count = part.geometry.attributes.position.count;
+  batch.live -= count;
+  batch.dead += count;
+  part.layers.set(0);
+  inBatch.delete(part);
+}
+
+/** Add `parts` to the batch of colouring `key`, made or grown for them --
+ *  made with `material` where one is to hand. */
+function join(key, parts, material) {
+  let vertices = 0;
+  let corners = 0;
+  for (const part of parts) {
+    vertices += part.geometry.attributes.position.count;
+    corners += part.geometry.index?.count ?? 0;
+  }
+  let batch = batches.get(key);
+  if (!batch) {
+    const size = { vertices, corners: Math.max(corners, 1) };
+    const mesh = new THREE.BatchedMesh(
+      parts.length,
+      size.vertices,
+      size.corners,
+      material ?? batchMaterial(parts[0]),
+    );
+    // drawn whole, unsorted: an opaque scene in view needs neither, and
+    // both cost a pass over every instance every frame
+    mesh.perObjectFrustumCulled = false;
+    mesh.sortObjects = false;
+    mesh.frustumCulled = false;
+    mesh.matrixAutoUpdate = false;
+    scene.add(mesh);
+    batch = { mesh, live: 0, dead: 0, size };
+    batches.set(key, batch);
+  } else {
+    const { mesh, size } = batch;
+    const room = mesh.unusedVertexCount;
+    const roomCorners = mesh.unusedIndexCount;
+    if (room < vertices || roomCorners < corners) {
+      // half as much again as it will hold, so a drag's few new traces
+      // do not grow it every step
+      size.vertices = Math.ceil(1.5 * (size.vertices - room + vertices));
+      size.corners = Math.ceil(1.5 * (size.corners - roomCorners + corners));
+      mesh.setGeometrySize(size.vertices, size.corners);
+    }
+    if (mesh.instanceCount + parts.length > mesh.maxInstanceCount) {
+      mesh.setInstanceCount(
+        Math.ceil(1.5 * (mesh.instanceCount + parts.length)),
+      );
+    }
+  }
+  for (const part of parts) {
+    let instance;
+    try {
+      instance = batch.mesh.addInstance(batch.mesh.addGeometry(part.geometry));
+    } catch {
+      continue; // made unlike the batch's first: drawn on its own
+    }
+    part.updateWorldMatrix(true, false);
+    const at = part.matrixWorld.clone();
+    batch.mesh.setMatrixAt(instance, at);
+    batch.live += part.geometry.attributes.position.count;
+    inBatch.set(part, { key, instance, at });
+    look(part);
+    // its own copy on the GPU, if it was drawn alone: the batch has one
+    part.geometry.dispose();
+  }
+}
+
+/** A batch's material: its traces' own, with a colour table of its own,
+ *  since each trace's goes when the trace is freed (`free`). */
+function batchMaterial(sample) {
+  const material = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
+  if (sample.userData.lut) material.map = lutTexture(sample.userData.lut);
+  else material.color.copy(sample.material.color);
+  return material;
 }
 
 /** Bound a trace by the points that are actually points.
@@ -2811,6 +3035,7 @@ function buildItem(item) {
           : buildScatter(item);
   if (item.copy) built.userData.copy = item.copy;
   built.userData.built = true; // what a node carries for its object, see `dress`
+  if (built.userData.batch) batchesStale = true;
   if (item.part) built.userData.part = item.part;
   // a current's arrows, which say what its flow says: see `setFlow`
   if (item.arrows) {
@@ -3739,6 +3964,7 @@ function highlight(objectIds) {
   );
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   drawOutlines();
+  moversStale = true; // its batches follow what is selected, to be dragged
 }
 
 /** Outline the selection afresh, round whatever is drawn for it now. */
@@ -4053,6 +4279,7 @@ function setCamera(state) {
  *  nothing a host floats over it, legend or controls, is in the picture. */
 function snapshot() {
   if (!renderer) return null;
+  keepBatches();
   renderer.render(scene, camera);
   drawCorner(false); // the scale bar is part of the picture; the cube, a control
   return renderer.domElement.toDataURL("image/png");
@@ -4064,6 +4291,7 @@ function snapshot() {
  *  spot, only to be decoded again to be shown. */
 function still() {
   if (!renderer) return null;
+  keepBatches();
   renderer.render(scene, camera);
   drawCorner(true);
   const source = renderer.domElement;
@@ -4946,6 +5174,7 @@ function paintBar(text, pixels) {
  *  16 ms frame on an M4 Pro, measured. Left alone, a material goes with its
  *  mesh, and the program stays for the next one like it. */
 function free(part) {
+  if (part.userData.batch) batchesStale = true;
   flowLines.delete(part);
   flowArrows.delete(part);
   if (!part.userData.borrowed) part.geometry?.dispose();
