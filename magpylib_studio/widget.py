@@ -1209,6 +1209,10 @@ class SceneWidget(anywidget.AnyWidget):
                 }
             edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
+        if method == "begin_interaction":
+            # what the view is showing, for the gesture's steps to be drawn
+            # against from the first: the scene it was last sent
+            self._session.shows(self.payload)
         if method == "apply_edits":
             self._dragged = params.get("edits")
         # The scene with the answer, when the view asks for it: a preview

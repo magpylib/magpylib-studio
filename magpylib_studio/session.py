@@ -2697,11 +2697,19 @@ class MagpylibStudioSession:
         #: What redo held when the current gesture began, to put back if the
         #: gesture turns out to have changed nothing.
         self._interaction_redo: list[dict] = []
-        #: Inside a gesture: the ids it moves -- a set, or None for anything,
-        #: as a variable does -- and per sensor, the grid and the field of
-        #: what stays, computed once for the gesture. See `_field_lines`.
+        #: Inside a gesture: the ids it moves -- a set, or None for anything
+        #: -- those of them the view carries under its handles, and per
+        #: sensor, the grid and the field of what stays, computed once for
+        #: the gesture. See `_field_lines`.
         self._moving: set | None = set()
+        self._carried: set = set()
         self._field_cache: dict = {}
+        #: The scene last drawn whole, with its colours and the ids it drew,
+        #: and what has changed since: a set of ids, or None where that is
+        #: not known -- any edit but a gesture's. A view showing it has a
+        #: gesture drawn against it from its first step, and a scene asked
+        #: for whole again draws only what changed. See `_whole_since`.
+        self._whole: dict | None = None
         #: Per sensor, the field its lines were last drawn from at rest, and
         #: what the sources were (`_sources_written`): drawn again from it
         #: while they are the same and its pixels are on its grid. See
@@ -2820,6 +2828,7 @@ class MagpylibStudioSession:
         # ...but a rolled-back build is a preview, so the document keeps the
         # tree of the whole log. Otherwise saving while stepping through the
         # history would write out a scene missing everything after the step.
+        self._changed()
 
     def _folded_events(self):
         """The events this build takes in, which is all of them unless the
@@ -3995,7 +4004,14 @@ class MagpylibStudioSession:
         it at that first step: nothing else moves while a hand is on the
         handles. On the demo's 96 magnets a step was 38 ms of python and
         127 KB, all but 19 KB of it the magnets that stood still. A variable
-        moves anything, so its steps are drawn whole.
+        moves what its steps write, and only that is drawn: on the U-core of
+        material-response's docs, 768 cells, a step of the probe's density was
+        940 KB, all but 18 KB of it the cells. A view that says it shows the
+        scene last drawn whole (`shows`) has the first step drawn so too.
+
+        Asked for whole after a gesture, the scene draws again only what the
+        gesture moved, and takes the rest from the scene last drawn whole
+        (`_whole_since`).
         """
         with threejs.pinned_scene_units():
             return self._scene_as_drawn(frame, partial)
@@ -4018,42 +4034,73 @@ class MagpylibStudioSession:
         # it, and the lines take their colours from it.
         readings = None
         if self.field_lines:
-            from magpylib.graphics.backend import pixel_fields
+            from magpylib_studio import fieldlines
 
-            readings = pixel_fields(self.scene)
+            readings = fieldlines.readings(self.scene)
+        # the nodes ids are drawn on: a copy is drawn on its source's
+        source_of = {c: s for s, made in self._derived.items() for c in made}
+        stepping = partial and self._interaction is not None
+        known = self._whole  # the scene last drawn whole, and what changed since
         only = None
-        if partial and self._interaction is not None and self._drawn_whole:
+        against = None  # the scene drawn whole that what `only` draws extends
+        base = None  # the one this scene, asked for whole, is drawn from
+        if stepping and self._drawn_whole:
             names = self._moving_names()
             if names is not None:
-                # the nodes they are drawn on: a copy is drawn on its source's
-                source_of = {c: s for s, made in self._derived.items() for c in made}
                 only = {source_of.get(name, name) for name in names}
                 # A sealed body moved by the drag is carried by the view on
                 # its own node, its cells and all; drawn again, its thousands
                 # of cells would be sent to be thrown away (`drag.mjs`). One
                 # with copies is the exception: only a rebuild places those.
+                # A variable carries nothing: what it moves is drawn again.
+                carried = self._expanded(self._carried)
                 only = {
                     name
                     for name in only
-                    if not threejs.is_sealed(self._objs.get(name))
+                    if name not in carried
+                    or not threejs.is_sealed(self._objs.get(name))
                     or self._derived.get(name)
                 }
+                against = self._drawn_whole
+        elif not stepping:
+            # Asked for whole -- a gesture let go, most often: what it did not
+            # move is drawn as the scene last drawn whole drew it. On the
+            # U-core of material-response's docs, 5,888 cells, a slider let
+            # go took 1.9 s to draw the cells again.
+            base = self._whole_since()
+            if base is not None:
+                only = {source_of.get(name, name) for name in base["changed"]}
+                against = base
         scene = threejs.scene_payload(
             self._drawn(),
             live=self._objs,
             derived=self._derived,
             fields=readings,
             only=only,
-            whole=self._drawn_whole if only is not None else None,
+            whole=against,
         )
         colors = scene.pop("colors", None)
-        if partial and self._interaction is not None and only is None:
+        if base is not None:
+            scene = threejs.drawn_over(base["scene"], scene)
+            colors = base["colors"]
+        if stepping and only is None:
             # the gesture's first frame, drawn whole, and the colours it drew
             # in, which what a later frame draws alone would not get
             self._drawn_whole = {
                 "ranges": scene["ranges"],
                 "labels": scene["labels"],
                 "colors": colors,
+            }
+        if "partial" not in scene:
+            self._whole = {
+                "scene": scene,
+                "ranges": scene["ranges"],
+                "labels": scene["labels"],
+                "colors": colors,
+                "ids": frozenset(self._objs),
+                "changed": set(),
+                # how deep overlaps go is said at rest only (`get_overlaps`)
+                "in_gesture": self._interaction is not None,
             }
         # Added here rather than in the converter: which fields a variable is
         # deciding is a fact about the document, not about the drawing.
@@ -4078,11 +4125,26 @@ class MagpylibStudioSession:
         # Carried with every scene, a drag's preview frames included, so an
         # overlap shows while the magnet is still under the pointer. A check
         # that fails costs the scene nothing but its outlines, and says why.
-        try:
-            scene.update(self._overlap_payload())
-        except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
-            scene["overlaps"] = []
-            scene["overlaps_error"] = f"{type(e).__name__}: {e}"
+        # Only sensors moved since the scene last drawn whole: no shape to
+        # overlap with moved, and its overlaps stand -- a fifth of a second
+        # on the U-core's 5,888 cells, every step of a slider.
+        moved = known["changed"] if known is not None else None
+        if (
+            moved is not None
+            and "overlaps" in known["scene"]
+            and known["in_gesture"] == (self._interaction is not None)
+            and all(isinstance(self._objs.get(name), magpy.Sensor) for name in moved)
+        ):
+            scene.update(
+                {k: v for k, v in known["scene"].items() if k.startswith("overlap")}
+            )
+            scene["intended_overlaps"] = known["scene"]["intended_overlaps"]
+        else:
+            try:
+                scene.update(self._overlap_payload())
+            except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
+                scene["overlaps"] = []
+                scene["overlaps_error"] = f"{type(e).__name__}: {e}"
         if self.field_lines:
             scene["fieldlines"] = self._field_lines(readings)
             # for a view that keeps no switch of its own: the studio's panel
@@ -4292,17 +4354,84 @@ class MagpylibStudioSession:
             out["depth"] = None if value is None else float(value)
         return out
 
-    def _moved(self, ids):
-        """What the gesture in progress moves: `ids`, or anything (None)."""
+    def _moved(self, ids, carried=False):
+        """What the gesture in progress moves: `ids`, or anything (None).
+        `carried`: by the view's handles, which move their nodes themselves
+        -- a drag's, not a variable's."""
         if self._interaction is None:
             return
         if ids is None or self._moving is None:
             self._moving = None
         else:
             self._moving.update(ids)
+            if carried:
+                self._carried.update(ids)
+
+    def _changed(self, known=True):
+        """Note, against the scene last drawn whole, that the scene changed:
+        by what the gesture in progress moves, where that is `known` and
+        named -- by anything otherwise."""
+        whole = self._whole
+        if whole is None or whole["changed"] is None:
+            return
+        names = (
+            self._moving_names() if known and self._interaction is not None else None
+        )
+        whole["changed"] = None if names is None else whole["changed"] | names
+
+    def shows(self, scene):
+        """Say that the view starting a gesture shows `scene`: if it is the
+        scene this session last drew whole, and nothing has changed since,
+        the gesture's steps are drawn against it from the first, each only
+        what it moves. Otherwise, and for a view that says nothing, the
+        first step is drawn whole."""
+        whole = self._whole
+        if (
+            self._interaction is not None
+            and whole is not None
+            and scene is whole["scene"]
+            and whole["changed"] == set()
+        ):
+            self._drawn_whole = {k: whole[k] for k in ("ranges", "labels", "colors")}
+
+    def _whole_since(self):
+        """The scene last drawn whole, when one asked for whole now can be
+        drawn from it, again only where it changed: by a gesture's moves,
+        with no object made or removed -- a pattern's count -- and no path
+        to replay. None otherwise."""
+        whole = self._whole
+        if (
+            whole is None
+            or whole["changed"] is None
+            or whole["ids"] != frozenset(self._objs)
+            or self.path_steps() > 1
+        ):
+            return None
+        return whole
+
+    def _written_with(self, names):
+        """The ids of the objects whose steps are written in the variables
+        `names`, or in a variable written in one of them: what setting them
+        moves. None where a step written in them is no object's."""
+        variables = self.doc.get("variables") or {}
+        names = set(names)
+        while more := {
+            other
+            for other, value in variables.items()
+            if other not in names and names & set(expressions.referenced_names(value))
+        }:
+            names |= more
+        moved = set()
+        for event in self.doc.get("events") or []:
+            if names & set(expressions.referenced_names(event)):
+                if event.get("target") is None:
+                    return None
+                moved.add(event["target"])
+        return moved
 
     def _forget_gesture(self):
         self._moving = set()
+        self._carried = set()
         self._field_cache = {}
         self._drawn_whole = None
         self._pixels_at_start = {}
@@ -4320,8 +4449,10 @@ class MagpylibStudioSession:
         dragged past magnets that stand still. A sensor dragged keeps its
         grid too, fixed in the world: its lines are traced from where its
         pixels are now, until they leave the grid or its plane
-        (`fieldlines.holds`). A variable moves anything: then the whole field
-        is computed every frame, on the coarser grid.
+        (`fieldlines.holds`). A variable moves the objects its steps write --
+        none, for a sensor's density, whose lines are drawn from the field at
+        rest. One written where no object's step is moves anything: then the
+        whole field is computed every frame, on the coarser grid.
 
         At rest the field is kept, and a sensor's lines are drawn from it
         again while the sources are as they were and its pixels on its grid:
@@ -4344,9 +4475,7 @@ class MagpylibStudioSession:
         if not sensors:
             return []
         if readings is None:
-            from magpylib.graphics.backend import pixel_fields
-
-            readings = pixel_fields(self.scene)
+            readings = fieldlines.readings(self.scene)
         digest = []  # `_sources_written`, once, where asked for
 
         def written():
@@ -4586,9 +4715,14 @@ class MagpylibStudioSession:
         where that is anything."""
         if self._moving is None:
             return None
+        return self._expanded(self._moving)
+
+    def _expanded(self, ids):
+        """`ids`, the copies made from them, and what a collection among
+        them holds."""
         name_of = self._names_of_objects()
         names = set()
-        for name in self._moving:
+        for name in ids:
             names.add(name)
             names.update(self._derived.get(name, ()))
             for child in getattr(self._objs.get(name), "children_all", ()):
@@ -6227,7 +6361,7 @@ class MagpylibStudioSession:
             made = [d["params"]["name"] for d in definitions]
             calls = [*definitions, *calls]
         ids = sorted({edit["objectId"] for edit in edits})
-        self._moved(ids)
+        self._moved(ids, carried=True)
         result = self.apply_calls(calls, f"edit {', '.join(ids)}")
         if made and result.get("ok"):
             result = {**result, "defined": made}
@@ -7662,7 +7796,7 @@ class MagpylibStudioSession:
         `unit` says what it measures in the same step (see
         `set_variable_unit`), so a variable is created a length rather than
         created and then made one; None leaves what it says as it was."""
-        self._moved(None)
+        self._moved(self._written_with([name]))
         problem = _variable_problem(name, value)
         if problem:
             return {"ok": False, "error": problem}
@@ -7694,7 +7828,7 @@ class MagpylibStudioSession:
         whole when any value is. So a combination that holds only together --
         two lengths a wall is the difference of -- is taken as the
         combination it is, never checked half-set."""
-        self._moved(None)
+        self._moved(self._written_with(values) if isinstance(values, dict) else None)
         if not isinstance(values, dict) or not values:
             return {"ok": False, "error": "give the variables' values by name"}
         for name, value in values.items():
@@ -7839,6 +7973,7 @@ class MagpylibStudioSession:
         mutate(self.doc)
         _canonical(self.doc)
         self._record_state(label, snapshot)
+        self._changed(known=False)
         return {"ok": True}
 
     def use_variant(self, name):

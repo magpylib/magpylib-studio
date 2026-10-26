@@ -62,10 +62,12 @@ export const HEAVY_REDRAW_MS = 100;
  *   anything it will supersede, before rather than after. Not on the press:
  *   the renderer reports nothing for a handle clicked and let go, so a group
  *   opened then would never be closed, and swallow the next edit made.
- * - `preview(pose, { scene })`: a pose reached mid-drag. Returns a promise,
- *   settled once the engine has taken it; the next is not sent until then.
- *   `scene` says the drag will redraw from what the pose made, which the
- *   answer may carry -- see `scene()`.
+ * - `preview(pose, { scene, since })`: a pose reached mid-drag. Returns a
+ *   promise, settled once the engine has taken it; the next is not sent until
+ *   then. `scene` says the drag will redraw from what the pose made, which
+ *   the answer may carry -- see `scene()`. `since`: when the first of the
+ *   poses it stands for was reached, the pointer having moved on while the
+ *   one before was away.
  * - `commit(pose)`: the pose the drag ended on. Record it and close the group.
  * - `cancel()`: Esc in a drag that had begun: close the group and take it
  *   back, as if it had never been made.
@@ -83,6 +85,7 @@ export function watchDrags(host, view) {
   const drawing = view.drawing ?? (() => true);
   let dragging = null; // { keep, tooSlow, redraws, slow, nextAt, begun } while a handle is held
   let pending = null; // the newest pose not yet sent
+  let pendingSince = null; // when the first pose it replaced was reached
   let inFlight = false;
   let ticked = true; // a frame has begun since the last pose was sent
   let toDraw = null; // { drag, carried }: the newest answer, for the next frame
@@ -116,12 +119,13 @@ export function watchDrags(host, view) {
       send();
     });
     const pose = pending;
-    pending = null;
+    const since = pendingSince;
+    pending = pendingSince = null;
     const drag = dragging;
     // Asked for with the pose only while it will be drawn: a drag that has
     // stopped redrawing would have the scene built on every step for nothing.
     const scene = drawing() && Boolean(dragging) && !dragging.tooSlow;
-    Promise.resolve(view.preview(pose, { scene }))
+    Promise.resolve(view.preview(pose, { scene, since }))
       .then((answer) => {
         if (scene) drawSoon(drag, answer && answer.scene ? answer.scene : null);
       })
@@ -202,7 +206,7 @@ export function watchDrags(host, view) {
       // Esc: what the drag sent is taken back, nothing more is
       const began = dragging?.begun;
       dragging = null;
-      pending = null;
+      pending = pendingSince = null;
       toDraw = null;
       if (began) view.cancel?.();
       return;
@@ -214,11 +218,13 @@ export function watchDrags(host, view) {
       // would make a fast drag on a heavy scene look like it had stopped.
       view.showPose?.(pose);
       pending = pose;
+      pendingSince ??= performance.now();
       send();
       return;
     }
     dragging = null;
-    pending = null; // the pose it ended on supersedes anything still waiting
+    // the pose it ended on supersedes anything still waiting
+    pending = pendingSince = null;
     toDraw = null;
     view.commit(pose);
   }

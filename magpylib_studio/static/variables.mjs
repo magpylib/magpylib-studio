@@ -12,9 +12,11 @@
  * floats it over the view with its calls going to the session in the kernel.
  * The module knows neither. It is handed:
  *
- * - `rpc(method, params, { preview })`: the engine's answer, as a promise.
- *   `preview` marks a value the pointer is still on, which a host may treat
- *   more lightly than a settled edit.
+ * - `rpc(method, params, { preview, since })`: the engine's answer, as a
+ *   promise. `preview` marks a value the pointer is still on, which a host
+ *   may treat more lightly than a settled edit; `since`, when the slider
+ *   first moved past the value the view shows, for a host that says how
+ *   long it has been kept waiting.
  * - `onPreview(answer)`: after a previewed value is answered, for a host
  *   that has to redraw itself -- the widget draws the scene the answer
  *   carries, or asks for it. Awaited inside the drag's pacing, so a redraw
@@ -366,7 +368,9 @@ export function createVariables(
   let pendingValue = null;
 
   function preview(name, value) {
-    pendingValue = { name, value };
+    // the newest value, waited on since the first one it replaced
+    const since = pendingValue?.since ?? performance.now();
+    pendingValue = { name, value, since };
     sendValue();
   }
 
@@ -382,9 +386,9 @@ export function createVariables(
       frameSpent = false;
       sendValue();
     });
-    const { name, value } = pendingValue;
+    const { name, value, since } = pendingValue;
     pendingValue = null;
-    rpc("set_variable", { name, value }, { preview: true })
+    rpc("set_variable", { name, value }, { preview: true, since })
       .then((answer) => onPreview?.(answer))
       .catch(() => {
         // the release value reports; a refusal mid-drag is not worth saying

@@ -2332,7 +2332,9 @@ async function objectPanelMixed(port, base) {
 }
 
 /** While python is slow to answer, a ring of current runs round the view; a
- *  quick answer -- a drag's, at pointer rate -- never shows it. */
+ *  quick answer -- a drag's, at pointer rate -- never shows it. A slider or
+ *  a drag answered a little too slowly to keep up falls behind the pointer,
+ *  and rings once, until it catches up. */
 async function busyRing(port, base) {
   await check(
     "a slow answer rings the view, a quick one does not",
@@ -2342,13 +2344,24 @@ async function busyRing(port, base) {
         await tab.navigate(`${base}/pages/busy.html`);
         const result = await tab.until("return window.result", 20_000);
         if (!result) return "never finished";
-        const { exists, quick, early, waiting, answeredAfter } = result;
+        const { exists, quick, early, waiting, answeredAfter, behind, late } =
+          result;
         if (!exists) return "no ring";
         if (quick) return "a quick answer showed the ring";
         if (early) return "the ring came on before the answer was late";
         if (!waiting) return "a slow answer did not show the ring";
         if (answeredAfter > 1600)
           return `the ring stayed on ${answeredAfter} ms`;
+        for (const [gesture, flips] of Object.entries(behind)) {
+          if (flips !== "on,off")
+            return `a ${gesture} behind the pointer rang ${flips || "never"}`;
+        }
+        if (!late.said.startsWith("No answer from Python"))
+          return `python busy past 4 s: it said ${JSON.stringify(late.said)}`;
+        if (!late.waiting) return "the ring went out when the view said so";
+        const left = Object.entries(late.after).filter(([, on]) => on);
+        if (left.length)
+          return `after the late answer: ${JSON.stringify(Object.fromEntries(left))}`;
         return thrown(tab);
       } finally {
         await tab.close();

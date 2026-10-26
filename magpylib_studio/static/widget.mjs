@@ -304,9 +304,11 @@ const NO_ANSWER =
   "running. Run the cell again to play this run.";
 
 /** What a view says when python does not answer an edit. */
-/** How long, in ms, an answer from python may take before the view says it
- *  is being waited on (`watchBusy`): long enough that a drag answered at
- *  pointer rate never shows it, short enough to say so before one wonders. */
+/** How long, in ms, python may take to answer what was asked before the view
+ *  says it is being waited on (`watchBusy`): long enough that a drag answered
+ *  at pointer rate never shows it, short enough to say so before one wonders.
+ *  Counted from the asking -- a slider moved, a pose reached -- not from the
+ *  sending: a value held back behind the one away has been waited on too. */
 const BUSY_AFTER = 350;
 
 const NO_EDIT_ANSWER =
@@ -569,8 +571,8 @@ function render({ model, el }) {
   dockActionsObject.className = "magpy-scene-dock-actions";
   const variables = createVariables(variablesEl, {
     // a preview asks for the scene in the same message, and redraws from it
-    rpc: (method, params, { preview = false } = {}) =>
-      call(method, params, { preview, scene: preview }),
+    rpc: (method, params, { preview = false, since } = {}) =>
+      call(method, params, { preview, scene: preview, since }),
     onPreview: redrawFromSession,
     empty: "No variables: a scene function's parameters are its variables.",
     compact: true,
@@ -1892,27 +1894,37 @@ function render({ model, el }) {
   // `display` of it -- would otherwise take each other's answers.
   const caller = Math.random().toString(36).slice(2, 10);
   let nextCall = 0;
-  const calls = new Map(); // id -> { timer, sent, settle }
+  const calls = new Map(); // id -> { timer, asked, settle }
   let dragActive = false; // between a drag's first move and its release
-  function call(method, params = {}, { preview = false, scene = false } = {}) {
+  // `since`: when what the call carries was asked for, if before now -- the
+  // first value a slider or a drag held back while the one before was away
+  function call(
+    method,
+    params = {},
+    { preview = false, scene = false, since } = {},
+  ) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
-      const timer = setTimeout(() => {
-        calls.delete(id);
-        watchBusy();
-        unheard();
-        reject(new Error(NO_EDIT_ANSWER));
-      }, 4000);
+      // Said, and still waited on: python may only be busy -- a scene of
+      // thousands of cells takes longer than this -- and its answer settles
+      // the call when it comes. The ring stays on until then, and a slider
+      // or a drag holds its next value back rather than queueing it behind
+      // the one python is still working on.
+      const timer = setTimeout(unheard, 4000);
+      const asked = since ?? performance.now();
       calls.set(id, {
         timer,
-        sent: performance.now(),
+        asked,
         settle(message) {
           if (message.error) reject(new Error(message.error.message));
           else resolve(message.result);
         },
       });
       // waited on past BUSY_AFTER, it shows the ring
-      setTimeout(() => calls.has(id) && watchBusy(), BUSY_AFTER);
+      setTimeout(
+        () => calls.has(id) && watchBusy(),
+        Math.max(BUSY_AFTER - (performance.now() - asked), 0),
+      );
       // `preview` marks a value the pointer is still on: python applies
       // it and says nothing to the notebook, as for a pose mid-drag.
       // `scene` asks for the scene in the same answer, sparing a second
@@ -1928,23 +1940,29 @@ function render({ model, el }) {
     });
   }
 
-  /** The ring round the view on while a call has waited past `BUSY_AFTER`,
-   *  off once none has: by each call's age, not by whether any is out -- a
-   *  quick drag always has one out, answered in a few milliseconds. */
+  /** The ring round the view on once a call has waited past `BUSY_AFTER`:
+   *  by each call's age, not by whether any is out -- a quick drag always
+   *  has one out, answered in a few milliseconds. Off once none is out: a
+   *  slider or a drag fallen behind the pointer sends the next value as the
+   *  last is answered, each waited on a little less than `BUSY_AFTER`, and
+   *  the view is behind until it has caught up. */
   function watchBusy() {
     const now = performance.now();
-    let slow = false;
-    for (const { sent } of calls.values())
-      slow ||= now - sent >= BUSY_AFTER - 1;
+    let slow = busyRing.classList.contains("on") && calls.size > 0;
+    for (const { asked } of calls.values())
+      slow ||= now - asked >= BUSY_AFTER - 1;
     busyRing.classList.toggle("on", slow);
   }
 
   function answer(message) {
     const pending = calls.get(message.id);
-    if (!pending) return; // given up on already
+    if (!pending) return; // another view's
     calls.delete(message.id);
     clearTimeout(pending.timer);
-    watchBusy();
+    // after what the answer sets going: a slider or a drag sends the value
+    // that waited behind it at once, and the ring stays on for that one
+    // rather than going out between them
+    setTimeout(watchBusy);
     if (notice.textContent === NO_EDIT_ANSWER) notice.classList.remove("shown");
     pending.settle(message);
   }
@@ -1972,9 +1990,7 @@ function render({ model, el }) {
           );
         }
       })
-      .catch((error) => {
-        if (error.message !== NO_EDIT_ANSWER) notify(error.message);
-      });
+      .catch((error) => notify(error.message));
   }
 
   // --- the readout ---------------------------------------------------------
@@ -2242,8 +2258,8 @@ function render({ model, el }) {
   const editor = model.editor ?? {
     begin: () => call("begin_interaction"),
     // the scene comes back with the pose, and the drag redraws from it
-    preview: (edits, { scene = true } = {}) =>
-      call("apply_edits", { edits }, { scene }),
+    preview: (edits, { scene = true, since } = {}) =>
+      call("apply_edits", { edits }, { scene, since }),
     commit(edits, { define = false } = {}) {
       const done = call("apply_edits", {
         edits,

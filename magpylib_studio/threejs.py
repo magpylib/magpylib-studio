@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import itertools
 import json
 import math
 import re
@@ -2018,15 +2019,17 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
             polarizations[key] = np.asarray(polarization, dtype=float).tolist()
 
     collections, split = _collections(live, derived, source_of)
-    colors = {}
-    if only is None and live:
-        own_key = _key_map(live, derived)
-        for trace in traces:
-            color = trace.get("line_color" if trace["type"] == "scatter3d" else "color")
-            if isinstance(color, str) and not trace.get("path"):
-                colors.setdefault(own_key(trace.get("object_id"), own=True), color)
+    colors = _cycled_colors(objects, live) if only is None and live else {}
+    items = [*_keyed(traces, live, derived), *pixels]
+    if only is not None:
+        # named, as drawn among the rest, after the outermost group holding
+        # each: alone, an object's traces are named after it
+        names = _group_names(objects, live, redrawn)
+        for item in items:
+            if item.get("object_id") in names:
+                item["name"] = names[item["object_id"]]
     return {
-        **_by_kind([*_keyed(traces, live, derived), *pixels]),
+        **_by_kind(items),
         "ranges": _ranges_with_pixels(reach, pixels),
         "labels": labels,
         "anchors": anchors,
@@ -2045,6 +2048,76 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
         # for the session to keep, not for a view: see `whole`
         **({"colors": colors} if colors else {}),
     }
+
+
+def _cycled_colors(objects, live):
+    """The colour magpylib draws each of `live`'s objects in, drawn among
+    `objects`, as `get_flatten_objects_properties_recursive` gives it: its
+    own, or its parent's, or -- for one shown with neither -- the next of
+    the colour sequence. Read without drawing, for an object drawn alone to
+    be lent: a sensor's body is coloured face by face, no one colour of its
+    traces names it."""
+    from magpylib._src.defaults.defaults_classes import default_settings
+    from magpylib._src.style import get_style
+
+    key_of = {id(obj): key for key, obj in live.items()}
+    sequence = itertools.cycle(default_settings.display.colorsequence)
+    colors = {}
+
+    def visit(obj, inherited):
+        color = get_style(obj, default_settings).color
+        if color is None:
+            color = inherited if inherited is not None else next(sequence)
+        if id(obj) in key_of:
+            colors[key_of[id(obj)]] = color
+        if not is_sealed(obj):  # a sealed one's parts are its own to colour
+            for child in getattr(obj, "children", None) or ():
+                visit(child, color)
+
+    for obj in dict.fromkeys(objects):
+        visit(obj, None)
+    return colors
+
+
+def _group_names(objects, live, nodes):
+    """The name magpylib gives the traces of each of `nodes` drawn among
+    `objects`, where it is held in one of them: that one's legend label."""
+    from magpylib._src.defaults.defaults_classes import default_settings
+    from magpylib._src.display.traces_utility import get_legend_label
+    from magpylib._src.style import get_style
+
+    wanted = {id(live[node]): node for node in nodes if node in live}
+    names = {}
+    for top in dict.fromkeys(objects):
+        held = [c for c in getattr(top, "children_all", ()) if id(c) in wanted]
+        if not held:
+            continue
+        style = get_style(top, default_settings)
+        if style.label is None:
+            style.label = type(top).__name__
+        label = get_legend_label(top, style=style)
+        for child in held:
+            names[wanted[id(child)]] = label
+    return names
+
+
+def drawn_over(base, scene):
+    """`scene`, drawn of some nodes only (``partial``), made whole with what
+    `base` -- a scene drawn whole -- drew of every other node: the whole
+    scene again, at the cost of what changed. `base` is left as it was."""
+    redrawn = set(scene.pop("partial"))
+    luts = base.get("luts") or []
+    for kind in ("meshes", "scatters", "pixels"):
+        kept = [
+            # a colour table by its own index in `base`, shared again below
+            {**item, "lut": luts[item["lut"]]}
+            if isinstance(item.get("lut"), int)
+            else item
+            for item in base.get(kind, [])
+            if item.get("object_id") not in redrawn
+        ]
+        scene[kind] = [*kept, *scene.get(kind, [])]
+    return _shared(scene)
 
 
 def _spanning(*ranges):
