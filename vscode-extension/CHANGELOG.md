@@ -41,7 +41,7 @@ move. The field is computed a slice of the sources at a time, on four threads,
 and whether a point lies inside a cuboid is answered without magpylib, as it
 would answer it. Copying such a body into a view to edit no longer warns that
 its cells were made in a loop and should be patterned: only copies of one object
-are said to be that, and solved cells are not (#86).
+are said to be that, and solved cells are not (#86, #91).
 
 </details>
 
@@ -87,7 +87,7 @@ went out, so a slider or a drag that falls behind the pointer shows it once, for
 as long as it is behind. Past four seconds the view says Python has not answered
 and goes on waiting, the pulse still running: a slider or a drag holds its next
 value back instead of queueing it behind the one Python is still working on. A
-drag answered at pointer rate never shows it (#88).
+drag answered at pointer rate never shows it (#88, #91).
 
 </details>
 
