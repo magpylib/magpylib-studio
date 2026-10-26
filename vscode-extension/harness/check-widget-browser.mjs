@@ -2331,8 +2331,9 @@ async function objectPanelMixed(port, base) {
   });
 }
 
-/** While python is slow to answer, a ring of current runs round the view; a
- *  quick answer -- a drag's, at pointer rate -- never shows it. A slider or
+/** While python is slow to answer, a ring of current runs round the view --
+ *  drawn and turning in a shadow root, where marimo draws a widget; a quick
+ *  answer -- a drag's, at pointer rate -- never shows it. A slider or
  *  a drag answered a little too slowly to keep up falls behind the pointer,
  *  and rings once, until it catches up. */
 async function busyRing(port, base) {
@@ -2350,6 +2351,8 @@ async function busyRing(port, base) {
         if (quick) return "a quick answer showed the ring";
         if (early) return "the ring came on before the answer was late";
         if (!waiting) return "a slow answer did not show the ring";
+        if (!result.painted) return "the ring was on and drew nothing";
+        if (!result.turns) return "the ring was on and stood still";
         if (answeredAfter > 1600)
           return `the ring stayed on ${answeredAfter} ms`;
         for (const [gesture, flips] of Object.entries(behind)) {

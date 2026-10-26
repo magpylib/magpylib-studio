@@ -311,6 +311,22 @@ const NO_ANSWER =
  *  sending: a value held back behind the one away has been waited on too. */
 const BUSY_AFTER = 350;
 
+// The busy ring's turn, an angle the ring's colours are laid from and its
+// animation runs through. widget.css registers it with `@property`, which a
+// browser ignores in a shadow root -- where marimo draws a widget -- and the
+// ring then stood still, drawn half the time. Registered here, it is the
+// whole page's.
+try {
+  CSS.registerProperty({
+    name: "--magpy-busy-turn",
+    syntax: "<angle>",
+    inherits: false,
+    initialValue: "0deg",
+  });
+} catch {
+  // registered already, by another view of the page
+}
+
 const NO_EDIT_ANSWER =
   "No answer from Python for this edit yet: the kernel may be busy or not " +
   "running. The view catches up if it answers.";
