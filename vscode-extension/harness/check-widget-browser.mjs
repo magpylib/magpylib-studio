@@ -3778,6 +3778,68 @@ async function savedView(port, base, out, expected) {
     return rounded(off) === rounded(want) ? null : `hidden ${off}`;
   });
 
+  await check(
+    "⌥ on an eye shows only that row, again puts it back, slid fades the rest",
+    async () => {
+      const eye = `${row("upper")}.querySelector(".magpy-legend-eye")`;
+      const mouse = (type, x, y, buttons) =>
+        tab.send("Input.dispatchMouseEvent", {
+          type,
+          x,
+          y,
+          button: "left",
+          buttons,
+          clickCount: 1,
+          modifiers: 1, // alt
+        });
+      const rows = (cls) =>
+        tab.evaluate(
+          `return [...document.querySelectorAll(".magpy-legend-row.${cls}")].map((r) => r.querySelector(".magpy-legend-label").textContent).join()`,
+        );
+      const upper = ["upper", "upper 0", "upper 1", "upper 2", "upper 3"];
+      const all = await tab.evaluate(
+        `return [...document.querySelectorAll(".magpy-legend-row")].map((r) => r.querySelector(".magpy-legend-label").textContent)`,
+      );
+      const before = await rows("off"); // what the eye's check hid
+      const { x, y } = await tab.evaluate(centreOf(eye));
+      const click = async () => {
+        await mouse("mousePressed", x, y, 1);
+        await mouse("mouseReleased", x, y, 0);
+        await wait(300);
+      };
+      await click();
+      const only = await rows("off");
+      // all but upper -- and "stack", which holds it, and is shown in part
+      const rest = all
+        .filter((label) => !upper.includes(label) && label !== "stack")
+        .join();
+      if (only !== rest) return `⌥-clicked, hidden: ${only}`;
+      await click();
+      const back = await rows("off");
+      if (back !== before) return `⌥-clicked again, hidden: ${back}`;
+      await mouse("mousePressed", x, y, 1);
+      for (let step = 1; step <= 10; step++) {
+        await mouse("mouseMoved", x - (50 * step) / 10, y, 1);
+      }
+      await mouse("mouseReleased", x - 50, y, 0);
+      await wait(300);
+      const faded = await rows("faded");
+      const shown = all.filter((label) => !upper.includes(label));
+      if (faded !== shown.join()) return `⌥-slid, faded: ${faded}`;
+      if (upper.some((label) => faded.split(",").includes(label))) {
+        return "⌥-slid, the row itself faded";
+      }
+      await mouse("mousePressed", x, y, 1); // on the eye again, rightwards
+      for (let step = 1; step <= 10; step++) {
+        await mouse("mouseMoved", x + (60 * step) / 10, y, 1);
+      }
+      await mouse("mouseReleased", x + 60, y, 0);
+      await wait(300);
+      const whole = await rows("faded");
+      return whole ? `slid back, still faded: ${whole}` : null;
+    },
+  );
+
   await check("the picture tool saves the view as a PNG", async () => {
     await tab.hover(await tab.evaluate(centreOf(VIEW)));
     await wait(300);

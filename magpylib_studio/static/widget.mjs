@@ -390,6 +390,7 @@ const KEY_LIST = {
     ["1 · 3 · 7", "look from the front, the right, the top"],
     ["5", "perspective or parallel"],
     ["H", "hide the selection — ⇧H: show only it"],
+    ["⌥ / Alt on an eye", "click: show only that row — slide: fade the rest"],
     ["Esc", "select nothing"],
     ["space", "play the path"],
     ["⌘ / Ctrl click", "add to the selection"],
