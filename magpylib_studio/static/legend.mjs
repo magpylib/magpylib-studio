@@ -3,7 +3,9 @@
  *
  * The tree view of magpylib's three.js prototype (`sandbox/threejs`), kept as
  * it was: a caret folds a collection, an eye hides it and everything beneath
- * it -- or, pressed and slid sideways, fades it -- a swatch says what it is
+ * it -- or, pressed and slid sideways, fades it; with option (alt) held, the
+ * eye does that to everything else: a click shows only the row, and again
+ * puts back what was hidden, a slide fades the rest -- a swatch says what it is
  * drawn in, and the label selects -- a plain click
  * replaces, cmd/ctrl toggles, shift takes the range from the last row clicked,
  * in tree order, which is the only order a scene has. A double click frames
@@ -233,6 +235,7 @@ export function createLegend(
   { onSelect, onHide, onFade, onFrame, onHint, onIntend, onMeasure, canEdit },
 ) {
   let order = []; // every node, in tree order
+  let roots = []; // the nodes at the top of the tree
   let leaves = new Map(); // id -> the drawn objects under that row
   let shows = new Map(); // id -> what its eye hides: those, or their parts
   let holds = {}; // the collections the view can select, as the payload says
@@ -248,6 +251,10 @@ export function createLegend(
   const rows = new Map(); // id -> row element
   const eyes = new Map(); // id -> its row's eye
   let barEl = null; // how far a slide has faded its row, along the row's foot
+  // What an option-click on an eye hid, as it stood then, and what was hidden
+  // before it: the next option-click on that eye puts that back, while
+  // nothing else has changed what is hidden.
+  let only = null; // { id, hid, before }
   // Folded collections, by where they sit rather than by id: a re-pointed view
   // is new objects at new ids, and a slider drag should not unfold what the
   // user had folded.
@@ -360,19 +367,48 @@ export function createLegend(
     onHide([...next]);
   }
 
-  /** The share of their own opacity a row's objects are drawn at, together. */
-  function levelOf(node) {
-    const mine = shows.get(node.id);
-    if (!mine.length) return 1;
-    const sum = mine.reduce((total, id) => total + (faded.get(id) ?? 1), 0);
-    return sum / mine.length;
+  /** What every other row's eye hides: all the scene draws but `node`'s. */
+  function othersOf(node) {
+    const mine = new Set(shows.get(node.id));
+    const all = new Set(roots.flatMap((root) => shows.get(root.id)));
+    return [...all].filter((id) => !mine.has(id));
   }
 
-  /** What is faded, with all `node` holds at `level`. Drawn whole is not
-   *  faded, and is left out. */
-  function fadedWith(node, level) {
+  const asKey = (ids) => [...ids].sort().join();
+
+  /** Option-click on an eye: the row shown, everything else hidden -- and
+   *  on that eye again, while that is still what is hidden, back to what was
+   *  hidden before. */
+  function showOnly(node) {
+    if (only?.id === node.id && only.hid === asKey(hidden)) {
+      const { before } = only;
+      only = null;
+      onHide(before);
+      return;
+    }
+    const next = othersOf(node);
+    only = { id: node.id, hid: asKey(next), before: [...hidden] };
+    onHide(next);
+  }
+
+  /** The share of their own opacity `ids` are drawn at, together. */
+  function levelOfIds(ids) {
+    if (!ids.length) return 1;
+    const sum = ids.reduce((total, id) => total + (faded.get(id) ?? 1), 0);
+    return sum / ids.length;
+  }
+
+  /** The share of their own opacity a row's objects are drawn at, together. */
+  const levelOf = (node) => levelOfIds(shows.get(node.id));
+
+  /** What is faded, with all `node` holds at `level` -- or, for `others`,
+   *  all else at `level` and `node` whole. Drawn whole is not faded, and is
+   *  left out. */
+  function fadedWith(node, level, others = false) {
     const next = new Map(faded);
-    for (const id of shows.get(node.id)) {
+    const mine = shows.get(node.id);
+    if (others) for (const id of mine) next.delete(id);
+    for (const id of others ? othersOf(node) : mine) {
       level < 1 ? next.set(id, level) : next.delete(id);
     }
     return next;
@@ -380,15 +416,18 @@ export function createLegend(
 
   /** Press on a row's eye and slide sideways to fade what the row holds:
    *  left for less of it, right for more, `SLIDE_RANGE` pixels the whole
-   *  way. A press that does not slide is a click, and hides. The view is
-   *  told at every step, and the level settled once, at the release. */
+   *  way -- with option held, everything else, the row whole. A press that
+   *  does not slide is a click, and hides. The view is told at every step,
+   *  and the level settled once, at the release. */
   function slideToFade(eye, node) {
-    let from = null; // where the press began, and the level then
+    let from = null; // where the press began, the level then, and of what
     let slid = false;
     eye.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       eye.setPointerCapture(event.pointerId);
-      from = { x: event.clientX, level: levelOf(node) };
+      const others = event.altKey;
+      const level = others ? levelOfIds(othersOf(node)) : levelOf(node);
+      from = { x: event.clientX, level, others };
       slid = false;
     });
     eye.addEventListener("pointermove", (event) => {
@@ -399,9 +438,13 @@ export function createLegend(
         slid = true;
         rows.get(node.id).classList.add("sliding");
         onHint?.([]); // the hover's outline would cover the fade it shows
-        // a hidden row slid is a row to look at
+        // a hidden row slid is a row to look at; and slid with option, what
+        // option-clicking it hid
         const mine = shows.get(node.id);
-        if (mine.every((id) => hidden.has(id))) {
+        if (from.others && only?.id === node.id && only.hid === asKey(hidden)) {
+          onHide(only.before.filter((id) => !mine.includes(id)));
+          only = null;
+        } else if (mine.every((id) => hidden.has(id))) {
           onHide([...hidden].filter((id) => !mine.includes(id)));
         }
       }
@@ -410,7 +453,7 @@ export function createLegend(
         Math.round(
           100 * Math.min(1, Math.max(FAINTEST, from.level + dx / SLIDE_RANGE)),
         ) / 100;
-      faded = fadedWith(node, level);
+      faded = fadedWith(node, level, from.others);
       paint();
       barEl ??= part("magpy-legend-bar");
       barEl.style.setProperty("--fade", String(level));
@@ -428,8 +471,9 @@ export function createLegend(
     eye.addEventListener("pointerup", release);
     eye.addEventListener("pointercancel", release);
     // The release of a slide is a click as well, and not one that hides.
-    eye.addEventListener("click", () => {
+    eye.addEventListener("click", (event) => {
       if (slid) slid = false;
+      else if (event.altKey) showOnly(node);
       else toggleHidden(node);
     });
   }
@@ -443,7 +487,8 @@ export function createLegend(
     const caret = part("magpy-legend-caret");
     const eye = part(
       "magpy-legend-eye",
-      "Show / hide — slide sideways to fade",
+      "Show / hide — slide sideways to fade. With ⌥ / Alt: show only " +
+        "this, again to undo — slide to fade the rest",
     );
     const swatch = part("magpy-legend-swatch");
     const label = part("magpy-legend-label");
@@ -783,6 +828,7 @@ export function createLegend(
     const drawn = drawnIn(payload);
     holds = payload.collections || {};
     order = inTreeOrder(tree);
+    roots = tree;
     leaves = new Map();
     shows = new Map();
     parents = new Map();

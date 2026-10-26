@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>⌥ on a legend eye: show only that row, or fade the rest</summary>
+
+Option-click (Alt-click) a row's eye in the legend to show only what the row
+holds and hide everything else; Option-click it again to put back what was
+hidden before. Hold Option and slide the eye sideways to fade everything else,
+the row staying whole -- as a slide without Option fades the row itself. The
+eye's tooltip and the key list say so (#93).
+
+</details>
+
 ## [0.8.0]
 
 ### Changed
