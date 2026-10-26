@@ -5,6 +5,8 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.8.0]
+
 ### Changed
 
 <details>
