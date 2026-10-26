@@ -14,7 +14,7 @@ Option-click (Alt-click) a row's eye in the legend to show only what the row
 holds and hide everything else; Option-click it again to put back what was
 hidden before. Hold Option and slide the eye sideways to fade everything else,
 the row staying whole -- as a slide without Option fades the row itself. The
-eye's tooltip and the key list say so.
+eye's tooltip and the key list say so (#93).
 
 </details>
 
