@@ -338,6 +338,51 @@ def _in_chunks(get, sources, points):
     return out
 
 
+def readings(objects):
+    """What each sensor's pixels read, as magpylib's `pixel_fields` gives
+    it: ``{sensor: (path_length, n_pixels, 3)}``, in the sensor's own frame,
+    of the field its pixels' source names. On `THREADS` threads
+    (`_in_chunks`) where nothing has a path and each reads B or H: magpylib
+    reads every source at every pixel on one, three quarters of a second
+    for a probe past the U-core of material-response's docs, 5,888 cells.
+    Magpylib's own otherwise."""
+    from magpylib.graphics.backend import pixel_fields
+
+    objects = list(objects)
+    sources = sources_of(objects)
+    sensors, seen = [], set()
+    for obj in objects:
+        for each in (obj, *getattr(obj, "children_all", ())):
+            if (
+                isinstance(each, magpy.Sensor)
+                and id(each) not in seen
+                and each.style.pixel.field.source
+            ):
+                seen.add(id(each))
+                sensors.append(each)
+    if any(len(np.atleast_2d(o.position)) > 1 for o in (*sources, *sensors)) or any(
+        s.style.pixel.field.source[0] not in "BH" for s in sensors
+    ):
+        return pixel_fields(objects)
+    out = {}
+    if not sources:
+        return out
+    for sensor in sensors:
+        source = sensor.style.pixel.field.source
+        pixel = np.zeros(3) if sensor.pixel is None else sensor.pixel
+        pixel = np.asarray(pixel, dtype=float).reshape(-1, 3)
+        pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
+        turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
+        get = magpy.getH if source[0] == "H" else magpy.getB
+        values = turn.inv().apply(_in_chunks(get, sources, turn.apply(pixel) + pose))
+        if getattr(sensor, "handedness", "right") == "left":
+            values[:, 0] *= -1
+        named = source[1:] or "xyz"
+        values[:, [i for i, axis in enumerate("xyz") if axis not in named]] = 0
+        out[sensor] = values.reshape(1, -1, 3)
+    return out
+
+
 def field(sources, points, kind="B"):
     """B, or H, at `points` from `sources`, summed; zero for no sources.
     Zero too where magpylib says NaN -- a point within rounding of a

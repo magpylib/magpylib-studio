@@ -13,10 +13,9 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="/static/widget.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="host"></div>
     <script type="module">
       import widget from "/static/widget.js";
 
@@ -96,6 +95,8 @@
           else if (method === "set_param") result = made({ value: p.value });
           else if (method === "set_transform")
             result = made({ position: p.position, orientation: p.orientation });
+          // the scene with the answer when asked for, as the kernel sends it
+          if (message.scene) result = { ...result, scene };
           // answered as late as the page says: a quick python, or a slow one
           setTimeout(
             () => emit("msg:custom", { kind: "rpc", id: message.id, result }),
@@ -104,7 +105,13 @@
         },
       };
 
-      const el = document.getElementById("root");
+      // in a shadow root with its own stylesheet, as marimo draws a widget
+      const shadow = document
+        .getElementById("host")
+        .attachShadow({ mode: "open" });
+      shadow.innerHTML =
+        '<link rel="stylesheet" href="/static/widget.css" /><div id="root"></div>';
+      const el = shadow.getElementById("root");
       if (query.has("narrow")) el.style.width = "480px";
       widget.render({ model, el });
       await until(() => el.querySelector("canvas"));
@@ -136,15 +143,88 @@
       const early = on();
       await wait(450); // 700 ms after asking
       const waiting = on();
+      // drawn, and turning: its colours are laid from an angle that moves
+      const style = () => getComputedStyle(ring());
+      const painted = style().backgroundImage !== "none";
+      const turned = style().getPropertyValue("--magpy-busy-turn");
+      await wait(150);
+      const turns = style().getPropertyValue("--magpy-busy-turn") !== turned;
       window.shot = true; // a picture may be taken now
       await until(() => !on());
       const answeredAfter = performance.now() - askedAt;
+      // a slider moved on, or a magnet dragged, while each value is answered
+      // in less than the ring's wait: the newest waits behind the one away,
+      // the view falls behind the pointer, and the ring comes on once and
+      // stays on until it catches up
+      window.delay = 250;
+      const flips = [];
+      new MutationObserver(() => flips.push(on() ? "on" : "off")).observe(
+        ring(),
+        { attributeFilter: ["class"] },
+      );
+      const behind = async (start, move, release) => {
+        flips.length = 0;
+        start();
+        for (let i = 1; i <= 10; i++) {
+          move(i);
+          await wait(100);
+        }
+        release();
+        await wait(1200);
+        return flips.join();
+      };
+      const slider = el.querySelector(".magpy-vars-row input[type=range]");
+      const sliding = await behind(
+        () =>
+          slider.dispatchEvent(
+            new PointerEvent("pointerdown", { bubbles: true }),
+          ),
+        (i) => {
+          slider.value = String(Number(slider.min) + i);
+          slider.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        () => {
+          slider.dispatchEvent(new Event("change", { bubbles: true }));
+          slider.dispatchEvent(
+            new PointerEvent("pointerup", { bubbles: true }),
+          );
+        },
+      );
+      const host = el.querySelector(".magpy-scene-view");
+      const fire = (type, detail) =>
+        host.dispatchEvent(new CustomEvent(type, { detail }));
+      const pose = (i) => [{ objectId: "m", position: [0.001 * i, 0, 0] }];
+      const dragging = await behind(
+        () => fire("dragstart", { objectIds: ["m"], mode: "translate" }),
+        (i) => fire("objecttransform", { preview: true, edits: pose(i) }),
+        () => fire("objecttransform", { preview: false, edits: pose(11) }),
+      );
+      // python busy past the view's patience: said, still rung, and the
+      // answer taken when it comes, with nothing left saying it was not
+      window.delay = 4600;
+      slider.value = String(Number(slider.min) + 3);
+      slider.dispatchEvent(new Event("change", { bubbles: true }));
+      window.delay = 10;
+      await wait(4300);
+      const shown = () =>
+        el.querySelector(".magpy-scene-notice.shown")?.textContent ?? "";
+      const late = { said: shown(), waiting: on() };
+      await wait(800);
+      late.after = {
+        ring: on(),
+        notice: shown(),
+        status: el.querySelector(".magpy-vars-status")?.textContent ?? "",
+      };
       window.result = {
         exists: Boolean(ring()),
         quick,
         early,
         waiting,
+        painted,
+        turns,
         answeredAfter,
+        behind: { slider: sliding, drag: dragging },
+        late,
       };
     </script>
   </body>

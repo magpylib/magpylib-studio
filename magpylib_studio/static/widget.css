@@ -40,7 +40,9 @@
 
 /* While python is slow to answer (`watchBusy`): a pulse of current running
    round the view's edge, as round a coil -- a comet in the focus colour on a
-   ring two pixels wide, fading in and out. */
+   ring three pixels wide, the rest of the ring faintly lit, fading in and
+   out. The turn is registered here and again in widget.mjs: `@property` is
+   ignored in a shadow root, where marimo draws a widget. */
 @property --magpy-busy-turn {
   syntax: "<angle>";
   inherits: false;
@@ -51,15 +53,15 @@
   position: absolute;
   inset: 0;
   z-index: 3;
-  padding: 2px;
+  padding: 3px;
   pointer-events: none;
   background: conic-gradient(
     from var(--magpy-busy-turn),
-    transparent 0deg 230deg,
-    color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent) 300deg,
-    var(--vscode-focusBorder) 348deg,
-    color-mix(in srgb, var(--vscode-focusBorder) 40%, white) 358deg,
-    transparent 360deg
+    color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent) 0deg 200deg,
+    color-mix(in srgb, var(--vscode-focusBorder) 60%, transparent) 290deg,
+    var(--vscode-focusBorder) 345deg,
+    color-mix(in srgb, var(--vscode-focusBorder) 40%, white) 357deg,
+    color-mix(in srgb, var(--vscode-focusBorder) 25%, transparent) 360deg
   );
   /* the ring alone: the box less its content */
   -webkit-mask:

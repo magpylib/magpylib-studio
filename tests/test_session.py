@@ -5,12 +5,13 @@ import json
 import os
 import sys
 import tempfile
+from typing import Annotated
 
 import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import scene, threejs
+from magpylib_studio import Count, derived, duplicate_along, grid, scene, threejs
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     DOC_VERSION,
@@ -502,6 +503,103 @@ def test_a_drags_later_steps_draw_only_what_it_moves():
     ):
         assert low <= was_low and high >= was_high
     assert "partial" not in s.get_scene(partial=True)  # out of a drag, whole
+
+
+@scene
+def _bench(
+    density: Annotated[int, Count(4, 40)] = 6,
+    gap: float = 0.02,
+    lift: float = 0.03,
+    count: Annotated[int, Count(1, 5)] = 2,
+):
+    """A magnet patterned in a row, a probe that reads the field and a
+    sealed body, each moved by a variable of its own."""
+    half = derived("half", gap / 2)
+    m = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(half, 0, 0)
+    )
+    row = magpy.Collection(m)
+    duplicate_along(m, count=count, step=(0.02, 0, 0))
+    probe = magpy.Sensor(position=(0, 0, 0.03), pixel=grid(0.04, density))
+    probe.style.pixel.field.source = "B"
+    body = magpy.Collection()
+    body.sealed = True
+    body.add(
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0, -0.03)
+        )
+    )
+    body.move((0, lift, 0))
+    return row, probe, body
+
+
+#: Each variable of `_bench`, two values to slide it through, and what a
+#: step that slides it draws again.
+SLIDES = [
+    ("density", (7, 8), ["probe"]),  # a sensor's pixels: the probe alone
+    ("gap", (0.022, 0.024), ["m", "probe"]),  # through `half`; copies and all
+    ("lift", (0.033, 0.036), ["body", "probe"]),  # sealed: no handle carries it
+    ("count", (3, 4), ["m", "probe"]),  # copies made: the pattern's source
+]
+
+
+@pytest.mark.parametrize(("variable", "values", "redrawn"), SLIDES)
+def test_a_sliders_steps_draw_only_what_its_variable_moves(variable, values, redrawn):
+    """A slider's steps hold what the steps written in its variable move --
+    or in a variable written in it -- and the sensors that read the field;
+    the rest stands as the view shows it. From the first step, when the view
+    shows the scene last drawn whole, as a notebook's view says it does."""
+    s = _bench.build().session
+    s.set_field_lines(True)
+    shown = s.get_scene()
+    s.begin_interaction()
+    s.shows(shown)
+    steps = []
+    for value in values:
+        s.set_variable(variable, value)
+        steps.append(s.get_scene(partial=True))
+    s.end_interaction()
+    for step in steps:
+        assert step["partial"] == redrawn
+        assert sorted({item["object_id"] for item in step["meshes"]}) == redrawn
+
+
+@pytest.mark.parametrize(("variable", "values", "redrawn"), SLIDES)
+def test_a_scene_asked_for_whole_after_a_gesture_is_the_scene(
+    variable, values, redrawn
+):
+    """Asked for whole once a gesture is let go, the scene draws again only
+    what the gesture moved, and is item for item the scene drawn anew -- or,
+    where the gesture made or removed objects, is drawn anew."""
+
+    def items(scene):
+        luts = scene["luts"]
+        return sorted(
+            json.dumps(
+                {**item, "lut": luts[item["lut"]]}
+                if isinstance(item.get("lut"), int)
+                else item,
+                sort_keys=True,
+            )
+            for kind in ("meshes", "scatters", "pixels")
+            for item in scene[kind]
+        )
+
+    s = _bench.build().session
+    s.set_field_lines(True)
+    s.get_scene()
+    s.begin_interaction()
+    for value in values:
+        s.set_variable(variable, value)
+        s.get_scene(partial=True)
+    s.end_interaction()
+    assert (s._whole_since() is None) == (variable == "count")
+    drawn = s.get_scene()
+    s._whole = None
+    anew = s.get_scene()
+    assert items(drawn) == items(anew)
+    for key in ("overlaps", "fieldlines", "anchors", "shapes"):
+        assert drawn[key] == anew[key]
 
 
 def test_a_drags_later_steps_keep_the_colours_of_its_first():
