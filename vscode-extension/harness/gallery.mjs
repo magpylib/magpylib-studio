@@ -193,6 +193,13 @@ try {
   }
   page.close();
 } finally {
-  proc.kill();
-  fs.rmSync(work, { recursive: true, force: true });
+  // Chrome writes to its profile as it shuts down: its folder is taken away
+  // once it has gone, or the delete can find it not yet empty.
+  if (proc.exitCode === null && proc.signalCode === null) {
+    await new Promise((resolve) => {
+      proc.once("exit", resolve);
+      proc.kill();
+    });
+  }
+  fs.rmSync(work, { recursive: true, force: true, maxRetries: 5 });
 }
