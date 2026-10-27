@@ -13,7 +13,7 @@ import json
 import pathlib
 import sys
 
-#: The picture's height in CSS pixels; `gallery.mjs` takes it 16:10.
+#: The picture's height in CSS pixels; `gallery.mjs` takes it 4:3.
 HEIGHT = 300
 
 #: What a picture leaves out: the view's overlays, and the page's margin and

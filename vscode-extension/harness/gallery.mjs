@@ -6,8 +6,9 @@
  *
  * Every example the gallery offers, as it loads, saved as a page and dressed
  * as a picture (`gallery.py`), is opened in headless Chrome and taken at
- * 480 x 300 CSS pixels, twice that in pixels, in each theme. The field lines
- * flow, so each page is handed one fixed time to draw at: the same scene
+ * 400 x 300 CSS pixels, twice that in pixels, in each theme: 4:3, as every
+ * example picture in magpylib's docs is, so these sit among them. The field
+ * lines flow, so each page is handed one fixed time to draw at: the same scene
  * makes the same picture, and a run that changed nothing changes no file.
  *
  * Run it after changing an example or how the view draws one, and commit the
@@ -29,7 +30,7 @@ const { enginePython } = require("./engine-python.js");
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(HERE, "..", "media", "gallery");
-const WIDTH = 480;
+const WIDTH = 400;
 const HEIGHT = 300; // gallery.py's HEIGHT
 /** The time every frame is drawn at: a third of the way through a pulse of
  *  the field lines' flow (`scene3d.mjs` runs 0.8 a second). */

@@ -2087,7 +2087,8 @@ design: two concentric rings, its field lines across the bore, a variant or two.
   it loads, saved as a page, taken in headless Chrome in the light theme and the
   dark, its flow held at one time, so the same scene makes the same file. They
   are plain files in `media/gallery/`, about 25 KB each, for the docs to use
-  too.
+  too, and 4:3, as every example picture in magpylib's docs is: a tall scene is
+  a quarter bigger than at 16:10, and a wide one no smaller.
 - **The notebook's two designs are the first two examples**, written in
   `designs.py` as the scene functions they are, a test holding them to the
   notebook's. The rings load with their field lines on, as the notebook shows
