@@ -576,7 +576,7 @@ def array_scene():
 
 
 def tolerance_scene(resolution=7):
-    """A probe under a magnet, and the patch it might be misplaced within.
+    """A probe over a magnet, and the patch it might be misplaced within.
 
     The question a field map is for. A Hall sensor is placed by a pick-and-
     place machine or a person with a jig, and neither puts it exactly where
@@ -664,15 +664,27 @@ def tolerance_scene(resolution=7):
                 "id": "probe",
                 "type": "Sensor",
                 "params": {
-                    # Under the magnet by the air gap, measured from its face
+                    # Over the magnet by the air gap, measured from its face
                     # rather than its centre — which is how a gap is quoted.
-                    "position": [0, 0, "=-(mag / 2 + gap)"],
+                    # Over, not under: the view looks down on a scene, and
+                    # under the magnet the patch was hidden by it.
+                    "position": [0, 0, "=mag / 2 + gap"],
                     "pixel": [
                         [[coordinate(u), coordinate(v), 0] for u in steps]
                         for v in steps
                     ],
                 },
-                "style": {"label": "Where the probe might sit", "size": SENSOR_SIZE},
+                # each pixel an arrow coloured by what it reads, so the patch
+                # shows how much the field varies across it; the probe drawn
+                # as a small package, 2 mm, so that the patch, not its axes,
+                # is what the eye finds
+                "style": {
+                    "label": "Where the probe might sit",
+                    "size": 0.002,
+                    "pixel.field.source": "B",
+                    "pixel.field.symbol": "arrow3d",
+                    "pixel.field.colormap": "Viridis",
+                },
             },
         ],
     }
@@ -942,8 +954,9 @@ EXAMPLES = {
     ),
     "tolerance": (
         "Probe placement",
-        "A probe under a magnet and the patch it might be misplaced "
-        "within — drag the tolerance and read what it costs",
+        "A probe over a magnet and the patch it might be misplaced "
+        "within, coloured by the field — drag the tolerance and read what "
+        "it costs",
         tolerance_scene,
     ),
     "quiver": (

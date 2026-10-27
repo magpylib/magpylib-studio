@@ -17,8 +17,10 @@ Halbach rings, with their field lines, in place of the Halbach stack, and a
 Helmholtz coil pair whose variants run the currents together or against each
 other; the solenoid, which the pair shows twice over, is no longer listed. Both
 still load by name, `load_example("halbach")` and `load_example("coil")`.
-`npm run gallery` draws the pictures. The Get Started walkthrough is rewritten
-for the studio as it is now, the gallery its first step.
+`npm run gallery` draws the pictures. In the probe placement example the probe
+sits over the magnet, where the view sees it, its patch drawn as field arrows.
+The Get Started walkthrough is rewritten for the studio as it is now, the
+gallery its first step.
 
 </details>
 
