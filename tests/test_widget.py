@@ -14,7 +14,6 @@ import re
 import sys
 import tempfile
 import types
-from typing import Annotated
 
 import magpylib as magpy
 import numpy as np
@@ -850,8 +849,8 @@ def test_changes_past_the_limit_are_served_instead(morphing, served):
 
 def test_only_what_changes_is_carried():
     """Pixels coloured by the field they sit in change as the sensor passes;
-    the magnets turning past it only move. Carried as frames, the ring would
-    be most of the run: posed, only the probe's pixels are."""
+    the magnets turning past it, and its axes, only move. Carried as frames,
+    the ring would be most of the run: posed, only the probe's pixels are."""
     ring = magpy.Collection(
         *[
             magpy.magnet.Cuboid(
@@ -873,7 +872,8 @@ def test_only_what_changes_is_carried():
         item for item in played["meshes"] + played["scatters"] if "changes" in item
     ]
     assert {item["object_id"] for item in changing} == {str(id(sensor))}
-    assert sum("track" in item for item in played["meshes"]) == 8
+    assert all("glyph" not in item for item in changing)
+    assert sum("track" in item for item in played["meshes"]) == 8 + 1
     _replays(scene, played)
 
 
@@ -2025,52 +2025,127 @@ def test_another_controls_trait_links_to_the_variables_both_ways():
     assert knobs.values["axis"] == "y"
 
 
-def test_a_bare_sensor_is_drawn_the_studios_size_and_magpylib_is_left_as_it_was():
-    """A sensor whose style says no size is drawn at the studio's default --
-    five millimetres, not magpylib's default of one, which the studio's
-    absolute sizing would make a metre -- and the drawing puts magpylib's
-    defaults back, so a notebook's own `show` after it is as it was."""
-    from magpylib_studio import Length, name, scene
+@pytest.mark.parametrize(
+    "style",
+    [
+        {},
+        {"size": 0.3},
+        {"size": 0.3, "sizemode": "scaled"},
+        {"size": 0.003, "sizemode": "absolute"},
+    ],
+)
+def test_a_glyphs_size_is_read_as_magpylib_reads_it(style):
+    """A size alone is magpylib's ``"scaled"``, as `magpy.show()` reads it:
+    a share of the view per unit, which the view keeps whatever the zoom --
+    not metres, which a pin on magpylib's defaults once made of it, a 0.3
+    drawn 300 mm long. An absolute size is metres. A dipole is resized in
+    the same units its style says, and drawing leaves the styles, and
+    magpylib's defaults, as they were."""
+    from magpylib_studio import name, scene
 
     display = magpy.defaults.display
-    before = (
-        display.units.length,
-        display.style.sensor.sizemode,
-        display.style.sensor.size,
-        display.style.dipole.sizemode,
-        display.style.dipole.size,
-    )
+    before = display.units.length, display.style.sensor.sizemode
 
     @scene
-    def ring(r: Annotated[float, Length(0.01, 0.08)] = 0.025):
-        magnet = name(
-            magpy.magnet.Cuboid(
-                dimension=(0.008, 0.008, 0.008),
-                polarization=(0, 1, 0),
-                position=(r, 0, 0),
-            ),
-            "m",
+    def probed():
+        magnet = name(magpy.magnet.Cuboid(dimension=(0.008,) * 3), "m")
+        probe = name(magpy.Sensor(position=(0.012, 0, 0), style=style), "probe")
+        dipole = magpy.misc.Dipole(
+            position=(-0.012, 0, 0), moment=(0, 0, 1), style=style
         )
-        probe = name(magpy.Sensor(style_label="Probe"), "probe")
-        sized = name(magpy.Sensor(style_label="Sized", style_size=0.002), "sized")
-        return magnet, probe, sized
+        return magnet, probe, name(dipole, "dipole")
 
-    studio = widget.SceneWidget(ring.build(), editable=True)
-    span = max(high - low for low, high in studio.payload["ranges"])
-    assert span < 0.08, f"a 25 mm ring with a 5 mm probe spans {span:.3f} m"
-    assert (
-        display.units.length,
-        display.style.sensor.sizemode,
-        display.style.sensor.size,
-        display.style.dipole.sizemode,
-        display.style.dipole.size,
-    ) == before
-    studio._session.get_figure()  # the chart draws under the same pin
-    assert display.style.sensor.sizemode == before[1]
-    # a size the style does say is kept
-    doc = studio._session.doc
-    sized = next(e for e in doc["events"] if e.get("target") == "sized")
-    assert sized["style"]["size"] == 0.002
+    studio = widget.SceneWidget(probed.build(), editable=True)
+    (axes,) = [m for m in studio.payload["meshes"] if m["object_id"] == "probe"]
+    span = float(np.ptp(np.reshape(axes["position"], (-1, 3)), axis=0).max())
+    size = style.get("size", 1)
+    if style.get("sizemode") == "absolute":
+        assert "glyph" not in axes and 0.002 < span < 0.005
+    else:
+        assert axes["glyph"]["share"] == pytest.approx(size * threejs.GLYPH_SHARE)
+        assert axes["glyph"]["drawn"] == pytest.approx(size * threejs.GLYPH_SIZE)
+        assert axes["glyph"]["anchor"] == pytest.approx([0.012, 0, 0])
+    assert studio.payload["shapes"]["dipole"]["value"] == pytest.approx(size)
+    live = studio._session._objs["probe"].style
+    assert (live.size, live.sizemode) == (style.get("size"), style.get("sizemode"))
+    assert (display.units.length, display.style.sensor.sizemode) == before
+
+
+def test_what_magpylib_sizes_to_the_scene_comes_marked_for_the_view():
+    """A sensor's axes and a dipole's arrow come marked ``glyph``, each copy
+    `style.path.frames` draws about its own step. A sensor's pixels -- where
+    they are, the size their spacing gives them -- come apart from its axes
+    unmarked, unless they sit on its origin, where the axes size them."""
+    grid = np.mgrid[-2:3, 0:1, -2:3].reshape(3, -1).T * 0.002
+    walk = np.linspace((0, 0, 0.004), (0.01, 0, 0.004), 5)
+    objects = {
+        "grid": magpy.Sensor(position=(0, 0, 0.004), pixel=grid),
+        "origin": magpy.Sensor(position=(0, 0, 0.004), pixel=(0, 0, 0)),
+        "walk": magpy.Sensor(position=walk, style_path_frames=2),
+        "dipole": magpy.misc.Dipole(position=(0.01, 0, 0), moment=(0, 0, 1)),
+    }
+    scene = threejs._capture(
+        [magpy.magnet.Cuboid(dimension=(0.01,) * 3), *objects.values()]
+    )
+    per_mm = threejs._drawn_per_metre(scene)
+    for name, obj in objects.items():
+        meshes = [
+            t
+            for t in scene.frames[0].traces
+            if t["object_id"] == id(obj) and t["type"] == "mesh3d"
+        ]
+        anchors = [t["glyph"]["anchor"] for t in meshes if "glyph" in t]
+        drawn = {
+            "grid": [obj.position],
+            "origin": [obj.position],
+            "walk": walk[[4, 2, 0]],
+            "dipole": [obj.position],
+        }[name]
+        assert anchors == pytest.approx(np.asarray(drawn) * per_mm)
+        unmarked = [t for t in meshes if "glyph" not in t]
+        assert len(unmarked) == (name == "grid"), name
+    # the grid's pixels drawn as magpylib drew them: 25 cubes and their hull
+    (pixels,) = [
+        t
+        for t in scene.frames[0].traces
+        if t["object_id"] == id(objects["grid"])
+        and "glyph" not in t
+        and t["type"] == "mesh3d"
+    ]
+    assert len(pixels["x"]) == 26 * 8
+
+
+@pytest.mark.parametrize("how", ["cell", "backend", "sized by show", "framed by show"])
+def test_glyphs_are_marked_however_a_view_is_drawn(how):
+    """A cell's view and `magpy.show(backend="widget")` both mark what
+    magpylib sizes to the scene, in the drawing's millimetres: a dipole's
+    arrow, a sensor's axes and the pixel on its origin -- drawn apart in a
+    cell's view, with the axes in magpylib's own. A style given to `show`,
+    which the objects do not hold, leaves what it changes as magpylib drew
+    it: a size, or the probe's path drawn in copies."""
+    cube = magpy.magnet.Cuboid(dimension=(0.01,) * 3, polarization=(0, 0, 1))
+    walk = np.linspace((0.014, 0, -0.004), (0.014, 0, 0), 3)
+    probe = magpy.Sensor(position=walk, pixel=(0, 0, 0))
+    probe.style.pixel.field.source = "B"
+    dipole = magpy.misc.Dipole(position=(-0.014, 0, 0), moment=(0, 0, 1))
+    if how == "backend":
+        view = magpy.show(cube, probe, dipole, backend="widget", return_fig=True)
+    else:
+        styled = {
+            "sized by show": {"style_size": 0.5},
+            "framed by show": {"style_path_frames": 1},
+        }.get(how, {})
+        view = widget.SceneWidget(cube, probe, dipole, **styled)
+    drawn = view.payload["meshes"] + view.payload["pixels"]
+    anchors = sorted(item["glyph"]["anchor"][0] for item in drawn if "glyph" in item)
+    assert anchors == pytest.approx(
+        {
+            "cell": [-14, 14, 14],
+            "backend": [-14, 14],
+            "sized by show": [],
+            "framed by show": [-14],
+        }[how]
+    )
 
 
 def test_a_preview_carries_the_scene_in_its_own_answer():

@@ -28,7 +28,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0017](#0017-the-scene-is-a-function-in-plain-magpylib-recorded)                               | The scene is a function in plain magpylib, recorded          | accepted 2026-10-09, as built                                        |
 | [0018](#0018-a-view-is-read-only-until-its-pencil-is-pressed)                                  | A view is read only until its pencil is pressed              | accepted 2026-10-09, as built; amended 2026-10-10                    |
 | [0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)                        | The editor's panels are the widget's, and a host mounts them | accepted 2026-10-09, as built                                        |
-| [0020](#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone) | A bare sensor is drawn at the studio's size                  | accepted 2026-10-09, as built                                        |
+| [0020](#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone) | A bare sensor is drawn at the studio's size                  | accepted 2026-10-09, as built; superseded by 0040                    |
 | [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built                                        |
 | [0022](#0022-what-the-widget-is-and-is-not)                                                    | What the widget is, and is not                               | accepted 2026-10-10                                                  |
 | [0023](#0023-the-inspector-is-the-widgets-object-panel-compact)                                | The Inspector is the widget's object panel, compact          | accepted 2026-10-10, as built                                        |
@@ -48,6 +48,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0037](#0037-fem-is-material-responses-extra-and-studio-calls-it)                              | FEM is material-response's extra, and studio calls it        | accepted 2026-10-24                                                  |
 | [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
 | [0039](#0039-examples-open-from-a-gallery)                                                     | Examples open from a gallery                                 | accepted 2026-10-27, as built                                        |
+| [0040](#0040-sensors-and-dipoles-keep-their-size-on-screen)                                    | Sensors and dipoles keep their size on screen                | accepted 2026-10-27, as built                                        |
 
 ---
 
@@ -1113,7 +1114,7 @@ way, for JupyterLab alone.
 
 ## 0020. A bare sensor is drawn at the studio's size, and magpylib's defaults are left alone
 
-**Status:** accepted 2026-10-09, as built.
+**Status:** accepted 2026-10-09, as built; superseded by 0040.
 
 ### Context
 
@@ -2106,3 +2107,55 @@ design: two concentric rings, its field lines across the bore, a variant or two.
   one run away.
 - **The stack moved out and the tests moved to the rings**: some sixty tests,
   the window checks and the evals rewritten, for nothing anyone sees.
+
+## 0040. Sensors and dipoles keep their size on screen
+
+**Status:** accepted 2026-10-27, as built; supersedes 0020. Alex asked for
+sensors and dipoles to keep their size on screen as the handles do, unless their
+style says absolute, and for #95 to be fixed with it; the share of the view, and
+path frames sized each about its own step, are as built, for him to review.
+
+### Context
+
+Magpylib gives a scaled sensor's axes and a dipole's arrow --
+`sizemode="scaled"`, its default -- `style.size` times a tenth of the scene, its
+`autosizefactor`: right for a figure nobody zooms. The studio must not let one
+object's move rescale another (0020), so it pinned magpylib's defaults to
+absolute while it drew, a bare glyph at 5 mm. A style's `size` without a
+`sizemode` inherited the pin and was read as metres: a 0.3 drew 300 mm where
+`magpy.show()` draws 0.34 mm (#95), and the examples' `size=0.005`, 5 mm in the
+studio, was next to nothing in `magpy.show()`. Zoomed in, a glyph covered what
+it measured; zoomed out, it was gone.
+
+### Decision
+
+- **A scaled sensor or dipole keeps 7 % of the view**: `style.size` times
+  `GLYPH_SHARE`, 0.07, of the view's height where it stands, whatever the zoom,
+  as the handles keep theirs. Fitted, that is the size a bare sensor's 5 mm had
+  across the shipped examples (Alex: a tenth was too big), and a little under
+  `magpy.show()`'s tenth of the scene. `sizemode="absolute"` is metres, as
+  stated.
+- **Only what magpylib sizes by the scene**: the axes, the arrow, and pixels all
+  on the sensor's origin, which magpylib sizes by the axes. Positions, pixels'
+  positions and the size their spacing gives them stay metres; the axes never
+  shrink under the pixels' least spread, as magpylib draws them. A copy
+  `style.path.frames` draws keeps its share about its own step.
+- **Sizes are read as magpylib reads them.** Nothing is pinned in magpylib's
+  defaults but the unit: a size alone is scaled. The examples write no size.
+- **The engine still draws them the same whatever else the scene holds**: at
+  `GLYPH_SIZE`, 5 mm per unit, their styles made absolute for the capture and
+  put back, each marked `glyph` -- its anchor, its share, the size it was drawn
+  at, its floor. The view scales each about its anchor before every frame, after
+  the pose a drag or a run gives it, and frames it at the size it was drawn at.
+
+### Rejected
+
+- **Magpylib's tenth of the scene, drawn as it comes**: one object's move
+  rescales every other, and changes the scene's reach with it.
+- **Matching `magpy.show()` exactly at the fitted view**: magpylib's tenth is of
+  a padded cube round the scene, which no share of a view is for every scene.
+- **A tenth of the view, magpylib's `autosizefactor` taken of it**: drawn so,
+  every probe in the examples was a third bigger than the studio drew it before;
+  too big.
+- **Scaling in a shader**: nothing per frame, but picking, outlines and the fit
+  would each need to know of it.

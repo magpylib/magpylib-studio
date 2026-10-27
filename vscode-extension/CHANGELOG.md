@@ -35,6 +35,22 @@ eye's tooltip and the key list say so (#93).
 
 </details>
 
+### Changed
+
+<details>
+<summary>Sensors and dipoles keep their size on screen as you zoom</summary>
+
+A sensor's axes and a dipole's arrow keep their size on screen as the view zooms
+in and out, as the handles keep theirs: 7 % of the view, the size a bare sensor
+had in the examples, where `magpy.show()` gives them a tenth of the scene.
+`style.size` scales it, and `sizemode="absolute"` makes it metres. Positions and
+a sensor's pixels stay as they are. A `size` given without a `sizemode` was
+drawn in metres, a 0.3 as 300 mm, and is now read as `magpy.show()` reads it
+(#95). The examples' sensors say no size any more; a scene saved from one says
+`size: 0.005`, which is now a speck: take it out.
+
+</details>
+
 ## [0.8.0]
 
 ### Changed

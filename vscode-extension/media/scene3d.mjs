@@ -256,6 +256,7 @@ function drawFrame(now) {
 
 /** The scene, and the marks over it: everything but the corner. */
 function drawPicture(now = performance.now()) {
+  if (sizeGlyphs()) placeGlyphMarks();
   keepBatches();
   const cues = cuesAt(now);
   lookOfOverlaps(cues);
@@ -643,7 +644,10 @@ function makeGizmo() {
     }
   });
   // A handle lit under the pointer, or moved by it.
-  gizmo.addEventListener("change", redraw);
+  gizmo.addEventListener("change", () => {
+    glyphsMoved = true;
+    redraw();
+  });
   gizmo.addEventListener("objectChange", () => {
     if (from?.shape) constrainScale(gizmo.object, from.shape.constraint);
     if (from) snapDragged(gizmo.object, from);
@@ -1459,6 +1463,114 @@ function sizeGrips() {
   }
 }
 
+// --- what magpylib sizes to the scene, sized to the view ----------------
+// A scaled sensor's axes and a dipole's arrow have no size of their own:
+// magpylib draws them at a tenth of the scene, for a figure that is never
+// zoomed. Here they keep a share of the view instead (`threejs.GLYPH_SHARE`,
+// said by each), as the handles keep theirs -- each at its own distance,
+// about its own anchor -- a sensor's never under the spread of its pixels.
+// Fitted, they open the size the studio drew them before; zoomed, they stay.
+const glyphs = new Set(); // the traces sized so, while they are drawn
+// Sized again only when they may have to be: a glyph built, posed or
+// dragged, or the camera moved. A current's flow draws sixty frames a
+// second with neither, and a thousand dipoles were half a millisecond each.
+let glyphsMoved = true;
+const glyphView = []; // the camera they were last sized for (`viewMoved`)
+
+/** Size `built` to the view from now on (`sizeGlyphs`), as `spec` says. Its
+ *  matrix is its pose -- what a drag or a run moves -- after a scale of its
+ *  own about `spec.anchor`; re-parented or carried, only the pose moves. */
+function makeGlyph(built, spec) {
+  const glyph = {
+    anchor: new THREE.Vector3().fromArray(spec.anchor),
+    share: spec.share,
+    drawn: spec.drawn,
+    floor: spec.floor,
+    scale: 1,
+    matrix: new THREE.Matrix4(),
+  };
+  built.userData.glyph = glyph;
+  const posed = THREE.Object3D.prototype.updateMatrix;
+  built.updateMatrix = function () {
+    posed.call(this);
+    this.matrix.multiply(glyph.matrix);
+  };
+  built.applyMatrix4 = function (matrix) {
+    posed.call(this);
+    this.matrix.premultiply(matrix);
+    this.matrix.decompose(this.position, this.quaternion, this.scale);
+    this.updateMatrix();
+  };
+  glyphs.add(built);
+  glyphsMoved = true;
+}
+
+/** Whether the camera stands elsewhere, or sees more or less, than when
+ *  the glyphs were last sized: all a glyph's size depends on, its own pose
+ *  aside. */
+function viewMoved() {
+  const now = [
+    ...camera.position.toArray(),
+    camera.zoom,
+    camera.fov ?? 0,
+    camera.top ?? 0,
+    camera.bottom ?? 0,
+  ];
+  if (now.every((value, k) => value === glyphView[k])) return false;
+  glyphView.splice(0, glyphView.length, ...now);
+  return true;
+}
+
+/** Size each glyph to its share of the view's height where it stands, or
+ *  to its floor, where that is more. Before each draw, as `sizeGrips` sizes
+ *  the handles. Whether any was sized again. */
+function sizeGlyphs() {
+  if (!glyphs.size) return false;
+  // both asked, so the camera is noted even when a glyph moved
+  if (!(viewMoved() | glyphsMoved)) return false;
+  glyphsMoved = false;
+  let sized = false;
+  const at = new THREE.Vector3();
+  const tall = camera.isOrthographicCamera
+    ? (camera.top - camera.bottom) / camera.zoom
+    : (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / camera.zoom;
+  for (const built of glyphs) {
+    const glyph = built.userData.glyph;
+    // from its node's, as the last frame or a drag left it: not the scene
+    // walked again for each of a thousand dipoles
+    built.updateWorldMatrix(false, false);
+    at.copy(glyph.anchor).applyMatrix4(built.matrixWorld);
+    const view = camera.isOrthographicCamera
+      ? tall
+      : tall * at.distanceTo(camera.position);
+    const scale = Math.max(glyph.share * view, glyph.floor) / glyph.drawn;
+    if (!(scale > 0) || Math.abs(scale / glyph.scale - 1) < 1e-4) continue;
+    glyph.scale = scale;
+    glyph.matrix.makeScale(scale, scale, scale);
+    glyph.matrix.setPosition(at.copy(glyph.anchor).multiplyScalar(1 - scale));
+    built.updateMatrix();
+    follow(built); // where a batch draws it
+    sized = true;
+  }
+  return sized;
+}
+
+/** `part`'s world matrix with the scale of the glyph it is, or is in, taken
+ *  out: where it stands at the size it was drawn at. What a fit frames --
+ *  framed at the size the view gives it, a glyph alone would be framed
+ *  closer every time, its size following the camera in. */
+function asDrawn(part) {
+  let glyph = part;
+  while (glyph && !glyph.userData.glyph) glyph = glyph.parent;
+  if (!glyph || glyph.userData.glyph.scale === 1) return part.matrixWorld;
+  const own = glyph.userData.glyph.matrix.clone().invert();
+  return glyph.matrixWorld
+    .clone()
+    .multiply(own)
+    .multiply(glyph.matrixWorld.clone().invert())
+    .multiply(part.matrixWorld);
+}
+
 /** Snap a length to the move's step, an angle to the turn's, when on. */
 function snapped(value, angle) {
   const step = angle
@@ -1528,6 +1640,13 @@ function snapTargets(skip) {
   const at = new THREE.Vector3();
   const visit = (part) => {
     if (!part.visible || part.userData.path || part.userData.unsnapped) return;
+    if (part.userData.glyph) {
+      // its anchor, not its vertices, which the zoom moves (`sizeGlyphs`)
+      at.copy(part.userData.glyph.anchor).applyMatrix4(part.matrixWorld);
+      const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
+      if (!seen.has(key)) seen.set(key, at.clone());
+      return;
+    }
     if (!part.isInstancedMesh && !part.isPoints) {
       for (const [x, y, z] of verticesOf(part.geometry)) {
         at.set(x, y, z).applyMatrix4(part.matrixWorld);
@@ -1617,13 +1736,26 @@ function drawnPointsOf(node) {
   const inverse = node.matrixWorld.clone().invert();
   const seen = new Map();
   const at = new THREE.Vector3();
+  const add = () => {
+    const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
+    if (!seen.has(key)) seen.set(key, at.clone());
+  };
   node.traverseVisible((part) => {
     if (part.userData.path || part.isInstancedMesh) return;
+    let glyph = part;
+    while (glyph && glyph !== node && !glyph.userData.glyph)
+      glyph = glyph.parent;
+    if (glyph?.userData.glyph) {
+      // a glyph by its anchor alone, and nothing hung on it: `snapTargets`
+      if (glyph !== part) return;
+      at.copy(glyph.userData.glyph.anchor).applyMatrix4(part.matrixWorld);
+      at.applyMatrix4(inverse);
+      return add();
+    }
     if (part.isPoints || !part.geometry?.userData.exact) return; // its own
     for (const [x, y, z] of verticesOf(part.geometry)) {
       at.set(x, y, z).applyMatrix4(part.matrixWorld).applyMatrix4(inverse);
-      const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
-      if (!seen.has(key)) seen.set(key, at.clone());
+      add();
     }
   });
   return [...seen.values()];
@@ -2698,19 +2830,77 @@ function markShapes(meshes, channel, hang) {
     merged?.meshes.length !== meshes.length ||
     merged.meshes.some((mesh, k) => mesh !== meshes[k])
   ) {
-    merged?.geometry.dispose();
-    merged = { meshes, geometry: mergedShape(on, meshes) };
+    if (merged) {
+      merged.geometry.dispose();
+      glyphMarks.delete(merged);
+    }
+    merged = { on, meshes, geometry: mergedShape(on, meshes) };
     kept.set(channel, merged);
+    // glyphs among them rescale as the view zooms: placed again as they do
+    const glyphed = meshes.filter((mesh) => mesh.userData.glyph);
+    if (glyphed.length) {
+      // all of them when the mark hangs on one, whose scale is its frame
+      merged.glyphs = on.userData.glyph ? null : new Set(glyphed);
+      glyphMarks.add(merged);
+    }
   }
   markShape(on, channel, hang, merged.geometry);
+}
+
+/** The merged marks that hold glyphs: `placeGlyphMarks` keeps them on them. */
+const glyphMarks = new Set();
+
+/** Put each merged mark holding glyphs where they now stand, those hung
+ *  alone following theirs by themselves: after `sizeGlyphs` rescaled any. A
+ *  mark is placed again only while it is shown, and only its glyphs' part
+ *  of it -- one merge of a thousand dipoles a frame, where a mark apiece was
+ *  a thousand draws, and a body's cells beside a probe left as they were. */
+function placeGlyphMarks() {
+  for (const merged of glyphMarks) {
+    const { on, meshes, geometry, glyphs: only } = merged;
+    if (!on.children.some((part) => part.geometry === geometry)) continue;
+    const position = geometry.attributes.position;
+    placeShapes(on, meshes, position.array, only);
+    position.needsUpdate = true;
+    // read off the array, not vertex by vertex: this is every zoomed frame
+    geometry.boundingBox ??= new THREE.Box3();
+    geometry.boundingBox.setFromArray(position.array);
+    geometry.boundingSphere ??= new THREE.Sphere();
+    geometry.boundingBox.getBoundingSphere(geometry.boundingSphere);
+  }
+}
+
+/** `meshes`' corners written into `position`, one after the other, in the
+ *  frame of `on` -- or only those of the meshes in `only`, in their place. */
+function placeShapes(on, meshes, position, only = null) {
+  on.updateWorldMatrix(true, false);
+  const back = on.matrixWorld.clone().invert();
+  const into = new THREE.Matrix4();
+  let at = 0; // vertices written
+  for (const mesh of meshes) {
+    const from = mesh.geometry.attributes.position;
+    if (only && !only.has(mesh)) {
+      at += from.count;
+      continue;
+    }
+    // a glyph just sized, its node's world as `sizeGlyphs` read it
+    mesh.updateWorldMatrix(!only, false);
+    const e = into.multiplyMatrices(back, mesh.matrixWorld).elements;
+    const xyz = from.array; // a trace's own, never interleaved
+    for (let i = 0; i < from.count; i++) {
+      const [x, y, z] = [xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]];
+      const o = (at + i) * 3;
+      position[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      position[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      position[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+    }
+    at += from.count;
+  }
 }
 
 /** `meshes` as one geometry, in the frame of `on`: their corners only,
  *  which is all a mark draws. */
 function mergedShape(on, meshes) {
-  on.updateWorldMatrix(true, false);
-  const back = on.matrixWorld.clone().invert();
-  const into = new THREE.Matrix4();
   let vertices = 0;
   let corners = 0;
   for (const { geometry } of meshes) {
@@ -2719,24 +2909,16 @@ function mergedShape(on, meshes) {
     corners += geometry.index?.count ?? count;
   }
   const position = new Float32Array(vertices * 3);
+  placeShapes(on, meshes, position);
   const index = new Uint32Array(corners);
-  let at = 0; // vertices written
+  let at = 0; // vertices numbered
   let k = 0; // corners written
-  for (const mesh of meshes) {
-    mesh.updateWorldMatrix(true, false);
-    const e = into.multiplyMatrices(back, mesh.matrixWorld).elements;
-    const from = mesh.geometry.attributes.position;
-    for (let i = 0; i < from.count; i++) {
-      const [x, y, z] = [from.getX(i), from.getY(i), from.getZ(i)];
-      const o = (at + i) * 3;
-      position[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
-      position[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
-      position[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
-    }
-    const own = mesh.geometry.index;
+  for (const { geometry } of meshes) {
+    const own = geometry.index;
+    const { count } = geometry.attributes.position;
     if (own) for (let i = 0; i < own.count; i++) index[k++] = at + own.getX(i);
-    else for (let i = 0; i < from.count; i++) index[k++] = at + i;
-    at += from.count;
+    else for (let i = 0; i < count; i++) index[k++] = at + i;
+    at += count;
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(position, 3));
@@ -4126,6 +4308,8 @@ function buildItem(item) {
   built.userData.built = true; // what a node carries for its object, see `dress`
   if (built.userData.batch) batchesStale = true;
   if (item.part) built.userData.part = item.part;
+  // a sensor's axes, a dipole's arrow: sized by the view (`sizeGlyphs`)
+  if (item.glyph) makeGlyph(built, item.glyph);
   // a current's arrows, which say what its flow says: see `setFlow`
   if (item.arrows) {
     built.userData.arrows = true;
@@ -4992,8 +5176,8 @@ function sceneSphere(objectIds) {
   // a ring reaches corners the card has none in, and framed by them the
   // ring sat in the middle of the view with a margin all round.
   const parts = [];
+  // and a glyph at the size it was drawn at (`asDrawn`), the box with them
   const take = (node) => {
-    box.expandByObject(node);
     node.updateWorldMatrix(true, true);
     node.traverse((part) => {
       let own = null;
@@ -5005,12 +5189,13 @@ function sceneSphere(objectIds) {
         own = part.geometry.boundingBox;
       }
       if (!own || own.isEmpty()) return;
+      const matrix = asDrawn(part);
       for (const x of [own.min.x, own.max.x]) {
         for (const y of [own.min.y, own.max.y]) {
           for (const z of [own.min.z, own.max.z]) {
-            parts.push(
-              new THREE.Vector3(x, y, z).applyMatrix4(part.matrixWorld),
-            );
+            const corner = new THREE.Vector3(x, y, z).applyMatrix4(matrix);
+            box.expandByPoint(corner);
+            parts.push(corner);
           }
         }
       }
@@ -6261,12 +6446,14 @@ function paintBar(text, pixels) {
  *  mesh, and the program stays for the next one like it. */
 function free(part) {
   if (part.userData.batch) batchesStale = true;
-  for (const { geometry } of mergedMarks.get(part)?.values() ?? []) {
-    geometry.dispose();
+  for (const merged of mergedMarks.get(part)?.values() ?? []) {
+    merged.geometry.dispose();
+    glyphMarks.delete(merged);
   }
   mergedMarks.delete(part);
   flowLines.delete(part);
   flowArrows.delete(part);
+  glyphs.delete(part);
   if (!part.userData.borrowed) part.geometry?.dispose();
   part.material?.map?.dispose();
 }
@@ -6349,6 +6536,7 @@ function renderFrame(payload) {
  * trace hangs on its object's node, so it is carried into the node's frame
  * by the matrix it was hung with. */
 function poseFrame(index) {
+  glyphsMoved = true;
   const pose = new THREE.Matrix4();
   const at = new THREE.Vector3();
   const turn = new THREE.Quaternion();
@@ -6432,6 +6620,7 @@ function primaryId() {
  * arrives at it.
  */
 function poseEdit(objectId, field, numbers) {
+  glyphsMoved = true;
   const path = paths[objectId];
   if (!path || (field !== "position" && field !== "orientation")) {
     return numbers;
@@ -6561,6 +6750,7 @@ function viewKey(event, host = {}) {
  * pointer was a round trip ago.
  */
 function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
+  glyphsMoved = true;
   const held = new Set([].concat(keep ?? []));
   // What a dragged collection carries is held with it: rebuilt, it would be
   // drawn twice, once on the collection's node and once from the payload.

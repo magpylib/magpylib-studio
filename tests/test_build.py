@@ -76,7 +76,6 @@ def halbach(
         magpy.Sensor(
             position=np.linspace((0, 0, -0.015), (0, 0, 0.03), 25),
             style_label="Sensor",
-            style_size=0.005,
         ),
         "sensor",
     )
@@ -389,9 +388,7 @@ def quiver(
         count=density**2,
         over=(0, density**2 - 1),
     )
-    arrows = name(
-        magpy.Sensor(position=(0, 0, lift), pixel=grid, style_size=0.005), "field"
-    )
+    arrows = name(magpy.Sensor(position=(0, 0, lift), pixel=grid), "field")
     magnet.rotate_from_angax(np.linspace(0, 360, 51), "y", start=0)
     return magnet, arrows
 

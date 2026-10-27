@@ -48,6 +48,8 @@ Writes into OUT:
   that plays as motion: the batch draws the moving one where it is;
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
+* ``glyphs.html`` -- a cube, and a magenta dipole beside it: an arrow the
+  view keeps the same size on screen, zoomed in or out;
 * ``overlap.html`` -- two cubes, one pushed a quarter of its side into the
   other, a third clear of both, and a small cube in the corner of a
   tetrahedron: overlaps shaded where they are, and a cube the pointer can mark
@@ -497,6 +499,10 @@ def main(out):
     )
     body.sealed = True
     SceneWidget(body).write_html(out / "sealed.html")
+    dipole = magpy.misc.Dipole(
+        moment=(0, 0, 1), position=(0.014, 0, 0), style_color="#ff00ff"
+    )
+    SceneWidget(cube, dipole).write_html(out / "glyphs.html")
     pushed = [
         magpy.magnet.Cuboid(
             polarization=(0, 0, 1), dimension=(0.01,) * 3, position=at, style_label=name
