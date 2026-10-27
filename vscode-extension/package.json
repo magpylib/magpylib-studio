@@ -2,7 +2,7 @@
   "name": "magpylib-studio-vscode",
   "displayName": "Magpylib Studio",
   "description": "Build and explore magpylib magnet designs: a 3D editor with variables, patterns and field plots.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "magpylib",
   "license": "BSD-3-Clause",
   "icon": "media/icon.png",

@@ -5,6 +5,8 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.9.0]
+
 ### Added
 
 <details>
@@ -20,7 +22,7 @@ still load by name, `load_example("halbach")` and `load_example("coil")`.
 `npm run gallery` draws the pictures. In the probe placement example the probe
 sits over the magnet, where the view sees it, its patch drawn as field arrows.
 The Get Started walkthrough is rewritten for the studio as it is now, the
-gallery its first step.
+gallery its first step (#94).
 
 </details>
 
@@ -46,7 +48,7 @@ had in the examples, where `magpy.show()` gives them a tenth of the scene.
 `style.size` scales it, and `sizemode="absolute"` makes it metres. Positions and
 a sensor's pixels stay as they are. A `size` given without a `sizemode` was
 drawn in metres, a 0.3 as 300 mm, and is now read as `magpy.show()` reads it
-(#95). The examples' sensors say no size any more; a scene saved from one says
+(#98). The examples' sensors say no size any more; a scene saved from one says
 `size: 0.005`, which is now a speck: take it out.
 
 </details>
