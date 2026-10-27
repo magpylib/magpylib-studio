@@ -478,8 +478,8 @@ the editor's theme. A card opens its example as the command passed a name does,
 in a preview tab, clean until edited. The pictures are drawn by
 `npm run gallery`, the studio taking each example in headless Chrome
 ([0039](decisions.md#0039-examples-open-from-a-gallery)). `UNLISTED_EXAMPLES`
-are loaded by name and not shown: the Halbach stack the tests are written
-against.
+are loaded by name and not shown: the Halbach stack and the solenoid the tests
+are written against.
 
 Webview JavaScript lives in `media/*.js|mjs` under a nonce CSP, never inside
 TypeScript template literals; `harness/` checks that, the message contract, the

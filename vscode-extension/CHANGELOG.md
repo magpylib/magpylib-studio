@@ -15,7 +15,8 @@ the light theme or the dark as the editor is, its name and what it shows. Click
 one to open it. The first two are the designs of `examples/marimo_demo.py`: the
 Halbach rings, with their field lines, in place of the Halbach stack, and a
 Helmholtz coil pair whose variants run the currents together or against each
-other. The stack still loads by name, `load_example("halbach")`.
+other; the solenoid, which the pair shows twice over, is no longer listed. Both
+still load by name, `load_example("halbach")` and `load_example("coil")`.
 `npm run gallery` draws the pictures.
 
 </details>

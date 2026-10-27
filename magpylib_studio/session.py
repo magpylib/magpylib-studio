@@ -928,12 +928,6 @@ EXAMPLES = {
         "against each other for a zero",
         lambda: _design("coils"),
     ),
-    "coil": (
-        "Solenoid coil",
-        "One current loop patterned along its axis — turns and pitch "
-        "reshape the whole winding",
-        coil_scene,
-    ),
     "spiral": (
         "Helical winding",
         "One wire spiralling through space — vertices written as "
@@ -973,11 +967,12 @@ EXAMPLES = {
     ),
 }
 
-#: Scenes `load_example` takes that the gallery does not offer. The Halbach
-#: stack was the first example, and the tests, the harness and the evals are
-#: written against it — its ids, its variables — so it stays loadable by name
-#: after the notebook's rings took its place in the gallery.
-UNLISTED_EXAMPLES = {"halbach": example_scene}
+#: Scenes `load_example` takes that the gallery does not offer. The tests, the
+#: harness and the evals are written against these — their ids, their
+#: variables — so they stay loadable by name after the gallery moved on: the
+#: Halbach stack, whose place the notebook's rings took, and the solenoid,
+#: which the Helmholtz pair shows twice over.
+UNLISTED_EXAMPLES = {"halbach": example_scene, "coil": coil_scene}
 
 
 # Editable constructor parameters, introspected off the live object.

@@ -1,13 +1,13 @@
 # Load an example
 
-An example is the shortest documentation there is. Nine are built in, each
+An example is the shortest documentation there is. Eight are built in, each
 leaning on a different feature, and the gallery shows each with a picture:
 
 - **Halbach rings** — two magnet rings, each built from one magnet and one
   circular pattern, with the field lines across the bore
-- **Helmholtz coil pair** — two coils whose currents are variables, and two
-  variants that run them together or against each other
-- **Solenoid** — a linear pattern of current loops
+- **Helmholtz coil pair** — two coils, each a linear pattern of current loops,
+  whose currents are variables, and two variants that run them together or
+  against each other
 - **Helical winding** — one wire spiralling through space: geometry no pattern
   makes, written as expressions so it stays parametric
 - **Facing pair** — two magnets built with a mirror

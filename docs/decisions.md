@@ -2064,9 +2064,9 @@ draws no frame.
 
 **Status:** accepted 2026-10-27, as built. Alex asked for the gallery, a tab of
 pictures in place of the quick pick, with the notebook's Halbach rings in place
-of the Halbach stack and its Helmholtz pair added; that the stack stays loadable
-by name and that the studio draws the pictures itself are as built, for him to
-review.
+of the Halbach stack and its Helmholtz pair added, and then the solenoid taken
+out, the pair showing it twice over; that the two stay loadable by name and that
+the studio draws the pictures itself are as built, for him to review.
 
 ### Context
 
@@ -2092,8 +2092,9 @@ design: two concentric rings, its field lines across the bore, a variant or two.
   `designs.py` as the scene functions they are, a test holding them to the
   notebook's. The rings load with their field lines on, as the notebook shows
   them.
-- **The Halbach stack stays loadable by name, unlisted.** The tests, the window
-  checks and the evals are written against its ids and variables.
+- **The Halbach stack and the solenoid stay loadable by name, unlisted.** The
+  tests, the window checks and the evals are written against their ids and
+  variables.
 
 ### Rejected
 

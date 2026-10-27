@@ -105,7 +105,7 @@ function scenes() {
 import json, sys
 from magpylib_studio.session import MagpylibStudioSession, EXAMPLES, UNLISTED_EXAMPLES
 out = {}
-# the gallery's, and the Halbach stack the checks below open
+# the gallery's, and the unlisted ones the checks below open
 for name in [*EXAMPLES, *UNLISTED_EXAMPLES]:
     s = MagpylibStudioSession()
     s.load_example(name)
