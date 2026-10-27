@@ -897,15 +897,36 @@ def quiver_scene(density=12, steps=51):
     }
 
 
+def _design(name):
+    """One of the notebook's designs (`designs.py`) as a document, its field
+    lines on, as the notebook shows it. Imported here rather than at the top:
+    a scene function is built by `build`, which is built on this module."""
+    from magpylib_studio import designs
+
+    session = getattr(designs, name).build().session
+    session.set_field_lines(True)
+    return session.to_dict()
+
+
 # The built-in scenes, each written the way the studio is meant to be used
 # and each leaning on a different feature — which is the point of having
-# more than one: an example is the shortest documentation there is.
+# more than one: an example is the shortest documentation there is. The
+# gallery shows them in this order, each with its picture
+# (`vscode-extension/media/gallery/`, drawn by `npm run gallery`).
 EXAMPLES = {
-    "halbach": (
-        "Halbach stack",
-        "Two rings of magnets, each one magnet and a circular "
-        "pattern; the upper ring staggered by half a step",
-        example_scene,
+    "rings": (
+        "Halbach rings",
+        "Two rings of magnets, each one magnet and a circular pattern, "
+        "and the field lines across the bore — twist the inner ring, or "
+        "try the compact and wide variants",
+        lambda: _design("halbach"),
+    ),
+    "helmholtz": (
+        "Helmholtz coil pair",
+        "Two coils on one axis, each current a variable — the Helmholtz "
+        "variant runs them together for a flat field, anti-Helmholtz "
+        "against each other for a zero",
+        lambda: _design("coils"),
     ),
     "coil": (
         "Solenoid coil",
@@ -951,6 +972,12 @@ EXAMPLES = {
         solid_scene,
     ),
 }
+
+#: Scenes `load_example` takes that the gallery does not offer. The Halbach
+#: stack was the first example, and the tests, the harness and the evals are
+#: written against it — its ids, its variables — so it stays loadable by name
+#: after the notebook's rings took its place in the gallery.
+UNLISTED_EXAMPLES = {"halbach": example_scene}
 
 
 # Editable constructor parameters, introspected off the live object.
@@ -7116,12 +7143,15 @@ class MagpylibStudioSession:
     def load_example(self, name="halbach", base_dir=None):
         """Load one of the built-in scenes; see list_examples(). `base_dir` is
         the folder a mesh added later is looked for in, as for load_scene."""
-        if name not in EXAMPLES:
+        if name in EXAMPLES:
+            _, _, build = EXAMPLES[name]
+        elif name in UNLISTED_EXAMPLES:
+            build = UNLISTED_EXAMPLES[name]
+        else:
             return {
                 "ok": False,
                 "error": f"unknown example {name!r}; try one of {sorted(EXAMPLES)}",
             }
-        _, _, build = EXAMPLES[name]
         return self.load_scene(build(), base_dir)
 
     def clear_scene(self):

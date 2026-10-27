@@ -47,6 +47,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0036](#0036-the-corners-axes-say-which-way-they-point)                                        | The corner's axes say which way they point                   | accepted 2026-10-24, as built                                        |
 | [0037](#0037-fem-is-material-responses-extra-and-studio-calls-it)                              | FEM is material-response's extra, and studio calls it        | accepted 2026-10-24                                                  |
 | [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
+| [0039](#0039-examples-open-from-a-gallery)                                                     | Examples open from a gallery                                 | accepted 2026-10-27, as built                                        |
 
 ---
 
@@ -2058,3 +2059,48 @@ draws no frame.
 - **Brackets round the object**: loose round a turned shape, crowded in a ring.
 - **A pulse**: a frame drawn every frame, and the eye drawn to it all the time.
 - **An overlapping pair outlined only**: it says that two overlap, not where.
+
+## 0039. Examples open from a gallery
+
+**Status:** accepted 2026-10-27, as built. Alex asked for the gallery, a tab of
+pictures in place of the quick pick, with the notebook's Halbach rings in place
+of the Halbach stack and its Helmholtz pair added; that the stack stays loadable
+by name and that the studio draws the pictures itself are as built, for him to
+review.
+
+### Context
+
+**Load Example Scene…** asked in a quick pick: a name and a line for each
+example. An example is there to show what the studio can do, and a line of text
+shows it less well than a picture. The first example was the Halbach stack,
+while the README's picture and the marimo notebook show the notebook's own
+design: two concentric rings, its field lines across the bore, a variant or two.
+
+### Decision
+
+- **A tab of cards**, one per example in `EXAMPLES`' order: its picture, its
+  name, what it shows. A click opens it as a name passed to the command does --
+  in a preview tab of its own -- and the gallery stays behind it for the next.
+  The command passed a name still loads it without asking: keybindings, tasks
+  and the tests use that.
+- **The pictures are drawn by the studio** (`npm run gallery`): each example as
+  it loads, saved as a page, taken in headless Chrome in the light theme and the
+  dark, its flow held at one time, so the same scene makes the same file. They
+  are plain files in `media/gallery/`, about 25 KB each, for the docs to use
+  too.
+- **The notebook's two designs are the first two examples**, written in
+  `designs.py` as the scene functions they are, a test holding them to the
+  notebook's. The rings load with their field lines on, as the notebook shows
+  them.
+- **The Halbach stack stays loadable by name, unlisted.** The tests, the window
+  checks and the evals are written against its ids and variables.
+
+### Rejected
+
+- **The quick pick, with the pictures as icons**: a quick pick's icon is a
+  glyph, not a picture.
+- **Pictures drawn by hand or taken from a screen**: they go stale as the view
+  changes, and nobody would notice. Drawn by a script, a change to the view is
+  one run away.
+- **The stack moved out and the tests moved to the rings**: some sixty tests,
+  the window checks and the evals rewritten, for nothing anyone sees.

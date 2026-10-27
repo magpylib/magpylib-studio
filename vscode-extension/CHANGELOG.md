@@ -8,6 +8,19 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>An example gallery, with the notebook's Halbach rings and Helmholtz pair</summary>
+
+**Load Example Scene…** opens a tab of cards, one per example: its picture, in
+the light theme or the dark as the editor is, its name and what it shows. Click
+one to open it. The first two are the designs of `examples/marimo_demo.py`: the
+Halbach rings, with their field lines, in place of the Halbach stack, and a
+Helmholtz coil pair whose variants run the currents together or against each
+other. The stack still loads by name, `load_example("halbach")`.
+`npm run gallery` draws the pictures.
+
+</details>
+
+<details>
 <summary>⌥ on a legend eye: show only that row, or fade the rest</summary>
 
 Option-click (Alt-click) a row's eye in the legend to show only what the row

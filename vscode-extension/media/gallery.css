@@ -1,0 +1,79 @@
+/* The example gallery (`gallery.mjs`): cards in the editor's colours, as many
+   to a row as fit. */
+body {
+  margin: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 32px;
+}
+h1 {
+  margin: 0 0 16px;
+  font-size: 1.4em;
+  font-weight: 600;
+}
+#gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding: 0 0 12px;
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--vscode-editorWidget-background);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.card:hover {
+  border-color: var(--vscode-focusBorder);
+}
+.card:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+.picture {
+  aspect-ratio: 16 / 10;
+  margin-bottom: 6px;
+  background: var(--vscode-editor-background);
+}
+.picture img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* the picture the theme asks for: light in the light themes, dark otherwise */
+body.vscode-light .picture img.dark,
+body.vscode-high-contrast-light .picture img.dark,
+body:not(.vscode-light):not(.vscode-high-contrast-light) .picture img.light {
+  display: none;
+}
+.label,
+.description {
+  padding: 0 12px;
+}
+.label {
+  font-weight: 600;
+}
+.description {
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.4;
+}
+.error {
+  grid-column: 1 / -1;
+  color: var(--vscode-errorForeground);
+}

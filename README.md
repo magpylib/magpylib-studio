@@ -36,8 +36,8 @@ bore. Drag `n` and both rings rebuild._
 
 1. Install the extension: search for **Magpylib Studio** in the Extensions view,
    or run `code --install-extension magpylib.magpylib-studio-vscode`.
-2. Open a folder, click the magpylib icon in the Activity Bar, and choose **Load
-   Example Scene**.
+2. Open a folder, click the magpylib icon in the Activity Bar, choose **Load
+   Example Scene…** and pick one from the gallery.
 3. The first time, it offers to **Install the Engine** (the Python side) for
    you. Nothing to set up beforehand.
 

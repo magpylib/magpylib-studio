@@ -110,6 +110,13 @@ writes the two cut along a diagonal: `docs/halbach.gif`, which both READMEs
 show, and its first frame as `docs/halbach.png`. VS Code renders its own window,
 so it needs no screen-recording permission; it takes about a minute.
 
+**The example gallery's pictures**, after changing an example or how the view
+draws one: `npm run gallery` (or `npm run gallery -- rings helmholtz` for some)
+takes each example as it loads, in headless Chrome, in the light theme and the
+dark, into `vscode-extension/media/gallery/`. The same scene makes the same
+file, so commit what it changed. A new example without a picture shows as a card
+without one.
+
 **By hand, on a slow machine**, after a change to what a drag or a slider does:
 `npm run slow-machine -- examples/marimo_demo.py` (the demo by default; `--edit`
 for `marimo edit`, or any server after `--` with its page as `--url`) opens the
