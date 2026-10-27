@@ -150,6 +150,47 @@ def _(halbach):
     return s, session
 
 
+@app.cell(hide_code=True)
+def _(json, mo, s, session):
+    # Shown before the views: a sidebar that comes after them has marimo lay
+    # the page out again, and every view on it mounted a second time. Its
+    # files are written when clicked, so they hold the scenes as they are
+    # then -- the coil pair's handed over by its own cell, below (`scenes`).
+    scenes = {"halbach": (s, session)}
+
+    def _downloads(name):
+        return [
+            mo.download(
+                data=lambda: json.dumps(scenes[name][0].to_dict(), indent=2),
+                filename=f"{name}.magpy.json",
+                mimetype="application/json",
+                label=f"{name}.magpy.json",
+            ),
+            mo.download(
+                data=lambda: scenes[name][1].to_builder_script(),
+                filename=f"{name}_scene.py",
+                mimetype="text/x-python",
+                label=f"{name}_scene.py",
+            ),
+        ]
+
+    mo.sidebar(
+        [
+            mo.md("# Magpylib Studio"),
+            mo.outline(),
+            mo.md("**The scenes, as edited**"),
+            mo.vstack([*_downloads("halbach"), *_downloads("coils")], gap=0.5),
+            mo.md(
+                "_A `.magpy.json` opens in VS Code with **Magpylib Studio: Open "
+                "Scene…**, never running code; the `.py` is the same function, "
+                "written back from the document._"
+            ),
+        ],
+        footer=mo.md("_magpylib-studio_"),
+    )
+    return (scenes,)
+
+
 @app.cell
 def _(SceneWidget, mo, s):
     # The document's own view, editable from the start, the bore's field
@@ -437,9 +478,10 @@ def _(Annotated, Bounds, Count, Length, duplicate_along, grid, magpy, scene):
 
 
 @app.cell
-def _(SceneWidget, coils, mo):
+def _(SceneWidget, coils, mo, scenes):
     pair = coils.build()
     pair_session = pair.session
+    scenes["coils"] = pair, pair_session  # for the sidebar's files
     # Opened with its variables, the two variants a click each above them.
     pair_view3d = SceneWidget(
         pair, editable=True, height=480, field_lines=True, open_panel="variables"
@@ -646,50 +688,6 @@ def _(SceneWidget, magpy, mo, np):
         )
 
     _every_kind()
-    return
-
-
-@app.cell(hide_code=True)
-def _(edited, json, mo, pair, pair_edited, pair_session, s, session):
-    # Re-run after each edit, so the files hold the scenes as they are now.
-    _ = edited(), pair_edited()
-
-    def _downloads(document, code, name):
-        return [
-            mo.download(
-                data=json.dumps(document.to_dict(), indent=2),
-                filename=f"{name}.magpy.json",
-                mimetype="application/json",
-                label=f"{name}.magpy.json",
-            ),
-            mo.download(
-                data=code.to_builder_script(),
-                filename=f"{name}_scene.py",
-                mimetype="text/x-python",
-                label=f"{name}_scene.py",
-            ),
-        ]
-
-    mo.sidebar(
-        [
-            mo.md("# Magpylib Studio"),
-            mo.outline(),
-            mo.md("**The scenes, as edited**"),
-            mo.vstack(
-                [
-                    *_downloads(s, session, "halbach"),
-                    *_downloads(pair, pair_session, "coils"),
-                ],
-                gap=0.5,
-            ),
-            mo.md(
-                "_A `.magpy.json` opens in VS Code with **Magpylib Studio: Open "
-                "Scene…**, never running code; the `.py` is the same function, "
-                "written back from the document._"
-            ),
-        ],
-        footer=mo.md("_magpylib-studio_"),
-    )
     return
 
 
