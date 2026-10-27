@@ -3974,8 +3974,8 @@ class MagpylibStudioSession:
         resolved here because plotly.js has no named-template registry.
         The whole scene is always drawn: objects hidden via set_visible carry
         magpylib's own hide switches, keeping every colour assignment stable."""
-        # Drawn as the 3D view draws: a bare sensor the same size in the chart
-        # as in the view.
+        # In metres, as the 3D view is drawn. Its sensors and dipoles are
+        # magpylib's own, a tenth of the scene: a chart is not zoomed.
         with threejs.pinned_scene_units():
             fig = magpy.show(
                 *self._drawn(), backend="plotly", animation=animation, return_fig=True

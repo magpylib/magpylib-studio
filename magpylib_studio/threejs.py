@@ -198,8 +198,9 @@ def pinned_scene_units():
     object changes the extent, which rescales every autosized object and can
     shift the SI prefix that scales *everything*. Measured in the prototype: a
     magnet's own vertices changed by 1000x because an unrelated object moved.
-    So lengths are in metres, and a scaled sensor or dipole is drawn at
-    `GLYPH_SIZE` (`_scaled_drawn_at`).
+    So lengths are in metres, and a capture under it draws a scaled sensor
+    or dipole at `GLYPH_SIZE` (`_scaled_drawn_at`); a figure drawn under it
+    by `magpy.show()` draws them as magpylib does.
 
     A context, not a setting: magpylib's defaults are put back on the way
     out, so a notebook's own `magpy.show()` after the studio has drawn is as
@@ -231,16 +232,15 @@ def _scaled_glyphs(objects):
 
 
 @contextlib.contextmanager
-def _scaled_drawn_at(objects):
-    """While `pinned_scene_units` holds, each of `objects`' scaled sensors
-    and dipoles drawn at its size times `GLYPH_SIZE`, in metres, its style
-    put back after; yields the autosize each was drawn at, by ``id``. Empty
-    otherwise: they are drawn at magpylib's own (`Panel.autosize`)."""
+def _scaled_drawn_at(scaled):
+    """While `pinned_scene_units` holds, each of the `scaled` sensors and
+    dipoles (`_scaled_glyphs`) drawn at its size times `GLYPH_SIZE`, in
+    metres, its style put back after; yields the autosize each was drawn
+    at, by ``id``. Empty otherwise: they are drawn at magpylib's own
+    (`Panel.autosize`)."""
     held = []
     if _glyph_size is not None:
-        held = [
-            (obj, obj.style.size, obj.style.sizemode) for obj in _scaled_glyphs(objects)
-        ]
+        held = [(obj, obj.style.size, obj.style.sizemode) for obj in scaled]
     try:
         for obj, _, _ in held:
             size = _resolve(obj, "style.size")
@@ -550,10 +550,11 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
     # While a script is being opened in the studio, show() is a stand-in that
     # captures the script's own calls; the one it replaced still draws.
     show = getattr(magpy.show, "original", magpy.show)
+    scaled = _scaled_glyphs(objects)
     try:
         with (
             warnings.catch_warnings(record=True) as caught,
-            _scaled_drawn_at(objects) as drawn_at,
+            _scaled_drawn_at(scaled) as drawn_at,
         ):
             warnings.simplefilter("always")
             show(
@@ -579,16 +580,16 @@ def _capture(objects, animation=False, *, on_behalf_of="widget", **kwargs):
     scene = _captured.pop("scene")
     _mark_paths(scene, objects)
     _mark_flows(scene, objects)
-    return _mark_glyphs(scene, objects, drawn_at)
+    return _mark_glyphs(scene, objects, drawn_at, scaled)
 
 
-def _mark_glyphs(scene, objects, drawn_at=None):
+def _mark_glyphs(scene, objects=None, drawn_at=None, scaled=None):
     """`scene`, with what magpylib sized to it marked ``glyph``: a scaled
     sensor's axes and a dipole's arrow, each copy `style.path.frames` draws
     on its own. A view sizes them to itself, the same share of it whatever
     the zoom, as it sizes its handles: where magpylib gives them a tenth of
     the scene -- its ``autosizefactor`` -- a view gives them a tenth of its
-    height. Marked with what it needs:
+    height. Marked with what it needs (`_glyph`):
 
     * ``anchor``, the point it is sized about: the object's position at
       that copy's step, in the drawing's unit;
@@ -603,13 +604,31 @@ def _mark_glyphs(scene, objects, drawn_at=None):
     A sensor's pixels stay where they are, at the size their spacing gives
     them: split off its axes, unmarked -- unless they all sit on its origin,
     where magpylib sizes them by the axes too. What does not come apart as
-    magpylib puts it together is left as drawn.
+    magpylib puts it together, or does not reach from its anchor as far as
+    its style says -- styled by `show` rather than by itself, which this
+    cannot read -- is left as drawn. `objects` are those the scene was drawn
+    from; without them, the ones magpylib handed its backend. `scaled` are
+    their `_scaled_glyphs`, where the caller has them.
     """
-    known = {id(each): each for each in _scaled_glyphs(objects)}
+    if objects is None:
+        objects = [o for panel in scene.panels for o in panel.objects]
+    if scaled is None:
+        scaled = _scaled_glyphs(objects)
+    known = {id(each): each for each in scaled}
     per_metre = _drawn_per_metre(scene) if known else None
     if not per_metre:
         return scene
     autosize = scene.panel(1, 1).autosize
+    # what a sensor reading the field is drawn over, as its field is read
+    longest = max(
+        (
+            each._get_path_len()
+            for obj in _given(objects)
+            for each in (obj, *getattr(obj, "children_all", ()))
+        ),
+        default=1,
+    )
+    specs = {}
     steps = scene.animation.path_indices if scene.is_animation else ()
     frames = []
     for n, frame in enumerate(scene.frames):
@@ -619,57 +638,123 @@ def _mark_glyphs(scene, objects, drawn_at=None):
             if obj is None or trace.get("type") != "mesh3d":
                 traces.append(trace)
                 continue
-            at = (drawn_at or {}).get(id(obj), autosize)
-            step = steps[n] if n < len(steps) else None
-            traces.extend(_glyph_parts(obj, trace, at, step, per_metre))
+            if id(obj) not in specs:  # the same in every frame
+                at = (drawn_at or {}).get(id(obj), autosize)
+                specs[id(obj)] = _glyph_spec(obj, at, longest)
+            spec = specs[id(obj)]
+            if spec is None:
+                traces.append(trace)
+                continue
+            at = [steps[n]] if n < len(steps) else spec["steps"]
+            traces.extend(_glyph_parts(trace, spec, at, per_metre))
         frames.append(dataclasses.replace(frame, traces=tuple(traces)))
     return dataclasses.replace(scene, frames=tuple(frames))
 
 
-def _glyph_parts(obj, trace, autosize, step, per_metre):
-    """`obj`'s mesh `trace` as `_mark_glyphs` marks it: one ``glyph`` trace
-    per copy drawn, and the rest of it beside them, or `trace` as it is.
+def _glyph(anchor, size, drawn, floor=0.0):
+    """The ``glyph`` mark `_mark_glyphs` describes: a part drawn at `drawn`
+    about `anchor`, whose style says `size`, never under `floor`."""
+    return {
+        "anchor": np.round(anchor, 12).tolist(),
+        "share": size / magpy.defaults.display.autosizefactor,
+        "drawn": float(drawn),
+        "floor": float(floor),
+    }
 
-    Magpylib draws a copy for each of the path's steps `style.path.frames`
-    names -- `step` alone, in a frame of a run -- one after the other, each
-    a sensor's axes before its pixels and their hull: so it is taken apart,
-    and only where each copy's faces keep to its own vertices, and its axes'
-    to theirs.
-    """
+
+@functools.cache
+def _arrow_reach(pivot):
+    """How far a dipole's arrow of size 1 reaches from its anchor, as
+    magpylib draws it about `pivot`: one arrow, not one per dipole."""
+    from magpylib._src.display.traces_base import make_Arrow
+
+    arrow = make_Arrow("plotly-dict", base=10, diameter=0.3, height=1, pivot=pivot)
+    unit = np.column_stack([arrow[k] for k in "xyz"]).astype(float)
+    return float(np.linalg.norm(unit, axis=1).max())
+
+
+@functools.cache
+def _axes_reach(shown, handedness):
+    """A sensor's axes as magpylib draws them, by which are `shown` and its
+    `handedness`: how many vertices, and how far they reach from its
+    anchor at size 1. The same for every sensor styled alike."""
     from magpylib._src.display.sensor_mesh import get_sensor_mesh
+
+    mesh = get_sensor_mesh(**dict(shown), handedness=handedness)
+    unit = np.column_stack([mesh[k] for k in "xyz"]).astype(float)
+    unit[(np.abs(unit) < 1).all(axis=1)] = 0  # its middle, as magpylib draws it
+    return len(unit), float(np.linalg.norm(unit, axis=1).max()) / 2
+
+
+def _glyph_spec(obj, autosize, longest):
+    """How `_glyph_parts` takes `obj`'s traces apart, the same in every
+    frame: the steps its copies stand at, the vertices of a copy the view
+    sizes -- its axes, ``axes`` of them, or the whole copy -- how far those
+    reach from its anchor, in metres, and its size. None where there is
+    nothing to mark: a model of its own, a sensor with no axes."""
     from magpylib._src.display.traces_core import _sensor_extent
     from magpylib._src.display.traces_utility import path_frames_to_indices
     from magpylib._src.style import get_style
 
     style = get_style(obj, magpy.defaults)
     if autosize is None or style.model3d.data or not style.model3d.showdefault:
-        return [trace]
-    if step is None:
-        steps = path_frames_to_indices(style.path.frames, obj._get_path_len())
+        return None
+    if isinstance(obj, magpy.Sensor):
+        pixel, hull, drawn = _sensor_extent(obj, style, autosize)
+        drawn = float(np.mean(drawn))
+        arrows = style.arrows.as_dict(flatten=True, separator="_")
+        if not any(arrows[f"{k}_show"] for k in "xyz"):
+            return None
+        # what changes the mesh's vertices: which parts show, not colours
+        shown = tuple(
+            (key, value) for key, value in sorted(arrows.items()) if "color" not in key
+        )
+        axes, reach = _axes_reach(shown, obj.handedness)
+        # pixels all on the origin are sized by the axes, and stand on them
+        on_axes = pixel is not None and style.pixel.sizemode == "scaled"
+        reads = pixel is not None and bool(style.pixel.field.source)
+        spec = {
+            "axes": axes,
+            "whole": pixel is None or (on_axes and not np.any(obj.pixel)),
+            "reach": reach * drawn,
+            "size": float(np.mean(style.size)),
+            "drawn": drawn,
+            "floor": 0.0 if hull is None else float(np.min(hull)),
+        }
+        length = longest if reads else obj._get_path_len()
     else:
-        steps = [step]
+        drawn = float(style.size) * autosize
+        spec = {
+            "axes": None,
+            "whole": True,
+            "reach": _arrow_reach(style.pivot) * drawn,
+            "size": float(style.size),
+            "drawn": drawn,
+            "floor": 0.0,
+        }
+        length = obj._get_path_len()
+    spec["steps"] = path_frames_to_indices(style.path.frames, length)
+    spec["positions"] = np.atleast_2d(np.asarray(obj.position, dtype=float))
+    return spec
+
+
+def _glyph_parts(trace, spec, steps, per_metre):
+    """A mesh `trace` as `_mark_glyphs` marks it, by its object's `spec`:
+    one ``glyph`` trace per copy drawn, at `steps`, and the rest of it
+    beside them -- or `trace` as it is.
+
+    Magpylib draws a copy for each step one after the other, each a sensor's
+    axes before its pixels and their hull: so it is taken apart, and only
+    where each copy's faces keep to its own vertices, and its axes' to
+    theirs, and what is sized reaches from its anchor as far as `spec` says.
+    """
     count, copies = len(trace["x"]), len(steps)
     if count < 4 or count % copies:
         return [trace]  # an arrow of no moment is a point; or not copies
     block = count // copies
-    if isinstance(obj, magpy.Sensor):
-        pixel, hull, drawn = _sensor_extent(obj, style, autosize)
-        size = float(np.mean(style.size))
-        floor = 0.0 if hull is None else float(np.min(hull))
-        arrows = style.arrows.as_dict(flatten=True, separator="_")
-        axes = 0
-        if any(arrows[f"{k}_show"] for k in "xyz"):
-            mesh = get_sensor_mesh(
-                **arrows, center_color=style.color, handedness=obj.handedness
-            )
-            axes = len(mesh["x"])
-        # pixels all on the origin are sized by the axes, and stand on them
-        on_axes = pixel is not None and style.pixel.sizemode == "scaled"
-        sized = block if pixel is None or (on_axes and not np.any(obj.pixel)) else axes
-    else:
-        size = float(style.size)
-        drawn, floor, sized = size * autosize, 0.0, block
-    if not sized:
+    axes = spec["axes"] or block
+    sized = block if spec["whole"] else axes
+    if axes > block:
         return [trace]
     whole = copies == 1 and sized == block  # a dipole, a bare sensor: as it is
     if not whole:
@@ -682,9 +767,18 @@ def _glyph_parts(obj, trace, autosize, step, per_metre):
             inner.any(axis=1) != inner.all(axis=1)
         ).any():
             return [trace]
-    positions = np.atleast_2d(np.asarray(obj.position, dtype=float))
-    parts, rest = [], np.ones(count, dtype=bool)
+    points = _points(trace)
+    positions = spec["positions"]
+    reach = spec["reach"] * per_metre
+    parts, rest = [], None if whole else np.ones(count, dtype=bool)
     for n, at in enumerate(steps):
+        anchor = positions[min(at, len(positions) - 1)] * per_metre
+        drawn = points[n * block : n * block + sized] - anchor
+        if (
+            abs(float(np.sqrt((drawn * drawn).sum(axis=1).max())) - reach)
+            > 1e-6 * reach
+        ):
+            return [trace]
         if whole:
             part = dict(trace)
         else:
@@ -692,13 +786,12 @@ def _glyph_parts(obj, trace, autosize, step, per_metre):
             mine[n * block : n * block + sized] = True
             rest &= ~mine
             part = _mesh_part(trace, mine)
-        anchor = positions[min(at, len(positions) - 1)] * per_metre
-        part["glyph"] = {
-            "anchor": np.round(anchor, 12).tolist(),
-            "share": size / magpy.defaults.display.autosizefactor,
-            "drawn": float(np.mean(drawn)) * per_metre,
-            "floor": floor * per_metre,
-        }
+        part["glyph"] = _glyph(
+            anchor,
+            spec["size"],
+            spec["drawn"] * per_metre,
+            spec["floor"] * per_metre,
+        )
         parts.append(part)
     if not whole and rest.any():
         parts.append(_mesh_part(trace, rest))
@@ -1717,12 +1810,7 @@ def _pixels_of(sensor, field, key, path_ind=-1, autosize=None):
         and _resolve(sensor, "style.pixel.sizemode") == "scaled"
     ):
         size = float(np.mean(_resolve(sensor, "style.size")))
-        glyph = {
-            "anchor": np.round(pose, 12).tolist(),
-            "share": size / magpy.defaults.display.autosizefactor,
-            "drawn": size * autosize,
-            "floor": 0.0,
-        }
+        glyph = _glyph(pose, size, size * autosize)
 
     def item(chosen, symbol, oriented):
         chosen = np.flatnonzero(chosen)
@@ -1881,6 +1969,8 @@ def run_payload(scene, pixels=()):
     # a script's scene, which `_capture` did not make
     _mark_paths(scene)
     _mark_flows(scene)
+    if not any("glyph" in trace for frame in scene.frames for trace in frame.traces):
+        scene = _mark_glyphs(scene)
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
     payload = played or view_payload(scene, index=0, pixels=pixels)

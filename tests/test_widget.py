@@ -2115,6 +2115,39 @@ def test_what_magpylib_sizes_to_the_scene_comes_marked_for_the_view():
     assert len(pixels["x"]) == 26 * 8
 
 
+@pytest.mark.parametrize("how", ["cell", "backend", "sized by show", "framed by show"])
+def test_glyphs_are_marked_however_a_view_is_drawn(how):
+    """A cell's view and `magpy.show(backend="widget")` both mark what
+    magpylib sizes to the scene, in the drawing's millimetres: a dipole's
+    arrow, a sensor's axes and the pixel on its origin -- drawn apart in a
+    cell's view, with the axes in magpylib's own. A style given to `show`,
+    which the objects do not hold, leaves what it changes as magpylib drew
+    it: a size, or the probe's path drawn in copies."""
+    cube = magpy.magnet.Cuboid(dimension=(0.01,) * 3, polarization=(0, 0, 1))
+    walk = np.linspace((0.014, 0, -0.004), (0.014, 0, 0), 3)
+    probe = magpy.Sensor(position=walk, pixel=(0, 0, 0))
+    probe.style.pixel.field.source = "B"
+    dipole = magpy.misc.Dipole(position=(-0.014, 0, 0), moment=(0, 0, 1))
+    if how == "backend":
+        view = magpy.show(cube, probe, dipole, backend="widget", return_fig=True)
+    else:
+        styled = {
+            "sized by show": {"style_size": 0.5},
+            "framed by show": {"style_path_frames": 1},
+        }.get(how, {})
+        view = widget.SceneWidget(cube, probe, dipole, **styled)
+    drawn = view.payload["meshes"] + view.payload["pixels"]
+    anchors = sorted(item["glyph"]["anchor"][0] for item in drawn if "glyph" in item)
+    assert anchors == pytest.approx(
+        {
+            "cell": [-14, 14, 14],
+            "backend": [-14, 14],
+            "sized by show": [],
+            "framed by show": [-14],
+        }[how]
+    )
+
+
 def test_a_preview_carries_the_scene_in_its_own_answer():
     """One message where there were two: a value under the pointer, or a
     pose, asked with `scene` is answered with the scene as it is now -- the
