@@ -1,7 +1,8 @@
 # See the field
 
-The Field panel plots B, H, J or M along a sensor's path, using magpylib's own
-field rendering — animated if the sensor moves along a path. It opens as its own
-panel so it doesn't compete with the 3D view.
+The **Field** view plots B, H, J or M where you measure it:
 
-[Open Field View](command:magpylib-studio.openFieldView)
+- along a sensor's path,
+- as a map over a plane,
+- or swept against a variable: **Sweep a Variable…** rebuilds the scene at each
+  value and plots what a sensor reads.

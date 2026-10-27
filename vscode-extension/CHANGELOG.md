@@ -8,6 +8,23 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>An example gallery, with the notebook's Halbach rings and Helmholtz pair</summary>
+
+**Load Example Scene…** opens a tab of cards, one per example: its picture, in
+the light theme or the dark as the editor is, its name and what it shows. Click
+one to open it. The first two are the designs of `examples/marimo_demo.py`: the
+Halbach rings, with their field lines, in place of the Halbach stack, and a
+Helmholtz coil pair whose variants run the currents together or against each
+other; the solenoid, which the pair shows twice over, is no longer listed. Both
+still load by name, `load_example("halbach")` and `load_example("coil")`.
+`npm run gallery` draws the pictures. In the probe placement example the probe
+sits over the magnet, where the view sees it, its patch drawn as field arrows.
+The Get Started walkthrough is rewritten for the studio as it is now, the
+gallery its first step.
+
+</details>
+
+<details>
 <summary>⌥ on a legend eye: show only that row, or fade the rest</summary>
 
 Option-click (Alt-click) a row's eye in the legend to show only what the row

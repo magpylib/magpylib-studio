@@ -977,6 +977,24 @@ suite('magpylib-studio', () => {
     assert.strictEqual(sceneFileState().dirty, false, 'a refresh claimed an edit');
   });
 
+  test('Load Example Scene with no name opens the gallery, once', async function () {
+    this.timeout(30000);
+    const galleries = () =>
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter(
+          (tab) =>
+            tab.input instanceof vscode.TabInputWebview &&
+            tab.input.viewType.endsWith('magpylibStudio.gallery'),
+        );
+    await vscode.commands.executeCommand('magpylib-studio.loadExample');
+    await until(() => galleries().length === 1, 'the gallery to open');
+    await vscode.commands.executeCommand('magpylib-studio.loadExample');
+    await pause(300); // asserting that nothing more opens
+    assert.strictEqual(galleries().length, 1, 'asked again, the gallery opened twice');
+    await vscode.window.tabGroups.close(galleries());
+  });
+
   test('an example opens clean, in a preview tab the next one takes', async function () {
     this.timeout(60000);
     const tabOf = (uri: vscode.Uri) =>

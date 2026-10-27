@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonExtension } from '@vscode/python-extension';
 import { EngineClient, EngineError } from './engineClient';
+import { Example, showGallery } from './gallery';
 import { HistoryEntry, HistoryTreeProvider } from './historyView';
 import {
   addScene,
@@ -5718,30 +5719,33 @@ export function activate(context: vscode.ExtensionContext): void {
       refreshSurfaces(),
     ),
     // The name may be passed in — from a keybinding, a task, or a test —
-    // in which case there is nothing to ask.
+    // in which case there is nothing to ask. Otherwise the gallery: each
+    // example leans on a different feature, so its picture and description
+    // are the point — they are what tell you the tool can do that at all.
     registerCommand(
       'magpylib-studio.loadExample',
       async (name?: unknown, _options?: Discard) => {
-        // as for Open Scene: a row handed over by the title bar is no name
-        let chosen = typeof name === 'string' ? name : undefined;
-        if (!chosen) {
-          const { examples } = await (await getEngine(context)).request<{
-            examples: { name: string; label: string; description: string }[];
-          }>('list_examples');
-          // Each leans on a different feature, so the description is the point
-          // of the list — it is what tells you the tool can do that at all.
-          const pick = await vscode.window.showQuickPick(
-            examples.map((e) => ({ label: e.label, detail: e.description, e })),
-            { placeHolder: 'Example scene to load' },
-          );
-          if (!pick) {
-            return;
-          }
-          chosen = pick.e.name;
-        }
         // In a tab of its own, opened on the example: nothing to undo, and
         // nothing unsaved until it is edited.
-        followNewScene(await exampleTab(chosen));
+        const load = async (chosen: string) => followNewScene(await exampleTab(chosen));
+        // as for Open Scene: a row handed over by the title bar is no name
+        if (typeof name === 'string') {
+          await load(name);
+          return;
+        }
+        showGallery(
+          context,
+          async () =>
+            (await (await getEngine(context)).request<{ examples: Example[] }>('list_examples'))
+              .examples,
+          // a click is not a command run, whose failure VS Code would show
+          (chosen) =>
+            void load(chosen).catch((err: unknown) =>
+              vscode.window.showErrorMessage(
+                `Magpylib Studio: the example did not open: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            ),
+        );
       },
     ),
     registerCommand('magpylib-studio.selectObject', (objectId: string, node?: SceneObject) => {

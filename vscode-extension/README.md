@@ -21,14 +21,14 @@ bore. Drag `n` and both rings rebuild._
 1. Install the extension: search for **Magpylib Studio** in the Extensions view,
    or run `code --install-extension magpylib.magpylib-studio-vscode`.
 2. Open a folder, click the magpylib icon in the Activity Bar, choose **Load
-   Example Scene…** and pick the Halbach stack.
+   Example Scene…** and pick the Halbach rings from the gallery.
 3. The first time, it offers to **Install the Engine**, the Python side of the
    studio. Accept: it uses the Python interpreter you have selected, if it is
    3.11 or newer and you agree, or creates a `.venv` in the folder.
 
 Then try a few things:
 
-- In **Variables**, drag `n`: twenty magnets rebuild from one number.
+- In **Variables**, drag `n`: twenty-four magnets rebuild from one number.
 - In **Objects**, expand a ring to see the steps that built it, and choose
   **Edit Step…** on one to change it after the fact.
 - Run **Sweep a Variable…** on `gap` to plot the field against it.
