@@ -193,20 +193,21 @@ re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
 `view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
-whose style says no size is drawn five millimetres across; `style_size=` says
-another. Beside the sliders, the **object** toggle opens the selection's
-parameters and pose, in the scene's units, with expressions as written: type
-`12`, `1.5 cm` or a variable's name into any of them, and a name the scene lacks
-is made at the value it replaces. Under them, **style** folds the object's style
-tree — colour, opacity, label, the magnetization arrows, the path — read when
-opened; a value set there is one step to undo, and the view's own objects carry
-it; a ↺ Reset style in the title line puts all of it back at once, the label
-kept. One of the two panels is open at a time, and both go with the handles.
-They open in a column beside the view, which refits to what is left; drag the
-column's inner edge to widen it. Narrower than 720 pixels the column is a sheet
-below the view. `V` and `O` open and close them from the keyboard, and while the
-object panel shows the pose the readout stays away, back only for a drag. How
-the editable view is built is
+or a dipole keeps its size on screen as the view zooms, a tenth of the view per
+unit of `style_size=`, unless `style_sizemode="absolute"` makes that metres.
+Beside the sliders, the **object** toggle opens the selection's parameters and
+pose, in the scene's units, with expressions as written: type `12`, `1.5 cm` or
+a variable's name into any of them, and a name the scene lacks is made at the
+value it replaces. Under them, **style** folds the object's style tree — colour,
+opacity, label, the magnetization arrows, the path — read when opened; a value
+set there is one step to undo, and the view's own objects carry it; a ↺ Reset
+style in the title line puts all of it back at once, the label kept. One of the
+two panels is open at a time, and both go with the handles. They open in a
+column beside the view, which refits to what is left; drag the column's inner
+edge to widen it. Narrower than 720 pixels the column is a sheet below the view.
+`V` and `O` open and close them from the keyboard, and while the object panel
+shows the pose the readout stays away, back only for a drag. How the editable
+view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 ![The widget with its variables panel open in the column beside the view, and with the object panel open on the ring's source, its copies outlined faint](../widget-panels.png)

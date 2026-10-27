@@ -1080,6 +1080,77 @@ async function sealedBody(port, base) {
   );
 }
 
+/** A dipole's arrow keeps its size on screen, as the handles keep theirs,
+ *  with the camera four times nearer it or four times farther: measured in
+ *  the picture, by its magenta, top to bottom. */
+async function glyphs(port, base) {
+  await check(
+    "a dipole keeps its size on screen, zoomed in or out",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/glyphs.html`);
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size`,
+          20_000,
+        );
+        if (!drawn) return "the page never drew";
+        const tall = await tab.evaluate(`
+        const s = window.scene3d;
+        const fitted = s.cameraState();
+        const arrow = [...s.byObjectId.values()]
+          .flatMap((node) => node.children)
+          .find((part) => part.userData.glyph);
+        if (!arrow) return null;
+        arrow.updateWorldMatrix(true, false);
+        const at = arrow.userData.glyph.anchor.clone()
+          .applyMatrix4(arrow.matrixWorld).toArray();
+        const back = fitted.position.map((p, i) => p - fitted.target[i]);
+        const magenta = () => {
+          const copy = s.still();
+          const { data, width, height } = copy
+            .getContext("2d").getImageData(0, 0, copy.width, copy.height);
+          let top = height;
+          let bottom = -1;
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const i = 4 * (y * width + x);
+              if (data[i] > 120 && data[i + 2] > 120 && data[i + 1] < 90) {
+                top = Math.min(top, y);
+                bottom = Math.max(bottom, y);
+              }
+            }
+          }
+          return bottom - top + 1;
+        };
+        return [1, 0.25, 4].map((k) => {
+          s.setCamera({
+            ...fitted,
+            target: at,
+            position: at.map((p, i) => p + k * back[i]),
+          });
+          return magenta();
+        });`);
+        if (!tall) return "no glyph among what is drawn";
+        const [fitted, near, far] = tall;
+        if (!(fitted > 10)) return `the arrow is ${fitted} pixels tall`;
+        for (const [how, pixels] of [
+          ["four times nearer", near],
+          ["four times farther", far],
+        ]) {
+          const ratio = pixels / fitted;
+          if (ratio < 0.85 || ratio > 1.18) {
+            return `${how}, the arrow is ${pixels} pixels tall, not ${fitted}`;
+          }
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A hundred magnets and one on a path, played as motion: the moving one
  *  stays in the batch, which draws it at the step shown -- gone from where
  *  it was, there where it is. */
@@ -4091,6 +4162,7 @@ try {
   await manyMagnets(browser.port, base);
   await manyRun(browser.port, base);
   await sealedBody(browser.port, base);
+  await glyphs(browser.port, base);
   await marks(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);

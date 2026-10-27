@@ -245,14 +245,6 @@ def example_scene():
     }
 
 
-#: How big a sensor is drawn, in metres — the size of a real Hall probe
-#: package, and what the studio draws a sensor at when its style says no
-#: size (`threejs.pinned_scene_units`). Written into the examples' sensors so
-#: that their scripts say it; a scene function's bare sensor gets the same
-#: without saying it.
-SENSOR_SIZE = threejs.SENSOR_SIZE
-
-
 def _bore_sensor(start, stop, steps=25, label="Sensor"):
     """A sensor walking a straight line, the usual way to read a scene.
 
@@ -268,7 +260,7 @@ def _bore_sensor(start, stop, steps=25, label="Sensor"):
         "params": {
             "position": np.linspace((0, 0, start), (0, 0, stop), steps).tolist()
         },
-        "style": {"label": label, "size": SENSOR_SIZE},
+        "style": {"label": label},
     }
 
 
@@ -569,7 +561,7 @@ def array_scene():
                         for i in range(25)
                     ]
                 },
-                "style": {"label": "Above the array", "size": SENSOR_SIZE},
+                "style": {"label": "Above the array"},
             },
         ],
     }
@@ -675,12 +667,9 @@ def tolerance_scene(resolution=7):
                     ],
                 },
                 # each pixel an arrow coloured by what it reads, so the patch
-                # shows how much the field varies across it; the probe drawn
-                # as a small package, 2 mm, so that the patch, not its axes,
-                # is what the eye finds
+                # shows how much the field varies across it
                 "style": {
                     "label": "Where the probe might sit",
-                    "size": 0.002,
                     "pixel.field.source": "B",
                     "pixel.field.symbol": "arrow3d",
                     "pixel.field.colormap": "Viridis",
@@ -809,7 +798,7 @@ def solid_scene():
                         }
                     }
                 },
-                "style": {"label": "Above the magnet", "size": SENSOR_SIZE},
+                "style": {"label": "Above the magnet"},
             },
         ],
     }
@@ -899,7 +888,6 @@ def quiver_scene(density=12, steps=51):
                 },
                 "style": {
                     "label": "Field arrows",
-                    "size": SENSOR_SIZE,
                     "pixel.field.source": "B",
                     "pixel.field.symbol": "arrow3d",
                     "pixel.field.colormap": "Viridis",

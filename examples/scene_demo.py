@@ -79,7 +79,6 @@ def halbach(
         pixel=grid(reach, density),
         style={
             "label": "bore",
-            "size": 0.004,
             "pixel": {
                 "field": {"source": "B", "symbol": "arrow3d", "colormap": "Viridis"}
             },

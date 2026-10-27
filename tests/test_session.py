@@ -341,10 +341,10 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     magnet a metre on a side. Every shipped example is a bench-top assembly.
 
     Asserted on what is *drawn*, not on what is declared, because the two can
-    part company: a Sensor's glyph is sized absolutely -- the studio pins it
-    that way so moving one object cannot rescale every other, see
-    `threejs.pinned_scene_units` -- so it kept magpylib's default size of 1 and
-    arrived a metre across beside 10 mm magnets, in every example at once.
+    part company: a Sensor's glyph was once pinned absolute, so it kept
+    magpylib's default size of 1 and arrived a metre across beside 10 mm
+    magnets, in every example at once. It is drawn at `threejs.GLYPH_SIZE`
+    now, for the view to size to itself.
     """
     session = MagpylibStudioSession()
     session.load_example(name)
@@ -1000,8 +1000,8 @@ def test_a_played_frame_recomputes_what_the_field_decides():
     later = session.get_scene(frame=9)
 
     assert first["frames"] == 51 and later["frame"] == 9
-    arrows = [
-        next(m for m in f["meshes"] if m["object_id"] == "field")
+    arrows = [  # the readings, not the axes beside them
+        next(m for m in f["meshes"] if m["object_id"] == "field" and "glyph" not in m)
         for f in (first, later)
     ]
     assert arrows[0]["position"] != arrows[1]["position"]  # the field moved on

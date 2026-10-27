@@ -64,7 +64,6 @@ def halbach(
         pixel=grid(radius / 2, density, layers=layers),
         style={
             "label": "bore",
-            "size": 0.004,
             "pixel": {
                 "field": {
                     "source": "B",
@@ -117,7 +116,6 @@ def coils(
         pixel=grid(0.6 * radius, 9, plane="xz"),
         style={
             "label": "probe",
-            "size": 0.004,
             "pixel": {"field": {"source": "B", "symbol": "arrow3d"}},
         },
     )
