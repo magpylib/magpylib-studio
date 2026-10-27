@@ -1466,11 +1466,10 @@ function sizeGrips() {
 // --- what magpylib sizes to the scene, sized to the view ----------------
 // A scaled sensor's axes and a dipole's arrow have no size of their own:
 // magpylib draws them at a tenth of the scene, for a figure that is never
-// zoomed. Here they keep a tenth of the view instead (`threejs._mark_glyphs`
-// says what share), as the handles keep theirs -- each at its own distance,
+// zoomed. Here they keep a share of the view instead (`threejs.GLYPH_SHARE`,
+// said by each), as the handles keep theirs -- each at its own distance,
 // about its own anchor -- a sensor's never under the spread of its pixels.
-// Fitted, the view is about the scene, and they open about as `magpy.show()`
-// draws them; zoomed, they stay.
+// Fitted, they open the size the studio drew them before; zoomed, they stay.
 const glyphs = new Set(); // the traces sized so, while they are drawn
 // Sized again only when they may have to be: a glyph built, posed or
 // dragged, or the camera moved. A current's flow draws sixty frames a

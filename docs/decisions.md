@@ -2129,11 +2129,12 @@ it measured; zoomed out, it was gone.
 
 ### Decision
 
-- **A scaled sensor or dipole keeps a tenth of the view**: `style.size` over
-  `autosizefactor` of the view's height where it stands, whatever the zoom, as
-  the handles keep theirs. Fitted, the view is about the scene, and they open
-  about as `magpy.show()` draws them: 0.7 to 1 times its size on three scenes
-  measured. `sizemode="absolute"` is metres, as stated.
+- **A scaled sensor or dipole keeps 7 % of the view**: `style.size` times
+  `GLYPH_SHARE`, 0.07, of the view's height where it stands, whatever the zoom,
+  as the handles keep theirs. Fitted, that is the size a bare sensor's 5 mm had
+  across the shipped examples (Alex: a tenth was too big), and a little under
+  `magpy.show()`'s tenth of the scene. `sizemode="absolute"` is metres, as
+  stated.
 - **Only what magpylib sizes by the scene**: the axes, the arrow, and pixels all
   on the sensor's origin, which magpylib sizes by the axes. Positions, pixels'
   positions and the size their spacing gives them stay metres; the axes never
@@ -2152,7 +2153,9 @@ it measured; zoomed out, it was gone.
 - **Magpylib's tenth of the scene, drawn as it comes**: one object's move
   rescales every other, and changes the scene's reach with it.
 - **Matching `magpy.show()` exactly at the fitted view**: magpylib's tenth is of
-  a padded cube round the scene, which no share of a view is for every scene; a
-  tenth of each is a rule that can be said.
+  a padded cube round the scene, which no share of a view is for every scene.
+- **A tenth of the view, magpylib's `autosizefactor` taken of it**: drawn so,
+  every probe in the examples was a third bigger than the studio drew it before;
+  too big.
 - **Scaling in a shader**: nothing per frame, but picking, outlines and the fit
   would each need to know of it.

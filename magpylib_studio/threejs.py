@@ -185,6 +185,12 @@ def shape_of(obj):
 #: sizes these to itself (`_mark_glyphs`).
 GLYPH_SIZE = 0.005
 
+#: The share of the view's height a scaled sensor or dipole keeps, per unit
+#: of its ``style.size``, whatever the zoom (`_mark_glyphs`): what a bare
+#: sensor's 5 mm took of the fitted view across the shipped examples, before
+#: it was sized to the view -- a little under magpylib's tenth of the scene.
+GLYPH_SHARE = 0.07
+
 #: `GLYPH_SIZE` while `pinned_scene_units` holds, read by `_capture`; None
 #: for magpylib's own autosize.
 _glyph_size = None
@@ -588,13 +594,12 @@ def _mark_glyphs(scene, objects=None, drawn_at=None, scaled=None):
     sensor's axes and a dipole's arrow, each copy `style.path.frames` draws
     on its own. A view sizes them to itself, the same share of it whatever
     the zoom, as it sizes its handles: where magpylib gives them a tenth of
-    the scene -- its ``autosizefactor`` -- a view gives them a tenth of its
-    height. Marked with what it needs (`_glyph`):
+    the scene, a view gives them `GLYPH_SHARE` of its height. Marked with
+    what it needs (`_glyph`):
 
     * ``anchor``, the point it is sized about: the object's position at
       that copy's step, in the drawing's unit;
-    * ``share``, of the view's height: ``style.size`` over the
-      ``autosizefactor``;
+    * ``share``, of the view's height: ``style.size`` times `GLYPH_SHARE`;
     * ``drawn``, the size it was drawn at, in the drawing's unit:
       ``style.size`` times the autosize -- `drawn_at`'s, by ``id``, or
       magpylib's `Panel.autosize` -- or a sensor's pixels' least spread,
@@ -656,7 +661,7 @@ def _glyph(anchor, size, drawn, floor=0.0):
     about `anchor`, whose style says `size`, never under `floor`."""
     return {
         "anchor": np.round(anchor, 12).tolist(),
-        "share": size / magpy.defaults.display.autosizefactor,
+        "share": size * GLYPH_SHARE,
         "drawn": float(drawn),
         "floor": float(floor),
     }

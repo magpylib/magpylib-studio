@@ -193,11 +193,11 @@ re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
 `view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
-or a dipole keeps its size on screen as the view zooms, a tenth of the view per
-unit of `style_size=`, unless `style_sizemode="absolute"` makes that metres.
-Beside the sliders, the **object** toggle opens the selection's parameters and
-pose, in the scene's units, with expressions as written: type `12`, `1.5 cm` or
-a variable's name into any of them, and a name the scene lacks is made at the
+or a dipole keeps its size on screen as the view zooms, 7 % of the view per unit
+of `style_size=`, unless `style_sizemode="absolute"` makes that metres. Beside
+the sliders, the **object** toggle opens the selection's parameters and pose, in
+the scene's units, with expressions as written: type `12`, `1.5 cm` or a
+variable's name into any of them, and a name the scene lacks is made at the
 value it replaces. Under them, **style** folds the object's style tree — colour,
 opacity, label, the magnetization arrows, the path — read when opened; a value
 set there is one step to undo, and the view's own objects carry it; a ↺ Reset

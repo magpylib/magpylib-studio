@@ -260,8 +260,9 @@ Three ways between code and the document, none of which parses code
 lengths in metres, with magpylib's defaults put back after, so a notebook's own
 `show()` is untouched. What magpylib sizes by the scene -- a scaled sensor's
 axes, a dipole's arrow -- comes drawn at `GLYPH_SIZE` per unit of its size and
-marked `glyph` (`threejs._mark_glyphs`), and the view keeps it at a tenth of its
-height per unit, scaled about its anchor before every frame, whatever the zoom
+marked `glyph` (`threejs._mark_glyphs`), and the view keeps it at `GLYPH_SHARE`,
+7 %, of its height per unit, scaled about its anchor before every frame,
+whatever the zoom
 ([0040](decisions.md#0040-sensors-and-dipoles-keep-their-size-on-screen)). A
 sensor whose pixels read the field comes as a `pixels` item, a position, a
 direction, a size and a colour per pixel, that the renderer draws as instances

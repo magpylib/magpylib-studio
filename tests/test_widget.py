@@ -2036,7 +2036,7 @@ def test_another_controls_trait_links_to_the_variables_both_ways():
 )
 def test_a_glyphs_size_is_read_as_magpylib_reads_it(style):
     """A size alone is magpylib's ``"scaled"``, as `magpy.show()` reads it:
-    a tenth of the view per unit, which the view keeps whatever the zoom --
+    a share of the view per unit, which the view keeps whatever the zoom --
     not metres, which a pin on magpylib's defaults once made of it, a 0.3
     drawn 300 mm long. An absolute size is metres. A dipole is resized in
     the same units its style says, and drawing leaves the styles, and
@@ -2062,7 +2062,7 @@ def test_a_glyphs_size_is_read_as_magpylib_reads_it(style):
     if style.get("sizemode") == "absolute":
         assert "glyph" not in axes and 0.002 < span < 0.005
     else:
-        assert axes["glyph"]["share"] == pytest.approx(size / 10)
+        assert axes["glyph"]["share"] == pytest.approx(size * threejs.GLYPH_SHARE)
         assert axes["glyph"]["drawn"] == pytest.approx(size * threejs.GLYPH_SIZE)
         assert axes["glyph"]["anchor"] == pytest.approx([0.012, 0, 0])
     assert studio.payload["shapes"]["dipole"]["value"] == pytest.approx(size)
