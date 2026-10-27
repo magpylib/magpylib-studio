@@ -541,58 +541,79 @@
         "icon": "media/icon.png",
         "steps": [
           {
-            "id": "openStudio",
-            "title": "Open the Studio view",
-            "description": "The Studio panel renders the scene with magpylib's own 3D plot, and stays open as you edit.\n[Open Scene View](command:magpylib-studio.openStudio)",
-            "media": {
-              "markdown": "walkthroughs/open-studio.md"
-            },
-            "completionEvents": [
-              "onCommand:magpylib-studio.openStudio"
-            ]
-          },
-          {
             "id": "loadExample",
-            "title": "Load an example",
-            "description": "Ready-made scenes, each a handful of parametric steps — load one and drag its sliders.\n[Load Example Scene…](command:magpylib-studio.loadExample)",
+            "title": "Pick an example",
+            "description": "The gallery shows every built-in scene with a picture. Start with the Halbach rings. The first time, the studio offers to **Install the Engine**, its Python side: accept, and it sets one up.\n[Open the Example Gallery](command:magpylib-studio.loadExample)",
             "media": {
-              "markdown": "walkthroughs/load-example.md"
+              "image": {
+                "light": "media/gallery/rings-light.webp",
+                "dark": "media/gallery/rings-dark.webp",
+                "hc": "media/gallery/rings-dark.webp",
+                "hcLight": "media/gallery/rings-light.webp"
+              },
+              "altText": "The Halbach rings example: two rings of magnets, and the field lines across the bore"
             },
             "completionEvents": [
               "onCommand:magpylib-studio.loadExample"
             ]
           },
           {
+            "id": "variables",
+            "title": "Drag a variable",
+            "description": "Every example is parametric: its numbers are variables, each with a slider in the **Variables** view. Drag one and the scene rebuilds.",
+            "media": {
+              "markdown": "walkthroughs/variables.md"
+            },
+            "completionEvents": [
+              "onView:magpylib-studio.variablesView"
+            ]
+          },
+          {
             "id": "addObject",
-            "title": "Add your own object",
-            "description": "Add a magnet, current source, sensor or collection, then click it in the Scene tree to edit it in the Inspector.\n[Add Object…](command:magpylib-studio.addObject)",
+            "title": "Edit in 3D",
+            "description": "Click an object in the 3D view and drag its handles. The **Objects** view lists the steps that built it, each one editable after the fact.\n[Add Object…](command:magpylib-studio.addObject)",
             "media": {
               "markdown": "walkthroughs/add-object.md"
             },
             "completionEvents": [
-              "onCommand:magpylib-studio.addObject"
+              "onCommand:magpylib-studio.addObject",
+              "onCommand:magpylib-studio.editOperation"
             ]
           },
           {
             "id": "fieldView",
             "title": "See the field",
-            "description": "Plot B, H, J or M along a sensor's path — magpylib's own field rendering, in its own panel.\n[Open Field View](command:magpylib-studio.openFieldView)",
+            "description": "Plot the field along a sensor's path, as a map over a plane, or swept against a variable.\n[Open Field View](command:magpylib-studio.openFieldView)",
             "media": {
               "markdown": "walkthroughs/field-view.md"
             },
             "completionEvents": [
-              "onCommand:magpylib-studio.openFieldView"
+              "onCommand:magpylib-studio.openFieldView",
+              "onCommand:magpylib-studio.sweep"
+            ]
+          },
+          {
+            "id": "script",
+            "title": "Switch to code and back",
+            "description": "The scene is a magpylib function whose parameters are the variables. Edit it as code, save, and the scene follows.\n[Edit Python Script](command:magpylib-studio.viewScript)",
+            "media": {
+              "markdown": "walkthroughs/script.md"
+            },
+            "completionEvents": [
+              "onCommand:magpylib-studio.viewScript",
+              "onCommand:magpylib-studio.exportScript"
             ]
           },
           {
             "id": "saveScene",
-            "title": "Save your work",
-            "description": "Scenes save as `.magpy.json`, reopenable later, or export a runnable Python script.\n[Save Scene As…](command:magpylib-studio.saveSceneAs)",
+            "title": "Save your scene",
+            "description": "A scene is a `.magpy.json` file in a tab of its own, saved like any other file.\n[Save Scene As…](command:magpylib-studio.saveSceneAs)",
             "media": {
               "markdown": "walkthroughs/save-scene.md"
             },
             "completionEvents": [
-              "onCommand:magpylib-studio.saveSceneAs"
+              "onCommand:magpylib-studio.saveSceneAs",
+              "onCommand:magpylib-studio.saveScene"
             ]
           }
         ]

@@ -1,8 +1,14 @@
-# Add your own object
+# Edit in 3D
 
-Add a magnet, current source, sensor or collection, with its constructor
-parameters prompted up front — dimensions, polarization, position, with units.
-Click it afterwards in the Scene tree to edit it further in the Inspector, or
-drag it into a Collection to group it with others.
+Click an object in the 3D view to select it, then:
 
-[Add Object…](command:magpylib-studio.addObject)
+- **W** moves it, **E** turns it, **R** resizes it, **P** aims its polarization.
+  ⌘Z / Ctrl+Z undoes a whole drag.
+- **F** frames the selection, **Home** everything; **1**, **3** and **7** look
+  from the front, the right and the top.
+
+A magnet pushed into another shows the overlap in amber.
+
+The **Objects** view lists the steps that built each object. **Edit Step…**
+changes one after the fact, and everything after it is applied again. **Add
+Object…** adds a magnet, a current, a sensor or a mesh of your own.
