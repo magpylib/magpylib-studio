@@ -40,7 +40,10 @@ from magpylib_studio.session import (
     _parts_source,
     _parts_turned,
     _style_arg,
+    _types_in,
     _variant_problem,
+    class_call,
+    class_imports,
 )
 
 
@@ -1113,6 +1116,9 @@ class _ScriptWriter:
             lines.append(
                 f"from scipy.spatial.transform import Rotation as {self.alias['R']}"
             )
+        lines += class_imports(
+            _types_in(e for e in self.events if e.get("op") == "create")
+        )
         words = ", ".join(
             word if self.alias[word] == word else f"{word} as {self.alias[word]}"
             for word in sorted(self.words | self.constants)
@@ -1335,7 +1341,7 @@ class _ScriptWriter:
                 call = self.word("TriangularMesh")
                 parts.append(("mesh_source", self.value(source)))
         else:
-            call = f"{self.alias['magpy']}.{kind}"
+            call = class_call(kind, self.alias["magpy"])
         parts += [(key, self.value(value, table=True)) for key, value in params.items()]
         # magpylib's own spelling, `style_label="Ring"`, where a path has no
         # underscore of its own to be read wrong; the rest as `style={...}`

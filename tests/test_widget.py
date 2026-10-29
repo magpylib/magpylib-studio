@@ -1316,6 +1316,23 @@ def test_a_sealed_collection_says_what_it_cannot_carry():
     assert any("body's parts: a CustomSource" in w for w in warnings)
 
 
+def test_an_object_of_a_class_a_document_has_no_name_for_is_left_out():
+    """Said by its class and package, in a collection or on its own, where
+    it was a step failing with "unknown object type None" (#100)."""
+
+    class Mine(magpy.misc.CustomSource):
+        pass
+
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    group = magpy.Collection(magnet, Mine(style_label="inner"))
+    doc, warnings = importer.document_from_objects([group, Mine()], {}, script=False)
+    assert [spec["type"] for spec in doc["objects"]] == ["Collection"]
+    assert [spec["type"] for spec in doc["objects"][0]["children"]] == ["magnet.Cuboid"]
+    (said,) = [w for w in warnings if "not supported in a document" in w]
+    mine = f"Mine from {__name__.partition('.')[0]}"
+    assert said.startswith(f"{mine}, inner ({mine}): not supported in a document")
+
+
 def _studio(**traits):
     """A ring of three and a probe, edited; what the view says back is kept
     in `sent` rather than going to a comm."""

@@ -22,7 +22,8 @@ the view needs to draw lines nobody has to tune:
   own polarization (`getJ`), so every shape it knows; a cuboid's answered
   here as getJ answers it (`inside`), for a meshed body's thousands. The lines are of the
   field in the air: let through the magnets, 3D lines wandered on paths too
-  unstable to trace.
+  unstable to trace. A solved face-charge sheet's body, which getJ does not
+  see, stops them too (`_inside_sheets`).
 
 During a gesture the grid is coarser and kept for its length, unless the
 sensor itself moves: the field of what does not move is computed once and
@@ -409,9 +410,12 @@ def inside(sources, points):
     if not sources:
         return within
     cuboids = [s for s in sources if _cuboid(s)]
-    others = [s for s in sources if not _cuboid(s)]
+    sheets = [s for s in sources if _sheet(s)]
+    others = [s for s in sources if not _cuboid(s) and not _sheet(s)]
     if cuboids:
         within |= _inside_cuboids(cuboids, points)
+    if sheets:
+        within |= _inside_sheets(sheets, points)
     if others:
         within |= np.linalg.norm(_in_chunks(magpy.getJ, others, points), axis=1) > 0
     return within
@@ -419,6 +423,34 @@ def inside(sources, points):
 
 def _cuboid(source):
     return isinstance(source, magpy.magnet.Cuboid) and source.polarization is not None
+
+
+def _sheet(source):
+    """A solved face-charge sheet (`magpylib_material_response`): a surface
+    round a body whose field it gives inside as H alone, B there lacking
+    the body's magnetization, and which getJ does not see as a body."""
+    return type(source).__module__.startswith("magpylib_material_response.face_charge")
+
+
+def _inside_sheets(sheets, points):
+    """`inside` for solved sheets at their last step: the points their
+    triangles enclose, all of them together -- parts solved as one leave
+    out the faces they share, so only together are they closed. Tested as
+    magpylib tests a TriangularMesh, by the crossings of a ray."""
+    from magpylib._src.fields.field_BH_triangularmesh import (
+        _mask_inside_trimesh,
+    )
+
+    triangles = []
+    for sheet in sheets:
+        turn = sheet.orientation if sheet.orientation.single else sheet.orientation[-1]
+        corners = sheet.triangles.reshape(-1, 3)
+        moved = turn.apply(corners) + np.atleast_2d(sheet.position)[-1]
+        triangles.append(moved.reshape(-1, 3, 3))
+    triangles = np.concatenate(triangles)
+    if not len(triangles):
+        return np.zeros(len(points), dtype=bool)
+    return _mask_inside_trimesh(points, triangles)
 
 
 #: How far, relative to a half-side, a point may stand outside a cuboid and
