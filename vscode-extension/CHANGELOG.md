@@ -16,7 +16,7 @@ left out with "unknown object type None". It is drawn coloured by its charge, as
 `magpy.show()` draws it, the sheets of one solve on one scale; it moves and
 turns as a whole, and nothing re-solves; field lines stop inside it as at a
 magnet. Needs magpylib-material-response 0.7. An object of any other class a
-scene cannot hold is left out, said by its label, class and package (#100).
+scene cannot hold is left out, said by its label, class and package (#101).
 
 </details>
 
