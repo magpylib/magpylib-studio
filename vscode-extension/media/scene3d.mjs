@@ -3051,9 +3051,10 @@ function takeOff(added) {
 // every pair whose shapes are convex solids: a cuboid, a cylinder, a sphere,
 // a tetrahedron, a convex mesh, and each cell of a meshed body. Their shared
 // region is convex, and bounded by the faces of each that lie inside the
-// other: each face clipped by the other's planes. A hollow shape -- a ring,
-// a segment of one -- is not convex, and its overlap is marked round it
-// only (`outlineOverlaps`). A meshed body's region is a piece a cell, and the
+// other: each face clipped by the other's planes. A ring, or a segment of one,
+// is not convex but its wedges are, and it is taken as a body of those
+// (`wedgesOf`). A mesh of any other hollow shape is marked round it only
+// (`outlineOverlaps`). A meshed body's region is a piece a cell, and the
 // pieces' inner faces are hidden as a solid's would be: the regions are drawn
 // apart, after the picture, on depths of their own (`drawRegions`).
 
@@ -3131,6 +3132,61 @@ function middleOf(geometry) {
   return geometry.userData.middle;
 }
 
+/** The corners of a wedge's six faces, two triangles each: a corner is its
+ *  column, then twice its radius, then four times its height. */
+const WEDGE_FACES = [
+  [0, 2, 6, 4],
+  [1, 3, 7, 5],
+  [0, 1, 5, 4],
+  [2, 3, 7, 6],
+  [0, 1, 3, 2],
+  [4, 5, 7, 6],
+].flatMap(([a, b, c, d]) => [a, b, c, a, c, d]);
+
+/** A body with more wedges than this reaching the other is marked round it
+ *  only: each is a solid to clip against, and a body of 2,400 ring cells took
+ *  over 400 ms a step to drag. A segment is a few dozen. */
+const MOST_WEDGES = 512;
+
+/** The wedges of a CylinderSegment, one between each column of corners and the
+ *  next: its mesh is four rows of them -- in and out, top and bottom -- and no
+ *  triangle reaches past a neighbouring column. Empty for any other shape,
+ *  whose rows and columns would not hold, or whose wedges would not be convex.
+ *  Worked out once per geometry, and never drawn. */
+function wedgesOf(geometry) {
+  geometry.userData.wedges ??= findWedges(geometry);
+  return geometry.userData.wedges;
+}
+
+function findWedges(geometry) {
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const n = position.count / 4;
+  if (!index || !Number.isInteger(n) || n < 2) return [];
+  for (let t = 0; t + 2 < index.count; t += 3) {
+    const columns = [0, 1, 2].map((k) => index.getX(t + k) % n);
+    if (Math.max(...columns) - Math.min(...columns) > 1) return [];
+  }
+  const wedges = [];
+  for (let column = 0; column + 1 < n; column++) {
+    const corners = [];
+    for (let row = 0; row < 4; row++) {
+      for (const v of [row * n + column, row * n + column + 1]) {
+        corners.push(position.getX(v), position.getY(v), position.getZ(v));
+      }
+    }
+    const wedge = new THREE.BufferGeometry();
+    wedge.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(corners, 3),
+    );
+    wedge.setIndex(WEDGE_FACES);
+    if (!facesOf(wedge)) return [];
+    wedges.push(wedge);
+  }
+  return wedges;
+}
+
 /** `faces` carried by `matrix` into the world. */
 function worldFaces(faces, matrix) {
   const turn = new THREE.Matrix3().getNormalMatrix(matrix);
@@ -3182,13 +3238,13 @@ function within(p, faces, margin) {
 }
 
 /** The faces of `mesh` that lie within `faces` -- another solid's, in the
- *  world, inside `box` -- added to `points` as world triangles, nine numbers
- *  each. A face clear of the box is passed over unclipped: of a cylinder's
- *  hundreds, a cell of a meshed body reaches a few. A face with one of
+ *  world, inside `box` -- handed to `add` as world polygons. A face clear of
+ *  the box is passed over unclipped: of a cylinder's hundreds, a cell of a
+ *  meshed body reaches a few. A face with one of
  *  `beside` -- the other cells of its body, `{ box, faces }` -- just outside
  *  it lies between two cells, inside the region, and is left out; and, where
  *  `shared`, one lying in a face of the other solid, which has given it. */
-function clipShape(points, mesh, faces, box, margin, beside, shared) {
+function clipShape(add, mesh, faces, box, margin, beside, shared) {
   const position = mesh.geometry.attributes.position;
   const index = mesh.geometry.index;
   const corners = index ? index.count : position.count;
@@ -3245,9 +3301,7 @@ function clipShape(points, mesh, faces, box, margin, beside, shared) {
       );
       if (between) continue;
     }
-    for (let i = 1; i + 1 < polygon.length; i++) {
-      points.push(...polygon[0], ...polygon[i], ...polygon[i + 1]);
-    }
+    add(polygon, margin);
   }
 }
 
@@ -3269,14 +3323,18 @@ function solidsById(ids) {
 }
 
 /** Where `as` and `bs` -- two objects' solids -- interpenetrate, as world
- *  triangles; empty where none of them are convex solids that do. A meshed
- *  body's cells are compared only where they reach the other's box, and only
- *  those have their faces worked out. */
+ *  triangles; empty where none of them are convex solids, or made of them,
+ *  that do. A meshed body's cells and a segment's wedges are compared only
+ *  where they reach the other's box, and only those have their faces worked
+ *  out. */
 function sharedRegion(as, bs) {
+  const boxIn = ({ geometry, matrixWorld }) => {
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    return geometry.boundingBox.clone().applyMatrix4(matrixWorld);
+  };
   const boxOf = (mesh) => {
     mesh.updateWorldMatrix(true, false);
-    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-    return mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+    return boxIn(mesh);
   };
   const spanning = (boxes) =>
     boxes.reduce((all, box) => all.union(box), new THREE.Box3());
@@ -3293,27 +3351,50 @@ function sharedRegion(as, bs) {
     }
     return faces.get(mesh);
   };
-  a = a.filter(({ mesh }) => facesOf(mesh.geometry));
-  b = b.filter(({ mesh }) => facesOf(mesh.geometry));
+  // the convex solids, and a segment's wedges where they reach the other
+  const convex = (side, reach) => {
+    const solid = side.filter(({ mesh }) => facesOf(mesh.geometry));
+    const hollow = side.filter(({ mesh }) => !facesOf(mesh.geometry));
+    const count = hollow.reduce(
+      (n, { mesh }) => n + mesh.geometry.attributes.position.count / 4,
+      0,
+    );
+    if (count > MOST_WEDGES) return solid;
+    const wedges = hollow.flatMap(({ mesh }) =>
+      wedgesOf(mesh.geometry)
+        .map((geometry) => ({ geometry, matrixWorld: mesh.matrixWorld }))
+        .map((piece) => ({ mesh: piece, box: boxIn(piece) }))
+        .filter(({ box }) => box.intersectsBox(reach)),
+    );
+    return [...solid, ...wedges];
+  };
+  a = convex(a, reachB);
+  b = convex(b, reachA);
   // a body's cells, each beside the others: see `clipShape`
   const cells = (side) =>
     side.length > 1 ? side.map((s) => ({ ...s, faces: facesIn(s) })) : [];
   const [cellsA, cellsB] = [cells(a), cells(b)];
   const points = [];
+  // once each: a face lying between two pieces of the other is within both,
+  // and a pixel of it hatched twice is darker than the rest
+  const seen = new Set();
+  const add = (polygon, margin) => {
+    const key = polygon
+      .map((p) => p.map((v) => Math.round(v / (100 * margin))).join())
+      .sort()
+      .join(" ");
+    if (seen.has(key)) return;
+    seen.add(key);
+    for (let i = 1; i + 1 < polygon.length; i++) {
+      points.push(...polygon[0], ...polygon[i], ...polygon[i + 1]);
+    }
+  };
   for (const one of a) {
     for (const other of b) {
       if (!one.box.intersectsBox(other.box)) continue;
       const margin = 1e-6 * one.box.getSize(new THREE.Vector3()).length();
-      clipShape(points, one.mesh, facesIn(other), other.box, margin, cellsA);
-      clipShape(
-        points,
-        other.mesh,
-        facesIn(one),
-        one.box,
-        margin,
-        cellsB,
-        true,
-      );
+      clipShape(add, one.mesh, facesIn(other), other.box, margin, cellsA);
+      clipShape(add, other.mesh, facesIn(one), one.box, margin, cellsB, true);
     }
   }
   return points;

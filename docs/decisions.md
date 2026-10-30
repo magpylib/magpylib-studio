@@ -2032,7 +2032,10 @@ apart matters.
 - **An overlap is hatched where it is**: the region the two share, in amber,
   drawn through what stands in front of it, with an amber line round each. The
   view works it out from the shapes it draws, for convex solids -- each clipped
-  by the other's faces -- so a ring segment is marked round only.
+  by the other's faces -- and a ring segment is taken as the wedges it is drawn
+  in, each convex. A mesh of any other hollow shape is marked round only, and so
+  is a body with more than 512 wedges to compare: a body of 2,400 ring cells
+  took over 400 ms a step to drag.
 - **Motion once, then still**: an overlap blinks twice as it appears; a mark
   comes at once -- a hover's fade-in, shared by every faint mark, flickered them
   all as the pointer moved. Nothing pulses: a pulse draws every frame for as

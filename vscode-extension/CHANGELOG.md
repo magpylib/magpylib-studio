@@ -20,6 +20,27 @@ scene cannot hold is left out, said by its label, class and package (#101).
 
 </details>
 
+### Fixed
+
+<details>
+<summary>A ring or a cylinder segment is hatched where it overlaps</summary>
+
+Where a `CylinderSegment` overlaps another magnet, the region they share is
+hatched in amber, bore and curves followed, as it is for a cylinder or a cuboid.
+It was outlined only, because a segment is not convex. A mesh of another hollow
+shape, or a body of very many ring cells, stays outlined only.
+
+</details>
+
+<details>
+<summary>A magnet dragged again is drawn where it is let go</summary>
+
+From an object's second drag on, in an editable notebook view, the handles and
+the readout went to where it was let go and the magnet stayed where the first
+drag had left it, its overlaps as they were. Any kind of object, since 0.8.0.
+
+</details>
+
 ## [0.9.0]
 
 ### Added

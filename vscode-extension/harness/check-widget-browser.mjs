@@ -898,15 +898,15 @@ async function marks(port, base) {
   const open = async (tab) => {
     await tab.navigate(`${base}/out/overlap.html`);
     const drawn = await tab.until(
-      `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size === 5`,
+      `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size === 7`,
       20_000,
     );
-    return drawn && (await tab.evaluate(CUBES)) === "a,b,clear,t,u";
+    return drawn && (await tab.evaluate(CUBES)) === "a,b,c,clear,s,t,u";
   };
   await check("the pointer marks what it is on, faintly", async () => {
     const tab = await openTab(port);
     try {
-      if (!(await open(tab))) return "the page never drew its five shapes";
+      if (!(await open(tab))) return "the page never drew its shapes";
       const at = await tab.evaluate(`
         const box = boxOf(cubes.clear);
         const centre = onPage(box.getCenter(box.min.clone()));
@@ -950,7 +950,7 @@ async function marks(port, base) {
     async () => {
       const tab = await openTab(port);
       try {
-        if (!(await open(tab))) return "the page never drew its five shapes";
+        if (!(await open(tab))) return "the page never drew its shapes";
         // two cubes, and a cube in a tetrahedron's corner -- outside its
         // box's middle, which a convex solid's inside was once taken from
         const region = await tab.evaluate(`
@@ -962,8 +962,21 @@ async function marks(port, base) {
             return found;
           };
           const regions = hatched("a", "b");
-          const count = regions.length + hatched("t", "u").length;
-          if (regions.length !== 1 || count !== 2) return { count };
+          const [through] = hatched("s", "c");
+          const count = regions.length + hatched("t", "u").length + (through ? 1 : 0);
+          if (regions.length !== 1 || count !== 3) return { count };
+          // how far the hatch through the segment's wall comes to its axis
+          through.updateWorldMatrix(true, false);
+          const corners = through.geometry.attributes.position;
+          const corner = boxOf(cubes.s).min.clone();
+          // the scene is drawn in a unit of its own: the 12 mm cylinder says which
+          const drawn = boxOf(cubes.c);
+          const perMetre = (drawn.max.x - drawn.min.x) / 0.012;
+          let nearest = Infinity;
+          for (let i = 0; i < corners.count; i++) {
+            corner.fromBufferAttribute(corners, i).applyMatrix4(through.matrixWorld);
+            nearest = Math.min(nearest, Math.hypot(corner.x / perMetre - 0.07, corner.y / perMetre));
+          }
           const [shading] = regions;
           shading.updateWorldMatrix(true, false);
           shading.geometry.computeBoundingBox();
@@ -976,8 +989,12 @@ async function marks(port, base) {
           shading.visible = false;
           const bare = colourAt(middle);
           shading.visible = true;
-          return { count, off, shaded, bare };`);
-        if (region.count !== 2) return `${region.count} shaded regions, not 2`;
+          return { count, off, shaded, bare, nearest };`);
+        if (region.count !== 3) return `${region.count} shaded regions, not 3`;
+        // 4 mm is the bore's radius; drawn in chords, it comes a little inside
+        if (region.nearest < 0.00395 || region.nearest > 0.0042) {
+          return `the hatch reaches ${region.nearest} m from the bored segment's axis, not its 4 mm bore`;
+        }
         if (region.off > 1e-3) {
           return `the shading is ${region.off} of its size off the cubes' shared box`;
         }

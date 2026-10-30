@@ -52,8 +52,8 @@ Writes into OUT:
   view keeps the same size on screen, zoomed in or out;
 * ``overlap.html`` -- two cubes, one pushed a quarter of its side into the
   other, a third clear of both, and a small cube in the corner of a
-  tetrahedron: overlaps shaded where they are, and a cube the pointer can mark
-  on its own;
+  tetrahedron, and a cylinder through the wall of a bored segment: overlaps
+  shaded where they are, and a cube the pointer can mark on its own;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -524,6 +524,19 @@ def main(out):
             dimension=(0.004,) * 3,
             position=(0.041, 0.001, 0.001),
             style_label="u",
+        ),
+        # not convex, and its bore is no part of what the two share
+        magpy.magnet.CylinderSegment(
+            polarization=(0, 0, 1),
+            dimension=(0.004, 0.008, 0.01, 0, 300),
+            position=(0.07, 0, 0),
+            style_label="s",
+        ),
+        magpy.magnet.Cylinder(
+            polarization=(0, 0, 1),
+            dimension=(0.012, 0.01),
+            position=(0.078, 0, 0),
+            style_label="c",
         ),
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
