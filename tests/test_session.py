@@ -636,6 +636,30 @@ def test_a_drags_later_steps_keep_the_colours_of_its_first():
     assert all(s._objs[key].style.color is None for key in ("lower", "upper"))
 
 
+@pytest.mark.parametrize(
+    "move",
+    [
+        lambda s, x: s.apply_edits([{"objectId": "cube", "position": [x, 0, 0]}]),
+        lambda s, x: s.set_transform("cube", position=[x, 0, 0]),
+    ],
+    ids=["handles", "named by nothing"],
+)
+def test_an_object_moved_again_is_drawn_where_it_ends(session, move):
+    """The first drag pins the object; a later one writes over that pin on the
+    live object, with no build, and is still drawn where it was let go."""
+    shown = session.get_scene()
+    for x in (1.0, 2.0, 3.0):
+        session.begin_interaction()
+        session.shows(shown)
+        move(session, x)
+        session.get_scene(partial=True)
+        session.end_interaction()
+        shown = session.get_scene()
+        mesh = next(m for m in shown["meshes"] if m["object_id"] == "cube")
+        drawn = np.reshape(mesh["position"], (-1, 3))[:, 0]
+        assert (drawn.min() + drawn.max()) / 2 == pytest.approx(x)
+
+
 def test_a_gesture_that_ends_where_it_began_leaves_nothing_behind(session):
     """A slider taken somewhere and released at the value it started from.
 

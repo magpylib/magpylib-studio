@@ -353,14 +353,15 @@ objects, `set_overlap_intended` marks a pair, kept in the document's
 `intended_overlaps` and carried through the script tab, and `list_objects` names
 each object's partners, which the Objects tree marks as it marks a broken mesh.
 The view marks each overlapping object in amber, its own traces only, and
-hatches the region two convex solids share, worked out from the shapes it draws;
-in a run, the pairs of the step shown. A selected one keeps its green. The
-legend marks each overlapping row, passed up to a folded collection, faint for a
-pair marked as meant; above the list it counts the pairs, a click stepping
-through them with a way to mark the one shown, and with two objects selected
-says how far apart they are. A read-only view works the overlaps out from the
-objects it was given, keyed as its payload. A check that fails leaves `overlaps`
-empty and says why in `overlaps_error`.
+hatches the region two solids share where each is convex or a ring segment's
+convex wedges, worked out from the shapes it draws; in a run, the pairs of the
+step shown. A selected one keeps its green. The legend marks each overlapping
+row, passed up to a folded collection, faint for a pair marked as meant; above
+the list it counts the pairs, a click stepping through them with a way to mark
+the one shown, and with two objects selected says how far apart they are. A
+read-only view works the overlaps out from the objects it was given, keyed as
+its payload. A check that fails leaves `overlaps` empty and says why in
+`overlaps_error`.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is
