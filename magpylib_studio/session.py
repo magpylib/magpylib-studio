@@ -5920,6 +5920,7 @@ class MagpylibStudioSession:
             return {"ok": False, "error": str(e)}
         if snapshot is not None:
             self._record_state(label, snapshot)
+        self._changed()  # as the build would have: `_whole_since` redraws it
         return {"ok": True}
 
     def duplicate_along(self, object_id, count, step):
