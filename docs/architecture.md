@@ -121,6 +121,17 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   each keeps its differences. Its own label, description, legend and traces stay
   its own. A view draws it as one node, its parts' traces keyed to it; a scene
   function's parts are taken in as data, never made objects.
+- **A solved face-charge sheet** (`face_charge.ChargeSheet`, from
+  magpylib-material-response, imported when a document first names it) is its
+  constructor's arguments: `vertices`, `faces`, `charge_densities`, `panels` and
+  `mean_polarization`
+  ([0041](decisions.md#0041-a-solved-face-charge-sheet-is-data-in-a-document)).
+  Scripts import the class by name; the recorder reads them off the sheet, which
+  magpylib's hook reports as the `CustomSource` it extends. Its colour level is
+  its style, `charge.level`, kept and edited as any style is. A view draws it
+  with the charge `get_trace` colours it by; it moves and turns as a whole,
+  offering no parameter to edit, and field lines stop inside it. An object of a
+  class the table lacks is left out, said by its label, class and package.
 - **Any numeric value may be an expression**: a string starting with `=`, over
   `variables` ([0003](decisions.md#0003-expressions-are-hermetic)). A run of
   points may be a `sampled` node, a formula of `t` with a `count` and a range,

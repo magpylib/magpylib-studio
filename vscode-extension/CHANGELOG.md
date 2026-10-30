@@ -5,6 +5,21 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>Solved face-charge sheets in a scene, beside field lines</summary>
+
+A `ChargeSheet` from magpylib-material-response's `apply_face_charge` comes into
+a `SceneWidget`, the field lines, a saved scene and both scripts, where it was
+left out with "unknown object type None". It is drawn coloured by its charge, as
+`magpy.show()` draws it, the sheets of one solve on one scale; it moves and
+turns as a whole, and nothing re-solves; field lines stop inside it as at a
+magnet. Needs magpylib-material-response 0.7. An object of any other class a
+scene cannot hold is left out, said by its label, class and package (#101).
+
+</details>
+
 ## [0.9.0]
 
 ### Added

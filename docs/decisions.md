@@ -2159,3 +2159,54 @@ it measured; zoomed out, it was gone.
   too big.
 - **Scaling in a shader**: nothing per frame, but picking, outlines and the fit
   would each need to know of it.
+
+## 0041. A solved face-charge sheet is data in a document
+
+**Status:** accepted 2026-10-29, as built (#100). Alex chose a sheet that moves
+as a whole, the solve's mean polarization as a public argument of `ChargeSheet`,
+and its colour level as the sheet's style (2026-10-30), both added in
+magpylib-material-response before its first release with it.
+
+### Context
+
+`apply_face_charge` (magpylib-material-response) solves soft parts into
+`ChargeSheet`s, `CustomSource`s whose field is their triangles and the charge at
+each face's corners. `magpy.show(backend="widget")` drew them, but a document
+named only magpylib's classes, so a view, field lines, saving and the script tab
+left them out with "unknown object type None". A `CustomSource` keeps only its
+shape, its field being a function (#34). A sheet's field is data.
+
+### Decision
+
+- **The type table names one class from beside magpylib**,
+  `face_charge.ChargeSheet`, imported from material-response the first time a
+  document names it; without that package, the step fails saying what it needs.
+  A document still reaches nothing but the table.
+- **A sheet is its constructor's arguments**: vertices, faces, charge densities,
+  panels, and the `mean_polarization` its solve set. Read off the object, as
+  `to_json` reads them, and written so by both scripts.
+- **Its colour level is its style**, `charge.level`: the charge its colours are
+  full at, which one solve gives all its sheets so that they compare. A document
+  keeps it with the rest of the sheet's style, and the style panel edits it,
+  with nothing of the studio's own.
+- **A sheet is moved and turned as a whole**, as a sealed body is, and nothing
+  re-solves: its arrays are not offered for editing. Saying a solve is out of
+  date, and solving again, are #89 and #96.
+- **Field lines stop at a solved body** as at a magnet: a sheet gives H inside
+  it, where B lacks the magnetization. The inside is that of all sheets'
+  triangles together, since parts solved as one leave out the faces they share.
+- **An object of any other class a document cannot name is left out**, said by
+  its label, class and package.
+
+### Rejected
+
+- **Material-response's private attributes** (`_saturation`, `_mean`): the
+  script tab would have written them as lines setting private attributes, which
+  the recorder does not see.
+- **The level as a constructor argument** (`color_level`), as first built: it is
+  for drawing only, and as an argument it needed its own line in the type table
+  and in `to_json`.
+- **A stand-in of `misc.Triangle`s with the sheet's trace as a model3d**: the
+  field 0.2-5 % off near the parts, and two objects to keep in step.
+- **A read-only sheet**: a lock per object the studio does not have, for a
+  result a sealed body is not locked for either.

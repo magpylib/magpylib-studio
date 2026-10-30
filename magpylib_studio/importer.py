@@ -24,7 +24,13 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import units
-from magpylib_studio.session import _HIDE_STYLE, _is_data, _style_values
+from magpylib_studio.session import (
+    _HIDE_STYLE,
+    _is_data,
+    _style_values,
+    external_params,
+    type_name,
+)
 from magpylib_studio.threejs import has_style, is_sealed, sealed_own
 
 # Constructor kwargs worth introspecting, tried in order per object.
@@ -51,15 +57,19 @@ def _dotted_type(obj):
     """Live object -> 'magnet.Cuboid' / 'Sensor' / ... or None if unsupported."""
     if isinstance(obj, magpy.Sensor):
         return "Sensor"
-    name = type(obj).__name__
-    for modname in ("magnet", "current", "misc"):
-        if getattr(getattr(magpy, modname), name, None) is type(obj):
-            return f"{modname}.{name}"
-    return None
+    return None if isinstance(obj, magpy.Collection) else type_name(type(obj))
 
 
 def _is_scene_object(obj):
     return isinstance(obj, magpy.Collection) or _dotted_type(obj) is not None
+
+
+def _class_of(obj):
+    """An object's class as a person finds it: its name, and the package it
+    comes from where that is not magpylib -- `MySource from my_package`."""
+    cls = type(obj)
+    package = cls.__module__.partition(".")[0]
+    return cls.__name__ if package == "magpylib" else f"{cls.__name__} from {package}"
 
 
 def _zeroed(array):
@@ -147,7 +157,7 @@ def _parts_of(collection, object_id, left_out, leaves, to_frame=None):
             }
         elif _dotted_type(child) is None:
             # a class a document cannot name: said, as a style it cannot hold
-            left_out.append(f"{object_id}'s part {type(child).__name__} (left out)")
+            left_out.append(f"{object_id}'s part {_class_of(child)} (left out)")
             continue
         else:
             part = _part_spec(child, to_frame)
@@ -162,17 +172,23 @@ def _parts_of(collection, object_id, left_out, leaves, to_frame=None):
     return parts
 
 
+def _params_of(obj):
+    """What an object is made of, as its constructor takes it, apart from
+    where it stands: magpylib's by `_PARAM_ATTRS`, one of a class from
+    beside magpylib by its own arguments (`session.external_params`)."""
+    given = external_params(obj) or {
+        attr: getattr(obj, attr, None) for attr in _PARAM_ATTRS
+    }
+    return {attr: _tolist(value) for attr, value in given.items() if value is not None}
+
+
 def _part_spec(obj, to_frame=None):
     """A part that holds none: its type and parameters, its pose among them.
     A part has no steps of its own to be moved and turned by, as an object
     has, so where it stands is as plain as what it is: `position`, a path's
     every step where it has one, and `orientation` as a rotation vector in
     degrees."""
-    params = {}
-    for attr in _PARAM_ATTRS:
-        value = getattr(obj, attr, None)
-        if value is not None:
-            params[attr] = _tolist(value)
+    params = _params_of(obj)
     position, orientation = np.asarray(obj.position, dtype=float), obj.orientation
     if to_frame is not None:
         position, orientation = to_frame(position, orientation)
@@ -219,16 +235,13 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
                     left_out,
                 )
                 for child in obj.children
+                if _is_scene_object(child) or _left_out(child, left_out)
             ],
         }
         if id(obj) not in names:
             unnamed.append(("Collection", _made_of(spec)))
     else:
-        params = {}
-        for attr in _PARAM_ATTRS:
-            value = getattr(obj, attr, None)
-            if value is not None:
-                params[attr] = _tolist(value)
+        params = _params_of(obj)
         position = np.array(obj.position)
         moved = None
         if position.ndim > 1:
@@ -273,6 +286,16 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     if style:
         spec["style"] = style
     return spec
+
+
+def _left_out(obj, left_out):
+    """An object of a class a document cannot name, said rather than built
+    as a step that fails with "unknown object type None". False, for the
+    filter it is called from."""
+    label = obj.style.label
+    named = f"{label} ({_class_of(obj)})" if label else _class_of(obj)
+    left_out.append(f"{named} (not held)")
+    return False
 
 
 def _hidden_parts(parts, shared):
@@ -324,9 +347,17 @@ def _document_from_named(named, names, script=True):
         if id(obj) not in seen:
             seen.add(id(obj))
             unique_top.append((name, obj))
-    if not unique_top:
-        raise ValueError("script produced no magpylib objects")
     used_ids, unnamed, left_out = _Ids(), [], []
+    unique_top = [
+        (name, obj)
+        for name, obj in unique_top
+        if _is_scene_object(obj) or _left_out(obj, left_out)
+    ]
+    if not unique_top:
+        raise ValueError(
+            "script produced no magpylib objects"
+            + "".join(f"; {w}" for w in _style_warnings(left_out))
+        )
     objects = [
         _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names, left_out)
         for name, obj in unique_top
@@ -384,8 +415,22 @@ def _style_warnings(left_out):
         for what in left_out
         if what.endswith(" (left out)")
     ]
-    styles = [what for what in left_out if not what.endswith(" (left out)")]
+    objects = [
+        what.removesuffix(" (not held)")
+        for what in left_out
+        if what.endswith(" (not held)")
+    ]
+    styles = [
+        what for what in left_out if not what.endswith((" (left out)", " (not held)"))
+    ]
     out = []
+    if objects:
+        # an object of a class from outside magpylib that a document has
+        # no name for (`session.OBJECT_TYPES`)
+        out.append(
+            f"{', '.join(objects)}: not supported in a document, so it was "
+            "left out. The rest of the scene came across."
+        )
     if styles:
         out.append(
             f"{', '.join(styles)}: made by a function, which a document cannot "
@@ -429,12 +474,12 @@ def _flattening_warnings(unnamed, script=True):
     for kind, made_of in unnamed:
         made.setdefault(kind, []).append(made_of)
     warnings = []
-    for type_name, values in made.items():  # first-seen order
+    for what, values in made.items():  # first-seen order
         times = Counter(values)
         copies = sum(1 for value in values if times[value] > 1)
         if copies > 1:
             warnings.append(
-                f"{copies} {type_name} objects were built without a variable of "
+                f"{copies} {what} objects were built without a variable of "
                 "their own — a loop or comprehension, which running the script "
                 "cannot preserve. They are separate objects here: editing one "
                 "does not change the others. Pattern them instead to get that "
@@ -442,7 +487,7 @@ def _flattening_warnings(unnamed, script=True):
             )
         elif script and len(values) > 1:
             warnings.append(
-                f"{len(values)} {type_name} objects were built without a "
+                f"{len(values)} {what} objects were built without a "
                 "variable of their own. They are separate objects here: "
                 "editing one does not change the others."
             )
