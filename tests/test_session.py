@@ -627,7 +627,12 @@ def test_a_drag_frames_probe_reads_the_whole_scene(wrapped, monkeypatch):
     whole = s.get_scene()
     assert frame["partial"] == ["m", "probe"]
     (probe,) = [p for p in frame["pixels"] if p["object_id"] == "probe"]
-    assert [p for p in whole["pixels"] if p["object_id"] == "probe"] == [probe]
+    (drawn,) = [p for p in whole["pixels"] if p["object_id"] == "probe"]
+    # the colour bar's levels from two reads of one field, each summed in
+    # its own order: a last bit apart on Linux
+    levels = [each["scale"].pop("levels") for each in (probe, drawn)]
+    np.testing.assert_allclose(*levels, rtol=1e-12)
+    assert drawn == probe
 
 
 def test_a_drags_later_steps_keep_the_colours_of_its_first():

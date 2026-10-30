@@ -7,7 +7,7 @@ yet on PyPI, so CI installs magpylib's main meanwhile.
 
 ## Left, once magpylib 6.1 is on PyPI
 
-- Delete `.github/magpylib-main.txt` and `UV_OVERRIDE` in `ci.yml`.
+- Delete `.github/magpylib-main.txt` and `UV_OVERRIDE` in `ci.yml` and `cd.yml`.
 - Lock it: `uv lock --upgrade-package magpylib`.
 - Mark the pull request ready.
 
