@@ -49,6 +49,8 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
 | [0039](#0039-examples-open-from-a-gallery)                                                     | Examples open from a gallery                                 | accepted 2026-10-27, as built                                        |
 | [0040](#0040-sensors-and-dipoles-keep-their-size-on-screen)                                    | Sensors and dipoles keep their size on screen                | accepted 2026-10-27, as built                                        |
+| [0041](#0041-a-solved-face-charge-sheet-is-data-in-a-document)                                 | A solved face-charge sheet is data in a document             |
+| [0042](#0042-a-ring-segment-is-hatched-as-its-wedges)                                          | A ring segment is hatched as its wedges                      |
 
 ---
 
@@ -1994,11 +1996,12 @@ the case material-response#82 names for a `magpylib-fem` of its own.
 
 ## 0038. The selection is outlined
 
-**Status:** accepted 2026-10-25, as built; Alex chose it in steps -- a glow from
-a page of five looks, the overlap's hatching with it, then neon green and the
-rest faded, the glow alone being barely visible; then an outline in place of the
-glow, and no fade, since dragging a sensor's field lines faded everything else;
-then the outline bolder, with a short halo, to be seen.
+**Status:** accepted 2026-10-25, as built; superseded in part by 0042; Alex
+chose it in steps -- a glow from a page of five looks, the overlap's hatching
+with it, then neon green and the rest faded, the glow alone being barely
+visible; then an outline in place of the glow, and no fade, since dragging a
+sensor's field lines faded everything else; then the outline bolder, with a
+short halo, to be seen.
 
 ### Context
 
@@ -2032,10 +2035,7 @@ apart matters.
 - **An overlap is hatched where it is**: the region the two share, in amber,
   drawn through what stands in front of it, with an amber line round each. The
   view works it out from the shapes it draws, for convex solids -- each clipped
-  by the other's faces -- and a ring segment is taken as the wedges it is drawn
-  in, each convex. A mesh of any other hollow shape is marked round only, and so
-  is a body with more than 512 wedges to compare: a body of 2,400 ring cells
-  took over 400 ms a step to drag.
+  by the other's faces -- so a ring segment is marked round only.
 - **Motion once, then still**: an overlap blinks twice as it appears; a mark
   comes at once -- a hover's fade-in, shared by every faint mark, flickered them
   all as the pointer moved. Nothing pulses: a pulse draws every frame for as
@@ -2213,3 +2213,39 @@ shape, its field being a function (#34). A sheet's field is data.
   field 0.2-5 % off near the parts, and two objects to keep in step.
 - **A read-only sheet**: a lock per object the studio does not have, for a
   result a sealed body is not locked for either.
+
+## 0042. A ring segment is hatched as its wedges
+
+**Status:** accepted 2026-10-30, as built (#103). Supersedes the part of
+[0038](#0038-the-selection-is-outlined) that marks a ring segment round only.
+Alex, seeing a cylinder and a segment outlined where a sphere and a cuboid were
+hatched, asked for it.
+
+### Context
+
+Hatching clips convex solids against each other. A `CylinderSegment` with a
+bore, or wider than 180 degrees, is not convex, so every overlap with one said
+that two overlap but not where -- the look 0038 rejected for overlaps in
+general.
+
+### Decision
+
+- **A segment is taken as the wedges it is drawn in**, one between each pair of
+  neighbouring columns of its mesh, as a body of convex cells. The view reads
+  them off the four rows of corners it is given, and a mesh that does not hold
+  to them stays outlined.
+- **A body with too much to compare is marked round only**, whole: more than 512
+  wedges on a side -- about 100 ring cells -- or, with wedges in the pair, more
+  than 25,000 pieces of one against the other. 2,400 ring cells against a
+  cylinder took 426 ms a step to drag, a ring through 5,832 cuboid cells 277 ms.
+
+### Rejected
+
+- **A flag from python naming the segments**: a field on every mesh of every
+  scene, for what the mesh already shows, and an edit to each payload that draws
+  one.
+- **Boolean operations on the meshes**: any closed shape would be hatched, a
+  non-convex `TriangularMesh` too, for a library in the bundle and a region many
+  times slower to work out on every step of a drag.
+- **Hatching the part of a body under the cap**: a smaller overlap on screen
+  than the real one, which is worse than saying where it is not known.

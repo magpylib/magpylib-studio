@@ -3148,6 +3148,10 @@ const WEDGE_FACES = [
  *  over 400 ms a step to drag. A segment is a few dozen. */
 const MOST_WEDGES = 512;
 
+/** And a pair with wedges in it, past this many pieces of one against the
+ *  other: a ring through 5,832 cuboid cells took 277 ms a step. */
+const MOST_WEDGE_PAIRS = 25000;
+
 /** The wedges of a CylinderSegment, one between each column of corners and the
  *  next: its mesh is four rows of them -- in and out, top and bottom -- and no
  *  triangle reaches past a neighbouring column. Empty for any other shape,
@@ -3158,11 +3162,17 @@ function wedgesOf(geometry) {
   return geometry.userData.wedges;
 }
 
+/** Whether `n` is how many columns a CylinderSegment is drawn in: five at
+ *  least, in magpylib, below which any mesh's rows and columns would hold. */
+function isSegmentCount(n) {
+  return Number.isInteger(n) && n >= 5;
+}
+
 function findWedges(geometry) {
   const position = geometry.attributes.position;
   const index = geometry.index;
   const n = position.count / 4;
-  if (!index || !Number.isInteger(n) || n < 2) return [];
+  if (!index || !isSegmentCount(n)) return [];
   for (let t = 0; t + 2 < index.count; t += 3) {
     const columns = [0, 1, 2].map((k) => index.getX(t + k) % n);
     if (Math.max(...columns) - Math.min(...columns) > 1) return [];
@@ -3237,13 +3247,27 @@ function within(p, faces, margin) {
   return true;
 }
 
+/** Whether world point `p`, three's vector, is in one of `cells` -- `{ mesh,
+ *  box, faces }` -- other than `own`'s. */
+function inAnotherCell(p, cells, own, margin) {
+  const there = p.toArray();
+  return cells.some(
+    (cell) =>
+      cell.mesh !== own &&
+      cell.box.containsPoint(p) &&
+      within(there, cell.faces, margin),
+  );
+}
+
 /** The faces of `mesh` that lie within `faces` -- another solid's, in the
  *  world, inside `box` -- handed to `add` as world polygons. A face clear of
  *  the box is passed over unclipped: of a cylinder's hundreds, a cell of a
  *  meshed body reaches a few. A face with one of
  *  `beside` -- the other cells of its body, `{ box, faces }` -- just outside
  *  it lies between two cells, inside the region, and is left out; and, where
- *  `shared`, one lying in a face of the other solid, which has given it. */
+ *  `shared` -- that solid's `{ mesh, cells }` -- one lying in a face of the
+ *  other solid, which has given it. A wall between two of its cells gives
+ *  nothing, being left out itself. */
 function clipShape(add, mesh, faces, box, margin, beside, shared) {
   const position = mesh.geometry.attributes.position;
   const index = mesh.geometry.index;
@@ -3263,17 +3287,24 @@ function clipShape(add, mesh, faces, box, margin, beside, shared) {
     polygon.every((p) => p[i] < min.getComponent(i) - margin) ||
     polygon.every((p) => p[i] > max.getComponent(i) + margin);
   const middle = middleOf(mesh.geometry).clone().applyMatrix4(mesh.matrixWorld);
+  const out = new THREE.Vector3();
+  const [n, across] = [new THREE.Vector3(), new THREE.Vector3()];
+  const step = 1e3 * margin;
+  const middleOfPolygon = (polygon) => {
+    out.set(0, 0, 0);
+    for (const corner of polygon) out.add(across.set(...corner));
+    return out.divideScalar(polygon.length);
+  };
   const lying = (polygon) => {
     for (let k = 0; k < faces.length; k += 4) {
       const [nx, ny, nz, d] = faces.subarray(k, k + 4);
       const off = (p) => Math.abs(nx * p[0] + ny * p[1] + nz * p[2] + d);
-      if (polygon.every((p) => off(p) <= 10 * margin)) return true;
+      if (!polygon.every((p) => off(p) <= 10 * margin)) continue;
+      middleOfPolygon(polygon).add(across.set(nx, ny, nz).multiplyScalar(step));
+      return !inAnotherCell(out, shared.cells, shared.mesh, margin);
     }
     return false;
   };
-  const out = new THREE.Vector3();
-  const [n, across] = [new THREE.Vector3(), new THREE.Vector3()];
-  const step = 1e3 * margin;
   for (let t = 0; t + 2 < corners; t += 3) {
     let polygon = [corner(t), corner(t + 1), corner(t + 2)];
     if (clear(polygon, 0) || clear(polygon, 1) || clear(polygon, 2)) continue;
@@ -3289,17 +3320,8 @@ function clipShape(add, mesh, faces, box, margin, beside, shared) {
     }
     if (polygon.length < 3 || (shared && lying(polygon))) continue;
     if (beside.length) {
-      out.set(0, 0, 0);
-      for (const corner of polygon) out.add(across.set(...corner));
-      out.divideScalar(polygon.length).addScaledVector(n, step);
-      const there = out.toArray();
-      const between = beside.some(
-        (cell) =>
-          cell.mesh !== mesh &&
-          cell.box.containsPoint(out) &&
-          within(there, cell.faces, margin),
-      );
-      if (between) continue;
+      middleOfPolygon(polygon).addScaledVector(n, step);
+      if (inAnotherCell(out, beside, mesh, margin)) continue;
     }
     add(polygon, margin);
   }
@@ -3355,11 +3377,11 @@ function sharedRegion(as, bs) {
   const convex = (side, reach) => {
     const solid = side.filter(({ mesh }) => facesOf(mesh.geometry));
     const hollow = side.filter(({ mesh }) => !facesOf(mesh.geometry));
-    const count = hollow.reduce(
-      (n, { mesh }) => n + mesh.geometry.attributes.position.count / 4,
-      0,
-    );
-    if (count > MOST_WEDGES) return solid;
+    const count = hollow.reduce((all, { mesh }) => {
+      const n = mesh.geometry.attributes.position.count / 4;
+      return isSegmentCount(n) ? all + n - 1 : all;
+    }, 0);
+    if (count > MOST_WEDGES) return [];
     const wedges = hollow.flatMap(({ mesh }) =>
       wedgesOf(mesh.geometry)
         .map((geometry) => ({ geometry, matrixWorld: mesh.matrixWorld }))
@@ -3370,6 +3392,8 @@ function sharedRegion(as, bs) {
   };
   a = convex(a, reachB);
   b = convex(b, reachA);
+  const wedged = [...a, ...b].some(({ mesh }) => !mesh.isMesh);
+  if (wedged && a.length * b.length > MOST_WEDGE_PAIRS) return [];
   // a body's cells, each beside the others: see `clipShape`
   const cells = (side) =>
     side.length > 1 ? side.map((s) => ({ ...s, faces: facesIn(s) })) : [];
@@ -3392,9 +3416,19 @@ function sharedRegion(as, bs) {
   for (const one of a) {
     for (const other of b) {
       if (!one.box.intersectsBox(other.box)) continue;
-      const margin = 1e-6 * one.box.getSize(new THREE.Vector3()).length();
+      // of the smaller: a large cuboid's kept the pieces of a face apart at a
+      // wedge's wall, and each was outlined
+      const margin =
+        1e-6 *
+        Math.min(
+          one.box.getSize(new THREE.Vector3()).length(),
+          other.box.getSize(new THREE.Vector3()).length(),
+        );
       clipShape(add, one.mesh, facesIn(other), other.box, margin, cellsA);
-      clipShape(add, other.mesh, facesIn(one), one.box, margin, cellsB, true);
+      clipShape(add, other.mesh, facesIn(one), one.box, margin, cellsB, {
+        mesh: one.mesh,
+        cells: cellsA,
+      });
     }
   }
   return points;

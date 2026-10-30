@@ -2824,6 +2824,8 @@ class MagpylibStudioSession:
         #: the gesture. See `_field_lines`.
         self._moving: set | None = set()
         self._carried: set = set()
+        #: the whole scene `_changed` has noted the gesture's moves against
+        self._noted: dict | None = None
         self._field_cache: dict = {}
         #: The scene last drawn whole, with its colours and the ids it drew,
         #: and what has changed since: a set of ids, or None where that is
@@ -4485,6 +4487,7 @@ class MagpylibStudioSession:
         -- a drag's, not a variable's."""
         if self._interaction is None:
             return
+        self._noted = None
         if ids is None or self._moving is None:
             self._moving = None
         else:
@@ -4495,14 +4498,19 @@ class MagpylibStudioSession:
     def _changed(self, known=True):
         """Note, against the scene last drawn whole, that the scene changed:
         by what the gesture in progress moves, where that is `known` and
-        named -- by anything otherwise."""
+        named -- by anything otherwise. Noted once for what it moves: a group
+        drag comes here once per object, and working the names out each time
+        was a third of a step for 1,000 magnets."""
         whole = self._whole
         if whole is None or whole["changed"] is None:
             return
-        names = (
-            self._moving_names() if known and self._interaction is not None else None
-        )
-        whole["changed"] = None if names is None else whole["changed"] | names
+        gesture = known and self._interaction is not None
+        if gesture and self._noted is whole:
+            return
+        names = self._moving_names() if gesture else None
+        # a gesture that named nothing, as a pose or a parameter set in one
+        whole["changed"] = whole["changed"] | names if names else None
+        self._noted = whole if gesture else None
 
     def shows(self, scene):
         """Say that the view starting a gesture shows `scene`: if it is the
@@ -4555,6 +4563,7 @@ class MagpylibStudioSession:
         return moved
 
     def _forget_gesture(self):
+        self._noted = None
         self._moving = set()
         self._carried = set()
         self._field_cache = {}
