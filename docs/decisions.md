@@ -2163,9 +2163,9 @@ it measured; zoomed out, it was gone.
 ## 0041. A solved face-charge sheet is data in a document
 
 **Status:** accepted 2026-10-29, as built (#100). Alex chose a sheet that moves
-as a whole, and the solve's colour level and mean polarization as public
-arguments of `ChargeSheet`, added in magpylib-material-response before its first
-release with it.
+as a whole, the solve's mean polarization as a public argument of `ChargeSheet`,
+and its colour level as the sheet's style (2026-10-30), both added in
+magpylib-material-response before its first release with it.
 
 ### Context
 
@@ -2183,10 +2183,12 @@ shape, its field being a function (#34). A sheet's field is data.
   document names it; without that package, the step fails saying what it needs.
   A document still reaches nothing but the table.
 - **A sheet is its constructor's arguments**: vertices, faces, charge densities,
-  panels, and what its solve set, `color_level` (the charge its colours are full
-  at, shared by one solve's sheets so that they compare) and
-  `mean_polarization`. Read off the object, as `to_json` reads them, and written
-  so by both scripts.
+  panels, and the `mean_polarization` its solve set. Read off the object, as
+  `to_json` reads them, and written so by both scripts.
+- **Its colour level is its style**, `charge.level`: the charge its colours are
+  full at, which one solve gives all its sheets so that they compare. A document
+  keeps it with the rest of the sheet's style, and the style panel edits it,
+  with nothing of the studio's own.
 - **A sheet is moved and turned as a whole**, as a sealed body is, and nothing
   re-solves: its arrays are not offered for editing. Saying a solve is out of
   date, and solving again, are #89 and #96.
@@ -2201,6 +2203,9 @@ shape, its field being a function (#34). A sheet's field is data.
 - **Material-response's private attributes** (`_saturation`, `_mean`): the
   script tab would have written them as lines setting private attributes, which
   the recorder does not see.
+- **The level as a constructor argument** (`color_level`), as first built: it is
+  for drawing only, and as an argument it needed its own line in the type table
+  and in `to_json`.
 - **A stand-in of `misc.Triangle`s with the sheet's trace as a model3d**: the
   field 0.2-5 % off near the parts, and two objects to keep in step.
 - **A read-only sheet**: a lock per object the studio does not have, for a

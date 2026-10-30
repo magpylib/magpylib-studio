@@ -52,7 +52,7 @@ def test_a_view_draws_the_sheet_beside_field_lines():
     scene = view._session.scene
     sheet = sheet_of(scene)
     np.testing.assert_array_equal(magpy.getB(scene, POINTS), given.getB(POINTS))
-    assert sheet.color_level == sheet_of(given).color_level  # the solve's colours
+    assert sheet.style.charge.level == sheet_of(given).style.charge.level
     (sheet_id,) = [
         o["id"] for o in view._session.list_objects() if o["type"].endswith("Sheet")
     ]
@@ -89,7 +89,10 @@ def test_the_sheet_comes_back(route, tmp_path):
             assert back.to_dict()["events"] == here.to_dict()["events"]
     assert back._broken == []
     np.testing.assert_array_equal(back.scene.getB(POINTS), given.getB(POINTS))
-    assert sheet_of(back.scene).color_level == sheet_of(given).color_level
+    # the solve's colour level, kept as the sheet's style
+    level = sheet_of(given).style.charge.level
+    assert level is not None
+    assert sheet_of(back.scene).style.charge.level == level
 
 
 def test_field_lines_stop_at_a_solved_body():

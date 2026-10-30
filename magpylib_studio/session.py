@@ -2350,7 +2350,6 @@ _EXTERNAL_TYPES = {
             "faces",
             "charge_densities",
             "panels",
-            "color_level",
             "mean_polarization",
         ),
     ),
