@@ -31,11 +31,12 @@ what is next is in [roadmap.md](roadmap.md)._
 
 ## The engine and magpylib's versions
 
-The engine needs magpylib 6 (`magpylib>=6.0`), the first release with what it is
-built on: the style property tree it reads and writes styles through
+The engine needs magpylib 6.1 (`magpylib>=6.1`), the first release with what it
+is built on: the style property tree it reads and writes styles through
 (`schema()`, `set`, `set_values()`), path-valued physics properties
 (`current=[100, 200, 300]`), the display-backend API the 3D view draws through,
-with its pixel helpers, and `Panel.objects`, which gives a bare `magpy.show()` a
+with each sensor's pixels handed over as a `pixels` trace (`draws_pixels`) and
+its pixel helpers, and `Panel.objects`, which gives a bare `magpy.show()` a
 legend.
 
 ## The document
@@ -264,21 +265,25 @@ marked `glyph` (`threejs._mark_glyphs`), and the view keeps it at `GLYPH_SHARE`,
 7 %, of its height per unit, scaled about its anchor before every frame,
 whatever the zoom
 ([0040](decisions.md#0040-sensors-and-dipoles-keep-their-size-on-screen)). A
-sensor whose pixels read the field comes as a `pixels` item, a position, a
-direction, a size and a colour per pixel, that the renderer draws as instances
-of one shape, sized and coloured as magpylib sizes and colours them
-([0021](decisions.md#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances));
-the sensor keeps its axes as a mesh, and a run's frames keep magpylib's whole
-drawing. It picks -- a sensor by its field lines too, where nothing else is
-under the pointer -- and marks what a click would pick, faintly, while the
-pointer is on it; marks the selection with a neon line round each shape's
-silhouette and a short halo, never a colour on its faces, faint where something
-in front hides it -- the marked shapes drawn flat into a mask after the picture,
-the mask's edges and blur laid over it, only near the marks and only while
-something is marked ([0038](decisions.md#0038-the-selection-is-outlined));
-multi-selects, drags with handles (move, turn, resize, aim a polarization; world
-or object axes; one-axis locks; snapping), hides, fades by id (`setFades`: a
-share of each object's own opacity, looked through by a click;
+sensor's pixels come from magpylib as a `pixels` trace (`draws_pixels`), and go
+to the view as a `pixels` item, a position, a direction, a size and a colour per
+pixel, which the renderer draws as instances of one shape -- a cube, turned as
+the sensor is, a cone or magpylib's arrow -- in a still scene and in each step
+of a run alike; a 2D marker or arrow as the scatter magpylib draws
+([0041](decisions.md#0041-sensor-pixels-come-from-magpylib-as-data)). The sensor
+keeps its axes as a mesh. The field studio has read already -- for field lines,
+or a drag's frame, which captures a reading sensor beside only what moves -- is
+handed to magpylib, the whole scene's (`threejs._readings_kept`). It picks -- a
+sensor by its field lines too, where nothing else is under the pointer -- and
+marks what a click would pick, faintly, while the pointer is on it; marks the
+selection with a neon line round each shape's silhouette and a short halo, never
+a colour on its faces, faint where something in front hides it -- the marked
+shapes drawn flat into a mask after the picture, the mask's edges and blur laid
+over it, only near the marks and only while something is marked
+([0038](decisions.md#0038-the-selection-is-outlined)); multi-selects, drags with
+handles (move, turn, resize, aim a polarization; world or object axes; one-axis
+locks; snapping), hides, fades by id (`setFades`: a share of each object's own
+opacity, looked through by a click;
 [0031](decisions.md#0031-the-legends-eye-fades-as-a-view-setting)), plays paths,
 and has one keys table both hosts use. Currents flow: `threejs._mark_flows`
 marks each Circle's and Polyline's wire with the way its current runs, and each

@@ -120,7 +120,7 @@ uvx library-skills  # pick magpylib-studio; for Claude Code, install into .claud
 pip install magpylib-studio
 ```
 
-Python 3.11 or newer, and magpylib 6.
+Python 3.11 or newer, and magpylib 6.1.
 
 ## Learn more
 

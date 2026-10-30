@@ -16,6 +16,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # magpylib from its main until 6.1, which the engine needs, is on PyPI: see
+  # the file. Every `uv pip install` below reads it.
+  UV_OVERRIDE: .github/magpylib-main.txt
+
 jobs:
   engine:
     name: engine

@@ -29,7 +29,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0018](#0018-a-view-is-read-only-until-its-pencil-is-pressed)                                  | A view is read only until its pencil is pressed              | accepted 2026-10-09, as built; amended 2026-10-10                    |
 | [0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)                        | The editor's panels are the widget's, and a host mounts them | accepted 2026-10-09, as built                                        |
 | [0020](#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone) | A bare sensor is drawn at the studio's size                  | accepted 2026-10-09, as built; superseded by 0040                    |
-| [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built                                        |
+| [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built; its pixels superseded by 0041         |
 | [0022](#0022-what-the-widget-is-and-is-not)                                                    | What the widget is, and is not                               | accepted 2026-10-10                                                  |
 | [0023](#0023-the-inspector-is-the-widgets-object-panel-compact)                                | The Inspector is the widget's object panel, compact          | accepted 2026-10-10, as built                                        |
 | [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
@@ -49,6 +49,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
 | [0039](#0039-examples-open-from-a-gallery)                                                     | Examples open from a gallery                                 | accepted 2026-10-27, as built                                        |
 | [0040](#0040-sensors-and-dipoles-keep-their-size-on-screen)                                    | Sensors and dipoles keep their size on screen                | accepted 2026-10-27, as built                                        |
+| [0041](#0041-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
 
 ---
 
@@ -1151,7 +1152,8 @@ metre across too.
 
 ## 0021. A frame is one message, and a reading's pixels are instances
 
-**Status:** accepted 2026-10-10, as built. Its marimo premise explained by
+**Status:** accepted 2026-10-10, as built; its pixels superseded by 0041. Its
+marimo premise explained by
 [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251).
 
 ### Context
@@ -2159,3 +2161,67 @@ it measured; zoomed out, it was gone.
   too big.
 - **Scaling in a shader**: nothing per frame, but picking, outlines and the fit
   would each need to know of it.
+
+## 0041. Sensor pixels come from magpylib as data
+
+**Status:** accepted 2026-10-30, as built; supersedes 0021's pixels. Alex chose
+pixels handed over as data in magpylib
+([magpylib#1065](https://github.com/magpylib/magpylib/pull/1065),
+`draws_pixels`), and the pin to magpylib 6.1 over keeping both paths.
+
+### Context
+
+0021 drew a reading sensor's pixels as instances by working round magpylib: each
+sensor's `style.pixel.size` set to 0 for a capture, and its pixels rebuilt with
+magpylib's helpers. A run kept magpylib's mesh of every arrow at every step, so
+a 200-step run past a 7 × 7 probe was served a frame at a time; a sensor whose
+pixels read nothing was a mesh of cubes, 7.7 MB for 100 × 100; a style given to
+`show` fell back to the mesh; and a left-handed sensor's arrows pointed 13° to
+51° off the field. Magpylib 6.1 hands a backend that declares `draws_pixels`
+each sensor's pixels as a `pixels` trace: each pixel's centre, the field it
+reads in world axes, its size and colour, and the shape.
+
+### Decision
+
+- **Every pixel is magpylib's trace.** A cube, a cone or an arrow3d is drawn as
+  instances of that shape, in a still scene and in each step of a run, which
+  carries the trace as it carries any; a 2D marker or arrow as the scatter
+  magpylib's own backends draw. Beside cones, a pixel that reads nothing is a
+  cube in the same item.
+- **Studio adds what a view needs beyond the drawing**: the part, the glyph of
+  pixels on the sensor's origin, the sensor's turn at each step, for its cubes
+  -- the trace has none -- and the colour bar's |field| and table, the table
+  spanning what magpylib read in the capture. Not the table where a style was
+  given to `show`, or may have been -- a script's `magpy.show` -- which a table
+  read off the sensor's own style would not know of: no colour bar there, as
+  before.
+- **The field is read once.** Where studio has read it already -- for field
+  lines, or a drag's frame, which captures a reading sensor beside only what
+  moves -- magpylib is handed it, the whole scene's, through a wrap of its
+  private reading. Where that cannot be wrapped, a drag's trace is rebuilt from
+  the field by magpylib's own `make_PixelsData`.
+- **The engine needs magpylib 6.1.** Until it is on PyPI, CI installs magpylib's
+  main.
+
+### Rejected
+
+- **Handing magpylib every source with its shape off**, for it to read the whole
+  scene itself: it still styles and walks each object, 227 ms a capture on 5,832
+  cells against 109 ms for the field alone.
+- **A magpylib API for a precomputed field**: only studio would use it.
+- **Both paths behind a version check**: the size-0 swap and the rebuilt pixels
+  kept until a later pin.
+- **Instanced 2D markers and arrows**: a renderer feature nothing asks for yet;
+  drawn as magpylib draws them, they look as they did.
+
+### Measured
+
+M4, magpylib's main, studio's main against this:
+
+| case                                             | before                        | after                      |
+| ------------------------------------------------ | ----------------------------- | -------------------------- |
+| a 200-step run past a field-coloured 7 × 7 probe | 437 ms, served frame by frame | 54 ms, 599 KB, plays alone |
+| a plain 100 × 100 pixel grid                     | 120 ms, 7.7 MB                | 2 ms, 408 KB               |
+| the probe example's `get_scene` (51-step path)   | 4.4 ms, 41 KB                 | 4.4 ms, 41 KB              |
+| a slider's drag frame, 40 × 40 probe             | 4.3 ms                        | 3.8 ms                     |
+| the same, field lines shown                      | 8.4 ms                        | 8.2 ms                     |
