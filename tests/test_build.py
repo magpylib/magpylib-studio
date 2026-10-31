@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as R
 
+from magpylib_studio import importer
 from magpylib_studio.build import BuildError, Scene
 from magpylib_studio.recording import (
     Angle,
@@ -1620,3 +1621,25 @@ def test_a_sealed_body_in_a_scene_is_its_parts_moved_once(sealed_first):
     (entry,) = session.list_objects()
     assert entry["parts"] == 2
     assert np.allclose(field(session), plain_field(make()))
+
+
+@pytest.mark.parametrize("by", ["scene function", "importing the object"])
+def test_an_applied_field_is_kept_with_the_scene(by):
+    """`H_ext` is an attribute no call reports: read off the objects, kept in
+    the document, written by both scripts and drawn from what they build."""
+
+    def make():
+        body = magpy.Collection(magpy.magnet.Cuboid(dimension=(1, 1, 1)))
+        body.H_ext = (0, 0, 0.1)
+        return body
+
+    if by == "scene function":
+        session = scene(make).build().session
+    else:
+        doc, _ = importer.document_from_objects([make()], {}, script=False)
+        session = MagpylibStudioSession(doc)
+    assert session.get_scene()["applied"] == [0, 0, 0.1]
+    for script in (session.to_script(), session.to_builder_script()):
+        assert ".H_ext = (0.0, 0.0, 0.1)" in script
+    again = MagpylibStudioSession(json.loads(json.dumps(session.to_dict())))
+    assert again.get_scene()["applied"] == [0, 0, 0.1]

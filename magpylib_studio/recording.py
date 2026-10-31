@@ -1104,11 +1104,27 @@ class _Recorder:
                 self.sealing.setdefault(each.id, set())
         self.flush()
 
+    def note_applied_fields(self):
+        """Each object's `H_ext` as the script left it, in one step: an
+        attribute set on an object, as `sealed` is, which no call reports."""
+        fields = {
+            each.id: threejs.own_applied_field(self.live.get(each.id))
+            for each in self.objects.values()
+        }
+        fields = {key: value for key, value in fields.items() if value is not None}
+        if not fields:
+            return
+        with hook.nested():
+            result = self.session._write_applied_fields(fields)
+        if not result["ok"]:
+            raise BuildError(result["error"])
+
     def finish(self):
         self.watch()
         self.flush()
         self.flush_styles()
         self.seal()
+        self.note_applied_fields()
         self.name_by_variables()
 
 

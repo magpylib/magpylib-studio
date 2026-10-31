@@ -660,6 +660,16 @@ def test_an_object_moved_again_is_drawn_where_it_ends(session, move):
         assert (drawn.min() + drawn.max()) / 2 == pytest.approx(x)
 
 
+def test_a_gestures_steps_leave_the_applied_field_as_the_view_has_it(session):
+    """A step draws only what it moves: said nothing, the view keeps the field.
+    Said `None`, the arrow would blink out for the length of a drag."""
+    session.begin_interaction()
+    session.shows(session.get_scene())
+    assert "applied" not in session.get_scene(partial=True)
+    session.end_interaction()
+    assert "applied" in session.get_scene()
+
+
 def test_a_gesture_that_ends_where_it_began_leaves_nothing_behind(session):
     """A slider taken somewhere and released at the value it started from.
 

@@ -1553,7 +1553,7 @@ _DOC_KEYS = (
 # newer format, a hand-written file, another tool — and is carried rather than
 # dropped, so opening a document here does not quietly strip it. A sealed
 # collection's `sealed` and `parts` travel the same way: on its create event,
-# and on its spec, where `to_script` reads them.
+# and on its spec, where `to_script` reads them. So does any object's `H_ext`.
 _CREATE_KEYS = (
     "id",
     "op",
@@ -3054,6 +3054,8 @@ class MagpylibStudioSession:
                 self._parents[child] = object_id
         else:
             obj = _resolve_type(event["type"])(**params)
+        if event.get("H_ext") is not None:
+            obj.H_ext = event["H_ext"]
         self._stamp_mesh(obj, object_id)
         for path, value in (event.get("style") or {}).items():
             obj.style.set(path, _style_arg(path, value))  # same call the GUI/LLM makes
@@ -4210,6 +4212,8 @@ class MagpylibStudioSession:
         if base is not None:
             scene = threejs.drawn_over(base["scene"], scene)
             colors = base["colors"]
+        if not stepping:  # no step of a gesture changes it, and the view keeps it
+            scene["applied"] = threejs.applied_field(self._drawn())
         if stepping and only is None:
             # the gesture's first frame, drawn whole, and the colours it drew
             # in, which what a later frame draws alone would not get
@@ -6789,6 +6793,16 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"seal {object_id}")
 
+    def _write_applied_fields(self, fields):
+        """Objects' `H_ext`, ``{id: three floats}``, written on their create
+        steps (`recording`, from what a scene function sets on them)."""
+
+        def mutate(doc):
+            for object_id, field in fields.items():
+                self._create_event(object_id)["H_ext"] = field
+
+        return self._mutate_doc(mutate, "set H_ext")
+
     def _rename_ids(self, renames):
         """Give objects other ids, every step that names them following: the
         names a scene function knows its objects by, once it has run
@@ -8675,6 +8689,8 @@ class MagpylibStudioSession:
                 parts.append(f"style={_nest(given)!r}")
             ctor = class_call(spec["type"])
             lines.append(f"{target} = {ctor}{factory}({', '.join(parts)})")
+            if spec.get("H_ext") is not None:
+                lines.append(f"{target}.H_ext = {tuple(spec['H_ext'])!r}")
             if spec.get("parts"):
                 # sealed, then what it is made of, one part a line
                 if spec.get("sealed"):

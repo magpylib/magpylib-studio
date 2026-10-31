@@ -54,6 +54,8 @@ Writes into OUT:
   other, a third clear of both, and a small cube in the corner of a
   tetrahedron, and a cylinder through the wall of a bored segment: overlaps
   shaded where they are, and a cube the pointer can mark on its own;
+* ``applied.html`` -- a cube in a uniform applied field, `H_ext`: an arrow
+  through the corner and past it, and a tag saying how strong;
 * ``shared.html`` -- that cube with two sensors on one colormap, one near
   and one far, each coloured over what it reads: one colour scale for both
   is a switch under their colour bar;
@@ -540,6 +542,9 @@ def main(out):
         ),
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
+    soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
+    soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top
+    SceneWidget(soft).write_html(out / "applied.html")
     near = magpy.Sensor(pixel=[(x, 0, 0.012) for x in across], style_label="near")
     far = magpy.Sensor(pixel=[(x, 0, 0.03) for x in across], style_label="far")
     for sensor in (near, far):

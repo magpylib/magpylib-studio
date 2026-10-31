@@ -1592,6 +1592,49 @@ def has_style(obj, path):
     return True
 
 
+def own_applied_field(obj):
+    """`obj`'s own `H_ext`, the uniform applied field of magpylib-material-
+    response (mu0 * H in tesla), as three floats: None unset, and None for what
+    is not three finite numbers, which that package refuses and says why."""
+    value = getattr(obj, "H_ext", None)
+    if value is None:
+        return None
+    try:
+        value = np.asarray(value, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    return value.tolist() if value.shape == (3,) and np.isfinite(value).all() else None
+
+
+def applied_field(objects):
+    """The one field `H_ext` of `objects` as the corner shows it: three floats,
+    ``"differs"`` where they set several, None where they set none, or only
+    zero. Each object's is its own or its nearest parent's, as material-response
+    reads it; what sets none is not counted. A sealed collection is one object:
+    its thousands of cells are not asked."""
+    found = set()
+
+    def visit(obj, above):
+        own = own_applied_field(obj)
+        here = above if own is None else own
+        if isinstance(obj, magpy.Collection) and not is_sealed(obj):
+            for child in obj.children:
+                visit(child, here)
+        elif here is not None:
+            found.add(tuple(here))
+
+    for obj in objects:
+        above = None
+        parent = obj.parent
+        while above is None and parent is not None:
+            above = own_applied_field(parent)
+            parent = parent.parent
+        visit(obj, above)
+    if len(found) > 1:
+        return "differs"
+    return next((list(field) for field in found if any(field)), None)
+
+
 def _leaf_count(collection):
     """How many objects that are not collections `collection` holds."""
     return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
@@ -2157,6 +2200,7 @@ def view_payload(scene, index=None, traces=None, pixels=()):
         **_by_kind([*_keyed(traces, sealed=_sealed_in(scene)), *pixels]),
         "ranges": _ranges_with_pixels(reach, pixels),
         "labels": panel.labels,
+        "applied": applied_field(panel.objects),
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no
         # collection to carry. The renderer reads each as empty and skips them.

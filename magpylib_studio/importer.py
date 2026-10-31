@@ -31,7 +31,12 @@ from magpylib_studio.session import (
     external_params,
     type_name,
 )
-from magpylib_studio.threejs import has_style, is_sealed, sealed_own
+from magpylib_studio.threejs import (
+    has_style,
+    is_sealed,
+    own_applied_field,
+    sealed_own,
+)
 
 # Constructor kwargs worth introspecting, tried in order per object.
 # magnetization is intentionally absent: it is derived from polarization.
@@ -285,6 +290,9 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
         style.update(_HIDE_STYLE)  # the parts' hiding is the body's
     if style:
         spec["style"] = style
+    applied = own_applied_field(obj)
+    if applied is not None:
+        spec["H_ext"] = applied
     return spec
 
 
