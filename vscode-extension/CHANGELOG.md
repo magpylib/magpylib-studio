@@ -8,6 +8,16 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>The applied field shows in the corner</summary>
+
+A uniform `H_ext` from magpylib-material-response, on an object or a parent
+collection, is a magenta arrow through the view's corner with a tag saying how
+strong, or that the values differ. A scene keeps it, and both scripts write it,
+where it used to be lost (#104).
+
+</details>
+
+<details>
 <summary>Solved face-charge sheets in a scene, beside field lines</summary>
 
 A `ChargeSheet` from magpylib-material-response's `apply_face_charge` comes into

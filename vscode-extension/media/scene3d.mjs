@@ -5952,6 +5952,15 @@ const BAR_ROOM = { width: BAR_LONGEST + 16, height: 30 };
 const BAR_UP = 26; // the bar's middle, up from the margin at the view's foot
 const CORNER_FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+// The applied field `H_ext` is an arrow through the corner's middle, so that it
+// stays beside an axis it runs along, and a little longer than the square
+// (docs/decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner).
+const FIELD_LENGTH = { rest: 3, grown: 2.5 };
+const FIELD_INKS = { light: "#c2189b", dark: "#f472d0" }; // no pole, axis or mark
+const FIELD_ROOM = 2.5; // how far past the square it is drawn, as a share of it
+const FIELD_END_ON = 0.96; // turned this far to the eye, it says so with a ring
+const TAG_ROOM = { width: 150, height: 22 }; // CSS pixels: the longest it says
+const TAG_ABOVE = 12; // up from the square: the arrow's head reaches past it
 
 let unit = ""; // the scene's length unit, for the scale bar
 let corner = null; // the corner's scene and camera, in the colours it was made in
@@ -5960,6 +5969,8 @@ let cornerHot = false; // whether the pointer is on the corner's square
 let cornerPointer = null; // and where it is on the canvas, while it is
 let grown = 0; // how far the corner has grown, from 0 at rest to 1
 let bar = null; // the scale bar's canvas, and what was last painted on it
+let applied = null; // the scene's `H_ext`: three numbers, "differs" or null
+let tag = null; // what says it, as `bar` is: drawn above the corner
 let insets = { right: 0, bottom: 0 }; // how far in the host pushes the square
 const cubeRay = new THREE.Raycaster();
 const cornerEye = new THREE.Vector3(); // toward the eye, for `aimCorner`
@@ -6110,7 +6121,21 @@ function dressCorner() {
   const axes = cornerAxes(dark);
   const cornerScene = new THREE.Scene();
   cornerScene.add(body, axes);
+  const field = cornerField(dark, paper);
   corner = {
+    field,
+    fieldScene: new THREE.Scene().add(field.group),
+    fieldCamera: new THREE.PerspectiveCamera(
+      THREE.MathUtils.radToDeg(
+        2 *
+          Math.atan(
+            FIELD_ROOM * Math.tan(THREE.MathUtils.degToRad(CORNER_FOV) / 2),
+          ),
+      ),
+      1,
+      0.1,
+      10,
+    ),
     ink,
     paper,
     accent,
@@ -6127,11 +6152,13 @@ function dressCorner() {
 
 function dropCorner() {
   if (!corner) return;
-  corner.scene.traverse((part) => {
-    part.geometry?.dispose();
-    part.material?.map?.dispose();
-    part.material?.dispose();
-  });
+  for (const each of [corner.scene, corner.fieldScene]) {
+    each.traverse((part) => {
+      part.geometry?.dispose();
+      part.material?.map?.dispose();
+      part.material?.dispose();
+    });
+  }
   corner.uniforms.names.value.dispose();
   corner = null;
 }
@@ -6210,6 +6237,102 @@ function cornerAxes(dark) {
   return axes;
 }
 
+/** The arrow of the applied field, centred on the corner's middle and pointing
+ *  along +y until `poseField` turns it: drawn whole, and faintly where the cube
+ *  hides it, as the axes are. And what it becomes seen end on: a ring with a
+ *  dot, coming toward the eye, or a cross, going away. */
+function cornerField(dark, paper) {
+  const ink = FIELD_INKS[dark ? "dark" : "light"];
+  const length = FIELD_LENGTH.rest;
+  const head = { radius: 0.17, length: 0.42 };
+  const shaft = new THREE.CylinderGeometry(
+    0.058,
+    0.058,
+    length - head.length,
+    16,
+  ).translate(0, -head.length / 2, 0);
+  const tip = new THREE.ConeGeometry(head.radius, head.length, 28).translate(
+    0,
+    length / 2 - head.length / 2,
+    0,
+  );
+  const arrow = new THREE.Group();
+  const faint = new THREE.MeshBasicMaterial({
+    color: ink,
+    transparent: true,
+    opacity: 0.35,
+    depthFunc: THREE.GreaterDepth,
+    depthWrite: false,
+  });
+  const solid = new THREE.MeshBasicMaterial({ color: ink });
+  for (const geometry of [shaft, tip]) {
+    const hidden = new THREE.Mesh(geometry, faint);
+    hidden.renderOrder = 1;
+    arrow.add(new THREE.Mesh(geometry, solid), hidden);
+  }
+  const ring = (mark) => {
+    const side = 128;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = side;
+    const context = canvas.getContext("2d");
+    context.translate(side / 2, side / 2);
+    context.beginPath();
+    context.arc(0, 0, side / 2 - 7, 0, 2 * Math.PI);
+    context.fillStyle = paper;
+    context.fill();
+    context.strokeStyle = context.fillStyle = ink;
+    context.lineWidth = 12;
+    context.stroke();
+    mark(context, side);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map, depthTest: false, depthWrite: false }),
+    );
+    sprite.renderOrder = 3;
+    sprite.scale.setScalar(0.62);
+    return sprite;
+  };
+  const toward = ring((context, side) => {
+    context.beginPath();
+    context.arc(0, 0, side * 0.14, 0, 2 * Math.PI);
+    context.fill();
+  });
+  const away = ring((context, side) => {
+    const reach = side * 0.2;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(-reach, -reach);
+    context.lineTo(reach, reach);
+    context.moveTo(reach, -reach);
+    context.lineTo(-reach, reach);
+    context.stroke();
+  });
+  const group = new THREE.Group();
+  group.add(arrow, toward, away);
+  return { group, arrow, toward, away };
+}
+
+/** Turn the arrow to the applied field, as long as the corner has grown. */
+function poseField() {
+  if (!corner) return;
+  const { group, arrow } = corner.field;
+  group.visible = Array.isArray(applied);
+  if (!group.visible) return;
+  arrow.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3().fromArray(applied).normalize(),
+  );
+  const { rest, grown: full } = FIELD_LENGTH;
+  arrow.scale.setScalar((rest + (full - rest) * easedGrowth()) / rest);
+}
+
+/** The scene's applied field, as `scene_payload` says it. */
+function setApplied(field) {
+  applied = field ?? null;
+  poseField();
+}
+
 /** An axis's name, to stand at its arrow's tip: hidden by the cube as the
  *  arrow is, and like it drawn faintly there. */
 function axisName(name, ink) {
@@ -6285,6 +6408,7 @@ function poseCorner() {
   corner.axes.position.setScalar(
     AXES_FROM.rest + (AXES_FROM.grown - AXES_FROM.rest) * eased,
   );
+  poseField();
 }
 
 /** Grow the corner while the pointer is on it, and shrink it back after:
@@ -6432,6 +6556,7 @@ function drawCorner(withCube) {
     renderer.render(corner.scene, corner.camera);
     renderer.setViewport(0, 0, size.x, size.y);
   }
+  drawApplied(size, withCube);
   // Across the foot, low beside the axes at rest -- and left of them, in a
   // view too narrow for both. Nothing floats over a picture, so there it
   // stands at the foot whatever the host has over it now.
@@ -6443,6 +6568,104 @@ function drawCorner(withCube) {
     CORNER_MARGIN + lift + BAR_UP,
   );
   renderer.autoClear = true;
+}
+
+/** The applied field: its arrow, and the tag that says it, above the corner.
+ *  What a picture keeps as well, as it keeps the bar: it is part of what the
+ *  picture shows, and nothing floats over one. */
+function drawApplied(size, withCube) {
+  if (!applied) return;
+  const side = withCube ? cornerSide() : CORNER_SIDE.rest;
+  const [left, top] = withCube
+    ? cornerAt(size, side)
+    : [size.x - CORNER_MARGIN - side, size.y - CORNER_MARGIN - side];
+  if (Array.isArray(applied)) {
+    aimCorner();
+    const { fieldCamera } = corner;
+    fieldCamera.quaternion.copy(corner.camera.quaternion);
+    fieldCamera.position.copy(corner.camera.position);
+    fieldCamera.updateMatrixWorld();
+    const facing = cornerEye.dot(
+      new THREE.Vector3().fromArray(applied).normalize(),
+    );
+    const endOn = Math.abs(facing) > FIELD_END_ON;
+    corner.field.arrow.visible = !endOn;
+    corner.field.toward.visible = endOn && facing > 0;
+    corner.field.away.visible = endOn && facing < 0;
+    // Drawn on a wider square about the same middle, with a camera as much
+    // wider, from the same eye: where they share pixels the corner's picture
+    // is unchanged, and depths compare with the cube's. Only the square's edge
+    // moves out.
+    const wide = side * FIELD_ROOM;
+    const past = (wide - side) / 2;
+    renderer.setViewport(left - past, size.y - top - side - past, wide, wide);
+    renderer.render(corner.fieldScene, fieldCamera);
+    renderer.setViewport(0, 0, size.x, size.y);
+  }
+  drawTag(size, left + side, size.y - top + TAG_ABOVE);
+}
+
+/** The field's strength, in the unit that reads best. */
+function sayField(field) {
+  const tesla = Math.hypot(...field);
+  const [name, per] =
+    tesla >= 1 ? ["T", 1] : tesla >= 1e-3 ? ["mT", 1e-3] : ["µT", 1e-6];
+  return `${Number((tesla / per).toPrecision(3))} ${name}`;
+}
+
+/** The tag, its right end at `right` and its foot at `up`, in CSS pixels from
+ *  the view's bottom left. */
+function drawTag(size, right, up) {
+  const ratio = renderer.getPixelRatio();
+  if (tag?.ratio !== ratio) {
+    dropBar(tag);
+    tag = makeBar(ratio, TAG_ROOM);
+  }
+  paintTag(Array.isArray(applied) ? sayField(applied) : "differs");
+  const { width, height } = TAG_ROOM;
+  tag.plane.position.set(right - width / 2, up + height / 2, 0);
+  tag.plane.scale.set(width, height, 1);
+  Object.assign(tag.camera, { right: size.x, top: size.y });
+  tag.camera.updateProjectionMatrix();
+  renderer.render(tag.scene, tag.camera);
+}
+
+/** Paint "H_ext `text`" on the tag -- only when that, or the theme, has changed
+ *  since it was last painted. */
+function paintTag(text) {
+  const dark = new THREE.Color(corner.paper).getHSL({}).l < 0.25;
+  const key = [text, dark].join("|");
+  if (key === tag.painted) return;
+  tag.painted = key;
+  const { width, height } = TAG_ROOM;
+  const context = tag.canvas.getContext("2d");
+  context.setTransform(tag.ratio, 0, 0, tag.ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  const widthOf = (font, words) => {
+    context.font = `600 ${font}px ${CORNER_FONT}`;
+    return context.measureText(words).width;
+  };
+  const h = widthOf(12, "H");
+  const ext = widthOf(9, "ext");
+  const said = widthOf(11, text);
+  const pad = 8;
+  const pill = pad + h + 0.5 + ext + 5 + said + pad;
+  const from = width - pill;
+  context.beginPath();
+  context.roundRect(from, 1, pill, height - 2, (height - 2) / 2);
+  context.fillStyle = FIELD_INKS[dark ? "dark" : "light"];
+  context.fill();
+  context.fillStyle = dark ? "#1e1e1e" : "#ffffff";
+  const y = height / 2 + 4;
+  context.font = `600 12px ${CORNER_FONT}`;
+  context.fillText("H", from + pad, y);
+  context.font = `600 9px ${CORNER_FONT}`;
+  context.fillText("ext", from + pad + h + 0.5, y + 2.5);
+  context.font = `600 11px ${CORNER_FONT}`;
+  context.fillText(text, from + pad + h + 0.5 + ext + 5, y);
+  tag.texture.needsUpdate = true;
 }
 
 /** How long one CSS pixel is in the scene, at the point the view turns
@@ -6469,7 +6692,7 @@ function drawBar(size, across, up) {
   const text = sayLength(length);
   const ratio = renderer.getPixelRatio();
   if (bar?.ratio !== ratio) {
-    dropBar();
+    dropBar(bar);
     bar = makeBar(ratio);
   }
   paintBar(text, length / perPixel);
@@ -6490,13 +6713,13 @@ function sayLength(length) {
   return `${Number(((length * factor) / per).toPrecision(3))} ${name}`;
 }
 
-/** The scale bar's plane, with a canvas of its own to paint, at `ratio`
- *  device pixels to the CSS pixel. The canvas is never resized: a texture's
- *  size is fixed once it is on the GPU. */
-function makeBar(ratio) {
+/** The scale bar's plane, or the tag's, `room` across, with a canvas of its own
+ *  to paint, at `ratio` device pixels to the CSS pixel. The canvas is never
+ *  resized: a texture's size is fixed once it is on the GPU. */
+function makeBar(ratio, room = BAR_ROOM) {
   const canvas = document.createElement("canvas");
-  canvas.width = BAR_ROOM.width * ratio;
-  canvas.height = BAR_ROOM.height * ratio;
+  canvas.width = room.width * ratio;
+  canvas.height = room.height * ratio;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = false; // drawn pixel for pixel
@@ -6525,11 +6748,10 @@ function makeBar(ratio) {
   };
 }
 
-function dropBar() {
-  if (!bar) return;
-  bar.texture.dispose();
-  bar.plane.geometry.dispose();
-  bar = null;
+function dropBar(plane) {
+  if (!plane) return;
+  plane.texture.dispose();
+  plane.plane.geometry.dispose();
 }
 
 /** Paint the bar `pixels` long, named `text` -- only when that, or the
@@ -6987,6 +7209,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   // something happened to fit it again.
   const was = METRES[unit];
   drawAxes(payload.ranges, payload.labels);
+  if ("applied" in payload) setApplied(payload.applied); // kept through a drag
   if (keepCamera && framed && was && METRES[unit] && METRES[unit] !== was) {
     // The scene again, in another unit: a cell's objects, in the millimetres
     // magpylib drew them in, made editable come back in the session's

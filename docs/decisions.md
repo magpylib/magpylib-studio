@@ -52,6 +52,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0041](#0041-a-solved-face-charge-sheet-is-data-in-a-document)                                 | A solved face-charge sheet is data in a document             |
 | [0042](#0042-a-ring-segment-is-hatched-as-its-wedges)                                          | A ring segment is hatched as its wedges                      |
 | [0043](#0043-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
+| [0044](#0044-the-applied-field-is-an-arrow-in-the-corner)                                      | The applied field is an arrow in the corner                  | accepted 2026-10-31, as built                                        |
 
 ---
 
@@ -2314,3 +2315,51 @@ M4, magpylib's main, studio's main against this:
 | the probe example's `get_scene` (51-step path)   | 4.4 ms, 41 KB                 | 4.4 ms, 41 KB              |
 | a slider's drag frame, 40 × 40 probe             | 4.3 ms                        | 3.8 ms                     |
 | the same, field lines shown                      | 8.4 ms                        | 8.2 ms                     |
+
+## 0044. The applied field is an arrow in the corner
+
+**Status:** accepted 2026-10-31, as built. Alex chose an axis in the corner from
+25 ideas, then this variation of it from 12: long, past the square, in magenta,
+with the tag above.
+
+### Context
+
+`H_ext` (magpylib-material-response) is a uniform applied field, mu0 H in tesla,
+set as an attribute on an object or a parent collection. It has no place in the
+scene, so nothing drew it, and a document dropped it: a script opened in the
+studio and written out again had lost it. A vector field would say "everywhere"
+and bury the model.
+
+### Decision
+
+- **An arrow through the corner's middle**, 3 long where x, y and z are 1.36:
+  about 90 px in the 84 px square at rest, so it is the longest thing in the
+  corner and its ends reach a few pixels past the square. It is drawn on a
+  square 2.5 times as wide about the same middle, from the same eye, so the
+  corner's picture is unchanged and depths still compare with the cube's.
+- **Through the middle, not from where the axes start**: from there it covers an
+  axis the field runs along, and a field along z is an ordinary one.
+- **Magenta**, which no pole, axis, overlap or selection uses. Violet stood too
+  near the z arrow's blue.
+- **A tag above the corner says it**, "H_ext 100 mT", not a name at the arrow's
+  tip: that moved as the view turned and ran into the axes' names.
+- **Seen end on, a ring with a dot or a cross**: an arrow with nothing left of
+  its length says neither which way nor that it is there.
+- **One value**: an object's own or its nearest parent's, as material-response
+  reads it. What sets none is not counted, so a soft part with none beside one
+  with a field still shows the arrow. Several values draw no arrow and the tag
+  says "differs".
+- **A document keeps it** on the object's create step, as it keeps `sealed`, and
+  both scripts write `obj.H_ext = (x, y, z)`. Read once a scene script has run,
+  in one step, because no call reports an attribute being set. It is not edited
+  in the studio yet.
+- **A picture keeps the arrow and the tag**, as it keeps the scale bar, and
+  leaves the axes out.
+- **Only with the corner**: in the box or no-axes modes nothing shows it.
+
+### Rejected
+
+- **Moving dashes along it**: the corner shares a canvas with the scene, so the
+  whole scene would redraw every frame, for a field that flows nowhere.
+- **Three parallel arrows, a tinted disc, dimmed axes, a bigger square**:
+  compared on a page at true size; Alex chose length.

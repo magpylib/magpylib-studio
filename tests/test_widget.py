@@ -2566,3 +2566,48 @@ def test_a_variant_saved_from_a_cell_hands_back_what_the_mark_can_hold():
         kept = studio.save_variant("start")
     assert kept == {"n": 10, "r": 0.02, "axis": "z", "free": 3.0}
     assert studio._session.get_variables()["variants"]["start"]["side"] == 0.01
+
+
+def _in_a_field(own=None, parent=None, above=None):
+    cube = magpy.magnet.Cuboid(dimension=(1, 1, 1))
+    other = magpy.magnet.Cuboid(dimension=(1, 1, 1), position=(2, 0, 0))
+    group = magpy.Collection(cube, other)
+    if own is not None:
+        cube.H_ext = own
+    if parent is not None:
+        group.H_ext = parent
+    if above is not None:
+        magpy.Collection(group).H_ext = above
+    return group
+
+
+Z = (0, 0, 0.1)
+
+
+@pytest.mark.parametrize(
+    ("group", "says"),
+    [
+        (_in_a_field(), None),
+        (_in_a_field(own=Z), list(Z)),
+        (_in_a_field(parent=Z), list(Z)),
+        (_in_a_field(above=Z), list(Z)),
+        (_in_a_field(own=Z, parent=Z), list(Z)),
+        (_in_a_field(own=(0.1, 0, 0), parent=Z), "differs"),
+        (_in_a_field(parent=(0, 0, 0)), None),
+        (_in_a_field(parent=(0, 0, float("nan"))), None),
+        (_in_a_field(parent="north"), None),
+    ],
+    ids=[
+        "unset",
+        "its own",
+        "a parent's",
+        "above what is shown",
+        "the same twice",
+        "several",
+        "zero",
+        "not finite",
+        "not numbers",
+    ],
+)
+def test_the_view_is_told_one_applied_field(group, says):
+    assert widget.SceneWidget(group).payload["applied"] == says

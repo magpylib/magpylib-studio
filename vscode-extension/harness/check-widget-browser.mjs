@@ -892,6 +892,60 @@ const CUBES = `
   };
   return Object.keys(cubes).sort().join();`;
 
+/** A uniform applied field is an arrow that leaves the corner's square, and a
+ *  tag above it. Page code, on the picture: how many pixels of the field's ink
+ *  are in a box, from the view's right edge and foot. */
+const FIELD_INK = `
+  const copy = window.scene3d.still();
+  const k = copy.width / ${VIEW}.querySelector("canvas").getBoundingClientRect().width;
+  window.inkIn = (right, up, width, height) => {
+    const box = copy.getContext("2d").getImageData(
+      copy.width - (right + width) * k, copy.height - (up + height) * k, width * k, height * k).data;
+    let n = 0;
+    for (let i = 0; i < box.length; i += 4) {
+      if (Math.abs(box[i] - 194) + Math.abs(box[i + 1] - 24) + Math.abs(box[i + 2] - 155) < 40) n++;
+    }
+    return n;
+  };`;
+
+async function applied(port, base) {
+  await check(
+    "an applied field is an arrow past the corner, and a tag",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/applied.html`);
+        if (
+          !(await tab.until(
+            `return window.scene3d?.byObjectId.size === 1`,
+            20_000,
+          ))
+        )
+          return "the page never drew its cube";
+        await wait(300);
+        // the square stands 84 px across, 8 in from the edge and the foot
+        const ink = await tab.evaluate(`${FIELD_INK}
+        return { past: inkIn(8, 92, 84, 12), tag: inkIn(8, 104, 84, 18), inside: inkIn(8, 8, 84, 84) };`);
+        if (ink.inside < 50)
+          return `${ink.inside} pixels of the arrow in the square`;
+        if (ink.past < 1)
+          return `${ink.past} pixels of the arrow past the square`;
+        if (ink.tag < 200) return `${ink.tag} pixels of the tag above it`;
+        await tab.navigate(`${base}/out/overlap.html`);
+        await tab.until(`return window.scene3d?.byObjectId.size === 7`, 20_000);
+        await wait(300);
+        const none = await tab.evaluate(
+          `${FIELD_INK} return inkIn(8, 104, 84, 18);`,
+        );
+        if (none) return `${none} pixels of a tag with no field`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** What the pointer is on is marked faintly, round it and only while it is;
  *  two cubes that overlap are shaded where they interpenetrate. */
 async function marks(port, base) {
@@ -4181,6 +4235,7 @@ try {
   await sealedBody(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
+  await applied(browser.port, base);
   await heldReading(browser.port, base);
   await dragPace(browser.port, base);
   await colorBar(browser.port, base);

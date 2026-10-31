@@ -122,6 +122,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   each keeps its differences. Its own label, description, legend and traces stay
   its own. A view draws it as one node, its parts' traces keyed to it; a scene
   function's parts are taken in as data, never made objects.
+- **A uniform applied field** (`H_ext`, of magpylib-material-response) is an
+  attribute, kept on the object's create step and sent as `applied` with a whole
+  scene; the corner draws it
+  ([0044](decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner)).
 - **A solved face-charge sheet** (`face_charge.ChargeSheet`, from
   magpylib-material-response, imported when a document first names it) is its
   constructor's arguments: `vertices`, `faces`, `charge_densities`, `panels` and

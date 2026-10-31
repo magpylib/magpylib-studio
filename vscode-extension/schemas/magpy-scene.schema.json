@@ -145,13 +145,21 @@
         },
         "sealed": { "$ref": "#/definitions/sealed" },
         "parts": { "$ref": "#/definitions/parts" },
-        "parts_style": { "$ref": "#/definitions/partsStyle" }
+        "parts_style": { "$ref": "#/definitions/partsStyle" },
+        "H_ext": { "$ref": "#/definitions/appliedField" }
       },
       "additionalProperties": true
     },
     "partsStyle": {
       "type": "object",
       "description": "Collections only: one style for a sealed collection's parts, by dotted path, over each part's own and set on every part that has the property, as `collection.set_children_styles` does."
+    },
+    "appliedField": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "The uniform applied field of magpylib-material-response, mu0 * H in tesla, on this object and what it holds. Said in a script as `obj.H_ext = (x, y, z)`. Shown in the view's corner."
     },
     "sealed": {
       "type": "boolean",
@@ -253,7 +261,8 @@
               },
               "sealed": { "$ref": "#/definitions/sealed" },
               "parts": { "$ref": "#/definitions/parts" },
-              "parts_style": { "$ref": "#/definitions/partsStyle" }
+              "parts_style": { "$ref": "#/definitions/partsStyle" },
+              "H_ext": { "$ref": "#/definitions/appliedField" }
             }
           }
         },

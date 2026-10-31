@@ -1322,6 +1322,7 @@ class _ScriptWriter:
                 "sealed",
                 "parts",
                 "parts_style",
+                "H_ext",
             ):
                 self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
         params = dict(event.get("params") or {})
@@ -1353,6 +1354,8 @@ class _ScriptWriter:
         if nested:
             parts.append(("style", repr(_nested(nested))))
         lines = [f"{name} = {call}({self.keywords(parts)})"]
+        if event.get("H_ext") is not None:
+            lines.append(f"{name}.H_ext = {tuple(event['H_ext'])!r}")
         if event.get("parts"):
             # Sealed first, then what it is made of, one part a line: the
             # recorder takes in parts added to a sealed collection as its
