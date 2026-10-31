@@ -71,7 +71,12 @@ from scipy.spatial.transform import Rotation as R
 
 from magpylib_studio import build, expressions, hook, meshes, threejs
 from magpylib_studio.build import BuildError, Expression, Sampled, _arg, _value
-from magpylib_studio.session import _is_data, _style_values
+from magpylib_studio.session import (
+    _is_data,
+    _style_values,
+    external_params,
+    type_name,
+)
 
 __all__ = [
     "Angle",
@@ -450,18 +455,6 @@ _TRANSFORMS = (
 )
 
 
-def _type_path(cls):
-    """magpylib's class -> the document's type: 'magnet.Cuboid', 'Sensor'."""
-    if cls is magpy.Sensor:
-        return "Sensor"
-    if cls is magpy.Collection:
-        return "Collection"
-    for module in ("magnet", "current", "misc"):
-        if getattr(getattr(magpy, module), cls.__name__, None) is cls:
-            return f"{module}.{cls.__name__}"
-    return None
-
-
 def _flat_style(given, prefix=""):
     """A style as given -- nested dicts, or `style_label`-shaped keys -- as
     dotted paths."""
@@ -780,7 +773,7 @@ class _Recorder:
 
     def _on_new(self, event):
         cls = hook.magpylib_class(type(event.obj))
-        type_ = _type_path(cls)
+        type_ = type_name(cls)
         if type_ is None:
             raise BuildError(f"a scene has no step for a {cls.__name__}")
         bound = inspect.signature(cls.__init__).bind(
@@ -810,6 +803,16 @@ class _Recorder:
         params = {
             key: _value(value) for key, value in given.items() if value is not None
         }
+        own = type_name(type(event.obj))
+        if own is not None and own != type_:
+            # A class from beside magpylib that a document holds, a solved
+            # ChargeSheet: magpylib's hook reports the CustomSource its
+            # constructor calls, so what it is made of is read off it, and
+            # where it stands is what it passed on -- a pose at the origin
+            # being its default, not something written.
+            if params.get("position") == [0, 0, 0]:
+                del params["position"]
+            type_, params = own, {**_value(external_params(event.obj)), **params}
         if type_ == "misc.CustomSource":
             raise BuildError(
                 "a CustomSource holds Python code (its field_func), which a document "
@@ -839,6 +842,8 @@ class _Recorder:
             self._note_symbolic(recorded, value)
         if attr == "style":
             return  # what it set is read at the next flush
+        if attr == "field_func" and recorded._type != "misc.CustomSource":
+            return  # a ChargeSheet's constructor, giving itself its field
         if attr == "position":
             recorded.set_transform(position=value)
         elif attr == "orientation":

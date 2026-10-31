@@ -42,11 +42,7 @@ jobs:
           python-version: "3.13"
           activate-environment: true
           enable-cache: true
-      # magpylib from its main until 6.1, which the engine needs, is on PyPI:
-      # see the file
       - run: uv pip install -e ".[dev]"
-        env:
-          UV_OVERRIDE: .github/magpylib-main.txt
       - run: python -m pytest -q
 
   dist:

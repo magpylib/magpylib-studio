@@ -29,7 +29,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0018](#0018-a-view-is-read-only-until-its-pencil-is-pressed)                                  | A view is read only until its pencil is pressed              | accepted 2026-10-09, as built; amended 2026-10-10                    |
 | [0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them)                        | The editor's panels are the widget's, and a host mounts them | accepted 2026-10-09, as built                                        |
 | [0020](#0020-a-bare-sensor-is-drawn-at-the-studios-size-and-magpylibs-defaults-are-left-alone) | A bare sensor is drawn at the studio's size                  | accepted 2026-10-09, as built; superseded by 0040                    |
-| [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built; its pixels superseded by 0041         |
+| [0021](#0021-a-frame-is-one-message-and-a-readings-pixels-are-instances)                       | A frame is one message, a reading's pixels instances         | accepted 2026-10-10, as built; its pixels superseded by 0043         |
 | [0022](#0022-what-the-widget-is-and-is-not)                                                    | What the widget is, and is not                               | accepted 2026-10-10                                                  |
 | [0023](#0023-the-inspector-is-the-widgets-object-panel-compact)                                | The Inspector is the widget's object panel, compact          | accepted 2026-10-10, as built                                        |
 | [0024](#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)                           | The panels dock beside the view, below a narrow one          | accepted 2026-10-10, as built                                        |
@@ -49,7 +49,9 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0038](#0038-the-selection-is-outlined)                                                        | The selection is outlined                                    | accepted 2026-10-25, as built                                        |
 | [0039](#0039-examples-open-from-a-gallery)                                                     | Examples open from a gallery                                 | accepted 2026-10-27, as built                                        |
 | [0040](#0040-sensors-and-dipoles-keep-their-size-on-screen)                                    | Sensors and dipoles keep their size on screen                | accepted 2026-10-27, as built                                        |
-| [0041](#0041-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
+| [0041](#0041-a-solved-face-charge-sheet-is-data-in-a-document)                                 | A solved face-charge sheet is data in a document             |
+| [0042](#0042-a-ring-segment-is-hatched-as-its-wedges)                                          | A ring segment is hatched as its wedges                      |
+| [0043](#0043-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
 
 ---
 
@@ -1152,7 +1154,7 @@ metre across too.
 
 ## 0021. A frame is one message, and a reading's pixels are instances
 
-**Status:** accepted 2026-10-10, as built; its pixels superseded by 0041. Its
+**Status:** accepted 2026-10-10, as built; its pixels superseded by 0043. Its
 marimo premise explained by
 [0028](#0028-marimos-slow-answers-were-its-own-fixed-in-0251).
 
@@ -1996,11 +1998,12 @@ the case material-response#82 names for a `magpylib-fem` of its own.
 
 ## 0038. The selection is outlined
 
-**Status:** accepted 2026-10-25, as built; Alex chose it in steps -- a glow from
-a page of five looks, the overlap's hatching with it, then neon green and the
-rest faded, the glow alone being barely visible; then an outline in place of the
-glow, and no fade, since dragging a sensor's field lines faded everything else;
-then the outline bolder, with a short halo, to be seen.
+**Status:** accepted 2026-10-25, as built; superseded in part by 0042; Alex
+chose it in steps -- a glow from a page of five looks, the overlap's hatching
+with it, then neon green and the rest faded, the glow alone being barely
+visible; then an outline in place of the glow, and no fade, since dragging a
+sensor's field lines faded everything else; then the outline bolder, with a
+short halo, to be seen.
 
 ### Context
 
@@ -2162,7 +2165,94 @@ it measured; zoomed out, it was gone.
 - **Scaling in a shader**: nothing per frame, but picking, outlines and the fit
   would each need to know of it.
 
-## 0041. Sensor pixels come from magpylib as data
+## 0041. A solved face-charge sheet is data in a document
+
+**Status:** accepted 2026-10-29, as built (#100). Alex chose a sheet that moves
+as a whole, the solve's mean polarization as a public argument of `ChargeSheet`,
+and its colour level as the sheet's style (2026-10-30), both added in
+magpylib-material-response before its first release with it.
+
+### Context
+
+`apply_face_charge` (magpylib-material-response) solves soft parts into
+`ChargeSheet`s, `CustomSource`s whose field is their triangles and the charge at
+each face's corners. `magpy.show(backend="widget")` drew them, but a document
+named only magpylib's classes, so a view, field lines, saving and the script tab
+left them out with "unknown object type None". A `CustomSource` keeps only its
+shape, its field being a function (#34). A sheet's field is data.
+
+### Decision
+
+- **The type table names one class from beside magpylib**,
+  `face_charge.ChargeSheet`, imported from material-response the first time a
+  document names it; without that package, the step fails saying what it needs.
+  A document still reaches nothing but the table.
+- **A sheet is its constructor's arguments**: vertices, faces, charge densities,
+  panels, and the `mean_polarization` its solve set. Read off the object, as
+  `to_json` reads them, and written so by both scripts.
+- **Its colour level is its style**, `charge.level`: the charge its colours are
+  full at, which one solve gives all its sheets so that they compare. A document
+  keeps it with the rest of the sheet's style, and the style panel edits it,
+  with nothing of the studio's own.
+- **A sheet is moved and turned as a whole**, as a sealed body is, and nothing
+  re-solves: its arrays are not offered for editing. Saying a solve is out of
+  date, and solving again, are #89 and #96.
+- **Field lines stop at a solved body** as at a magnet: a sheet gives H inside
+  it, where B lacks the magnetization. The inside is that of all sheets'
+  triangles together, since parts solved as one leave out the faces they share.
+- **An object of any other class a document cannot name is left out**, said by
+  its label, class and package.
+
+### Rejected
+
+- **Material-response's private attributes** (`_saturation`, `_mean`): the
+  script tab would have written them as lines setting private attributes, which
+  the recorder does not see.
+- **The level as a constructor argument** (`color_level`), as first built: it is
+  for drawing only, and as an argument it needed its own line in the type table
+  and in `to_json`.
+- **A stand-in of `misc.Triangle`s with the sheet's trace as a model3d**: the
+  field 0.2-5 % off near the parts, and two objects to keep in step.
+- **A read-only sheet**: a lock per object the studio does not have, for a
+  result a sealed body is not locked for either.
+
+## 0042. A ring segment is hatched as its wedges
+
+**Status:** accepted 2026-10-30, as built (#103). Supersedes the part of
+[0038](#0038-the-selection-is-outlined) that marks a ring segment round only.
+Alex, seeing a cylinder and a segment outlined where a sphere and a cuboid were
+hatched, asked for it.
+
+### Context
+
+Hatching clips convex solids against each other. A `CylinderSegment` with a
+bore, or wider than 180 degrees, is not convex, so every overlap with one said
+that two overlap but not where -- the look 0038 rejected for overlaps in
+general.
+
+### Decision
+
+- **A segment is taken as the wedges it is drawn in**, one between each pair of
+  neighbouring columns of its mesh, as a body of convex cells. The view reads
+  them off the four rows of corners it is given, and a mesh that does not hold
+  to them stays outlined.
+- **A body with too much to compare is marked round only**, whole: more than 512
+  wedges on a side -- about 100 ring cells -- or, with wedges in the pair, more
+  than 25,000 pieces of one against the other. 2,400 ring cells against a
+  cylinder took 426 ms a step to drag, a ring through 5,832 cuboid cells 277 ms.
+
+### Rejected
+
+- **A flag from python naming the segments**: a field on every mesh of every
+  scene, for what the mesh already shows, and an edit to each payload that draws
+  one.
+- **Boolean operations on the meshes**: any closed shape would be hatched, a
+  non-convex `TriangularMesh` too, for a library in the bundle and a region many
+  times slower to work out on every step of a drag.
+- **Hatching the part of a body under the cap**: a smaller overlap on screen
+  than the real one, which is worse than saying where it is not known.
+
+## 0043. Sensor pixels come from magpylib as data
 
 **Status:** accepted 2026-10-30, as built; supersedes 0021's pixels. Alex chose
 pixels handed over as data in magpylib
@@ -2200,8 +2290,7 @@ reads in world axes, its size and colour, and the shape.
   moves -- magpylib is handed it, the whole scene's, through a wrap of its
   private reading. Where that cannot be wrapped, a drag's trace is rebuilt from
   the field by magpylib's own `make_PixelsData`.
-- **The engine needs magpylib 6.1.** Until it is on PyPI, CI installs magpylib's
-  main.
+- **The engine needs magpylib 6.1.**
 
 ### Rejected
 

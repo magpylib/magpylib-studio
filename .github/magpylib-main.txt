@@ -1,4 +1,0 @@
-# Until magpylib 6.1 is on PyPI: its main has draws_pixels (magpylib#1065),
-# which the engine pins as magpylib>=6.1. Delete this file, and UV_OVERRIDE
-# in ci.yml, once 6.1 is released.
-magpylib @ git+https://github.com/magpylib/magpylib@main

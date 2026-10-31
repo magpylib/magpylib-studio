@@ -122,6 +122,17 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   each keeps its differences. Its own label, description, legend and traces stay
   its own. A view draws it as one node, its parts' traces keyed to it; a scene
   function's parts are taken in as data, never made objects.
+- **A solved face-charge sheet** (`face_charge.ChargeSheet`, from
+  magpylib-material-response, imported when a document first names it) is its
+  constructor's arguments: `vertices`, `faces`, `charge_densities`, `panels` and
+  `mean_polarization`
+  ([0041](decisions.md#0041-a-solved-face-charge-sheet-is-data-in-a-document)).
+  Scripts import the class by name; the recorder reads them off the sheet, which
+  magpylib's hook reports as the `CustomSource` it extends. Its colour level is
+  its style, `charge.level`, kept and edited as any style is. A view draws it
+  with the charge `get_trace` colours it by; it moves and turns as a whole,
+  offering no parameter to edit, and field lines stop inside it. An object of a
+  class the table lacks is left out, said by its label, class and package.
 - **Any numeric value may be an expression**: a string starting with `=`, over
   `variables` ([0003](decisions.md#0003-expressions-are-hermetic)). A run of
   points may be a `sampled` node, a formula of `t` with a `count` and a range,
@@ -270,7 +281,7 @@ to the view as a `pixels` item, a position, a direction, a size and a colour per
 pixel, which the renderer draws as instances of one shape -- a cube, turned as
 the sensor is, a cone or magpylib's arrow -- in a still scene and in each step
 of a run alike; a 2D marker or arrow as the scatter magpylib draws
-([0041](decisions.md#0041-sensor-pixels-come-from-magpylib-as-data)). The sensor
+([0043](decisions.md#0043-sensor-pixels-come-from-magpylib-as-data)). The sensor
 keeps its axes as a mesh. The field studio has read already -- for field lines,
 or a drag's frame, which captures a reading sensor beside only what moves -- is
 handed to magpylib, the whole scene's (`threejs._readings_kept`). It picks -- a
@@ -347,14 +358,15 @@ objects, `set_overlap_intended` marks a pair, kept in the document's
 `intended_overlaps` and carried through the script tab, and `list_objects` names
 each object's partners, which the Objects tree marks as it marks a broken mesh.
 The view marks each overlapping object in amber, its own traces only, and
-hatches the region two convex solids share, worked out from the shapes it draws;
-in a run, the pairs of the step shown. A selected one keeps its green. The
-legend marks each overlapping row, passed up to a folded collection, faint for a
-pair marked as meant; above the list it counts the pairs, a click stepping
-through them with a way to mark the one shown, and with two objects selected
-says how far apart they are. A read-only view works the overlaps out from the
-objects it was given, keyed as its payload. A check that fails leaves `overlaps`
-empty and says why in `overlaps_error`.
+hatches the region two solids share where each is convex or a ring segment's
+convex wedges, worked out from the shapes it draws; in a run, the pairs of the
+step shown. A selected one keeps its green. The legend marks each overlapping
+row, passed up to a folded collection, faint for a pair marked as meant; above
+the list it counts the pairs, a click stepping through them with a way to mark
+the one shown, and with two objects selected says how far apart they are. A
+read-only view works the overlaps out from the objects it was given, keyed as
+its payload. A check that fails leaves `overlaps` empty and says why in
+`overlaps_error`.
 
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is

@@ -98,10 +98,12 @@ import ast
 import copy
 import difflib
 import hashlib
+import importlib
 import json
 import math
 import os
 import re
+import sys
 import traceback
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
@@ -2180,14 +2182,20 @@ def _event_source(event):
     op = event.get("op", "rotate_from_angax")
     target = event["target"]
     if op == "create":
-        factory, args = _create_parts(event.get("params") or {})
+        params, lead = event.get("params") or {}, []
+        if event["type"] == "face_charge.ChargeSheet":
+            # a solve's arrays: one line for a history list, however many
+            # faces it has, as a sealed collection's parts below
+            lead = [f"<{len(params.get('faces') or ())} faces>"]
+            params = {key: value for key, value in params.items() if key == "position"}
+        factory, args = _create_parts(params)
+        args = lead + args
         if event.get("parent"):
             args.append(f"parent={event['parent']!r}")
-        ctor = "Collection" if event["type"] == "Collection" else event["type"]
         if event.get("parts"):
             # one line for a history list, however many parts it is made of
             args.insert(0, f"<{_parts_count(event['parts'])} parts>")
-        return f"{target} = magpy.{ctor}{factory}({', '.join(args)})"
+        return f"{target} = {class_call(event['type'])}{factory}({', '.join(args)})"
     if op == "remove":
         return f"remove {target}"
     if op == "reparent":
@@ -2233,7 +2241,9 @@ def _parts_source(parts, indent, over=(), lit=_lit, magpy="magpy", rotation="R")
             lines += [f"{indent}    {arg}," for arg in args]
             lines.append(f"{indent}),")
         else:
-            lines.append(f"{indent}{magpy}.{part['type']}({', '.join(args)}),")
+            lines.append(
+                f"{indent}{class_call(part['type'], magpy)}({', '.join(args)}),"
+            )
     return lines
 
 
@@ -2323,13 +2333,35 @@ OBJECT_TYPES = (
     "misc.Triangle",
     "Sensor",
     "Collection",
+    "face_charge.ChargeSheet",
 )
+
+#: The names of `OBJECT_TYPES` that are not magpylib's: the module each is
+#: imported from, when a document first names it, the package that holds
+#: it, and its own constructor's arguments, read off an object of it
+#: (`external_params`). A solved face-charge sheet is a CustomSource whose
+#: field is its arrays, not a function, so a document can hold it (#100).
+_EXTERNAL_TYPES = {
+    "face_charge.ChargeSheet": (
+        "magpylib_material_response.face_charge",
+        "magpylib-material-response",
+        (
+            "vertices",
+            "faces",
+            "charge_densities",
+            "panels",
+            "mean_polarization",
+        ),
+    ),
+}
 
 
 def _object_classes():
     """Each name of `OBJECT_TYPES` that this magpylib has, to its class."""
     table = {}
     for name in OBJECT_TYPES:
+        if name in _EXTERNAL_TYPES:
+            continue
         module, _, cls = name.rpartition(".")
         found = getattr(getattr(magpy, module) if module else magpy, cls, None)
         if isinstance(found, type):
@@ -2342,11 +2374,77 @@ _CLASSES = _object_classes()
 
 def _resolve_type(type_str):
     """'magnet.Cuboid' -> magpylib.magnet.Cuboid, from a fixed table; any
-    other name is refused before anything is called."""
+    other name is refused before anything is called. A class from beside
+    magpylib is imported the first time a document names it."""
     cls = _CLASSES.get(type_str) if isinstance(type_str, str) else None
+    if cls is None and type_str in _EXTERNAL_TYPES:
+        module, package, _ = _EXTERNAL_TYPES[type_str]
+        try:
+            found = importlib.import_module(module)
+        except ImportError:
+            raise ValueError(
+                f"{type_str} needs {package}, which is not installed here: "
+                f"pip install {package}"
+            ) from None
+        cls = _CLASSES[type_str] = getattr(found, type_str.rpartition(".")[2])
     if cls is None:
         raise ValueError(f"unknown object type {type_str!r}")
     return cls
+
+
+def type_name(cls):
+    """A class -> the name a document names it by, or None for one it
+    cannot hold. A class from beside magpylib is named only once its module
+    is imported, which an object of it has done."""
+    if cls is magpy.Sensor:
+        return "Sensor"
+    if cls is magpy.Collection:
+        return "Collection"
+    for name, (module, _, _) in _EXTERNAL_TYPES.items():
+        found = sys.modules.get(module)
+        if found is not None and getattr(found, cls.__name__, None) is cls:
+            return name
+    for module in ("magnet", "current", "misc"):
+        if getattr(getattr(magpy, module), cls.__name__, None) is cls:
+            return f"{module}.{cls.__name__}"
+    return None
+
+
+def external_params(obj):
+    """An object of a class from beside magpylib, as its own constructor
+    takes it: the arguments it holds, in their order. Empty for any other:
+    magpylib's are read as `importer._PARAM_ATTRS` says."""
+    entry = _EXTERNAL_TYPES.get(type_name(type(obj)))
+    if entry is None:
+        return {}
+    values = {name: getattr(obj, name, None) for name in entry[2]}
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def class_call(type_str, magpy="magpy"):
+    """How a script calls the class a document's `type` names: magpylib's
+    through `magpy`, as the script imports it, one from beside magpylib by
+    its own name, which `class_imports` imports."""
+    if type_str in _EXTERNAL_TYPES:
+        return type_str.rpartition(".")[2]
+    return f"{magpy}.{type_str}"
+
+
+def class_imports(types):
+    """The lines a script imports the classes among `types` that are not
+    magpylib's with, for `class_call`."""
+    return [
+        f"from {_EXTERNAL_TYPES[name][0]} import {name.rpartition('.')[2]}"
+        for name in sorted(set(types) & set(_EXTERNAL_TYPES))
+    ]
+
+
+def _types_in(specs):
+    """Every type among `specs`, their children and a sealed one's parts."""
+    for spec in specs:
+        yield spec.get("type")
+        yield from _types_in(spec.get("children") or ())
+        yield from _types_in(spec.get("parts") or ())
 
 
 def _built_parts(spec):
@@ -2726,6 +2824,8 @@ class MagpylibStudioSession:
         #: the gesture. See `_field_lines`.
         self._moving: set | None = set()
         self._carried: set = set()
+        #: the whole scene `_changed` has noted the gesture's moves against
+        self._noted: dict | None = None
         self._field_cache: dict = {}
         #: The scene last drawn whole, with its colours and the ids it drew,
         #: and what has changed since: a set of ids, or None where that is
@@ -3636,6 +3736,10 @@ class MagpylibStudioSession:
         except KeyError:
             written = {}  # a generated copy has no spec to have written it
         out = []
+        if type_name(type(obj)) in _EXTERNAL_TYPES:
+            # A solve's result, its arrays as solved: moved and turned as a
+            # whole, never edited a vertex or a charge at a time (#100).
+            return out
         source = written.get("mesh_source")
         if source is not None:
             # First, because it is what the object *is* — the same order the
@@ -4383,6 +4487,7 @@ class MagpylibStudioSession:
         -- a drag's, not a variable's."""
         if self._interaction is None:
             return
+        self._noted = None
         if ids is None or self._moving is None:
             self._moving = None
         else:
@@ -4393,14 +4498,19 @@ class MagpylibStudioSession:
     def _changed(self, known=True):
         """Note, against the scene last drawn whole, that the scene changed:
         by what the gesture in progress moves, where that is `known` and
-        named -- by anything otherwise."""
+        named -- by anything otherwise. Noted once for what it moves: a group
+        drag comes here once per object, and working the names out each time
+        was a third of a step for 1,000 magnets."""
         whole = self._whole
         if whole is None or whole["changed"] is None:
             return
-        names = (
-            self._moving_names() if known and self._interaction is not None else None
-        )
-        whole["changed"] = None if names is None else whole["changed"] | names
+        gesture = known and self._interaction is not None
+        if gesture and self._noted is whole:
+            return
+        names = self._moving_names() if gesture else None
+        # a gesture that named nothing, as a pose or a parameter set in one
+        whole["changed"] = whole["changed"] | names if names else None
+        self._noted = whole if gesture else None
 
     def shows(self, scene):
         """Say that the view starting a gesture shows `scene`: if it is the
@@ -4453,6 +4563,7 @@ class MagpylibStudioSession:
         return moved
 
     def _forget_gesture(self):
+        self._noted = None
         self._moving = set()
         self._carried = set()
         self._field_cache = {}
@@ -5818,6 +5929,7 @@ class MagpylibStudioSession:
             return {"ok": False, "error": str(e)}
         if snapshot is not None:
             self._record_state(label, snapshot)
+        self._changed()  # as the build would have: `_whole_since` redraws it
         return {"ok": True}
 
     def duplicate_along(self, object_id, count, step):
@@ -8504,6 +8616,7 @@ class MagpylibStudioSession:
             lines.append("import pyvista as pv")
         if needs_scipy:
             lines.append("from scipy.spatial.transform import Rotation as R")
+        lines += class_imports(_types_in(spec_of.values()))
         # An expression goes into the script verbatim, which is what keeps the
         # script parametric — but `sqrt(2) * radius` needs `sqrt` in scope to
         # be worth anything. Filled in at the end, off the finished script
@@ -8560,8 +8673,8 @@ class MagpylibStudioSession:
             if spec.get("style"):
                 given = {p: _style_arg(p, v) for p, v in spec["style"].items()}
                 parts.append(f"style={_nest(given)!r}")
-            ctor = "Collection" if spec["type"] == "Collection" else spec["type"]
-            lines.append(f"{target} = magpy.{ctor}{factory}({', '.join(parts)})")
+            ctor = class_call(spec["type"])
+            lines.append(f"{target} = {ctor}{factory}({', '.join(parts)})")
             if spec.get("parts"):
                 # sealed, then what it is made of, one part a line
                 if spec.get("sealed"):

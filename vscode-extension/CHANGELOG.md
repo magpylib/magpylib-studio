@@ -5,6 +5,21 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>Solved face-charge sheets in a scene, beside field lines</summary>
+
+A `ChargeSheet` from magpylib-material-response's `apply_face_charge` comes into
+a `SceneWidget`, the field lines, a saved scene and both scripts, where it was
+left out with "unknown object type None". It is drawn coloured by its charge, as
+`magpy.show()` draws it, the sheets of one solve on one scale; it moves and
+turns as a whole, and nothing re-solves; field lines stop inside it as at a
+magnet. Needs magpylib-material-response 0.7. An object of any other class a
+scene cannot hold is left out, said by its label, class and package (#101).
+
+</details>
+
 ### Changed
 
 <details>
@@ -18,6 +33,27 @@ to open and was served a frame at a time, and takes 55 ms and 600 KB. A grid of
 pixels that read nothing is instances of one cube: 100 × 100 was 7.7 MB, and is
 408 KB. A left-handed sensor's arrows point along the field, where they pointed
 up to 51° off it (#102).
+
+</details>
+
+### Fixed
+
+<details>
+<summary>A ring or a cylinder segment is hatched where it overlaps</summary>
+
+Where a `CylinderSegment` overlaps another magnet, the region they share is
+hatched in amber, bore and curves followed, as it is for a cylinder or a cuboid.
+It was outlined only, because a segment is not convex. A mesh of another hollow
+shape, or a body of very many ring cells, stays outlined only.
+
+</details>
+
+<details>
+<summary>A magnet dragged again is drawn where it is let go</summary>
+
+From an object's second drag on, in an editable notebook view, the handles and
+the readout went to where it was let go and the magnet stayed where the first
+drag had left it, its overlaps as they were. Any kind of object, since 0.8.0.
 
 </details>
 
