@@ -23,9 +23,10 @@ classifiers = [
   "Topic :: Scientific/Engineering",
 ]
 dynamic = ["version"]
-# 6.0 is the first magpylib with what the studio is built on: the style API,
-# path-valued properties, the display-backend API and its pixel helpers.
-dependencies =["annotated-types>=0.6", "magpylib>=6.0", "plotly>=5"]
+# 6.1 is the first magpylib with what the studio is built on: the style API,
+# path-valued properties, the display-backend API, and sensor pixels handed
+# over as data (`draws_pixels`).
+dependencies =["annotated-types>=0.6", "magpylib>=6.1", "plotly>=5"]
 
 [project.entry-points."magpylib.backends"]
 # Enough for `magpy.show(backend="studio")` to work on a pip install. Magpylib

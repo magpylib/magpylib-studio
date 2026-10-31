@@ -19,6 +19,7 @@ import magpylib as magpy
 import numpy as np
 import pytest
 import traitlets
+from scipy.spatial.transform import Rotation
 
 from magpylib_studio import backend, importer, threejs
 
@@ -657,10 +658,9 @@ def test_a_path_is_marked_apart_from_what_travels_it(animation):
 @pytest.mark.parametrize("animation", [False, True])
 def test_a_view_of_a_cells_objects_draws_their_pixels_apart(animation):
     """A sensor whose pixels the field colours, in a view of the cell's own
-    objects: still, its pixels are items of their own with their colour
-    table, for the colour bar, where magpylib's meshes of them would be --
-    in the drawing's unit, millimetres here, and sized as magpylib sizes
-    them there; in a run, magpylib's meshes, each step computed and
+    objects: its pixels are items of their own with their colour table, for
+    the colour bar -- in the drawing's unit, millimetres here, and sized as
+    magpylib sizes them there; in a run, carried with it, each step read and
     coloured as it is."""
     cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
     across = np.linspace(-0.02, 0.02, 5)
@@ -672,19 +672,117 @@ def test_a_view_of_a_cells_objects_draws_their_pixels_apart(animation):
         each.style.pixel.field.source = "B"
     cube.move(np.linspace((0, 0, 0), (0.001, 0, 0), 3), start=0)
     view = widget.SceneWidget(cube, sensor, alone, animation=animation)
-    pixels = view.payload.get("pixels", [])
-    if animation:
-        assert not pixels
-        return
-    item, single = pixels
+    item, single = view.payload["pixels"]
     assert item["object_id"] == str(id(sensor)) and item["scale"]
+    assert ("changes" in item) == animation
     assert item["origins"][:3] == [-20.0, 0.0, 12.0]
     assert single["sizes"][0] < 1  # mm; a fifth of a metre without the panel's
     # directions, whatever the field's strength: a microtesla rounded as a
     # field was turned by the rounding
     lengths = np.linalg.norm(np.reshape(item["vectors"], (-1, 3)), axis=1)
     np.testing.assert_allclose(lengths, 1, atol=1e-5)
-    assert sensor.style.pixel.size == 1  # put back after the capture
+
+
+@pytest.mark.parametrize(
+    ("style", "kind", "drawn"),
+    [
+        ({}, "pixels", "cube"),  # plain cubes, any count: instances, not a mesh
+        ({"pixel_field_source": "B", "pixel_field_symbol": "cone"}, "pixels", "cone"),
+        ({"pixel_symbol": "o"}, "scatters", "markers"),
+        (
+            {"pixel_field_source": "B", "pixel_field_symbol": "arrow"},
+            "scatters",
+            "lines",
+        ),
+    ],
+)
+def test_each_kind_of_pixel_is_drawn_as_magpylib_draws_it(style, kind, drawn):
+    """A 3D shape is instances of it, one per pixel; a 2D marker or arrow the
+    scatter magpylib's own backends draw."""
+    cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    across = np.linspace(-0.004, 0.004, 4)
+    grid = magpy.Sensor(
+        position=(0, 0, 0.01),
+        pixel=[(x, y, 0) for x in across for y in across],
+        **{f"style_{key}": value for key, value in style.items()},
+    )
+    payload = widget.SceneWidget(cube, grid).payload
+    (item,) = [i for i in payload[kind] if i["object_id"] == str(id(grid))]
+    if kind == "pixels":
+        assert item["symbol"] == drawn and len(item["sizes"]) == 16
+        assert (item["vectors"] is None) == (drawn == "cube")
+    else:
+        assert item[drawn]
+
+
+@pytest.mark.parametrize("animation", [False, True])
+def test_a_sensors_cubes_turn_with_it(animation):
+    """Magpylib turns a sensor's cubes with it, and the trace a backend gets
+    says nothing of that: each copy is turned as the sensor is at its step,
+    on a path drawn still and in a run's frames."""
+    sensor = magpy.Sensor(pixel=[(0.002, 0, 0), (0, 0.001, 0)], style_path_frames=1)
+    sensor.rotate_from_angax(np.linspace(0, 90, 3), "z", start=0)
+    payload = widget.SceneWidget(sensor, animation=animation).payload
+    drawn = payload["pixels"]
+    if animation:
+        drawn = payload["changes"][drawn[0]["changes"]]
+    assert len(drawn) == 3
+    for each in drawn:
+        x, y, _ = each["origins"][:3]
+        turned = 2 * np.arctan2(each["turn"][2], each["turn"][3])
+        assert turned == pytest.approx(np.arctan2(y, x))
+
+
+@pytest.mark.parametrize("route", ["widget", "show"])
+def test_a_style_given_to_show_leaves_out_the_colour_bar(route):
+    """A colour bar's table is read off the sensor's own style: given a
+    style by `show` -- or by a script's `magpy.show`, whose backend cannot
+    tell -- the pixels have none, rather than one they are not coloured
+    by."""
+    cube = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    probe = magpy.Sensor(
+        position=(0, 0, 0.01),
+        pixel=[(-0.002, 0, 0), (0.002, 0, 0)],
+        style_pixel_field_source="B",
+    )
+    style = {"style_pixel_field_colormap": "Plasma"}
+    if route == "widget":
+        view = widget.SceneWidget(cube, probe, **style)
+    else:
+        view = magpy.show(cube, probe, backend="widget", return_fig=True, **style)
+    (item,) = view.payload["pixels"]
+    assert "scale" not in item
+
+
+def test_a_style_given_to_show_sizes_2d_markers_as_the_sensors_own_would():
+    """A 2D marker is sized on the screen by the pixel size, as given to
+    `show` too."""
+    grid = magpy.Sensor(pixel=[(-0.002, 0, 0), (0.002, 0, 0)], style_pixel_symbol="o")
+    (given,) = widget.SceneWidget(grid, style_pixel_size=3).payload["scatters"]
+    grid.style.pixel.size = 3
+    (own,) = widget.SceneWidget(grid).payload["scatters"]
+    assert given["markers"] == own["markers"]
+
+
+def test_a_left_handed_sensors_arrows_point_along_the_field():
+    """A left-handed sensor reads the field with its x mirrored; drawn, its
+    arrows point along the field where they are, turned however it is."""
+    cube = magpy.magnet.Cuboid(polarization=(0.3, 0.5, 1), dimension=(0.01,) * 3)
+    sensor = magpy.Sensor(
+        position=(0.004, 0.002, 0.012),
+        orientation=Rotation.from_euler("xyz", (20, 35, 60), degrees=True),
+        pixel=[(0, 0, 0), (0.003, 0, 0)],
+        handedness="left",
+        style_pixel_field_source="B",
+        style_pixel_field_symbol="cone",
+    )
+    (item,) = widget.SceneWidget(cube, sensor).payload["pixels"]
+    field = magpy.getB(cube, sensor.position + sensor.orientation.apply(sensor.pixel))
+    np.testing.assert_allclose(
+        np.reshape(item["vectors"], (-1, 3)),
+        field / np.linalg.norm(field, axis=1, keepdims=True),
+        atol=1e-5,
+    )
 
 
 def test_an_editable_view_colours_its_objects_as_magpylib_does():
@@ -869,11 +967,15 @@ def test_only_what_changes_is_carried():
     played = threejs.played_payload(scene)
     assert played["changes"]
     changing = [
-        item for item in played["meshes"] + played["scatters"] if "changes" in item
+        item
+        for kind in ("meshes", "scatters", "pixels")
+        for item in played[kind]
+        if "changes" in item
     ]
-    assert {item["object_id"] for item in changing} == {str(id(sensor))}
-    assert all("glyph" not in item for item in changing)
-    assert sum("track" in item for item in played["meshes"]) == 8 + 1
+    assert [(i["kind"], i["object_id"]) for i in changing] == [
+        ("pixels", str(id(sensor)))
+    ]
+    assert sum("track" in item for item in played["meshes"]) == 8 + 1  # its axes
     _replays(scene, played)
 
 
@@ -2092,7 +2194,8 @@ def test_what_magpylib_sizes_to_the_scene_comes_marked_for_the_view():
     """A sensor's axes and a dipole's arrow come marked ``glyph``, each copy
     `style.path.frames` draws about its own step. A sensor's pixels -- where
     they are, the size their spacing gives them -- come apart from its axes
-    unmarked, unless they sit on its origin, where the axes size them."""
+    a trace of their own, unmarked, unless they sit on its origin, where the
+    axes size them and they are marked as the axes are."""
     grid = np.mgrid[-2:3, 0:1, -2:3].reshape(3, -1).T * 0.002
     walk = np.linspace((0, 0, 0.004), (0.01, 0, 0.004), 5)
     objects = {
@@ -2120,24 +2223,25 @@ def test_what_magpylib_sizes_to_the_scene_comes_marked_for_the_view():
         }[name]
         assert anchors == pytest.approx(np.asarray(drawn) * per_mm)
         unmarked = [t for t in meshes if "glyph" not in t]
-        assert len(unmarked) == (name == "grid"), name
-    # the grid's pixels drawn as magpylib drew them: 25 cubes and their hull
-    (pixels,) = [
-        t
-        for t in scene.frames[0].traces
-        if t["object_id"] == id(objects["grid"])
-        and "glyph" not in t
-        and t["type"] == "mesh3d"
-    ]
-    assert len(pixels["x"]) == 26 * 8
+        assert len(unmarked) == (name == "grid"), name  # the grid's hull
+        pixels = [
+            t
+            for t in scene.frames[0].traces
+            if t["object_id"] == id(obj) and t["type"] == "pixels"
+        ]
+        if name in ("grid", "origin"):
+            (pixels,) = pixels
+            assert len(pixels["x"]) == (25 if name == "grid" else 1)
+            assert pixels.get("glyph") == (
+                None if name == "grid" else meshes[0]["glyph"]
+            )
 
 
 @pytest.mark.parametrize("how", ["cell", "backend", "sized by show", "framed by show"])
 def test_glyphs_are_marked_however_a_view_is_drawn(how):
     """A cell's view and `magpy.show(backend="widget")` both mark what
     magpylib sizes to the scene, in the drawing's millimetres: a dipole's
-    arrow, a sensor's axes and the pixel on its origin -- drawn apart in a
-    cell's view, with the axes in magpylib's own. A style given to `show`,
+    arrow, a sensor's axes and the pixel on its origin. A style given to `show`,
     which the objects do not hold, leaves what it changes as magpylib drew
     it: a size, or the probe's path drawn in copies."""
     cube = magpy.magnet.Cuboid(dimension=(0.01,) * 3, polarization=(0, 0, 1))
@@ -2158,7 +2262,7 @@ def test_glyphs_are_marked_however_a_view_is_drawn(how):
     assert anchors == pytest.approx(
         {
             "cell": [-14, 14, 14],
-            "backend": [-14, 14],
+            "backend": [-14, 14, 14],
             "sized by show": [],
             "framed by show": [-14],
         }[how]

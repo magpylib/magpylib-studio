@@ -506,9 +506,8 @@ class SceneWidget(anywidget.AnyWidget):
             widget._keep_names(_names_of_caller())
         return widget
 
-    def _adopt(self, scene, pixels=()):
-        """Draw `scene`, in one update -- with `pixels`, its sensors' pixels
-        drawn apart from it (`threejs.capture_view`).
+    def _adopt(self, scene):
+        """Draw `scene`, in one update.
 
         `hold_sync` because these are four traits and the view reads them
         together: sent one at a time, a payload can arrive at a browser that
@@ -519,7 +518,7 @@ class SceneWidget(anywidget.AnyWidget):
         # what changes as it goes is carried with it: the view plays it, kernel
         # or none. Only a run too big to carry is kept here, to be served a
         # frame at a time.
-        payload, served = threejs.run_payload(scene, pixels)
+        payload, served = threejs.run_payload(scene)
         with self.hold_sync():
             self._scene = served
             self.frames = len(scene.frames)
@@ -560,7 +559,7 @@ class SceneWidget(anywidget.AnyWidget):
         self._not_editable("update")
         traits, kwargs = self._split(kwargs)
         with self.hold_sync():
-            self._adopt(*threejs.capture_view(objects, animation=animation, **kwargs))
+            self._adopt(threejs._capture(objects, animation=animation, **kwargs))
             self.identify(*objects)
             # after `identify`, so that a selection given here is not carried
             for name, value in traits.items():
@@ -597,8 +596,12 @@ class SceneWidget(anywidget.AnyWidget):
         self._not_editable("identify")
         given = list(threejs._given(objects))
         before = dict(_positions(self.tree))
-        # its sensors' parts where their pixels are drawn apart: `capture_view`
-        apart = {item["object_id"] for item in self.payload.get("pixels", [])}
+        # its sensors' parts where their pixels are drawn apart: `_mark_pixels`
+        apart = {
+            item["object_id"]
+            for item in self.payload.get("pixels", [])
+            if "part" in item
+        }
         tree, objects = threejs.object_tree(objects, apart)
         after = {path: key for key, path in _positions(tree)}
 

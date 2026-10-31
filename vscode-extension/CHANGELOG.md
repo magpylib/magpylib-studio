@@ -20,6 +20,22 @@ scene cannot hold is left out, said by its label, class and package (#101).
 
 </details>
 
+### Changed
+
+<details>
+<summary>Sensor pixels come from magpylib as data, in runs too; needs magpylib 6.1</summary>
+
+Magpylib 6.1 hands the view each sensor's pixels as data -- a position, the
+field, a size and a colour each -- instead of a mesh of every arrow, and the
+studio now needs it. A run past a probe whose pixels the field colours plays on
+its own, its pixels drawn as instances in every step: a 200-step run took 437 ms
+to open and was served a frame at a time, and takes 55 ms and 600 KB. A grid of
+pixels that read nothing is instances of one cube: 100 × 100 was 7.7 MB, and is
+408 KB. A left-handed sensor's arrows point along the field, where they pointed
+up to 51° off it (#102).
+
+</details>
+
 ### Fixed
 
 <details>
