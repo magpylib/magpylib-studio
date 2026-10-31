@@ -5,6 +5,8 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.10.0]
+
 ### Added
 
 <details>
@@ -54,7 +56,7 @@ up to 51° off it (#102).
 Where a `CylinderSegment` overlaps another magnet, the region they share is
 hatched in amber, bore and curves followed, as it is for a cylinder or a cuboid.
 It was outlined only, because a segment is not convex. A mesh of another hollow
-shape, or a body of very many ring cells, stays outlined only.
+shape, or a body of very many ring cells, stays outlined only (#103).
 
 </details>
 
@@ -63,7 +65,8 @@ shape, or a body of very many ring cells, stays outlined only.
 
 From an object's second drag on, in an editable notebook view, the handles and
 the readout went to where it was let go and the magnet stayed where the first
-drag had left it, its overlaps as they were. Any kind of object, since 0.8.0.
+drag had left it, its overlaps as they were. Any kind of object, since 0.8.0
+(#103).
 
 </details>
 
