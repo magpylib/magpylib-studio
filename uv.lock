@@ -430,7 +430,7 @@ wheels = [
 
 [[package]]
 name = "magpylib"
-version = "6.0.0"
+version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -440,9 +440,9 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/46/be1037b6b813afed1dd6dbf33b56bb7dea076e2e97f07b41aaebaf3d6864/magpylib-6.0.0.tar.gz", hash = "sha256:fe225bb61dc545f70b6545f0a0bcda12d2c8de2133406a7008f010af77898fd8", size = 16220216, upload-time = "2026-10-19T20:57:29.483Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/10/84e46added8bd58d3d95ed87da20bf02fefeb6223dea337de0a39d3ea4bc/magpylib-6.1.0.tar.gz", hash = "sha256:16a7b11c82dc76d156aa72bbbe3927590cf097dc6a052abb5530d5ee0e81d2e6", size = 16241606, upload-time = "2026-10-31T09:07:12.51Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/30/04c8097ac0fd8ddbf0dc2c515918f91c004bc6b3e4a2079b8b4118a13f77/magpylib-6.0.0-py3-none-any.whl", hash = "sha256:e0ef07b3eeda0769355a59def80fe0eb4cb511db23ff99c00826bcae627cda56", size = 281419, upload-time = "2026-10-19T20:57:27.259Z" },
+    { url = "https://files.pythonhosted.org/packages/39/2e/343918c6fcf1fe03f32041a52363d74b0b55410e19b63f4e814015067904/magpylib-6.1.0-py3-none-any.whl", hash = "sha256:54933be3fdbc0a17b7f2e3287c2238d64b99d750b2775c7df6269e3a7baae767", size = 290837, upload-time = "2026-10-31T09:07:10.424Z" },
 ]
 
 [[package]]
@@ -470,7 +470,7 @@ requires-dist = [
     { name = "anywidget", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "anywidget", marker = "extra == 'widget'", specifier = ">=0.9" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4" },
-    { name = "magpylib", specifier = ">=6.0" },
+    { name = "magpylib", specifier = ">=6.1" },
     { name = "plotly", specifier = ">=5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
 ]

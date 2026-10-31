@@ -1,5 +1,6 @@
 """Tests for the headless engine and its JSON-RPC transport."""
 
+import contextlib
 import io
 import json
 import os
@@ -602,6 +603,38 @@ def test_a_scene_asked_for_whole_after_a_gesture_is_the_scene(
         assert drawn[key] == anew[key]
 
 
+@contextlib.contextmanager
+def _not_wrapped(given=None):
+    """`threejs._readings_kept` where magpylib's reading cannot be wrapped."""
+    yield None
+
+
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_a_drag_frames_probe_reads_the_whole_scene(wrapped, monkeypatch):
+    """A drag draws the probe again beside only what moves, and its pixels
+    read the whole scene all the same: magpylib handed its field, or, where
+    magpylib's reading cannot be wrapped, the trace rebuilt from it."""
+    if not wrapped:
+        monkeypatch.setattr(threejs, "_readings_kept", _not_wrapped)
+    s = _bench.build().session
+    s.get_scene()
+    s.begin_interaction()
+    for gap in (0.022, 0.024):  # the gesture's first frame is drawn whole
+        s.set_variable("gap", gap)
+        frame = s.get_scene(partial=True)
+    s.end_interaction()
+    s._whole = None
+    whole = s.get_scene()
+    assert frame["partial"] == ["m", "probe"]
+    (probe,) = [p for p in frame["pixels"] if p["object_id"] == "probe"]
+    (drawn,) = [p for p in whole["pixels"] if p["object_id"] == "probe"]
+    # the colour bar's levels from two reads of one field, each summed in
+    # its own order: a last bit apart on Linux
+    levels = [each["scale"].pop("levels") for each in (probe, drawn)]
+    np.testing.assert_allclose(*levels, rtol=1e-12)
+    assert drawn == probe
+
+
 def test_a_drags_later_steps_keep_the_colours_of_its_first():
     """Magpylib colours what no style colours by its place among what it
     draws: a coil's two loops are one colour in the coil, and two drawn
@@ -1035,10 +1068,10 @@ def test_a_played_frame_recomputes_what_the_field_decides():
 
     assert first["frames"] == 51 and later["frame"] == 9
     arrows = [  # the readings, not the axes beside them
-        next(m for m in f["meshes"] if m["object_id"] == "field" and "glyph" not in m)
+        next(p for p in f["pixels"] if p["object_id"] == "field")
         for f in (first, later)
     ]
-    assert arrows[0]["position"] != arrows[1]["position"]  # the field moved on
+    assert arrows[0]["vectors"] != arrows[1]["vectors"]  # the field moved on
     magnet = [
         next(m for m in f["meshes"] if m["object_id"] == "magnet")
         for f in (first, later)
@@ -5344,18 +5377,15 @@ def test_a_sensors_pixels_are_drawn_as_instances():
     """A sensor whose pixels read the field is no longer a mesh of every
     arrow: its pixels come as one `pixels` item -- a position, a direction,
     a size and a colour each -- for the view to draw as instances. The
-    sensor keeps its axes, the ranges reach the arrows, the style is as it
-    was, and the 2D arrow symbol stays magpylib's own drawing."""
+    sensor keeps its axes, the ranges reach the arrows, and the 2D arrow
+    symbol stays magpylib's own drawing."""
     s = MagpylibStudioSession()
     s.load_example("quiver")
     sensor = s._objs["field"]
     pixels = np.asarray(sensor.pixel, dtype=float).reshape(-1, 3)
-    before = sensor.style.pixel.size
     scene = s.get_scene()
-    assert sensor.style.pixel.size == before, "the style is put back"
-    items = [p for p in scene["pixels"] if p["object_id"] == "field"]
-    assert items and sum(len(p["sizes"]) for p in items) == len(pixels)
-    arrows = next(p for p in items if p["symbol"] == "arrow3d")
+    (arrows,) = [p for p in scene["pixels"] if p["object_id"] == "field"]
+    assert arrows["symbol"] == "arrow3d" and len(arrows["sizes"]) == len(pixels)
     n = len(arrows["sizes"])
     assert len(arrows["origins"]) == 3 * n and len(arrows["vectors"]) == 3 * n
     assert len(arrows["colors"]) == n and all(

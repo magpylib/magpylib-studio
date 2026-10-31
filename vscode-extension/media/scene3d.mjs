@@ -4448,8 +4448,10 @@ function buildItem(item) {
  *  cone, or a cube -- placed, turned along its reading, scaled and coloured
  *  per pixel from the matrices alone. A 7 x 7 probe was a mesh of 49
  *  arrows, a hundred kilobytes a frame; this is a few hundred numbers and
- *  one draw call a part. Picked as the sensor, like its axes; not outlined,
- *  as its arrows were not. */
+ *  one draw call a part. Beside cones or arrows, a pixel that reads nothing
+ *  comes with no direction, and is a cube, as magpylib draws it. A cube is
+ *  turned as its sensor is, `item.turn`. Picked as the sensor, like its
+ *  axes; not outlined, as its arrows were not. */
 function buildPixels(item) {
   const group = new THREE.Group();
   group.name = item.name;
@@ -4459,38 +4461,55 @@ function buildPixels(item) {
     transparent: item.opacity < 1,
     opacity: item.opacity,
   });
-  const parts = pixelShape(item.symbol).map(
-    (geometry) => new THREE.InstancedMesh(geometry, material, count),
+  const v = item.vectors;
+  const reads = (i) => v && (v[i * 3] || v[i * 3 + 1] || v[i * 3 + 2]);
+  const along = [];
+  const still = [];
+  for (let i = 0; i < count; i++) (reads(i) ? along : still).push(i);
+  // each shape drawn, and which pixels it draws
+  const sets = [
+    [item.symbol, along],
+    ["cube", still],
+  ].flatMap(([symbol, which]) =>
+    which.length
+      ? [
+          {
+            which,
+            parts: pixelShape(symbol).map(
+              (geometry) =>
+                new THREE.InstancedMesh(geometry, material, which.length),
+            ),
+          },
+        ]
+      : [],
   );
   const matrix = new THREE.Matrix4();
   const at = new THREE.Vector3();
   const turn = new THREE.Quaternion();
   const scale = new THREE.Vector3();
   const up = new THREE.Vector3(0, 0, 1);
-  const along = new THREE.Vector3();
+  const towards = new THREE.Vector3();
   const colour = new THREE.Color();
-  for (let i = 0; i < count; i++) {
-    at.set(
-      item.origins[i * 3],
-      item.origins[i * 3 + 1],
-      item.origins[i * 3 + 2],
-    );
-    if (item.vectors) {
-      along
-        .set(
-          item.vectors[i * 3],
-          item.vectors[i * 3 + 1],
-          item.vectors[i * 3 + 2],
-        )
-        .normalize();
-      turn.setFromUnitVectors(up, along);
-    } else {
-      turn.identity();
-    }
-    const size = item.sizes[i];
-    scale.set(size, size, size);
-    matrix.compose(at, turn, scale);
-    for (const part of parts) part.setMatrixAt(i, matrix);
+  const sensorTurn = new THREE.Quaternion();
+  if (item.turn) sensorTurn.fromArray(item.turn);
+  for (const { which, parts } of sets) {
+    which.forEach((i, n) => {
+      at.set(
+        item.origins[i * 3],
+        item.origins[i * 3 + 1],
+        item.origins[i * 3 + 2],
+      );
+      if (reads(i)) {
+        towards.set(v[i * 3], v[i * 3 + 1], v[i * 3 + 2]).normalize();
+        turn.setFromUnitVectors(up, towards);
+      } else {
+        turn.copy(sensorTurn);
+      }
+      const size = item.sizes[i];
+      scale.set(size, size, size);
+      matrix.compose(at, turn, scale);
+      for (const part of parts) part.setMatrixAt(n, matrix);
+    });
   }
   // Coloured as magpylib coloured them, or -- the colour bar's cut on them
   // (`colorRanges`) -- from the sensor's table over the cut, by each one's
@@ -4498,25 +4517,29 @@ function buildPixels(item) {
   const own = (i) =>
     Array.isArray(item.colors) ? item.colors[i] : item.colors;
   group.userData.recolour = (range) => {
-    for (let i = 0; i < count; i++) {
-      const norm = item.norms?.[i];
-      colour.set(
-        range && item.scale && norm > 0
-          ? tableColour(item.scale.lut, item.scale.levels, range, norm)
-          : own(i),
-      );
-      for (const part of parts) part.setColorAt(i, colour);
+    for (const { which, parts } of sets) {
+      which.forEach((i, n) => {
+        const norm = item.norms?.[i];
+        colour.set(
+          range && item.scale && norm > 0
+            ? tableColour(item.scale.lut, item.scale.levels, range, norm)
+            : own(i),
+        );
+        for (const part of parts) part.setColorAt(n, colour);
+      });
+      for (const part of parts) part.instanceColor.needsUpdate = true;
     }
-    for (const part of parts) part.instanceColor.needsUpdate = true;
   };
   group.userData.recolour(colorRanges.get(item.object_id));
-  for (const part of parts) {
-    part.instanceMatrix.needsUpdate = true;
-    // so framing and picking see the instances, not the one shape at the origin
-    part.computeBoundingBox();
-    part.computeBoundingSphere();
-    part.userData.trace = true;
-    group.add(part);
+  for (const { parts } of sets) {
+    for (const part of parts) {
+      part.instanceMatrix.needsUpdate = true;
+      // so framing and picking see the instances, not the one shape at the origin
+      part.computeBoundingBox();
+      part.computeBoundingSphere();
+      part.userData.trace = true;
+      group.add(part);
+    }
   }
   return group;
 }
@@ -5931,7 +5954,7 @@ const CORNER_FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 // The applied field `H_ext` is an arrow through the corner's middle, so that it
 // stays beside an axis it runs along, and a little longer than the square
-// (docs/decisions.md#0043-the-applied-field-is-an-arrow-in-the-corner).
+// (docs/decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner).
 const FIELD_LENGTH = { rest: 3, grown: 2.5 };
 const FIELD_INKS = { light: "#c2189b", dark: "#f472d0" }; // no pole, axis or mark
 const FIELD_ROOM = 2.5; // how far past the square it is drawn, as a share of it
@@ -6804,9 +6827,8 @@ function clearNode(node) {
   }
 }
 
-/** Every item a payload draws: its meshes, its scatters and -- in a scene
- *  the engine drew -- its sensors' pixels. A frame of a run has no pixels
- *  of its own; its sensors came as meshes. */
+/** Every item a payload draws: its meshes, its scatters, its sensors'
+ *  pixels and their field lines. */
 function drawnItems(payload) {
   return payload.meshes.concat(
     payload.scatters,

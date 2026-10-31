@@ -13,7 +13,7 @@ Python package it runs on. Open an entry for its details.
 A uniform `H_ext` from magpylib-material-response, on an object or a parent
 collection, is a magenta arrow through the view's corner with a tag saying how
 strong, or that the values differ. A scene keeps it, and both scripts write it,
-where it used to be lost.
+where it used to be lost (#104).
 
 </details>
 
@@ -27,6 +27,22 @@ left out with "unknown object type None". It is drawn coloured by its charge, as
 turns as a whole, and nothing re-solves; field lines stop inside it as at a
 magnet. Needs magpylib-material-response 0.7. An object of any other class a
 scene cannot hold is left out, said by its label, class and package (#101).
+
+</details>
+
+### Changed
+
+<details>
+<summary>Sensor pixels come from magpylib as data, in runs too; needs magpylib 6.1</summary>
+
+Magpylib 6.1 hands the view each sensor's pixels as data -- a position, the
+field, a size and a colour each -- instead of a mesh of every arrow, and the
+studio now needs it. A run past a probe whose pixels the field colours plays on
+its own, its pixels drawn as instances in every step: a 200-step run took 437 ms
+to open and was served a frame at a time, and takes 55 ms and 600 KB. A grid of
+pixels that read nothing is instances of one cube: 100 × 100 was 7.7 MB, and is
+408 KB. A left-handed sensor's arrows point along the field, where they pointed
+up to 51° off it (#102).
 
 </details>
 
