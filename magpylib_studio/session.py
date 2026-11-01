@@ -2356,6 +2356,11 @@ _EXTERNAL_TYPES = {
 }
 
 
+#: What a solve gives on a mesh it was given, of a sheet: `set_params` writes
+#: them with no build.
+_SOLVED_ARRAYS = frozenset({"charge_densities", "mean_polarization"})
+
+
 def _object_classes():
     """Each name of `OBJECT_TYPES` that this magpylib has, to its class."""
     table = {}
@@ -4567,6 +4572,7 @@ class MagpylibStudioSession:
         return moved
 
     def _forget_gesture(self):
+        self._recharged = set()
         self._noted = None
         self._moving = set()
         self._carried = set()
@@ -4830,6 +4836,10 @@ class MagpylibStudioSession:
             )
         key_of = self._names_of_objects()
         moving = self._sources_named(sources, names, key_of)
+        # solved again on the mesh they had, and not dragged: their field
+        # changes, and which points they enclose does not
+        kept = self._recharged - self._carried
+        recharged = [s for s in moving if key_of.get(id(s)) in kept]
         cache = self._field_cache.get(key)
         if cache is None or cache["names"] != names or cache["grid"] is not grid:
             ids = {id(s) for s in moving}
@@ -4838,14 +4848,15 @@ class MagpylibStudioSession:
                 "grid": grid,
                 "names": names,
                 "field": fieldlines.field(still, points, kind),
-                "inside": fieldlines.inside(still, points),
+                "inside": fieldlines.inside([*still, *recharged], points),
             }
             self._field_cache[key] = cache
         if not moving:
             return cache["field"], cache["inside"]  # the same, frame after frame
         values = cache["field"] + fieldlines.field(moving, points, kind)
-        within = cache["inside"] | fieldlines.inside(moving, points)
-        return values, within
+        ids = {id(s) for s in recharged}
+        shaped = [s for s in moving if id(s) not in ids]
+        return values, cache["inside"] | fieldlines.inside(shaped, points)
 
     def _moving_names(self):
         """The ids the gesture in progress moves -- the objects it named, the
@@ -6920,6 +6931,56 @@ class MagpylibStudioSession:
             _overwrite_param(create, name, expressions.normalized(value))
 
         return self._mutate_doc(mutate, f"set {object_id}.{name}")
+
+    def set_params(self, wanted, label="edit"):
+        """Set several parameters of several objects, `wanted` being ``{id:
+        {name: value}}``, as one step and one build -- a sheet's new mesh and
+        its new charge, which apart would each be refused for not fitting the
+        other. Where all that changes is what a solve gives on the mesh it
+        had, nothing is built: on the U-core at level 3, a third of the time
+        of a drag's step that solves again went on building the document."""
+        for object_id in wanted:
+            self._spec(object_id)  # raise early on unknown id
+        self._moved(set(wanted))
+        if all(
+            set(params) <= _SOLVED_ARRAYS
+            and type_name(type(self._objs[key])) in _EXTERNAL_TYPES
+            for key, params in wanted.items()
+        ):
+            return self._solved_again(wanted, label)
+        self._recharged -= set(wanted)
+
+        def mutate(doc):
+            for object_id, params in wanted.items():
+                create = self._create_event(object_id)
+                for name, value in params.items():
+                    _overwrite_param(create, name, expressions.normalized(value))
+
+        return self._mutate_doc(mutate, label)
+
+    def _solved_again(self, wanted, label):
+        """`set_params` for the arrays a solve gives on a sheet's mesh: written
+        in the document and on the live sheets, which keep the colour level
+        they were drawn at, so that a drag shows the charge change."""
+        # the state to undo to, where the gesture has none yet
+        snapshot = None if self._interaction else json.loads(json.dumps(self.doc))
+        self._recharged.update(wanted)
+        for object_id, params in wanted.items():
+            self._create_event(object_id)["params"].update(params)
+            sheet = self._objs[object_id]
+            level = sheet.style.charge.level
+            # set by the constructor alone, and set back by a new charge
+            mean = params.get("mean_polarization", sheet._mean)
+            sheet.charge_densities = params.get(
+                "charge_densities", sheet.charge_densities
+            )
+            sheet.style.charge.level = level
+            sheet._mean = None if mean is None else np.asarray(mean, float).reshape(3)
+        self._animated = None  # the captured run is of a scene that no longer is
+        if snapshot is not None:
+            self._record_state(label, snapshot)
+        self._changed()  # as a build would have: `_whole_since` redraws it
+        return {"ok": True}
 
     def reset_style(self, object_id, path=None):
         """Reset one style path (or all styles) to defaults by dropping it

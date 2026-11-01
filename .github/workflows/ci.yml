@@ -28,11 +28,9 @@ jobs:
           activate-environment: true
           enable-cache: true
       - run: uv pip install -e ".[dev]"
-      # A solved face-charge sheet's tests (#100), skipped without it: from
-      # GitHub until 0.7.0, the first release with ChargeSheet, is on PyPI.
-      - run:
-          uv pip install "magpylib-material-response @
-          git+https://github.com/magpylib/magpylib-material-response"
+      # A solved face-charge sheet's tests (#100), skipped without it. 0.8 is
+      # the first with `reuse`, which the sheet solved again in a drag tests.
+      - run: uv pip install "magpylib-material-response>=0.8"
       - run:
           python -c "import magpylib; print('magpylib', magpylib.__version__)"
       - run: python -m pytest -q

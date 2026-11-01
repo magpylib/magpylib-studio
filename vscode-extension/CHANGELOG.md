@@ -5,6 +5,20 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>A notebook can solve a part again while you drag</summary>
+
+`SceneWidget.follow_edits` calls a function of the notebook at each edit made in
+the view, every step of a drag and of a slider included, and sets what it
+returns in that edit's step: one undo takes back the magnet and the solve. With
+`apply_face_charge(model, reuse=solved)` from magpylib-material-response 0.8, a
+step on the U-core takes 100 ms at level 2, in the python, field lines included.
+A new demo, `examples/ucore_solve_demo.py`, shows it (#106).
+
+</details>
+
 ## [0.10.0]
 
 ### Added

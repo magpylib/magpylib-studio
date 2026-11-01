@@ -134,3 +134,101 @@ def test_without_material_response_the_sheet_says_what_it_needs(monkeypatch):
     (broken,) = back._broken
     assert "needs magpylib-material-response" in broken["error"]
     assert [o["type"] for o in back.list_objects()] == ["Collection", "magnet.Cuboid"]
+
+
+def _following_view():
+    """A magnet on a plate, in a view that solves the plate again at each edit,
+    and the solves its `follow_edits` made."""
+    view = SceneWidget(solved(), editable=True)
+    sent = []
+    view.send = lambda message, *_, **__: sent.append(message)
+    solves = []
+
+    def follow(objects):
+        magnet = next(o for o in objects.values() if type(o) is magpy.magnet.Cuboid)
+        plate = magpy.magnet.Cuboid(
+            polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006)
+        )
+        plate.susceptibility = 1000
+        out = face_charge.apply_face_charge(
+            magpy.Collection(magnet.copy(), plate),
+            level=1,
+            reuse=solves[-1] if solves else True,
+        )
+        solves.append(out)
+        new = sheet_of(out)
+        key = next(
+            k for k, o in objects.items() if isinstance(o, face_charge.ChargeSheet)
+        )
+        return {
+            key: {
+                "vertices": new.vertices,
+                "faces": new.faces,
+                "panels": new.panels,
+                "charge_densities": new.charge_densities,
+                "mean_polarization": new.mean_polarization,
+            }
+        }
+
+    view.follow_edits(follow)
+    return view, solves, sent
+
+
+def _drag(view, object_id, *positions):
+    view._reply({"id": 1, "method": "begin_interaction"})
+    for position in positions:
+        edit = {"objectId": object_id, "position": list(position)}
+        call = {"edits": [edit]}
+        answer = view._reply(
+            {"id": 1, "method": "apply_edits", "params": call, "scene": True}
+        )[0]
+        assert answer["result"]["ok"]
+    view._reply({"id": 1, "method": "end_interaction"})
+    view._show({"by": "drag"})
+
+
+def test_an_edit_followed_is_solved_in_its_step():
+    view, solves, sent = _following_view()
+    key = next(k for k, o in view.objects.items() if type(o) is magpy.magnet.Cuboid)
+    session = view._session
+    before = magpy.getB(session.scene, POINTS)
+    faces = len(sheet_of(session.scene).faces)
+    level = sheet_of(session.scene).style.charge.level
+    # off the plate: a mesh not graded toward the magnet, and with it a charge
+    # that fits no other, and then the factorization kept, with only the charge
+    # new, step after step
+    _drag(view, key, (0, 0, 0.02), (0.001, 0, 0.02), (0.002, 0, 0.02))
+    assert [s.face_charge_info["reused"] for s in solves] == [False, True, True]
+    assert sent == []
+    assert len(sheet_of(session.scene).faces) != faces
+    moved = magpy.getB(session.scene, POINTS)
+    np.testing.assert_array_equal(moved, solves[-1].getB(POINTS))
+    assert sheet_of(session.scene).style.charge.level == level
+    np.testing.assert_array_equal(
+        sheet_of(session.scene).mean_polarization,
+        sheet_of(solves[-1]).mean_polarization,
+    )
+    # the document holds it: built from it, the same field
+    np.testing.assert_array_equal(
+        magpy.getB(build.rebuilt(session).scene, POINTS), moved
+    )
+
+    # one undo, and neither the magnet nor its solve is left, with no solve more
+    assert view.undo()
+    assert len(solves) == 3
+    np.testing.assert_array_equal(magpy.getB(session.scene, POINTS), before)
+    assert view._step("redo")
+    np.testing.assert_array_equal(magpy.getB(session.scene, POINTS), moved)
+
+
+def test_a_failed_answer_is_said_and_the_edit_stays():
+    view, _, sent = _following_view()
+    key = next(k for k, o in view.objects.items() if type(o) is magpy.magnet.Cuboid)
+
+    def refuses(objects):
+        raise ValueError("no solve")
+
+    view.follow_edits(refuses)
+    _drag(view, key, (0.002, 0, 0.02))
+    assert sent == [{"kind": "refused", "message": "Not followed: no solve"}]
+    assert view._session._objs[key].position[0] == 0.002

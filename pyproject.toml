@@ -97,3 +97,4 @@ ignore = [
 # line is the notebook displaying something, not a statement that does nothing.
 "examples/marimo_demo.py" = ["B018"]
 "examples/ucore_demo.py" = ["B018"]
+"examples/ucore_solve_demo.py" = ["B018"]
