@@ -162,6 +162,12 @@ took back); the same example logs them under the view, with what was selected
 and hidden. A drag of several objects, or a `set` of several values, is one
 edit: refused in part, none of it is made.
 
+`follow_edits(answer)` answers an edit while it happens: `answer(objects)` runs
+at every step of a drag or a slider, and what it returns,
+`{id: {parameter: value}}`, joins that edit's step, so one undo takes back both.
+`examples/ucore_solve_demo.py` solves a U-core again this way, with
+`apply_face_charge(model, reuse=solved)`.
+
 The objects are copied into the session rather than edited in place: the cell
 that made them stays as it was, and running it again does not take the edits
 away. A drag is recorded as it goes and is one step to undo; the notebook hears

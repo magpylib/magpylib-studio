@@ -53,6 +53,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0042](#0042-a-ring-segment-is-hatched-as-its-wedges)                                          | A ring segment is hatched as its wedges                      |
 | [0043](#0043-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
 | [0044](#0044-the-applied-field-is-an-arrow-in-the-corner)                                      | The applied field is an arrow in the corner                  | accepted 2026-10-31, as built                                        |
+| [0045](#0045-a-notebook-answers-an-edit-in-its-step)                                           | A notebook answers an edit in its step                       |
 
 ---
 
@@ -2363,3 +2364,58 @@ and bury the model.
   whole scene would redraw every frame, for a field that flows nowhere.
 - **Three parallel arrows, a tinted disc, dimmed axes, a bigger square**:
   compared on a page at true size; Alex chose length.
+
+## 0045. A notebook answers an edit in its step
+
+**Status:** accepted 2026-11-01, as built (#106). The notebook half of
+[#96](https://github.com/magpylib/magpylib-studio/issues/96): its first and
+third items. A solver the studio's own panel calls, and saying that a solve is
+out of date (#89), stay open.
+
+### Context
+
+magpylib-material-response 0.8 gave `apply_face_charge` `reuse`: while the
+solved parts stay as they were, a call is a new load and a back-substitution, 15
+ms on the U-core at level 2 against 150 ms for a whole solve. That is fast
+enough for every step of a drag. A view had no way to use it: it tells the
+notebook of an edit only at the release, `revision` then being the only hook,
+and `set` from that hook is a step of its own. An undo took back the solve and
+left the magnet, which the hook then solved again, and the redo was gone.
+
+### Decision
+
+- **`view.follow_edits(answer)`**: `answer(objects)` is called after each edit
+  made in the view, every step of a drag and of a slider included, in the
+  kernel's answer to that step, and returns `{id: {parameter: value}}`. The view
+  has nothing new to learn.
+- **The answer is part of the edit**: one step to undo, the first step of a
+  panel edit being grouped for it. An undo calls nothing, since the document it
+  comes back to holds the solve that went with it.
+- **What it sets is one change**: `session.set_params` writes every parameter of
+  every object and then builds once, since a sheet's new mesh and its new charge
+  refuse each other one at a time.
+- **A new charge on the same mesh is not built**: the arrays go in the document
+  and on the live sheet, and the sheet's enclosed points are kept for the
+  gesture. At level 3 a step took 290 ms, and 180 without the builds. The sheet
+  keeps the colour level it was drawn at, so that a drag shows the charge
+  change.
+- **A failed answer is said in the view, and the edit stays**: a solve that
+  fails does not take the magnet back from under the pointer.
+- **Edits from code are the code's**: `set` and `set_variable` do not call it,
+  since the code that made them can solve in the same breath.
+
+Measured on an M4 Pro, on the demo: 9.5 scenes a second in `marimo run` at level
+2, 180 KB a scene; 100 ms a step in the python, of which about 40 ms is the
+solve and most of the rest the field of the sheets on the field lines' grid.
+
+### Rejected
+
+- **A hook on `revision`, with a `set` that takes several objects**: no drag,
+  and the undo above.
+- **`set_parts`, swapping a sealed body's parts**, as #96 first proposed: a
+  sheet solved again is the same object with other arrays; nothing needs
+  swapping, and a sealed body's parts have no id to answer with. A meshed body
+  solved by `apply_demag` would want it; it is thousands of objects, and does
+  not keep up with a drag.
+- **A solve inside the studio**: which model a sheet was solved from is the
+  notebook's, and the engine stays free of material-response at import.
