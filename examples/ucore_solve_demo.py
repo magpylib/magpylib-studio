@@ -1,14 +1,14 @@
 """A U-core solved again under your hand: `marimo edit examples/ucore_solve_demo.py`.
 
-Needs the widget extra, marimo and magpylib-material-response 0.8:
+Needs the widget extra, marimo and magpylib-material-response 0.9:
 
-    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.8"
+    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9"
 
 The U-core of material-response's docs, three soft-iron cuboids (chi = 999)
 wound with a coil of 400 ampere-turns, with a magnet in its gap, solved by face
 charge: sheets of charge on the core's surfaces and no volume mesh. Every step
 of a drag solves the core again (`SceneWidget.follow_edits`). What the solve
-keeps does the rest: `apply_face_charge(model, reuse=solved)` takes only a new
+keeps does the rest: `solve_face_charge(model, reuse=solved)` takes only a new
 load and a back-substitution while the core stays as it was, so moving the
 magnet or changing the coil's current costs milliseconds. Pull a leg off the
 yoke and the matrix changes, so each step factors it again. The result stays
@@ -29,10 +29,8 @@ def _():
     import magpylib as magpy
     import marimo as mo
     import numpy as np
-    from magpylib_material_response.face_charge import (
-        ChargeSheet,
-        apply_face_charge,
-    )
+    from magpylib_material_response import solve_face_charge
+    from magpylib_material_response.face_charge import ChargeSheet
     from magpylib_material_response.polyline import (
         create_polyline_fillet,
         move_grid_along_polyline,
@@ -47,7 +45,6 @@ def _():
         ChargeSheet,
         Count,
         SceneWidget,
-        apply_face_charge,
         create_polyline_fillet,
         grid,
         magpy,
@@ -55,6 +52,7 @@ def _():
         move_grid_along_polyline,
         np,
         scene,
+        solve_face_charge,
     )
 
 
@@ -134,13 +132,13 @@ def _(
     Bounds,
     ChargeSheet,
     Count,
-    apply_face_charge,
     grid,
     level,
     magpy,
     poses,
     scene,
     solvable,
+    solve_face_charge,
     windings,
 ):
     def _magnet():
@@ -156,7 +154,7 @@ def _(
     )
     # Kept by `reuse=True`, for the first step of a drag to reuse: 8 n² bytes,
     # on the result, so only the last result is held.
-    solved = apply_face_charge(
+    solved = solve_face_charge(
         solvable(poses, _magnet(), _coil), level=level.value, reuse=True
     )
     sheets = [s for s in solved.sources_all if isinstance(s, ChargeSheet)]
@@ -231,12 +229,12 @@ def _(SceneWidget, mo, solved, ucore_scene):
 @app.cell
 def _(
     ChargeSheet,
-    apply_face_charge,
     last,
     level,
     magpy,
     np,
     solvable,
+    solve_face_charge,
     view3d,
 ):
     def state_of(objects):
@@ -269,7 +267,7 @@ def _(
             if isinstance(obj, magpy.magnet.Cuboid | magpy.current.Polyline)
         ]
         placed = [(objects[k].position, objects[k].orientation) for k in ids]
-        out = apply_face_charge(
+        out = solve_face_charge(
             solvable(placed, *drives), level=level.value, reuse=last["solved"]
         )
         last["solved"] = out

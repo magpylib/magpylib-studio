@@ -1,8 +1,8 @@
 """A magnet meshed into cells, in the view: `marimo edit examples/ucore_demo.py`.
 
-Needs the widget extra, marimo and magpylib-material-response:
+Needs the widget extra, marimo and magpylib-material-response 0.9:
 
-    uv pip install -e ".[widget]" marimo magpylib-material-response
+    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9"
 
 The U-core of material-response's docs: three soft-iron cuboids (chi = 999)
 wound with a coil of sixteen turns, meshed into about as many cells as asked
@@ -28,7 +28,7 @@ def _():
     import magpylib as magpy
     import marimo as mo
     import numpy as np
-    from magpylib_material_response.demag import apply_demag
+    from magpylib_material_response import solve_cells
     from magpylib_material_response.meshing import mesh_all
     from magpylib_material_response.polyline import (
         create_polyline_fillet,
@@ -42,7 +42,6 @@ def _():
         Annotated,
         Count,
         SceneWidget,
-        apply_demag,
         create_polyline_fillet,
         grid,
         magpy,
@@ -51,6 +50,7 @@ def _():
         move_grid_along_polyline,
         np,
         scene,
+        solve_cells,
         time,
     )
 
@@ -120,12 +120,12 @@ def _(create_polyline_fillet, magpy, move_grid_along_polyline, np):
 
 
 @app.cell
-def _(apply_demag, magpy, mesh_all, target, time, ucore):
+def _(magpy, mesh_all, solve_cells, target, time, ucore):
     t0 = time.perf_counter()
     core, coil = ucore()
     meshed = mesh_all(magpy.Collection(core, coil), target_elems=target.value)
     t1 = time.perf_counter()
-    solved = apply_demag(meshed)
+    solved = solve_cells(meshed)
     t2 = time.perf_counter()
     cells = [s for s in solved.sources_all if isinstance(s, magpy.magnet.Cuboid)]
     windings = [
