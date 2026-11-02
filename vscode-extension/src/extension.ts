@@ -422,6 +422,12 @@ const OBJECT_TEMPLATES: {
     params: { moment: [0, 0, 100] },
   },
   {
+    label: 'Uniform field',
+    type: 'UniformField',
+    detail: 'the same field everywhere — needs magpylib-material-response 0.9',
+    params: { B: [0, 0, 0.1] },
+  },
+  {
     label: 'Sensor',
     type: 'Sensor',
     detail: 'where the field is read — B and H at a point, or over a pixel grid',

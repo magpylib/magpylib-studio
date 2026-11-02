@@ -1085,7 +1085,8 @@ export function createInspector(
     const box = element("details");
     box.open = true;
     const units = t.shown || {};
-    const said = [units.position, units.orientation]
+    // a uniform field is the same everywhere: it has a turn, and no place
+    const said = [t.placed ? units.position : null, units.orientation]
       .map((s) => s && s.symbol)
       .filter(Boolean);
     // the units in a span of their own, so a heading set in capitals leaves
@@ -1115,16 +1116,17 @@ export function createInspector(
         ),
       );
     }
-    box.appendChild(
-      vecRow(
-        ["x", "y", "z"],
-        t.position,
-        (v) => transformOp("set_transform", { position: v }),
-        pathed,
-        t.written_position,
-        units.position,
-      ),
-    );
+    if (t.placed)
+      box.appendChild(
+        vecRow(
+          ["x", "y", "z"],
+          t.position,
+          (v) => transformOp("set_transform", { position: v }),
+          pathed,
+          t.written_position,
+          units.position,
+        ),
+      );
     box.appendChild(
       vecRow(
         ["rx", "ry", "rz"],

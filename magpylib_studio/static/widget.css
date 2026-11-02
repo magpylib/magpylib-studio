@@ -982,6 +982,9 @@
 .magpy-legend-swatch.icon-triangle {
   --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.1%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2.6%2013%208.6%205.6%2012.4%2013Z%22%2F%3E%3Cpath%20d%3D%22M8%2010.4%2012.4%203M12.4%203l-2.3.6M12.4%203l-.3%202.3%22%2F%3E%3C%2Fsvg%3E");
 }
+.magpy-legend-swatch.icon-uniform-field {
+  --magpy-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.2%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2.5%204.5h9M9.3%202.5l2.2%202-2.2%202M2.5%208h11M11.3%206l2.2%202-2.2%202M2.5%2011.5h9M9.3%209.5l2.2%202-2.2%202%22%2F%3E%3C%2Fsvg%3E");
+}
 /* --- end of the generated icons --- */
 
 .magpy-legend-label {

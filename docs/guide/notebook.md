@@ -168,6 +168,10 @@ at every step of a drag or a slider, and what it returns,
 `examples/ucore_solve_demo.py` solves a U-core again this way, with
 `apply_face_charge(model, reuse=solved)`.
 
+A `UniformField` from magpylib-material-response is an object like a coil: pass
+it to the view with the rest, any number of them. It has no place or body, so
+the corner draws it, the sum of them, or of those selected in the legend.
+
 The objects are copied into the session rather than edited in place: the cell
 that made them stays as it was, and running it again does not take the edits
 away. A drag is recorded as it goes and is one step to undo; the notebook hears

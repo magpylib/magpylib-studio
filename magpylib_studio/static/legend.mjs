@@ -63,13 +63,15 @@ function inTreeOrder(nodes, out = []) {
   return out;
 }
 
-/** The ids a payload draws something for. */
+/** The ids a payload draws something for: a uniform field is drawn in the
+ *  corner, where it is picked and hidden from its row as any object is. */
 export function drawnIn(payload) {
-  return new Set(
-    [...payload.meshes, ...payload.scatters, ...(payload.pixels ?? [])].map(
+  return new Set([
+    ...[...payload.meshes, ...payload.scatters, ...(payload.pixels ?? [])].map(
       (item) => item.object_id,
     ),
-  );
+    ...(payload.fields ?? []).map((field) => field.id),
+  ]);
 }
 
 /** What each drawn object is drawn in, as CSS -- decided the way the renderer
@@ -164,6 +166,9 @@ function mostCommon(values) {
   return best;
 }
 
+/** A uniform field has no trace to take a colour from: the corner's arrow's. */
+const FIELD_INK = "#c2189b";
+
 /** The tree's icon for a kind of object (`media/icons`, carried in the
  *  stylesheet as masks): the shape says what it is, the colour behind it what
  *  it is drawn in. A magnet shows its polarization colours through its own
@@ -182,6 +187,7 @@ const ICONS = {
   Polyline: "polyline",
   Dipole: "dipole",
   CustomSource: "custom",
+  UniformField: "uniform-field",
   Sensor: "sensor",
   Axes: "sensor",
   Pixels: "pixels",
@@ -500,7 +506,8 @@ export function createLegend(
     // a sensor's axes are what is left of it beside its other parts
     const colour =
       swatches.get(node.id) ??
-      (isPart(node) && parent ? swatches.get(parent.id) : undefined);
+      (isPart(node) && parent ? swatches.get(parent.id) : undefined) ??
+      (node.kind === "UniformField" ? FIELD_INK : undefined);
     if (colour) swatch.style.background = colour;
     // A collection is drawn only as its contents, so it has no colour of its
     // own: its slot says what it is instead, and the names stay in line.

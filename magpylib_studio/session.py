@@ -1001,6 +1001,7 @@ _PARAM_ATTRS = (
 # prose of _PARAM_DOCS for a UI to dig back out with a regex.
 _PARAM_UNITS = {
     "polarization": "T",
+    "B": "T",
     "magnetization": "A/m",
     "dimension": "m",
     "diameter": "m",
@@ -1021,6 +1022,7 @@ _PARAM_KINDS = {
     "vertices": "length",
     "pixel": "length",
     "polarization": "field",
+    "B": "field",
     "current": "current",
 }
 _ARGUMENT_KINDS = {
@@ -1040,12 +1042,14 @@ _ARGUMENT_KINDS = {
 # names. A dimension's do not: they depend on the shape, and its doc says so.
 _PARAM_COMPONENTS = {
     "polarization": ("x", "y", "z"),
+    "B": ("x", "y", "z"),
     "magnetization": ("x", "y", "z"),
     "moment": ("x", "y", "z"),
 }
 
 _PARAM_DOCS = {
     "polarization": "magnetic polarization J (T), in object coordinates",
+    "B": "flux density (T), the same everywhere, in object coordinates",
     "magnetization": "magnetization M (A/m) — derived from polarization",
     "dimension": "size; Cuboid (a,b,c) m · Cylinder (d,h) m · "
     "CylinderSegment (r1,r2,h,phi1,phi2) m/deg",
@@ -2334,13 +2338,15 @@ OBJECT_TYPES = (
     "Sensor",
     "Collection",
     "face_charge.ChargeSheet",
+    "UniformField",
 )
 
 #: The names of `OBJECT_TYPES` that are not magpylib's: the module each is
 #: imported from, when a document first names it, the package that holds
 #: it, and its own constructor's arguments, read off an object of it
 #: (`external_params`). A solved face-charge sheet is a CustomSource whose
-#: field is its arrays, not a function, so a document can hold it (#100).
+#: field is its arrays, not a function, so a document can hold it (#100). So
+#: is a uniform field, whose field is one vector (#108).
 _EXTERNAL_TYPES = {
     "face_charge.ChargeSheet": (
         "magpylib_material_response.face_charge",
@@ -2352,6 +2358,11 @@ _EXTERNAL_TYPES = {
             "panels",
             "mean_polarization",
         ),
+    ),
+    "UniformField": (
+        "magpylib_material_response",
+        "magpylib-material-response",
+        ("B",),
     ),
 }
 
@@ -2391,7 +2402,12 @@ def _resolve_type(type_str):
                 f"{type_str} needs {package}, which is not installed here: "
                 f"pip install {package}"
             ) from None
-        cls = _CLASSES[type_str] = getattr(found, type_str.rpartition(".")[2])
+        try:
+            cls = _CLASSES[type_str] = getattr(found, type_str.rpartition(".")[2])
+        except AttributeError:
+            raise ValueError(
+                f"{type_str} needs a newer {package}: pip install -U {package}"
+            ) from None
     if cls is None:
         raise ValueError(f"unknown object type {type_str!r}")
     return cls
@@ -2928,6 +2944,7 @@ class MagpylibStudioSession:
             problem = _out_of_limits(name, value, limits)
             if problem:
                 raise ValueError(problem)
+        self._uniforms = None  # `_uniform_fields`: of these objects, once asked
         self._objs = {}
         self._derived = {}
         self._inherited = {}
@@ -3713,6 +3730,11 @@ class MagpylibStudioSession:
         if threejs.is_sealed(obj):
             return self._sealed_schema(obj)
         schema = type(obj.style).schema()
+        if threejs.is_uniform_field(obj):
+            # nothing of it is drawn but the corner's arrow, which is the
+            # scene's: its name is all of its style that does anything
+            schema["properties"] = {"label": schema["properties"]["label"]}
+            return schema
         # magpylib's schema does not say what a pixel field source may be —
         # only that it is one. We know: it is the set the engine evaluates.
         # Without this the inspector has nothing to build a widget from and
@@ -3743,7 +3765,8 @@ class MagpylibStudioSession:
         except KeyError:
             written = {}  # a generated copy has no spec to have written it
         out = []
-        if type_name(type(obj)) in _EXTERNAL_TYPES:
+        own = type_name(type(obj))
+        if own == "face_charge.ChargeSheet":
             # A solve's result, its arrays as solved: moved and turned as a
             # whole, never edited a vertex or a charge at a time (#100).
             return out
@@ -3766,7 +3789,7 @@ class MagpylibStudioSession:
                     ),
                 }
             )
-        for name in _PARAM_ATTRS:
+        for name in _EXTERNAL_TYPES[own][2] if own in _EXTERNAL_TYPES else _PARAM_ATTRS:
             if source is not None and name in ("vertices", "faces"):
                 # What the source came out as, not what it is — the same
                 # reason a sampled path is not offered as its points. Nobody
@@ -3969,6 +3992,8 @@ class MagpylibStudioSession:
             "euler": euler[-1].round(9).tolist(),
             "path_length": len(position),
             "path": position.round(9).tolist() if len(position) > 1 else None,
+            # a uniform field is the same everywhere: only its turn counts
+            "placed": not threejs.is_uniform_field(obj),
             # as the inspector shows and reads them: a position in mm
             "shown": {
                 "position": self._shown("length"),
@@ -4219,6 +4244,9 @@ class MagpylibStudioSession:
             colors = base["colors"]
         if not stepping:  # no step of a gesture changes it, and the view keeps it
             scene["applied"] = threejs.applied_field(self._drawn())
+        # Every step: a slider's or a parent's turn changes them, and in most
+        # scenes there are none to read.
+        scene["fields"] = threejs.fields_of(self._uniform_fields(source_of))
         if stepping and only is None:
             # the gesture's first frame, drawn whole, and the colours it drew
             # in, which what a later frame draws alone would not get
@@ -4286,6 +4314,18 @@ class MagpylibStudioSession:
             # for a view that keeps no switch of its own: the studio's panel
             scene["field_lines"] = True
         return scene
+
+    def _uniform_fields(self, source_of):
+        """The uniform fields among the objects, as ``(id they are drawn
+        under, field)``, found once a build: thousands of cells are not asked
+        again at every step of a drag."""
+        if self._uniforms is None:
+            self._uniforms = [
+                (source_of.get(key, key), obj)
+                for key, obj in self._objs.items()
+                if threejs.is_uniform_field(obj)
+            ]
+        return self._uniforms
 
     def _overlap_payload(self):
         """What a view draws of the overlaps: the pairs to warn about and how

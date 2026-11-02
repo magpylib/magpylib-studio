@@ -186,6 +186,22 @@ else:
         cls._magpylib_recording_wrapped = True
 
 
+def wrap_external(cls):
+    """Report ``cls``'s construction and what is set on it as written, for a
+    class from beside magpylib whose constructor computes with its arguments
+    before magpylib sees them, so that a variable has to be turned into a number
+    before it. What it adds is not magpylib's to report: set unreported, a value
+    would be lost from the document with no word said."""
+    if _native is not None or cls.__dict__.get("_magpylib_recording_wrapped"):
+        return
+    cls.__init__ = _recorded(cls.__init__, "new")
+    for attr, value in list(cls.__dict__.items()):
+        if isinstance(value, property) and value.fset and not attr.startswith("_"):
+            fset = _recorded(value.fset, "set", attr)
+            setattr(cls, attr, property(value.fget, fset, value.fdel, value.__doc__))
+    cls._magpylib_recording_wrapped = True
+
+
 #: Whether this hook reports property reads (the copy does; magpylib's own
 #: hook, when it ships, may not).
 supports_reads = _native is None

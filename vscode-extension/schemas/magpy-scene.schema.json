@@ -202,7 +202,8 @@
         "misc.Triangle",
         "Sensor",
         "Collection",
-        "face_charge.ChargeSheet"
+        "face_charge.ChargeSheet",
+        "UniformField"
       ]
     },
     "event": {

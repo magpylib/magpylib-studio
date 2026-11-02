@@ -675,6 +675,7 @@ def _capture(
             warnings.catch_warnings(record=True) as caught,
             _scaled_drawn_at(scaled) as drawn_at,
             _readings_kept(fields) as read,
+            _fields_undrawn(_given(objects)),
         ):
             warnings.simplefilter("always")
             show(
@@ -1785,6 +1786,80 @@ def applied_field(objects):
     return next((list(field) for field in found if any(field)), None)
 
 
+def is_uniform_field(obj):
+    """Whether `obj` is magpylib-material-response's `UniformField`: a source
+    with a value and a turn, and no place or body. By name, as the type table
+    has it, so that nothing here imports that package."""
+    cls = type(obj)
+    return cls.__name__ == "UniformField" and cls.__module__.startswith(
+        "magpylib_material_response"
+    )
+
+
+def fields_of(named):
+    """What a view is told of `named`, ``(id, UniformField)`` pairs: each field
+    the eye has not hidden, ``{"id", "B"}``, B in tesla in the global frame, as
+    it turns with its orientation, at its last step. The view adds them up
+    (docs/decisions.md#0046-a-uniform-field-is-a-source)."""
+    return [
+        {
+            "id": key,
+            "B": np.atleast_2d(field.orientation.apply(field.B))[-1].tolist(),
+        }
+        for key, field in named
+        if field.style.model3d.showdefault is not False
+    ]
+
+
+@contextlib.contextmanager
+def _fields_undrawn(objects):
+    """Keep magpylib from drawing the uniform fields among `objects` while it
+    captures them. It draws what has no shape as a marker at its position, and
+    frames the scene to hold it, and a field has no place: a magnet half a metre
+    off would come up as a speck beside the origin. On the object for as long as
+    this lasts, and not in its style: a style cannot unset a value, so what was
+    put back would read as set by the user."""
+    found = []
+
+    def visit(obj):
+        if is_uniform_field(obj):
+            found.append(obj)
+        elif isinstance(obj, magpy.Collection) and not is_sealed(obj):
+            for child in obj.children:
+                visit(child)
+
+    for obj in objects:
+        visit(obj)
+    for field in found:
+        field.get_trace = _no_trace
+    try:
+        yield
+    finally:
+        for field in found:
+            del field.get_trace
+
+
+def _no_trace(**_):
+    return []
+
+
+def _uniform_fields_in(objects):
+    """`fields_of` for what a view with no session draws, under its ids. As
+    `applied_field` does, it asks no sealed collection."""
+    found = []
+
+    def visit(obj):
+        if is_uniform_field(obj):
+            found.append((str(id(obj)), obj))
+        elif isinstance(obj, magpy.Collection) and not is_sealed(obj):
+            for child in obj.children:
+                visit(child)
+
+    for obj in objects:
+        visit(obj)
+    return fields_of(found)
+
+
 def _leaf_count(collection):
     """How many objects that are not collections `collection` holds."""
     return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
@@ -2389,6 +2464,7 @@ def view_payload(scene, index=None, traces=None):
         "ranges": reach,
         "labels": panel.labels,
         "applied": applied_field(panel.objects),
+        "fields": _uniform_fields_in(panel.objects),
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no
         # collection to carry. The renderer reads each as empty and skips them.
