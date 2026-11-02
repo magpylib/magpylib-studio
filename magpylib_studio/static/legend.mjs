@@ -509,8 +509,8 @@ export function createLegend(
       (isPart(node) && parent ? swatches.get(parent.id) : undefined) ??
       (node.kind === "UniformField" ? FIELD_INK : undefined);
     if (colour) swatch.style.background = colour;
-    // A collection is drawn only as its contents, so it has no colour of its
-    // own: its slot says what it is instead, and the names stay in line.
+    // A collection is drawn as its contents, whatever it draws of its own: its
+    // slot says what it is instead of a colour, and the names stay in line.
     if (held.length || node.parts) swatch.classList.add("collection");
     // a sensor, and its axes, drawn as the view draws them
     else if (["Sensor", "Axes"].includes(node.kind) && node.colors && colour) {

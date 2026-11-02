@@ -709,35 +709,58 @@ async function linesPick(port, base) {
   );
 }
 
-/** A hundred magnets, enough to be drawn as one batch: each one's own traces
- *  kept on the layer the camera skips, and still what a click picks; one
- *  hidden goes from the picture, and one faded or selected is drawn apart. */
+/** A collection's own trace goes when it is hidden, from the first draw, and
+ *  what it holds stays as `hidden` says. The copies its pattern hangs on its
+ *  node go too, and their arrows stay the flow's to show. */
 async function collectionTrace(port, base) {
   await check("a collection's own trace hides with it", async () => {
     const tab = await openTab(port);
     try {
       await tab.navigate(`${base}/out/collection-trace.html`);
       const drawn = await tab.until(
-        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size > 0`,
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size > 1`,
         20_000,
       );
       if (!drawn) return "the page never drew";
       const seen = await tab.evaluate(`
         const s = window.scene3d;
-        const [[id, node]] = s.byObjectId;
+        const nodes = [...s.byObjectId];
+        const id = "held";
+        const node = s.byObjectId.get(id);
+        const [, part] = nodes.find(([, each]) => !each.userData.collection);
         const traces = node.children.filter((child) => child.userData.built);
-        const showing = () => traces.map((child) => child.visible);
-        const before = showing();
-        s.setHidden([id]);
-        const hidden = showing();
+        const of = (arrows) => traces.filter((t) => Boolean(t.userData.arrows) === arrows);
+        const say = () => ({
+          traces: of(false).map((t) => t.visible),
+          arrows: of(true).map((t) => t.visible),
+          part: part.visible,
+        });
+        const atFirst = say();
         s.setHidden([]);
-        return { before, hidden, back: showing(), carries: node.visible };`);
-      if (!seen.before.length || !seen.before.every(Boolean))
-        return `drawn: ${JSON.stringify(seen)}`;
-      if (seen.hidden.some(Boolean))
-        return `hidden, still drawn: ${JSON.stringify(seen)}`;
-      if (!seen.back.every(Boolean) || !seen.carries)
-        return `shown again: ${JSON.stringify(seen)}`;
+        const shown = say();
+        s.setFlow(false);
+        const noFlow = say();
+        s.setHidden([id]);
+        const hiddenNoFlow = say();
+        s.setFlow(true);
+        return { atFirst, shown, noFlow, hiddenNoFlow, hidden: say() };`);
+      const all = JSON.stringify(seen);
+      const every = (list, value) =>
+        list.length > 0 && list.every((each) => each === value);
+      if (!every(seen.atFirst.traces, false))
+        return `hidden at the first draw, still drawn: ${all}`;
+      if (!every(seen.atFirst.arrows, false) || !seen.atFirst.part)
+        return `at the first draw: ${all}`;
+      if (!every(seen.shown.traces, true) || !every(seen.shown.arrows, false))
+        return `shown, with the flow: ${all}`;
+      if (!every(seen.noFlow.arrows, true))
+        return `shown, with no flow, the arrows are not back: ${all}`;
+      if (
+        !every(seen.hiddenNoFlow.arrows, false) ||
+        !every(seen.hidden.traces, false) ||
+        !seen.hidden.part
+      )
+        return `hidden again: ${all}`;
       return null;
     } finally {
       await tab.close();
@@ -745,6 +768,9 @@ async function collectionTrace(port, base) {
   });
 }
 
+/** A hundred magnets, enough to be drawn as one batch: each one's own traces
+ *  kept on the layer the camera skips, and still what a click picks; one
+ *  hidden goes from the picture, and one faded or selected is drawn apart. */
 async function manyMagnets(port, base) {
   await check("many magnets drawn as one, each still its own", async () => {
     const tab = await openTab(port);

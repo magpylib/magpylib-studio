@@ -2540,9 +2540,9 @@ function placeCollections() {
 
 /** `objectIds` and all that each collection among them holds: what is drawn
  *  for them, which is what an outline or a frame goes round. A collection
- *  itself is kept: it draws nothing of its own, but the copies a pattern of
- *  it makes are drawn on its node -- the array example's rows and layers,
- *  which were left out of the selection of the array they make up. */
+ *  itself is kept: what it draws of its own is on its node, and so are the
+ *  copies a pattern of it makes -- the array example's rows and layers, which
+ *  were left out of the selection of the array they make up. */
 function drawnFor(objectIds) {
   const drawn = new Set();
   for (const objectId of objectIds) {
@@ -2586,7 +2586,11 @@ function dress(node) {
   node.visible = node.userData.collection || !hiddenIds.has(objectId);
   const built = node.children.filter((child) => child.userData.built);
   if (node.userData.collection) {
-    for (const child of built) child.visible = !hiddenIds.has(objectId);
+    const hidden = hiddenIds.has(objectId);
+    // a current's arrows among a pattern's copies are the flow's to show
+    for (const child of built) {
+      child.visible = !hidden && !(child.userData.arrows && flowShown);
+    }
   }
   if (!built.some((child) => child.userData.part)) {
     fade(node, fades.get(objectId) ?? 1);
@@ -2744,7 +2748,7 @@ function outline(objectIds, opacity, copyOpacity = opacity) {
     const node = byObjectId.get(objectId);
     if (!node?.visible) continue;
     for (const trace of node.children) {
-      if (!trace.userData.trace) continue; // a handle, or another node
+      if (!trace.userData.trace || !trace.visible) continue; // a handle, or another node
       const own = trace.userData.copy ? copyOpacity : opacity;
       if (!shapes.take(trace, own < 1 ? FAINT : STRONG)) {
         outlineTrace(trace, own, hang, colour, true);
@@ -2769,7 +2773,7 @@ function outlineOverlaps(objectIds) {
   for (const [objectId, node] of byObjectId) {
     if (!node.visible) continue;
     for (const trace of node.children) {
-      if (!trace.userData.trace) continue;
+      if (!trace.userData.trace || !trace.visible) continue;
       if (
         wanted.has(trace.userData.copy ?? objectId) &&
         !shapes.take(trace, WARN)
@@ -5256,6 +5260,10 @@ function setFlow(on) {
     if (!line.userData.field) line.visible = flowShown;
   }
   for (const arrows of flowArrows) arrows.visible = !flowShown;
+  // those a hidden collection's node carries stay hidden
+  for (const node of byObjectId.values()) {
+    if (node.userData.collection) dress(node);
+  }
 }
 
 function buildScatter(item) {
@@ -5319,9 +5327,10 @@ function sceneSphere(objectIds) {
   // ring sat in the middle of the view with a margin all round.
   const parts = [];
   // and a glyph at the size it was drawn at (`asDrawn`), the box with them
-  const take = (node) => {
+  const take = (node, onlyShown = false) => {
     node.updateWorldMatrix(true, true);
     node.traverse((part) => {
+      if (onlyShown && !shown(part)) return;
       let own = null;
       if (part.isInstancedMesh) {
         if (!part.boundingBox) part.computeBoundingBox();
@@ -5350,8 +5359,9 @@ function sceneSphere(objectIds) {
     for (const node of chosen) take(node);
   } else {
     // A hidden object is not part of what is being looked at.
+    // A hidden collection's node stays, for what it carries: its traces do not.
     for (const node of byObjectId.values()) {
-      if (node.visible) take(node);
+      if (node.visible) take(node, node.userData.collection);
     }
     // the graduated box sits a little outside the objects, and framing the
     // scene without its scale showing would cut the numbers off
@@ -6997,8 +7007,12 @@ function poseFrame(index) {
     entry.built.traverse(free);
     entry.built = buildItem(item);
     entry.node.attach(entry.built);
-    // a sensor's part, or its axes beside its parts, hidden as they were
-    if (entry.node.children.some((child) => child.userData.part)) {
+    // a sensor's part, its axes beside its parts, or a collection's own
+    // trace, hidden as they were
+    if (
+      entry.node.userData.collection ||
+      entry.node.children.some((child) => child.userData.part)
+    ) {
       dress(entry.node);
     }
   }

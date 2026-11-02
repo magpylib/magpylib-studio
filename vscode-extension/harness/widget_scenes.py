@@ -150,19 +150,38 @@ def scene_to_edit():
 
 
 def collection_with_a_trace():
-    """A collection that holds nothing and draws a trace of its own."""
-    held = magpy.Collection(style_label="edges")
-    held.style.model3d.add_trace(
-        backend="generic",
-        constructor="scatter3d",
-        kwargs={
-            "x": [0, 0.003, 0.003, 0, 0],
-            "y": [0, 0, 0.003, 0.003, 0],
-            "z": [0, 0, 0, 0, 0],
-            "mode": "lines",
-        },
-    )
-    return held
+    """A hidden collection with a trace of its own, holding a current and a
+    magnet, its pattern's copies on its node: an editable view of it."""
+
+    from magpylib_studio import duplicate_along, scene
+
+    @scene
+    def design():
+        held = magpy.Collection(style_label="edges")
+        held.style.model3d.add_trace(
+            backend="generic",
+            constructor="scatter3d",
+            kwargs={
+                "x": [0, 0.003, 0.003, 0, 0],
+                "y": [0, 0, 0.003, 0.003, 0],
+                "z": [0, 0, 0, 0, 0],
+                "mode": "lines",
+            },
+        )
+        loop = magpy.current.Circle(current=1, diameter=0.002)
+        held.add(loop)
+        outer = magpy.Collection(held)
+        duplicate_along(held, 2, (0.01, 0, 0))
+        apart = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1),
+            dimension=(0.001, 0.001, 0.001),
+            position=(0, 0.01, 0),
+        )
+        return outer, apart
+
+    view = SceneWidget(design.build(), editable=True)
+    view.hidden = ["held"]
+    return view
 
 
 def scene_with_a_collection():
@@ -518,9 +537,7 @@ def main(out):
     )
     body.sealed = True
     SceneWidget(body).write_html(out / "sealed.html")
-    SceneWidget(collection_with_a_trace(), editable=True).write_html(
-        out / "collection-trace.html"
-    )
+    collection_with_a_trace().write_html(out / "collection-trace.html")
     dipole = magpy.misc.Dipole(
         moment=(0, 0, 1), position=(0.014, 0, 0), style_color="#ff00ff"
     )
