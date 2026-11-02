@@ -39,6 +39,7 @@
  *   selected and dragged on its own, and played on a path (`many.html` and
  *   `many-run.html`, from `widget_scenes.py`), and as many sealed into one
  *   body, picked, outlined and hidden whole (`sealed.html`);
+ * - a collection's own trace hidden with it (`collection-trace.html`);
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -706,6 +707,65 @@ async function linesPick(port, base) {
       }
     },
   );
+}
+
+/** A collection's own trace goes when it is hidden, from the first draw, and
+ *  what it holds stays as `hidden` says. The copies its pattern hangs on its
+ *  node go too, and their arrows stay the flow's to show. */
+async function collectionTrace(port, base) {
+  await check("a collection's own trace hides with it", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/collection-trace.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size > 1`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const seen = await tab.evaluate(`
+        const s = window.scene3d;
+        const nodes = [...s.byObjectId];
+        const id = "held";
+        const node = s.byObjectId.get(id);
+        const [, part] = nodes.find(([, each]) => !each.userData.collection);
+        const traces = node.children.filter((child) => child.userData.built);
+        const of = (arrows) => traces.filter((t) => Boolean(t.userData.arrows) === arrows);
+        const say = () => ({
+          traces: of(false).map((t) => t.visible),
+          arrows: of(true).map((t) => t.visible),
+          part: part.visible,
+        });
+        const atFirst = say();
+        s.setHidden([]);
+        const shown = say();
+        s.setFlow(false);
+        const noFlow = say();
+        s.setHidden([id]);
+        const hiddenNoFlow = say();
+        s.setFlow(true);
+        return { atFirst, shown, noFlow, hiddenNoFlow, hidden: say() };`);
+      const all = JSON.stringify(seen);
+      const every = (list, value) =>
+        list.length > 0 && list.every((each) => each === value);
+      if (!every(seen.atFirst.traces, false))
+        return `hidden at the first draw, still drawn: ${all}`;
+      if (!every(seen.atFirst.arrows, false) || !seen.atFirst.part)
+        return `at the first draw: ${all}`;
+      if (!every(seen.shown.traces, true) || !every(seen.shown.arrows, false))
+        return `shown, with the flow: ${all}`;
+      if (!every(seen.noFlow.arrows, true))
+        return `shown, with no flow, the arrows are not back: ${all}`;
+      if (
+        !every(seen.hiddenNoFlow.arrows, false) ||
+        !every(seen.hidden.traces, false) ||
+        !seen.hidden.part
+      )
+        return `hidden again: ${all}`;
+      return null;
+    } finally {
+      await tab.close();
+    }
+  });
 }
 
 /** A hundred magnets, enough to be drawn as one batch: each one's own traces
@@ -4233,6 +4293,7 @@ try {
   await manyMagnets(browser.port, base);
   await manyRun(browser.port, base);
   await sealedBody(browser.port, base);
+  await collectionTrace(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
   await applied(browser.port, base);
