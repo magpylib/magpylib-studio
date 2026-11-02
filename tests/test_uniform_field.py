@@ -102,6 +102,14 @@ def test_the_view_is_told_each_in_the_global_frame_and_frames_without_them(edita
     assert "get_trace" not in vars(upward)
 
 
+def test_a_field_given_beside_its_collection_counts_once():
+    magnet, upward, _ = scene_of()
+    held = magpy.Collection(magnet, upward)
+    assert [f["B"] for f in SceneWidget(held, upward).payload["fields"]] == [
+        [0, 0, 0.1]
+    ]
+
+
 def test_a_field_is_edited_as_a_source():
     view = SceneWidget(*scene_of(), editable=True)
     studio = view._session

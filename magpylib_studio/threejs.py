@@ -1811,6 +1811,24 @@ def fields_of(named):
     ]
 
 
+def _uniform_fields_under(objects):
+    """The uniform fields among `objects`, collections opened up, each once: a
+    field can be given beside a collection that holds it. As `applied_field`
+    does, it asks no sealed collection."""
+    found = {}
+
+    def visit(obj):
+        if is_uniform_field(obj):
+            found[id(obj)] = obj
+        elif isinstance(obj, magpy.Collection) and not is_sealed(obj):
+            for child in obj.children:
+                visit(child)
+
+    for obj in objects:
+        visit(obj)
+    return list(found.values())
+
+
 @contextlib.contextmanager
 def _fields_undrawn(objects):
     """Keep magpylib from drawing the uniform fields among `objects` while it
@@ -1819,17 +1837,7 @@ def _fields_undrawn(objects):
     off would come up as a speck beside the origin. On the object for as long as
     this lasts, and not in its style: a style cannot unset a value, so what was
     put back would read as set by the user."""
-    found = []
-
-    def visit(obj):
-        if is_uniform_field(obj):
-            found.append(obj)
-        elif isinstance(obj, magpy.Collection) and not is_sealed(obj):
-            for child in obj.children:
-                visit(child)
-
-    for obj in objects:
-        visit(obj)
+    found = _uniform_fields_under(objects)
     for field in found:
         field.get_trace = _no_trace
     try:
@@ -1844,20 +1852,8 @@ def _no_trace(**_):
 
 
 def _uniform_fields_in(objects):
-    """`fields_of` for what a view with no session draws, under its ids. As
-    `applied_field` does, it asks no sealed collection."""
-    found = []
-
-    def visit(obj):
-        if is_uniform_field(obj):
-            found.append((str(id(obj)), obj))
-        elif isinstance(obj, magpy.Collection) and not is_sealed(obj):
-            for child in obj.children:
-                visit(child)
-
-    for obj in objects:
-        visit(obj)
-    return fields_of(found)
+    """`fields_of` for what a view with no session draws, under its ids."""
+    return fields_of((str(id(obj)), obj) for obj in _uniform_fields_under(objects))
 
 
 def _leaf_count(collection):
