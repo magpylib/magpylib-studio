@@ -1,6 +1,6 @@
 """A magnet meshed into cells, in the view: `marimo edit examples/ucore_demo.py`.
 
-Needs the widget extra, marimo and magpylib-material-response:
+Needs the widget extra, marimo and magpylib-material-response 0.9:
 
     uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9"
 

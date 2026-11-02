@@ -15,6 +15,7 @@ from magpylib_studio import build, fieldlines, importer, session
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 
+pytest.importorskip("magpylib_material_response", minversion="0.9")
 face_charge = pytest.importorskip("magpylib_material_response.face_charge")
 
 POINTS = np.array([(0, 0, 0.01), (0.01, 0.005, -0.004), (0.03, 0, 0)])

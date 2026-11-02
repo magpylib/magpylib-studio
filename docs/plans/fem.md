@@ -29,7 +29,7 @@ The pitch is therefore not "validate magpylib with FEM". It is:
 > where the analytic model stopped being trustworthy.
 
 `magpylib-material-response` sharpens this rather than obsoleting it. Its
-`apply_demag(collection, susceptibility=...)` is a dense interaction-matrix MoM
+`solve_cells(collection, susceptibility=...)` is a dense interaction-matrix MoM
 over meshed cells; it buys self-demagnetization, inhomogeneous polarization and
 linear soft-magnetic μr ~ 1000. It does **not** buy nonlinear B-H (saturation),
 eddy currents, transients or thermal coupling. So once it is integrated, the FEM
@@ -586,7 +586,7 @@ explicit cross-section.
 
 ### 10.4 material-response scaling
 
-`apply_demag` solves cuboid cells on one grid by FFT and GMRES, O(n log n) in
+`solve_cells` solves cuboid cells on one grid by FFT and GMRES, O(n log n) in
 cells; the interactions between grids of different spacing, and of any other
 cells, stay dense, O(n²). Tier 2 (μr ~ 1000) is exactly where cell counts want
 to explode and the system conditions badly. Mesh with `meshing.mesh_uniform`,
