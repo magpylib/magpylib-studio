@@ -54,6 +54,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0043](#0043-sensor-pixels-come-from-magpylib-as-data)                                         | Sensor pixels come from magpylib as data                     | accepted 2026-10-30, as built                                        |
 | [0044](#0044-the-applied-field-is-an-arrow-in-the-corner)                                      | The applied field is an arrow in the corner                  | accepted 2026-10-31, as built                                        |
 | [0045](#0045-a-notebook-answers-an-edit-in-its-step)                                           | A notebook answers an edit in its step                       |
+| [0046](#0046-a-uniform-field-is-a-source)                                                      | A uniform field is a source                                  |
 
 ---
 
@@ -2419,3 +2420,52 @@ solve and most of the rest the field of the sheets on the field lines' grid.
   not keep up with a drag.
 - **A solve inside the studio**: which model a sheet was solved from is the
   notebook's, and the engine stays free of material-response at import.
+
+## 0046. A uniform field is a source
+
+**Status:** accepted 2026-11-02, as built (#109). Alex chose the sum at rest
+with the parts on select, a row that is edited, and no handles. Supersedes the
+part of [0044](#0044-the-applied-field-is-an-arrow-in-the-corner) that has one
+value, and the tag's "H_ext", for a `UniformField`; the arrow itself stands.
+
+### Context
+
+magpylib-material-response replaced the attribute `H_ext` with a source,
+`UniformField` (material-response#163), and a model can hold several. `getB`
+includes it, where it left `H_ext` out, so field lines are right by themselves.
+`H_ext` keeps working there for one release, and a model with both raises in the
+solvers. A `UniformField` was left out of a document, with a warning.
+
+### Decision
+
+- **It is an object of the type table**, as a `ChargeSheet` is, by the name
+  `to_json` gives it, its one argument `B`. It is created, saved, written in
+  both scripts and removed like any source, and takes a variable. `H=` is
+  written as `B`; `H=` in a variable is refused and says so, since a document
+  has one form.
+- **The corner draws the sum at rest**, one arrow as before, and the tag says "B
+  128 mT (2 fields)". Selecting fields draws the sum of those, thicker and in
+  the selection's colour. Hidden ones are not added, while field lines keep
+  them, as for any hidden source. Fields that cancel draw no arrow, and the tag
+  says 0.
+- **Told at every step of a gesture**, as `fields`, global, in tesla: a slider
+  or a parent's turn changes them, and they are a few numbers. Found once a
+  build, so a scene with none, or thousands of cells, pays nothing per step.
+- **A row in the legend**, where the model holds it, in the arrow's colour. The
+  object panel offers `B`, its turn and its label: its position changes nothing,
+  and nothing else of its style is drawn.
+- **No handles, and no place in the scene**: magpylib's marker for what has no
+  shape is kept from being drawn, or it would frame the scene round the origin.
+- **`H_ext` stays apart**: its own arrow and pill, from the old path, never
+  added to the sum, because `getB` leaves it out and includes a `UniformField`.
+
+### Rejected
+
+- **One arrow per field at rest, sum on select**, and one per field with no sum:
+  Alex chose the sum, for what it says of the field in space, in the corner's
+  room.
+- **An aim handle through the middle of the scene**: a kind of gizmo with no
+  body under it, for what the panel can type.
+- **Setting `model3d.showdefault` during the capture**: a style cannot unset a
+  value, so the user's object came back with it marked as set, and "Reset style"
+  showed on a field nobody had styled.

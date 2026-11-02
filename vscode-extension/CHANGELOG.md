@@ -5,6 +5,20 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>Uniform fields are sources, any number of them</summary>
+
+A `UniformField` from magpylib-material-response 0.9 is an object in a scene: a
+row in the legend, added from **Add Object…**, with `B` and its turn edited in
+the object panel, and kept by a saved scene and both scripts. The corner draws
+their sum, "B 128 mT (2 fields)", or the sum of those selected. Field lines
+include them. An `H_ext` keeps its own arrow until material-response removes it
+(#109).
+
+</details>
+
 ## [0.11.0]
 
 ### Added

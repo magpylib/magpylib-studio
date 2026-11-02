@@ -5369,6 +5369,7 @@ function highlight(objectIds) {
   );
   setGizmoMode(gizmoMode); // the handles belong to whatever is selected now
   drawOutlines();
+  poseFields(); // a field has no body: selected, it is its arrow that shows it
   if (hoveredId) drawHints(); // selected now, it is marked in full instead
   moversStale = true; // its batches follow what is selected, to be dragged
 }
@@ -5952,14 +5953,19 @@ const BAR_ROOM = { width: BAR_LONGEST + 16, height: 30 };
 const BAR_UP = 26; // the bar's middle, up from the margin at the view's foot
 const CORNER_FONT =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-// The applied field `H_ext` is an arrow through the corner's middle, so that it
-// stays beside an axis it runs along, and a little longer than the square
-// (docs/decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner).
+// A field that is the same everywhere is an arrow through the corner's middle,
+// so that it stays beside an axis it runs along, and a little longer than the
+// square (docs/decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner):
+// the sum of the scene's `UniformField`s, or of those selected, thicker and in
+// the selection's colour, or an old model's `H_ext`, never the two as one
+// (docs/decisions.md#0046-a-uniform-field-is-a-source).
 const FIELD_LENGTH = { rest: 3, grown: 2.5 };
 const FIELD_INKS = { light: "#c2189b", dark: "#f472d0" }; // no pole, axis or mark
 const FIELD_ROOM = 2.5; // how far past the square it is drawn, as a share of it
 const FIELD_END_ON = 0.96; // turned this far to the eye, it says so with a ring
-const TAG_ROOM = { width: 150, height: 22 }; // CSS pixels: the longest it says
+const FIELD_PICKED = 1.6; // how much thicker the arrow of what is selected is
+const TAG_ROOM = { width: 300, height: 22 }; // CSS pixels: the longest it says
+const TAG_GAP = 4; // between its pills, an old `H_ext` beside a `UniformField`
 const TAG_ABOVE = 12; // up from the square: the arrow's head reaches past it
 
 let unit = ""; // the scene's length unit, for the scale bar
@@ -5970,6 +5976,7 @@ let cornerPointer = null; // and where it is on the canvas, while it is
 let grown = 0; // how far the corner has grown, from 0 at rest to 1
 let bar = null; // the scale bar's canvas, and what was last painted on it
 let applied = null; // the scene's `H_ext`: three numbers, "differs" or null
+let uniformFields = []; // the scene's `UniformField`s: {id, B}, B global in tesla
 let tag = null; // what says it, as `bar` is: drawn above the corner
 let insets = { right: 0, bottom: 0 }; // how far in the host pushes the square
 const cubeRay = new THREE.Raycaster();
@@ -6121,10 +6128,17 @@ function dressCorner() {
   const axes = cornerAxes(dark);
   const cornerScene = new THREE.Scene();
   cornerScene.add(body, axes);
-  const field = cornerField(dark, paper);
+  const fieldInk = FIELD_INKS[dark ? "dark" : "light"];
+  const fields = {
+    hext: cornerField(fieldInk, paper),
+    sum: cornerField(fieldInk, paper),
+    picked: cornerField(SELECTION_COLOUR, paper),
+  };
   corner = {
-    field,
-    fieldScene: new THREE.Scene().add(field.group),
+    fields,
+    fieldScene: new THREE.Scene().add(
+      ...Object.values(fields).map((field) => field.group),
+    ),
     fieldCamera: new THREE.PerspectiveCamera(
       THREE.MathUtils.radToDeg(
         2 *
@@ -6237,12 +6251,11 @@ function cornerAxes(dark) {
   return axes;
 }
 
-/** The arrow of the applied field, centred on the corner's middle and pointing
+/** The arrow of a uniform field, centred on the corner's middle and pointing
  *  along +y until `poseField` turns it: drawn whole, and faintly where the cube
  *  hides it, as the axes are. And what it becomes seen end on: a ring with a
  *  dot, coming toward the eye, or a cross, going away. */
-function cornerField(dark, paper) {
-  const ink = FIELD_INKS[dark ? "dark" : "light"];
+function cornerField(ink, paper) {
   const length = FIELD_LENGTH.rest;
   const head = { radius: 0.17, length: 0.42 };
   const shaft = new THREE.CylinderGeometry(
@@ -6313,24 +6326,60 @@ function cornerField(dark, paper) {
   return { group, arrow, toward, away };
 }
 
-/** Turn the arrow to the applied field, as long as the corner has grown. */
-function poseField() {
-  if (!corner) return;
-  const { group, arrow } = corner.field;
-  group.visible = Array.isArray(applied);
-  if (!group.visible) return;
-  arrow.quaternion.setFromUnitVectors(
+/** Turn `field`'s arrow along `vector`, as long as the corner has grown and as
+ *  thick as `thick` says, or put it away for no vector or one of no length. */
+function poseField(field, vector, thick = 1) {
+  field.vector = vector && Math.hypot(...vector) > 0 ? vector : null;
+  field.group.visible = field.vector !== null;
+  if (!field.vector) return;
+  field.arrow.quaternion.setFromUnitVectors(
     new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3().fromArray(applied).normalize(),
+    new THREE.Vector3().fromArray(field.vector).normalize(),
   );
   const { rest, grown: full } = FIELD_LENGTH;
-  arrow.scale.setScalar((rest + (full - rest) * easedGrowth()) / rest);
+  const long = (rest + (full - rest) * easedGrowth()) / rest;
+  field.arrow.scale.set(long * thick, long, long * thick);
 }
 
-/** The scene's applied field, as `scene_payload` says it. */
+/** What the corner says of the `UniformField`s: the sum of those selected, or
+ *  of all that are not hidden, and how many it adds up; null with none. A sum
+ *  that cancels is nothing, not the rounding it leaves. */
+function fieldShown() {
+  const shown = uniformFields.filter((field) => !hiddenIds.has(field.id));
+  const chosen = shown.filter((field) => selectedIds.includes(field.id));
+  const parts = chosen.length ? chosen : shown;
+  if (!parts.length) return null;
+  const B = [0, 1, 2].map((axis) =>
+    parts.reduce((sum, field) => sum + field.B[axis], 0),
+  );
+  const largest = Math.max(...parts.map((field) => Math.hypot(...field.B)));
+  return {
+    B: Math.hypot(...B) > 1e-12 * largest ? B : [0, 0, 0],
+    count: parts.length,
+    picked: chosen.length > 0,
+  };
+}
+
+/** Turn the corner's arrows to the fields the scene has now. */
+function poseFields() {
+  if (!corner) return;
+  const { hext, sum, picked } = corner.fields;
+  const shown = fieldShown();
+  poseField(hext, Array.isArray(applied) ? applied : null);
+  poseField(sum, shown && !shown.picked ? shown.B : null);
+  poseField(picked, shown?.picked ? shown.B : null, FIELD_PICKED);
+}
+
+/** The scene's `H_ext`, as `scene_payload` says it. */
 function setApplied(field) {
   applied = field ?? null;
-  poseField();
+  poseFields();
+}
+
+/** The scene's `UniformField`s, as `fields_of` says them. */
+function setUniformFields(fields) {
+  uniformFields = fields ?? [];
+  poseFields();
 }
 
 /** An axis's name, to stand at its arrow's tip: hidden by the cube as the
@@ -6408,7 +6457,7 @@ function poseCorner() {
   corner.axes.position.setScalar(
     AXES_FROM.rest + (AXES_FROM.grown - AXES_FROM.rest) * eased,
   );
-  poseField();
+  poseFields();
 }
 
 /** Grow the corner while the pointer is on it, and shrink it back after:
@@ -6570,28 +6619,32 @@ function drawCorner(withCube) {
   renderer.autoClear = true;
 }
 
-/** The applied field: its arrow, and the tag that says it, above the corner.
- *  What a picture keeps as well, as it keeps the bar: it is part of what the
- *  picture shows, and nothing floats over one. */
+/** The uniform fields: their arrows, and the tag that says them, above the
+ *  corner. What a picture keeps as well, as it keeps the bar: it is part of what
+ *  the picture shows, and nothing floats over one. */
 function drawApplied(size, withCube) {
-  if (!applied) return;
+  const shown = fieldShown();
+  if (!applied && !shown) return;
   const side = withCube ? cornerSide() : CORNER_SIDE.rest;
   const [left, top] = withCube
     ? cornerAt(size, side)
     : [size.x - CORNER_MARGIN - side, size.y - CORNER_MARGIN - side];
-  if (Array.isArray(applied)) {
+  const arrows = Object.values(corner.fields).filter((field) => field.vector);
+  if (arrows.length) {
     aimCorner();
     const { fieldCamera } = corner;
     fieldCamera.quaternion.copy(corner.camera.quaternion);
     fieldCamera.position.copy(corner.camera.position);
     fieldCamera.updateMatrixWorld();
-    const facing = cornerEye.dot(
-      new THREE.Vector3().fromArray(applied).normalize(),
-    );
-    const endOn = Math.abs(facing) > FIELD_END_ON;
-    corner.field.arrow.visible = !endOn;
-    corner.field.toward.visible = endOn && facing > 0;
-    corner.field.away.visible = endOn && facing < 0;
+    for (const field of arrows) {
+      const facing = cornerEye.dot(
+        new THREE.Vector3().fromArray(field.vector).normalize(),
+      );
+      const endOn = Math.abs(facing) > FIELD_END_ON;
+      field.arrow.visible = !endOn;
+      field.toward.visible = endOn && facing > 0;
+      field.away.visible = endOn && facing < 0;
+    }
     // Drawn on a wider square about the same middle, with a camera as much
     // wider, from the same eye: where they share pixels the corner's picture
     // is unchanged, and depths compare with the cube's. Only the square's edge
@@ -6602,7 +6655,23 @@ function drawApplied(size, withCube) {
     renderer.render(corner.fieldScene, fieldCamera);
     renderer.setViewport(0, 0, size.x, size.y);
   }
-  drawTag(size, left + side, size.y - top + TAG_ABOVE);
+  const pills = [];
+  if (shown) {
+    const many = shown.count > 1 ? ` (${shown.count} fields)` : "";
+    pills.push({
+      name: "B",
+      text: sayField(shown.B) + many,
+      picked: shown.picked,
+    });
+  }
+  if (applied) {
+    pills.push({
+      name: "H",
+      below: "ext",
+      text: Array.isArray(applied) ? sayField(applied) : "differs",
+    });
+  }
+  drawTag(size, left + side, size.y - top + TAG_ABOVE, pills);
 }
 
 /** The field's strength, in the unit that reads best. */
@@ -6615,13 +6684,13 @@ function sayField(field) {
 
 /** The tag, its right end at `right` and its foot at `up`, in CSS pixels from
  *  the view's bottom left. */
-function drawTag(size, right, up) {
+function drawTag(size, right, up, pills) {
   const ratio = renderer.getPixelRatio();
   if (tag?.ratio !== ratio) {
     dropBar(tag);
     tag = makeBar(ratio, TAG_ROOM);
   }
-  paintTag(Array.isArray(applied) ? sayField(applied) : "differs");
+  paintTag(pills);
   const { width, height } = TAG_ROOM;
   tag.plane.position.set(right - width / 2, up + height / 2, 0);
   tag.plane.scale.set(width, height, 1);
@@ -6630,11 +6699,12 @@ function drawTag(size, right, up) {
   renderer.render(tag.scene, tag.camera);
 }
 
-/** Paint "H_ext `text`" on the tag -- only when that, or the theme, has changed
- *  since it was last painted. */
-function paintTag(text) {
+/** Paint `pills` on the tag, each a quantity's name, a smaller word under it
+ *  and what it says, from its right end -- only when those, or the theme, have
+ *  changed since it was last painted. */
+function paintTag(pills) {
   const dark = new THREE.Color(corner.paper).getHSL({}).l < 0.25;
-  const key = [text, dark].join("|");
+  const key = JSON.stringify([pills, dark]);
   if (key === tag.painted) return;
   tag.painted = key;
   const { width, height } = TAG_ROOM;
@@ -6647,24 +6717,32 @@ function paintTag(text) {
     context.font = `600 ${font}px ${CORNER_FONT}`;
     return context.measureText(words).width;
   };
-  const h = widthOf(12, "H");
-  const ext = widthOf(9, "ext");
-  const said = widthOf(11, text);
   const pad = 8;
-  const pill = pad + h + 0.5 + ext + 5 + said + pad;
-  const from = width - pill;
-  context.beginPath();
-  context.roundRect(from, 1, pill, height - 2, (height - 2) / 2);
-  context.fillStyle = FIELD_INKS[dark ? "dark" : "light"];
-  context.fill();
-  context.fillStyle = dark ? "#1e1e1e" : "#ffffff";
   const y = height / 2 + 4;
-  context.font = `600 12px ${CORNER_FONT}`;
-  context.fillText("H", from + pad, y);
-  context.font = `600 9px ${CORNER_FONT}`;
-  context.fillText("ext", from + pad + h + 0.5, y + 2.5);
-  context.font = `600 11px ${CORNER_FONT}`;
-  context.fillText(text, from + pad + h + 0.5 + ext + 5, y);
+  let end = width;
+  for (const { name, below = "", text, picked } of [...pills].reverse()) {
+    const named = widthOf(12, name);
+    const under = below ? 0.5 + widthOf(9, below) : 0;
+    const said = widthOf(11, text);
+    const pill = pad + named + under + 5 + said + pad;
+    const from = end - pill;
+    context.beginPath();
+    context.roundRect(from, 1, pill, height - 2, (height - 2) / 2);
+    context.fillStyle = picked
+      ? SELECTION_COLOUR
+      : FIELD_INKS[dark ? "dark" : "light"];
+    context.fill();
+    context.fillStyle = dark || picked ? "#1e1e1e" : "#ffffff";
+    context.font = `600 12px ${CORNER_FONT}`;
+    context.fillText(name, from + pad, y);
+    if (below) {
+      context.font = `600 9px ${CORNER_FONT}`;
+      context.fillText(below, from + pad + named + 0.5, y + 2.5);
+    }
+    context.font = `600 11px ${CORNER_FONT}`;
+    context.fillText(text, from + pad + named + under + 5, y);
+    end = from - TAG_GAP;
+  }
   tag.texture.needsUpdate = true;
 }
 
@@ -7210,6 +7288,7 @@ function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
   const was = METRES[unit];
   drawAxes(payload.ranges, payload.labels);
   if ("applied" in payload) setApplied(payload.applied); // kept through a drag
+  if ("fields" in payload) setUniformFields(payload.fields);
   if (keepCamera && framed && was && METRES[unit] && METRES[unit] !== was) {
     // The scene again, in another unit: a cell's objects, in the millimetres
     // magpylib drew them in, made editable come back in the session's

@@ -163,6 +163,7 @@ const TYPE_ICON_FILES: Record<string, string> = {
   'misc.Dipole': 'dipole',
   'misc.Triangle': 'triangle',
   'misc.CustomSource': 'custom',
+  UniformField: 'uniform-field',
   Sensor: 'sensor',
 };
 

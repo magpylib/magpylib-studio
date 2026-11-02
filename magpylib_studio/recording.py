@@ -292,6 +292,23 @@ def _variants(variants, parameters, owner):
 # --- the decorator ------------------------------------------------------------
 
 
+_H_IN_VARIABLES = (
+    "a UniformField's H takes numbers only: to write it in variables, give it "
+    "as B, in tesla"
+)
+
+
+def _wrap_external():
+    """Let a variable reach the classes from beside magpylib that compute with
+    their arguments, if the scene's script has imported them: `UniformField`
+    takes the norm of its value. Written as `type_name` finds them, by what is
+    imported already, so that a scene with none imports nothing."""
+    found = sys.modules.get("magpylib_material_response")
+    field = getattr(found, "UniformField", None)
+    if field is not None:
+        hook.wrap_external(field)
+
+
 class SceneFunction:
     """A function that is a scene: see the module. Call it for plain magpylib
     objects at the values you pass; `build()` for the document."""
@@ -342,6 +359,7 @@ class SceneFunction:
         formula now, a value past new limits -- is left out with a warning,
         and the mark's of that name, if any, stays."""
         hook.install()
+        _wrap_external()
         document = build.Scene(
             values=values, model_unit=self.model_unit, field_unit=self.field_unit
         )
@@ -776,7 +794,11 @@ class _Recorder:
         type_ = type_name(cls)
         if type_ is None:
             raise BuildError(f"a scene has no step for a {cls.__name__}")
-        bound = inspect.signature(cls.__init__).bind(
+        # One the hook wraps itself reports its own arguments (`wrap_external`).
+        made_by = type(event.obj)
+        if not made_by.__dict__.get("_magpylib_recording_wrapped"):
+            made_by = cls
+        bound = inspect.signature(made_by.__init__).bind(
             event.obj, *event.args, **event.kwargs
         )
         # In the order written, as the document keeps them: what was passed
@@ -812,6 +834,9 @@ class _Recorder:
             # being its default, not something written.
             if params.get("position") == [0, 0, 0]:
                 del params["position"]
+            # a document has a field in one form, as B
+            if expressions.contains_expression(params.pop("H", None)):
+                raise BuildError(_H_IN_VARIABLES)
             type_, params = own, {**_value(external_params(event.obj)), **params}
         if type_ == "misc.CustomSource":
             raise BuildError(
@@ -838,6 +863,10 @@ class _Recorder:
         recorded = self.known(event.obj)
         (value,) = event.args
         attr = event.name
+        if attr == "H":  # of a UniformField: a document has it in one form, as B
+            if expressions.contains_expression(_value(value)):
+                raise BuildError(_H_IN_VARIABLES)
+            attr, value = "B", event.obj.B.tolist()
         if attr in ("position", "orientation"):
             self._note_symbolic(recorded, value)
         if attr == "style":
