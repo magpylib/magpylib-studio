@@ -39,6 +39,7 @@
  *   selected and dragged on its own, and played on a path (`many.html` and
  *   `many-run.html`, from `widget_scenes.py`), and as many sealed into one
  *   body, picked, outlined and hidden whole (`sealed.html`);
+ * - a collection's own trace hidden with it (`collection-trace.html`);
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -711,6 +712,39 @@ async function linesPick(port, base) {
 /** A hundred magnets, enough to be drawn as one batch: each one's own traces
  *  kept on the layer the camera skips, and still what a click picks; one
  *  hidden goes from the picture, and one faded or selected is drawn apart. */
+async function collectionTrace(port, base) {
+  await check("a collection's own trace hides with it", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/collection-trace.html`);
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && window.scene3d?.byObjectId.size > 0`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew";
+      const seen = await tab.evaluate(`
+        const s = window.scene3d;
+        const [[id, node]] = s.byObjectId;
+        const traces = node.children.filter((child) => child.userData.built);
+        const showing = () => traces.map((child) => child.visible);
+        const before = showing();
+        s.setHidden([id]);
+        const hidden = showing();
+        s.setHidden([]);
+        return { before, hidden, back: showing(), carries: node.visible };`);
+      if (!seen.before.length || !seen.before.every(Boolean))
+        return `drawn: ${JSON.stringify(seen)}`;
+      if (seen.hidden.some(Boolean))
+        return `hidden, still drawn: ${JSON.stringify(seen)}`;
+      if (!seen.back.every(Boolean) || !seen.carries)
+        return `shown again: ${JSON.stringify(seen)}`;
+      return null;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 async function manyMagnets(port, base) {
   await check("many magnets drawn as one, each still its own", async () => {
     const tab = await openTab(port);
@@ -4233,6 +4267,7 @@ try {
   await manyMagnets(browser.port, base);
   await manyRun(browser.port, base);
   await sealedBody(browser.port, base);
+  await collectionTrace(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
   await applied(browser.port, base);

@@ -19,6 +19,16 @@ include them. An `H_ext` keeps its own arrow until material-response removes it
 
 </details>
 
+### Fixed
+
+<details>
+<summary>A hidden collection's own traces</summary>
+
+A collection's own `model3d` traces stayed drawn when it was hidden in an
+editable view, while the legend said hidden. They now go with it (#111).
+
+</details>
+
 ## [0.11.0]
 
 ### Added

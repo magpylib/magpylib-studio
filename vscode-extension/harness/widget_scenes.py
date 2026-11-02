@@ -46,6 +46,7 @@ Writes into OUT:
   still picked, hidden, faded, selected and dragged on its own;
 * ``many-run.html`` -- those cubes and one more on a path above them, a run
   that plays as motion: the batch draws the moving one where it is;
+* ``collection-trace.html`` -- a collection drawing a trace of its own, editable;
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
 * ``glyphs.html`` -- a cube, and a magenta dipole beside it: an arrow the
@@ -146,6 +147,22 @@ def scene_to_edit():
     # whether y is sent as it is, or as the box rounds it
     probe = magpy.Sensor(position=(0, 0.00012345, 0.02))
     return SceneWidget(magnet, probe, editable=True)
+
+
+def collection_with_a_trace():
+    """A collection that holds nothing and draws a trace of its own."""
+    held = magpy.Collection(style_label="edges")
+    held.style.model3d.add_trace(
+        backend="generic",
+        constructor="scatter3d",
+        kwargs={
+            "x": [0, 0.003, 0.003, 0, 0],
+            "y": [0, 0, 0.003, 0.003, 0],
+            "z": [0, 0, 0, 0, 0],
+            "mode": "lines",
+        },
+    )
+    return held
 
 
 def scene_with_a_collection():
@@ -501,6 +518,9 @@ def main(out):
     )
     body.sealed = True
     SceneWidget(body).write_html(out / "sealed.html")
+    SceneWidget(collection_with_a_trace(), editable=True).write_html(
+        out / "collection-trace.html"
+    )
     dipole = magpy.misc.Dipole(
         moment=(0, 0, 1), position=(0.014, 0, 0), style_color="#ff00ff"
     )

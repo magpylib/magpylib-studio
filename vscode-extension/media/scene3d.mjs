@@ -2528,12 +2528,13 @@ function nodeFor(objectId, centroid) {
 }
 
 /** A node for each collection, for its handles: on its centroid, in its own
- *  frame. Nothing is drawn on it; see `makeGizmo` for what it carries. */
+ *  frame. Nothing is drawn on it but the traces it was given of its own; see
+ *  `makeGizmo` for what it carries. */
 function placeCollections() {
   for (const objectId of Object.keys(collections)) {
     const node = nodeFor(objectId, centroids[objectId]);
     node.userData.collection = true;
-    node.visible = true;
+    dress(node);
   }
 }
 
@@ -2581,9 +2582,12 @@ function setFades(levels) {
  *  the part's own id, which its legend's rows hide and fade apart. */
 function dress(node) {
   const objectId = node.userData.objectId;
-  // a collection's node draws nothing, and hidden would hide what it carries
+  // a collection's node stays, hidden, for what it carries; its own traces go
   node.visible = node.userData.collection || !hiddenIds.has(objectId);
   const built = node.children.filter((child) => child.userData.built);
+  if (node.userData.collection) {
+    for (const child of built) child.visible = !hiddenIds.has(objectId);
+  }
   if (!built.some((child) => child.userData.part)) {
     fade(node, fades.get(objectId) ?? 1);
     return;
