@@ -286,3 +286,52 @@ def test_an_older_package_is_said(monkeypatch):
     )
     with pytest.raises(ValueError, match="needs a newer magpylib-material-response"):
         session._resolve_type("UniformField")
+
+
+def _with_h_ext(*values):
+    objects = [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(x, 0, 0)
+        )
+        for x, _ in enumerate(values)
+    ]
+    for each, value in zip(objects, values, strict=True):
+        each.H_ext = value
+    return objects
+
+
+@pytest.mark.parametrize("writer", ["to_script", "to_builder_script"])
+def test_a_script_writes_h_ext_as_a_field_it_can_be_one_of(writer, tmp_path):
+    def written(*objects):
+        doc, _ = importer.document_from_objects(objects, {}, script=False)
+        here = MagpylibStudioSession(doc)
+        return here, getattr(here, writer)()
+
+    here, script = written(*_with_h_ext((0, 0, 0.1), (0, 0, 0.1)))
+    assert ".H_ext" not in script
+    assert "applied_field = UniformField(B=(0.0, 0.0, 0.1))" in script
+    path = tmp_path / "scene.py"
+    path.write_text(script, encoding="utf-8")
+    if writer == "to_script":
+        namespace, captured, _ = importer.run_script(path)
+        doc, _ = importer.document_from_objects(captured[0], namespace)
+        back = MagpylibStudioSession(doc)
+    else:
+        found = {}
+        exec(compile(script, str(path), "exec"), found)  # noqa: S102 - the point
+        back = found["design"].build().session
+    assert back._broken == []
+    assert [f["B"] for f in back.get_scene()["fields"]] == [[0, 0, 0.1]]
+    assert back.get_scene()["applied"] is None
+    np.testing.assert_allclose(
+        read(back) - read(here), np.tile((0, 0, 0.1), (len(POINTS), 1))
+    )
+
+    # what one field cannot say stays, and says so
+    for objects in (
+        _with_h_ext((0, 0, 0.1), (0, 0.2, 0)),
+        [*_with_h_ext((0, 0, 0.1)), UniformField(B=(0, 0, 0.1))],
+    ):
+        _, script = written(*objects)
+        assert ".H_ext = (0.0, 0.0, 0.1)  # one UniformField cannot say this" in script
+        assert "applied_field" not in script

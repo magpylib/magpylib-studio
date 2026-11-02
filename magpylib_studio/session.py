@@ -2451,6 +2451,35 @@ def class_call(type_str, magpy="magpy"):
     return f"{magpy}.{type_str}"
 
 
+#: What a script writes beside an `H_ext` it cannot make one `UniformField` of.
+_H_EXT_KEPT = "  # one UniformField cannot say this: it acts on every part"
+
+
+def script_field(specs):
+    """The `UniformField` a script writes for the document's `H_ext`, as ``(its
+    B, the comment over it)``, of the objects' create steps `specs`: None where
+    no one field says the same, for values that differ, or beside a field
+    already there, where it would count twice and the solvers refuse the
+    attribute instead. magpylib-material-response drops the attribute after 0.9,
+    and setting it then would say nothing and do nothing.
+    """
+    specs = list(specs)
+    values = {tuple(s["H_ext"]) for s in specs if s.get("H_ext") is not None}
+    if len(values) != 1 or any(s.get("type") == "UniformField" for s in specs):
+        return None
+    (value,) = values
+    return value, "# the scene's H_ext: read by getB as well, and on every part"
+
+
+def free_name(word, taken):
+    """`word`, or `word_2` and on, whichever `taken` does not hold."""
+    name, count = word, 1
+    while name in taken:
+        count += 1
+        name = f"{word}_{count}"
+    return name
+
+
 def class_imports(types):
     """The lines a script imports the classes among `types` that are not
     magpylib's with, for `class_call`."""
@@ -8731,7 +8760,10 @@ class MagpylibStudioSession:
             lines.append("import pyvista as pv")
         if needs_scipy:
             lines.append("from scipy.spatial.transform import Rotation as R")
-        lines += class_imports(_types_in(spec_of.values()))
+        field = script_field(spec_of.values())
+        lines += class_imports(
+            [*_types_in(spec_of.values()), *(["UniformField"] if field else [])]
+        )
         # An expression goes into the script verbatim, which is what keeps the
         # script parametric — but `sqrt(2) * radius` needs `sqrt` in scope to
         # be worth anything. Filled in at the end, off the finished script
@@ -8790,8 +8822,8 @@ class MagpylibStudioSession:
                 parts.append(f"style={_nest(given)!r}")
             ctor = class_call(spec["type"])
             lines.append(f"{target} = {ctor}{factory}({', '.join(parts)})")
-            if spec.get("H_ext") is not None:
-                lines.append(f"{target}.H_ext = {tuple(spec['H_ext'])!r}")
+            if spec.get("H_ext") is not None and field is None:
+                lines.append(f"{target}.H_ext = {tuple(spec['H_ext'])!r}{_H_EXT_KEPT}")
             if spec.get("parts"):
                 # sealed, then what it is made of, one part a line
                 if spec.get("sealed"):
@@ -8845,6 +8877,13 @@ class MagpylibStudioSession:
                     lines.append(sample)
                 lines.append(f"{event['target']}.{_op_source(event, sampled)}")
         names = [spec["id"] for spec in self.doc.get("objects") or []]
+        if field:
+            name = free_name("applied_field", spec_of)
+            lines += [
+                field[1],
+                f"{name} = {class_call('UniformField')}(B={field[0]!r})",
+            ]
+            names.append(name)
         # Shown as loose objects, not wrapped in a Collection: the script must
         # bind exactly the objects this document holds, so importing it back
         # reproduces the same scene. A wrapper would come back as one nested

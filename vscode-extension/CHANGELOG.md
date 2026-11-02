@@ -15,7 +15,9 @@ row in the legend, added from **Add Object…**, with `B` and its turn edited in
 the object panel, and kept by a saved scene and both scripts. The corner draws
 their sum, "B 128 mT (2 fields)", or the sum of those selected. Field lines
 include them. An `H_ext` keeps its own arrow until material-response removes it
-(#109).
+(#109). Both scripts now write an `H_ext` as a `UniformField` where one field
+can say it, with a comment, since material-response drops the attribute after
+0.9 (#112).
 
 </details>
 
