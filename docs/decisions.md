@@ -55,6 +55,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0044](#0044-the-applied-field-is-an-arrow-in-the-corner)                                      | The applied field is an arrow in the corner                  | accepted 2026-10-31, as built                                        |
 | [0045](#0045-a-notebook-answers-an-edit-in-its-step)                                           | A notebook answers an edit in its step                       |
 | [0046](#0046-a-uniform-field-is-a-source)                                                      | A uniform field is a source                                  |
+| [0047](#0047-a-script-writes-h_ext-as-a-uniform-field)                                         | A script writes H_ext as a uniform field                     |
 
 ---
 
@@ -2469,3 +2470,37 @@ solvers. A `UniformField` was left out of a document, with a warning.
 - **Setting `model3d.showdefault` during the capture**: a style cannot unset a
   value, so the user's object came back with it marked as set, and "Reset style"
   showed on a field nobody had styled.
+
+## 0047. A script writes H_ext as a uniform field
+
+**Status:** accepted 2026-11-02, as built (#112). Supersedes the part of
+[0044](#0044-the-applied-field-is-an-arrow-in-the-corner) that has both scripts
+write `obj.H_ext`.
+
+### Context
+
+magpylib-material-response 0.9 warns on `H_ext`, and drops it in its next
+release. Setting an attribute nobody reads raises nothing, so a script that
+studio wrote would then solve with no applied field and say nothing about it.
+
+### Decision
+
+- **Both scripts write one `UniformField`** for the document's `H_ext`, under
+  the objects, when one value says it. The document keeps the attribute until a
+  script is run or saved back, which is when it becomes the field.
+- **Said in a comment over it**, since two things change with it: `getB`
+  includes the field, and it acts on every part, where `H_ext` on one part acted
+  on that part. A document does not hold what is soft, so a script cannot tell
+  whether another part would feel it.
+- **What one field cannot say stays `H_ext`, with a comment:** values that
+  differ, or a `UniformField` beside it, where it would count twice and the
+  solvers refuse the attribute. Such a script needs a hand before that release,
+  and says so.
+
+### Rejected
+
+- **Turning a document's `H_ext` into a field on load**: it would change the
+  field lines of a saved scene on opening it, for a release in which the
+  attribute still works as it did.
+- **Adding different values up, or one field per value**: each would change what
+  acts on which part, with no word.

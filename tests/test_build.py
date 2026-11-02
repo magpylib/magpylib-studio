@@ -1640,6 +1640,7 @@ def test_an_applied_field_is_kept_with_the_scene(by):
         session = MagpylibStudioSession(doc)
     assert session.get_scene()["applied"] == [0, 0, 0.1]
     for script in (session.to_script(), session.to_builder_script()):
-        assert ".H_ext = (0.0, 0.0, 0.1)" in script
+        assert "= UniformField(B=(0.0, 0.0, 0.1))" in script
+        assert ".H_ext" not in script
     again = MagpylibStudioSession(json.loads(json.dumps(session.to_dict())))
     assert again.get_scene()["applied"] == [0, 0, 0.1]
