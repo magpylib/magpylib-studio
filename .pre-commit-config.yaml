@@ -59,7 +59,7 @@ repos:
       - id: trailing-whitespace
 
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: "v3.9.9"
+    rev: "v3.9.10"
     hooks:
       - id: prettier
         types_or: [yaml, markdown, html, css, javascript, json]
@@ -71,7 +71,7 @@ repos:
         exclude: (^|/)\.vscode/|/jsconfig\.json$|^magpylib_studio/\.agents/skills/magpylib-studio/references/api\.md$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.16.10"
+    rev: "v0.17.3"
     hooks:
       - id: ruff-check
         args: ["--fix"]
@@ -95,12 +95,12 @@ repos:
         args: ["--ignore-words-list=recognise,recognised,minimise,behaviour"]
 
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: "0.26"
+    rev: "v0.27"
     hooks:
       - id: validate-pyproject
         additional_dependencies: ["validate-pyproject-schema-store[all]"]
 
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: "0.38.2"
+    rev: "0.39.0"
     hooks:
       - id: check-github-workflows
