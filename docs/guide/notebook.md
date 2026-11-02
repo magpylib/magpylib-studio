@@ -166,7 +166,7 @@ edit: refused in part, none of it is made.
 at every step of a drag or a slider, and what it returns,
 `{id: {parameter: value}}`, joins that edit's step, so one undo takes back both.
 `examples/ucore_solve_demo.py` solves a U-core again this way, with
-`apply_face_charge(model, reuse=solved)`.
+`solve_face_charge(model, reuse=solved)`.
 
 A `UniformField` from magpylib-material-response is an object like a coil: pass
 it to the view with the rest, any number of them. It has no place or body, so

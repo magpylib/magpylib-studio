@@ -28,7 +28,7 @@ def solved():
     )
     plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006))
     plate.susceptibility = 1000
-    return face_charge.apply_face_charge(magpy.Collection(magnet, plate), level=1)
+    return face_charge.solve_face_charge(magpy.Collection(magnet, plate), level=1)
 
 
 def sheet_of(collection):
@@ -109,7 +109,7 @@ def test_field_lines_stop_at_a_solved_body():
     magnet = magpy.magnet.Cuboid(
         polarization=(1, 0, 0), dimension=(0.005,) * 3, position=(-0.02, 0, 0)
     )
-    out = face_charge.apply_face_charge(magpy.Collection(magnet, *cubes), level=1)
+    out = face_charge.solve_face_charge(magpy.Collection(magnet, *cubes), level=1)
     out.rotate_from_angax(30, "z", anchor=0)
     points = np.random.default_rng(0).uniform(-0.02, 0.02, (2000, 3))
     local = out.orientation.apply(points, inverse=True) - (0.005, 0, 0)
@@ -150,7 +150,7 @@ def _following_view():
             polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006)
         )
         plate.susceptibility = 1000
-        out = face_charge.apply_face_charge(
+        out = face_charge.solve_face_charge(
             magpy.Collection(magnet.copy(), plate),
             level=1,
             reuse=solves[-1] if solves else True,

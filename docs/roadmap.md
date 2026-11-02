@@ -170,8 +170,8 @@ built there. Studio builds no solver. In this order:
 
 1. units (R2) ✅;
 2. material-response's first milestone: magnets and soft parts in a uniform
-   field, `fem_study` and `compare` (its work, not studio's);
-3. studio calls it (M7): a scene's objects to `fem_study`, a comparison across a
+   field, `study_fem` and `compare` (its work, not studio's);
+3. studio calls it (M7): a scene's objects to `study_fem`, a comparison across a
    variable through `sweep()`, the solve as a job off the engine's loop (V3),
    refusals before results (V4, `plans/fem.md` §12–13); `susceptibility` carried
    in the document (M1 below);
