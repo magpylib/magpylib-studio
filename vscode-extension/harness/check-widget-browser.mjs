@@ -2387,13 +2387,15 @@ async function variablesPanel(port, base) {
       ) {
         return `restore was not one step: ${grouped.join(" ")}`;
       }
-      // variants: a toggle each above the rows while they are few, none
-      // pressed to start; one press asks the session once, settled, and the
-      // rows are read back; a press on the pressed one asks nothing
+      // variants: a toggle each along the foot of the view while they are
+      // few, the panel closed, and none in the panel; none pressed to start;
+      // one press asks the session once, settled, and the rows are read
+      // back; a press on the pressed one asks nothing
       await tab.navigate(`${base}/pages/variables.html?variants`);
       const few = (await tab.until("return window.result", 20_000))?.variants;
       if (!few) return "?variants: never finished";
       if (!few.shown) return "the variants were not offered";
+      if (few.inPanel) return "the variables panel listed the variants too";
       if (few.toggles.join() !== "compact,wide" || few.dropdown.length) {
         return `two variants were ${JSON.stringify(few)}`;
       }
@@ -2406,6 +2408,11 @@ async function variablesPanel(port, base) {
         return `after wide, ${few.after} was pressed and n was ${few.n}`;
       }
       if (few.pressedAgain) return "a press on the pressed variant asked again";
+      const slide =
+        "begin_interaction use_variant:compact* use_variant:compact end_interaction";
+      if (few.slid?.join(" ") !== slide || few.slidTo?.join() !== "compact") {
+        return `a slide from wide to compact asked ${JSON.stringify(few.slid)}, and ${few.slidTo} was pressed`;
+      }
       if (few.disabled.length) return `${few.disabled} was offered as unusable`;
       // one the scene cannot use as it stands: shown, not offered, and a
       // press on it asks nothing
@@ -2423,8 +2430,8 @@ async function variablesPanel(port, base) {
       await tab.navigate(`${base}/pages/variables.html?many`);
       const many = (await tab.until("return window.result", 20_000))?.variants;
       if (!many) return "?many: never finished";
-      if (many.toggles.length || many.dropdown.length !== 7) {
-        return `six variants were ${JSON.stringify(many)}`;
+      if (many.toggles.length || many.dropdown.length !== 13) {
+        return `twelve variants were ${JSON.stringify(many)}`;
       }
       if (many.before !== "—")
         return `the values were said to be in ${many.before}`;

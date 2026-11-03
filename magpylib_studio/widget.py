@@ -391,6 +391,12 @@ class SceneWidget(anywidget.AnyWidget):
     #: and the two move together; the view's model is the one that owns the
     #: numbers. A name the scene has no variable of is refused.
     variables = traitlets.Dict().tag(sync=True)
+    #: The scene's variants, by name, in a view with a scene of its own: a
+    #: row of them along the foot of the view, a click each setting their
+    #: values as one edit, as `use_variant` does. A page saved from the view
+    #: carries them (`to_html`). Empty in a view made for looking only, whose
+    #: scene a click would edit. Follows the scene; not for assigning.
+    variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     #: Its switch in the view is the eye on each sensor's field lines, a row
@@ -1121,6 +1127,11 @@ class SceneWidget(anywidget.AnyWidget):
             self.faded = {k: v for k, v in self.faded.items() if k in ids}
             self.color_range = {k: v for k, v in self.color_range.items() if k in ids}
             self.variables = _values_of(self._session)
+            self.variants = (
+                list(self._session.doc.get("variants") or {})
+                if self.editable is not None
+                else []
+            )
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
             if not first:
@@ -1235,7 +1246,7 @@ class SceneWidget(anywidget.AnyWidget):
                 )
             else:
                 state["payload"] = None  # the page's from `drawn["start"]`
-                state["variants"] = True  # the row, which the widget draws
+                state["variants"] = list(drawn["scenes"])  # the row's
                 saved["variants"] = drawn
         return saved
 
@@ -1364,7 +1375,7 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": method, "variable": params.get("name")}
             if method == "set_variable":
                 edit["value"] = params.get("value")
-        elif method in self._VARIANT_EDITS:
+        elif method in self._VARIANT_EDITS and not preview:
             edit = {"by": method, "variant": params.get("name")}
         elif method in self._OVERLAP_EDITS:
             edit = {
@@ -1411,7 +1422,7 @@ class SceneWidget(anywidget.AnyWidget):
         settles = (
             method in self._SETTLES
             or method in self._OBJECT_EDITS
-            or method in self._VARIANT_EDITS
+            or (method in self._VARIANT_EDITS and not preview)
             or method in self._OVERLAP_EDITS
             or (method in self._VARIABLE_EDITS and not preview)
         )

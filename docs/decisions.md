@@ -2616,10 +2616,18 @@ and see the model move, as #118 asks for an MTU's eight operating steps.
 - **What they share is held once**: a pool of the payload's items, each scene
   the places of its own. A mesh no variant moves is stored once; the field lines
   are each variant's own.
-- **A row along the foot of the page**, over the scale bar: the variables
-  panel's toggles alone (`variantsOnly`), ten across before it is a dropdown.
-  The page answers `get_variables` and `use_variant` itself. Selection, hiding,
-  fading and the camera stay across a click.
+- **A row along the foot of every view of a scene with variants**, over the
+  scale bar, the panel closed or open: the variables panel's toggles alone
+  (`variantsOnly`), ten across before it is a dropdown, and the widget's panel
+  without them, so they are in one place. A live view asks its session; a page
+  answers `get_variables` and `use_variant` itself. Selection, hiding, fading
+  and the camera stay across a click. Not in a view made for looking only, where
+  a click would edit the scene, nor in the studio panel, whose sidebar lists
+  them.
+- **The pressed toggle slides**: dragged sideways, each variant it passes is
+  shown as a preview, the one let go on used, and the slide is one step to undo,
+  the notebook told once. Chosen from four prototypes on a saved page; the
+  others put a track under or over the row, or a pill that opens into a slider.
 - **On by default**, for `write_html` and the Export button. `variants=False`
   leaves them out, a list keeps those named, and a page nobody named
   (`magpy.show`) past its size limit leaves them out with a warning.
@@ -2634,5 +2642,7 @@ and see the model move, as #118 asks for an MTU's eight operating steps.
 ### Limits
 
 - A run and variants do not go together: the run is kept, with a warning.
+- While a slide is in hand the variables panel shows the values it began at, and
+  reads them back at the release.
 - A variant naming fewer variables than the scene has keeps the others as they
   were when the page was written, whichever was clicked before.

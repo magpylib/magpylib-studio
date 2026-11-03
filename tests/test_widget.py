@@ -2545,7 +2545,7 @@ def test_a_saved_page_draws_each_variant_as_the_view_does():
     history = studio._session.get_history()
     saved = json.loads(_unpacked(studio.to_html(), "magpy-scene"))
     assert studio._session.get_history() == history
-    assert saved["state"]["variants"] is True
+    assert saved["state"]["variants"] == studio.variants == ["few", "many", "same"]
     assert saved["state"]["payload"] is None
     carried = saved["variants"]
     assert _drawn(saved, carried["start"]) == studio.payload
@@ -2565,6 +2565,43 @@ def test_a_saved_page_draws_each_variant_as_the_view_does():
         assert _drawn(saved, carried["scenes"][name]) == studio.payload
         assert carried["scenes"][name]["tree"] == studio.tree
         studio.undo()  # each from the scene as it was saved
+
+
+def test_a_slide_across_the_variants_is_one_edit():
+    """The pressed variant slid along the row: each one passed is a preview,
+    which tells the notebook nothing; the one let go on is used, told once,
+    and one undo takes the whole slide back."""
+    studio = _studio_of(_design())
+    for n in (4, 6, 8):
+        studio._session.save_variant(f"n{n}", {"n": n})
+    _ask(studio, "use_variant", name="n4")
+    revision = studio.revision
+    _ask(studio, "begin_interaction")
+    for name in ("n6", "n8"):
+        assert (
+            "scene"
+            in _ask(studio, "use_variant", preview=True, scene=True, name=name)[
+                "result"
+            ]
+        )
+    assert studio.revision == revision
+    _ask(studio, "use_variant", name="n8")
+    _ask(studio, "end_interaction")
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {"by": "use_variant", "variant": "n8"}
+    assert studio.variables["n"] == 8
+    assert studio.undo()
+    assert studio.variables["n"] == 4
+
+
+def test_the_row_offers_the_variants_but_not_to_a_view_for_looking():
+    """`variants` is the row along the foot of the view: every view of the
+    scene has it, but one made for looking only, where a click would edit
+    the scene other views show."""
+    built = _design().build()
+    built.session.save_variant("few", {"n": 4})
+    assert widget.SceneWidget(built).variants == ["few"]
+    assert widget.SceneWidget(built, editable="never").variants == []
 
 
 def test_a_page_carries_the_variants_it_is_asked_for():

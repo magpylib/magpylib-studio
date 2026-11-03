@@ -5,7 +5,7 @@
   variables as listed, a set moving the one it names, the scene for a redraw.
   `?standalone` is a saved page, `?readonly` a view with its handles away;
   neither offers the panel. `?variants` gives the scene two variants, the
-  values in neither, and `?many` six, too many for a toggle each; `?broken`
+  values in neither, and `?many` twelve, too many for a toggle each; `?broken`
   says one of them cannot be used as the scene stands. `window.result` is what the panel showed and
   what it asked the session, in order, with a previewed value marked `*` and a
   committed one `=`.
@@ -37,7 +37,7 @@
         r.shadowed = [{ events: ["ring-pattern"] }];
       }
       // `?variants`: two variants, in neither of which the values are;
-      // `?many`: six, which would crowd the row as toggles
+      // `?many`: twelve, which would crowd the row as toggles
       if (query.has("variants")) {
         variables.variants = {
           compact: { n: 4, r: 0.015 },
@@ -50,11 +50,16 @@
       }
       if (query.has("many")) {
         variables.variants = Object.fromEntries(
-          [4, 6, 8, 12, 16, 20].map((n) => [`n${n}`, { n }]),
+          [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map((n) => [
+            `n${n}`,
+            { n },
+          ]),
         );
         variables.variant = null;
       }
       const values = { ...state };
+      // the trait python sets from the scene's variants
+      values.variants = Object.keys(variables.variants || {});
       if (query.has("standalone")) values.standalone = true;
       if (query.has("readonly")) values.editable = false;
       // For a look: the view wears what it sits on, and a headless browser's
@@ -157,22 +162,33 @@
         (query.has("variants") || query.has("many")) &&
         !query.has("keep")
       ) {
-        // above the rows, a toggle per variant -- or a dropdown, past a few
-        // -- with none pressed; one press asks the session once, settled,
-        // the rows are read back, and a press on the pressed one asks
-        // nothing
+        // along the foot of the view, the panel closed, a toggle per
+        // variant -- or a dropdown, past ten -- with none pressed, and none
+        // in the panel; one press asks the session once, settled, the rows
+        // are read back, and a press on the pressed one asks nothing
+        const variantRow = el.querySelector(".magpy-scene-variants");
+        await until(() =>
+          el.querySelector(
+            ".magpy-scene-variants .magpy-vars-variant:not([hidden])",
+          ),
+        );
+        const shownClosed = !hidden(variantRow);
         button("Variables").click();
         await until(() => el.querySelectorAll(".magpy-vars-row").length);
         await wait(200);
-        const variantRow = el.querySelector(".magpy-vars-variant");
-        const chips = () => [...el.querySelectorAll(".magpy-vars-chip")];
-        const pick = () => el.querySelector(".magpy-vars-variant select");
+        const inPanel = !hidden(
+          el.querySelector(".magpy-scene-variables .magpy-vars-variant"),
+        );
+        const chips = () => [
+          ...el.querySelectorAll(".magpy-scene-variants .magpy-vars-chip"),
+        ];
+        const pick = () => el.querySelector(".magpy-scene-variants select");
         const pressed = () =>
           chips()
             .filter((c) => c.classList.contains("on"))
             .map((c) => c.textContent);
         const chosen = () => pick()?.selectedOptions[0]?.textContent ?? null;
-        const shown = !hidden(variantRow);
+        const shown = shownClosed && !hidden(variantRow);
         const toggles = chips().map((c) => c.textContent);
         const disabled = chips()
           .filter((c) => c.disabled)
@@ -212,10 +228,44 @@
           .find((c) => c.classList.contains("on"))
           ?.click();
         await wait(300);
+        const pressedAgain = asked
+          .slice(again)
+          .filter((a) => a.method === "use_variant").length;
+        // slid from the pressed one to the other: a preview for the one
+        // passed, the one let go on used, all in one group
+        const from = chips().find((c) => c.classList.contains("on"));
+        const to = chips().find((c) => !c.classList.contains("on"));
+        let slid = null;
+        let slidTo = null;
+        if (from && to) {
+          const x = (c) => {
+            const box = c.getBoundingClientRect();
+            return box.left + box.width / 2;
+          };
+          const slideMark = asked.length;
+          const at = (c) => ({ bubbles: true, clientX: x(c), clientY: 0 });
+          from.dispatchEvent(new PointerEvent("pointerdown", at(from)));
+          window.dispatchEvent(new PointerEvent("pointermove", at(to)));
+          await wait(200);
+          window.dispatchEvent(new PointerEvent("pointerup", at(to)));
+          await wait(400);
+          slid = asked
+            .slice(slideMark)
+            .filter((a) => a.method !== "get_variables")
+            .map((a) =>
+              a.method === "use_variant"
+                ? `${a.method}:${a.params.name}${a.preview ? "*" : ""}`
+                : a.method,
+            );
+          slidTo = pressed();
+        }
         window.result = {
           offered,
           variants: {
+            slid,
+            slidTo,
             shown,
+            inPanel,
             toggles,
             disabled,
             dropdown,
@@ -224,9 +274,7 @@
             readBack,
             after,
             n,
-            pressedAgain: asked
-              .slice(again)
-              .filter((a) => a.method === "use_variant").length,
+            pressedAgain,
           },
         };
       } else if (query.has("keep")) {

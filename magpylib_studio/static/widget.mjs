@@ -594,6 +594,7 @@ function render({ model, el }) {
     empty: "No variables: a scene function's parameters are its variables.",
     compact: true,
     head: dockActionsVariables,
+    variants: false, // along the foot of the view instead
   });
   function showVariables(open) {
     variablesEl.hidden = !open;
@@ -828,15 +829,15 @@ function render({ model, el }) {
   counter.className = "magpy-scene-counter";
   transport.append(play, scrub, counter);
 
-  // A saved page's variants (#118), along the foot of the view where a run's
-  // transport would be -- a page carries one or the other: a toggle each,
-  // the one drawn pressed, each a scene the page drew ahead and answers for
-  // itself (`_PAGE` in widget.py). Only there: a view with a kernel has its
-  // variables panel.
+  // The scene's variants (#118), along the foot of the view, over the scale
+  // bar: a toggle each, the one the values are in pressed. A click asks the
+  // session, as the variables panel did, or -- on a saved page -- the page,
+  // which drew each ahead (`_PAGE` in widget.py). Not in the studio panel,
+  // whose host lists them in its Variables view.
   const variantsEl = document.createElement("div");
   variantsEl.className = "magpy-scene-variants";
   variantsEl.hidden = true;
-  let variantRow = null; // made for a page that carries them, and only there
+  let variantRow = null; // made for a scene that has variants, and only then
 
   // What the view has to say -- a file saved, full screen refused -- said
   // for a moment, and gone.
@@ -1565,14 +1566,26 @@ function render({ model, el }) {
    * again when they did -- the flicker on every re-run of the cell that made
    * the widget.
    */
-  /** The variants' row, on a page that carries them. */
+  /** The variants' row, for a scene that has some. */
   function dressVariants() {
-    const carried = Boolean(model.get("standalone") && model.get("variants"));
+    const carried =
+      (model.get("variants") || []).length > 0 && model.editor === undefined;
     variantsEl.hidden = !carried;
     el.classList.toggle("magpy-varied", carried);
     if (carried) {
       variantRow ??= createVariables(variantsEl, {
-        rpc: (method, params) => call(method, params),
+        // a variant used, the panel's rows say the values it set; one a
+        // slide passes asks for the scene in its answer, as a slider does
+        rpc: (method, params, { preview = false } = {}) =>
+          call(method, params, { preview, scene: preview }).then((answer) => {
+            if (method === "use_variant" && !preview && !variablesEl.hidden) {
+              variables.refresh();
+            }
+            return answer;
+          }),
+        // a page draws the variant itself, and answers with no scene
+        onPreview: (answer) => answer?.scene && redrawFromSession(answer),
+        slide: true,
         variantsOnly: true,
         // as many as the foot of the view holds, past the panel's four
         fits: (names) => names.length <= 10 && names.join("").length <= 90,
@@ -2404,6 +2417,7 @@ function render({ model, el }) {
     "field_lines",
     "open_panel",
     "revision",
+    "variants",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2425,6 +2439,14 @@ function render({ model, el }) {
     // itself, and reads its rows back at the release.
     if ((now.has("payload") || now.has("revision")) && !variablesEl.hidden) {
       variables.refresh();
+    }
+    // which variant the values are in, after any edit of them
+    if (now.has("variants")) dressVariants();
+    else if (
+      (now.has("payload") || now.has("revision")) &&
+      !variantsEl.hidden
+    ) {
+      variantRow.refresh();
     }
     // The object panel follows the selection, and reads the scene back
     // after an edit settled -- once, since a re-pointed view is both.

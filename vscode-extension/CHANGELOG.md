@@ -8,14 +8,16 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
-<summary>An exported page carries the scene's variants</summary>
+<summary>Variants along the foot of the view, and in an exported page</summary>
 
-A page saved with **Export** or `write_html` from a scene with variants has a
-row of them along its foot, and a click draws that variant, with its field lines
-and its solved parts, with no notebook behind the page. Each is drawn when the
-page is written; what they share is stored once.
-`write_html(path, variants=False)` leaves them out, and a list of names keeps
-those (#118).
+A scene's variants are a row of toggles along the foot of the notebook view, a
+click each, panel open or not, where the variables panel had a dropdown past
+four. Drag the pressed one sideways to slide through them, one step to undo. A
+page saved with **Export** or `write_html` carries them: the same row, and a
+click draws that variant, with its field lines and its solved parts, with no
+notebook behind the page. Each is drawn when the page is written; what they
+share is stored once. `write_html(path, variants=False)` leaves them out, and a
+list of names keeps those (#118).
 
 </details>
 

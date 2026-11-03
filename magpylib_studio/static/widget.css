@@ -733,6 +733,8 @@
   left: 50%;
   bottom: 52px;
   transform: translateX(-50%);
+  /* its own width, not the half of the view right of its anchor */
+  width: max-content;
   max-width: calc(100% - 16px);
   padding: 3px 6px;
   font-size: 11px;
@@ -754,6 +756,25 @@
 
 .magpy-scene-variants select {
   min-width: 10em;
+}
+
+/* The pressed toggle is a handle: a grip on it while the pointer is on the
+   row, and the cursor of a sideways drag. Kept in place, faint, so the row
+   does not move when the grip shows. */
+.magpy-vars-slides .magpy-vars-chip.on::before {
+  content: "⠿ ";
+  opacity: 0;
+}
+
+.magpy-scene-variants:hover .magpy-vars-slides .magpy-vars-chip.on::before,
+.magpy-vars-sliding .magpy-vars-chip.on::before {
+  opacity: 0.8;
+}
+
+.magpy-vars-slides .magpy-vars-chip.on,
+.magpy-vars-sliding {
+  cursor: ew-resize;
+  touch-action: none;
 }
 
 .magpy-scene-scrub {

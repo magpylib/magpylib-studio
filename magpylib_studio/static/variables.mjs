@@ -36,10 +36,13 @@
  *   (the name's tooltip says them), a choice as its dropdown alone, and a
  *   number with no range as its box alone. The sidebar has the room, and
  *   shows all of it.
- * - `variantsOnly`: the variants' row and nothing else, for a page with no
- *   python behind it, where only the variants drawn ahead can be shown
+ * - `variantsOnly`: the variants' row and nothing else, for a host that shows
+ *   it apart from the rows -- the widget, along the foot of the view
  *   (docs/decisions.md#0050-a-saved-page-carries-its-variants). `fits(names)`
- *   says whether they are a toggle each there, or a dropdown.
+ *   says whether they are a toggle each there, or a dropdown. `variants`
+ *   false is the rows without it, for that host's panel. `slide` makes the
+ *   pressed toggle a handle: dragged sideways, each variant it passes is
+ *   shown, as a slider's values are, and the one let go on is used.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -143,7 +146,9 @@ export function createVariables(
     compact = false,
     head = null,
     variantsOnly = false,
+    variants: withVariants = true,
     fits = asToggles,
+    slide = false,
   } = {},
 ) {
   const withHelp = !compact && !variantsOnly;
@@ -244,6 +249,8 @@ export function createVariables(
         : `${name}: ${valuesOf(variants[name], variables)}`;
     if (fits(names)) {
       const toggles = element("div", "magpy-vars-chips");
+      toggles.classList.toggle("magpy-vars-slides", slide);
+      const chips = [];
       for (const name of names) {
         const on = name === current;
         const chip = element("button", "magpy-vars-chip", name);
@@ -255,6 +262,13 @@ export function createVariables(
         chip.addEventListener("click", () => {
           if (!on) useVariant(name);
         });
+        if (slide && on) {
+          chip.title = `${says(name)} -- drag sideways for the others`;
+          chip.addEventListener("pointerdown", (event) =>
+            slideFrom(event, chips, names, unusable),
+          );
+        }
+        chips.push(chip);
         toggles.appendChild(chip);
       }
       variantEl.append(label, toggles);
@@ -280,6 +294,87 @@ export function createVariables(
         : `The values are ${current}'s: choose another to set them`;
     pick.addEventListener("change", () => useVariant(pick.value));
     variantEl.append(label, pick);
+  }
+
+  /** The pressed variant, slid along the row: each one the pointer passes
+   *  shown as a preview, one on the wire at a time and the newest waiting,
+   *  and the one let go on used -- the whole slide one step to undo, as a
+   *  slider's drag is. The toggles stay as they are until the release:
+   *  `dragging` holds off the reads that would rebuild them. */
+  let variantSent = Promise.resolve();
+  let variantWaiting = null;
+  let variantInFlight = false;
+
+  function previewVariant(name) {
+    variantWaiting = name;
+    if (variantInFlight) return;
+    variantInFlight = true;
+    const next = variantWaiting;
+    variantWaiting = null;
+    variantSent = rpc("use_variant", { name: next }, { preview: true })
+      .then((answer) => onPreview?.(answer))
+      .catch(() => {}) // the release reports
+      .then(() => {
+        variantInFlight = false;
+        if (variantWaiting) previewVariant(variantWaiting);
+      });
+  }
+
+  function slideFrom(event, chips, names, unusable) {
+    event.preventDefault(); // no text selected along the way
+    const start = chips.findIndex((chip) => chip.classList.contains("on"));
+    let at = start;
+    dragging = true;
+    variantEl.classList.add("magpy-vars-sliding");
+    rpc("begin_interaction").catch(() => {});
+    const nearest = (x) => {
+      let best = at;
+      let gap = Infinity;
+      chips.forEach((chip, i) => {
+        if (unusable[names[i]]) return;
+        const box = chip.getBoundingClientRect();
+        const off = Math.abs(box.left + box.width / 2 - x);
+        if (off < gap) [best, gap] = [i, off];
+      });
+      return best;
+    };
+    const move = (e) => {
+      const i = nearest(e.clientX);
+      if (i === at) return;
+      for (const [k, chip] of [
+        [at, chips[at]],
+        [i, chips[i]],
+      ]) {
+        chip.classList.toggle("on", k === i);
+        chip.setAttribute("aria-pressed", String(k === i));
+      }
+      at = i;
+      previewVariant(names[at]);
+    };
+    const release = async () => {
+      removeEventListener("pointermove", move, true);
+      removeEventListener("pointerup", release, true);
+      removeEventListener("pointercancel", release, true);
+      variantEl.classList.remove("magpy-vars-sliding");
+      variantWaiting = null;
+      await variantSent;
+      if (at !== start) {
+        say("");
+        try {
+          const res = await rpc("use_variant", { name: names[at] });
+          if (res && res.ok === false) say(res.error);
+        } catch (error) {
+          say(error);
+        }
+      }
+      await rpc("end_interaction").catch(() => {});
+      dragging = false;
+      missedRefresh = false;
+      await load().catch(say);
+    };
+    addEventListener("pointermove", move, true);
+    addEventListener("pointerup", release, true);
+    addEventListener("pointercancel", release, true);
   }
 
   /** Let the variable decide again what a later step states outright. */
@@ -462,7 +557,7 @@ export function createVariables(
       "get_variables",
       {},
     );
-    showVariants(variants, variant, variables, unusable);
+    if (withVariants) showVariants(variants, variant, variables, unusable);
     if (variantsOnly) return;
     listEl.innerHTML = "";
     emptyEl.hidden = variables.length > 0;
