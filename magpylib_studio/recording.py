@@ -88,6 +88,7 @@ __all__ = [
     "Slider",
     "TriangularMesh",
     "Unit",
+    "choose",
     "derived",
     "duplicate_along",
     "duplicate_around",
@@ -819,6 +820,24 @@ class _Recorder:
             )
             self.call(recorded, "move_object", recorded.id, parent=group.id)
 
+    def add_branch(self, switch, branch, children):
+        """`versions.add("v3", ...)` on a switch (`choose`): each child is
+        created in it, in that branch. Only a child nothing has touched since
+        it was made: one with steps would keep its pose as numbers, and a
+        variable it was placed by would stop deciding it in every branch."""
+        group = self.known(switch)
+        for child in children:
+            recorded = self.known(child)
+            with hook.nested():
+                result = self.session._adopt_fresh(recorded.id, group.id, branch)
+            if not result["ok"]:
+                raise BuildError(result["error"])
+            if not result["fresh"]:
+                raise BuildError(
+                    f"{recorded.id!r} is already placed: add it to its branch "
+                    f"{branch!r} before anything else touches it"
+                )
+
     def call(self, recorded, method, *args, **kwargs):
         return self.document._call(method, *args, **kwargs)
 
@@ -1538,6 +1557,61 @@ def TriangularMesh(mesh_source, **kwargs):
         if orientation is not None:
             recorder.turn_later(recorded, _rotvec(orientation))
     return obj
+
+
+class Switch(magpy.Collection):
+    """What `choose` gives: a collection of branches, the one its choice
+    names in the scene. `add("v3", *objects)` puts objects in a branch;
+    `add(*objects)`, as a collection's, in every one."""
+
+    def __init__(self, chosen, **kwargs):
+        super().__init__(**kwargs)
+        #: The branch in the scene, for a function called plainly.
+        self.chosen = chosen
+        #: Called plainly, the other branches: held here, out of the scene,
+        #: so that a step on what they hold -- a pattern, which needs a
+        #: group -- still works.
+        self.aside = magpy.Collection()
+
+    def add(self, *children, **kwargs):
+        if not children or not isinstance(children[0], str):
+            return super().add(*children, **kwargs)
+        branch, *objects = children
+        recorder = _BUILDING.get()
+        if recorder is None:
+            holder = super() if branch == self.chosen else self.aside
+            holder.add(*objects, **kwargs)
+            return self
+        recorder.add_branch(self, branch, objects)
+        with hook.nested():  # every branch, as the document holds them
+            super().add(*objects, **kwargs)
+        return self
+
+
+def choose(choice, **style):
+    """A collection holding a branch for each value of `choice`, of which
+    the one it has now is in the scene: `versions = choose(version)` with
+    `version: Literal["v1", "v2"]`, then `versions.add("v1", core, inlay)`.
+    Every branch is the document's, and moving the choice -- a dropdown, a
+    variant -- puts another in the scene: drawn, in the field and in the
+    solves. What a branch holds keeps its edits while it is out. Called
+    plainly, `version` a value, it is a collection of that branch alone.
+    Takes a style (`style_label="versions"`); its pose is its steps'."""
+    if any(not key.startswith("style") for key in style):
+        unknown = ", ".join(k for k in style if not k.startswith("style"))
+        raise TypeError(f"choose takes a style, not {unknown}: move it with steps")
+    recorder = _BUILDING.get()
+    chosen = recorder.resolve(choice) if recorder else choice
+    with hook.nested():
+        switch = Switch(chosen, **style)
+    if recorder is not None:
+        recorder.flush_styles()
+        style_kwargs = {k: v for k, v in style.items() if k.startswith("style_")}
+        recorded = recorder.register(
+            switch, "Collection", {}, style_kwargs, style.get("style")
+        )
+        recorded._create_keys = {"switch": _value(choice)}
+    return switch
 
 
 def _mesh_from_file(path, *, scale=None, sha256=None, **kwargs):

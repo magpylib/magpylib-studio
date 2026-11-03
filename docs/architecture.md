@@ -122,6 +122,12 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   each keeps its differences. Its own label, description, legend and traces stay
   its own. A view draws it as one node, its parts' traces keyed to it; a scene
   function's parts are taken in as data, never made objects.
+- **A switch** (`switch: "=version"` on a collection's create, `choose(version)`
+  in a script) holds a branch for each value of a choice: each child's create
+  carries its `branch`, and the build sets aside every branch but the one the
+  choice has, out of the scene and out of the objects every consumer reads, with
+  its steps applied, so it comes back as it was
+  ([0051](decisions.md#0051-a-choice-picks-a-structure-with-a-switch)).
 - **A uniform field** (`UniformField`, of magpylib-material-response) is an
   object whose one parameter is `B`, sent as `fields` with every scene, global,
   for the corner to add up

@@ -8,6 +8,17 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A choice picks a structure: <code>choose</code></summary>
+
+`versions = choose(version)` in a scene function, then
+`versions.add("v3", ...)`: one document holds every version, and the one the
+`version` dropdown has is in the scene, drawn, in the field and in the solves.
+An edit made to a version stays while another is shown, and a variant can name a
+version (#119).
+
+</details>
+
+<details>
 <summary>Variants along the foot of the view, and in an exported page</summary>
 
 A scene's variants are a row of toggles along the foot of the notebook view, a

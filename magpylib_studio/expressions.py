@@ -369,7 +369,18 @@ def as_number(value):
 #: rather than fix its arithmetic — and `style` covers a whole subtree of
 #: them, so it carries down to everything inside.
 _NAMING_KEYS = frozenset(
-    {"id", "target", "parent", "op", "type", "path", "style", "source", "sha256"}
+    {
+        "id",
+        "target",
+        "parent",
+        "op",
+        "type",
+        "path",
+        "style",
+        "source",
+        "sha256",
+        "branch",
+    }
 )
 
 
