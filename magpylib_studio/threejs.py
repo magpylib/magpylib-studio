@@ -1757,6 +1757,51 @@ def own_applied_field(obj):
     return value.tolist() if value.shape == (3,) and np.isfinite(value).all() else None
 
 
+#: How magpylib-material-response names a solve by cells in `solved_by`:
+#: ``"demag"`` in a result pickled by its 0.8.0.
+_BY_CELLS = ("cells", "demag")
+
+
+def solved_by_cells(obj):
+    """Whether a solve by cells set `obj`'s polarization: it says so itself,
+    ``solved_by``, as a document writes it, or it is, holds or belongs to
+    what ``solve_cells`` returned -- the collection that package marks --
+    and responds, a susceptibility on it or a parent that is not zero, as
+    that package reads it. A group is not one, its parts are; a sealed
+    collection is one body, a cell of it no object of its own (#89)."""
+    if obj is None or (isinstance(obj, magpy.Collection) and not is_sealed(obj)):
+        return False
+    if getattr(obj, "solved_by", None) in _BY_CELLS:
+        return True
+    around = list(getattr(obj, "children_all", ()))
+    owner = getattr(obj, "parent", None)
+    while owner is not None:
+        around.append(owner)
+        owner = owner.parent
+    if not any(getattr(each, "solved_by", None) in _BY_CELLS for each in around):
+        return False
+    from magpylib._src.obj_classes.class_BaseExcitations import BaseMagnet
+
+    # a solve by cells sets magnets alone: a current or a sensor under a
+    # soft parent takes no susceptibility from it
+    leaves = obj.sources_all if isinstance(obj, magpy.Collection) else [obj]
+    return any(isinstance(leaf, BaseMagnet) and _responds(leaf) for leaf in leaves)
+
+
+def _responds(source):
+    """Whether `source` takes a susceptibility, its own or its nearest
+    parent's, that is not zero: a B-H curve does."""
+    while source is not None:
+        value = getattr(source, "susceptibility", None)
+        if value is not None:
+            try:
+                return bool(np.any(np.asarray(value, dtype=float)))
+            except (TypeError, ValueError):
+                return True
+        source = source.parent
+    return False
+
+
 def applied_field(objects):
     """The one field `H_ext` of `objects` as the corner shows it: three floats,
     ``"differs"`` where they set several, None where they set none, or only

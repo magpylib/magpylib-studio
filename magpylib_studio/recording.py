@@ -1262,18 +1262,23 @@ class _Recorder:
                 self.sealing.setdefault(each.id, set())
         self.flush()
 
-    def note_applied_fields(self):
-        """Each object's `H_ext` as the script left it, in one step: an
-        attribute set on an object, as `sealed` is, which no call reports."""
-        fields = {
-            each.id: threejs.own_applied_field(self.live.get(each.id))
-            for each in self.objects.values()
-        }
-        fields = {key: value for key, value in fields.items() if value is not None}
-        if not fields:
+    def note_attributes(self):
+        """Each object's `H_ext`, and each body a solve by cells set the
+        polarization of (`threejs.solved_by_cells`), as the script left them,
+        in one step: attributes set on an object, as `sealed` is, which no
+        call reports."""
+        fields, solved = {}, []
+        for each in self.objects.values():
+            obj = self.live.get(each.id)
+            field = threejs.own_applied_field(obj)
+            if field is not None:
+                fields[each.id] = field
+            if threejs.solved_by_cells(obj):
+                solved.append(each.id)
+        if not fields and not solved:
             return
         with hook.nested():
-            result = self.session._write_applied_fields(fields)
+            result = self.session._write_attributes(fields, solved)
         if not result["ok"]:
             raise BuildError(result["error"])
 
@@ -1282,7 +1287,7 @@ class _Recorder:
         self.flush()
         self.flush_styles()
         self.seal()
-        self.note_applied_fields()
+        self.note_attributes()
         self.name_by_variables()
 
 

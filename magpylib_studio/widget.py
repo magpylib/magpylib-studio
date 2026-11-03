@@ -248,7 +248,9 @@ def _drawn_ahead(session, names, payload):
     copy.load_scene(json.loads(json.dumps(session.to_dict())), session._base_dir)
     copy.follower = session.follower
     # what the sheets were solved for is the view's, not the page's start
-    copy._solved_for = dict(getattr(session, "_solved_for", {}))
+    copy._solved_for = {
+        key: dict(seen) for key, seen in getattr(session, "_solved_for", {}).items()
+    }
     copy._stale = None
     pool, places = [], {}
     start = _pooled(payload, pool, places)

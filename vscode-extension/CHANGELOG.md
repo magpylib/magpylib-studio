@@ -8,13 +8,14 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
-<summary>A sheet with no part is said out of date, and a run's frames have their own field lines</summary>
+<summary>A solve studio cannot do again is said out of date, and a run's frames have their own field lines</summary>
 
-A face-charge sheet that keeps no part to solve again from, whose magnet or coil
-has moved since, is marked solved for another arrangement in the legend and the
-scene tree, and `last_edit["stale"]` names it; put back, the mark goes (#89). A
-run's every step now draws its own field lines, scrubbed or played, in a
-notebook and on a saved page, where they went away off the last step (#129).
+A face-charge sheet that keeps no part to solve again from, or a body solved by
+`solve_cells`, whose magnet or coil has moved since, is marked solved for
+another arrangement in the legend and the scene tree, and `last_edit["stale"]`
+names it; put back, the mark goes (closes #89). A run's every step now draws its
+own field lines, scrubbed or played, in a notebook and on a saved page, where
+they went away off the last step (#129).
 
 </details>
 

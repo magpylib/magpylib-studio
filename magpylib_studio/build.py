@@ -35,6 +35,7 @@ from magpylib_studio import expressions, hook, units
 from magpylib_studio.session import (
     _H_EXT_KEPT,
     _HIDE_STYLE,
+    _SOLVED_KEPT,
     MagpylibStudioSession,
     _arange_lit,
     _linspace_lit,
@@ -1361,6 +1362,7 @@ class _ScriptWriter:
                 "parts",
                 "parts_style",
                 "H_ext",
+                "solved_by",
                 "switch",
                 "branch",
             ):
@@ -1413,6 +1415,8 @@ class _ScriptWriter:
             lines = [f"{name} = {call}({self.keywords(parts)})"]
         if event.get("H_ext") is not None and self.field() is None:
             lines.append(f"{name}.H_ext = {tuple(event['H_ext'])!r}{_H_EXT_KEPT}")
+        if event.get("solved_by") is not None:
+            lines.append(f"{name}.solved_by = {event['solved_by']!r}{_SOLVED_KEPT}")
         if event.get("parts"):
             # Sealed first, then what it is made of, one part a line: the
             # recorder takes in parts added to a sealed collection as its

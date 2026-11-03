@@ -2510,6 +2510,9 @@ def class_call(type_str, magpy="magpy"):
 #: What a script writes beside an `H_ext` it cannot make one `UniformField` of.
 _H_EXT_KEPT = "  # one UniformField cannot say this: it acts on every part"
 
+#: What a script writes beside a body's `solved_by` (`threejs.solved_by_cells`).
+_SOLVED_KEPT = "  # its polarization is what a solve made of it"
+
 
 def script_field(specs):
     """The `UniformField` a script writes for the document's `H_ext`, as ``(its
@@ -2574,6 +2577,48 @@ def _built_parts(spec):
             obj.style.set(path, _style_arg(path, value))
         made.append(obj)
     return made
+
+
+def _moving_alone(collection):
+    """What in `collection` a solve sums that moves on its own: each source,
+    and a sealed collection holding any as one (`stale_solves`)."""
+    yield from collection.sources
+    for inner in collection.collections:
+        if not threejs.is_sealed(inner):
+            yield from _moving_alone(inner)
+        elif inner.sources_all:
+            yield inner
+
+
+def _as_fixed(obj):
+    """A copy of `obj` as a solve here takes a source: fixed, so a body a
+    solve by cells set is no model already solved to material-response,
+    which would warn every step (`threejs.solved_by_cells`)."""
+    copied = obj.copy()
+    for each in (copied, *getattr(copied, "children_all", ())):
+        vars(each).pop("solved_by", None)
+    return copied
+
+
+#: How many answers of one solve `stale_solves` keeps what they were solved
+#: for: enough to undo back through, few enough for a follower's drag.
+_ANSWERS_KEPT = 32
+
+
+def _made_of(source, answered):
+    """What `source` is made of, as a solve reads it: its type and its
+    parameters, all but what a solve made of it -- a sheet's charge, or the
+    polarization of a body solved by cells, `answered`."""
+    out = [type(source).__name__.encode()]
+    if threejs.is_charge_sheet(source):
+        return out
+    for name in (*_PARAM_ATTRS, "B"):
+        if answered and name in ("polarization", "magnetization"):
+            continue
+        value = getattr(source, name, None)
+        if value is not None:
+            out.append(np.asarray(value).tobytes())
+    return out
 
 
 def _nest(flat):
@@ -3070,6 +3115,7 @@ class MagpylibStudioSession:
                 raise ValueError(problem)
         self._uniforms = None  # `_uniform_fields`: of these objects, once asked
         self._parts = None  # `_parted`: likewise
+        self._units = None  # `_solve_units`: likewise
         self._absent = {}
         self._objs = _Objects(self._absent)
         self._derived = {}
@@ -3210,6 +3256,8 @@ class MagpylibStudioSession:
             obj = _resolve_type(event["type"])(**params)
         if event.get("H_ext") is not None:
             obj.H_ext = event["H_ext"]
+        if event.get("solved_by") is not None:
+            obj.solved_by = event["solved_by"]
         self._stamp_mesh(obj, object_id)
         for path, value in (event.get("style") or {}).items():
             obj.style.set(path, _style_arg(path, value))  # same call the GUI/LLM makes
@@ -7267,13 +7315,17 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"seal {object_id}")
 
-    def _write_applied_fields(self, fields):
-        """Objects' `H_ext`, ``{id: three floats}``, written on their create
-        steps (`recording`, from what a scene function sets on them)."""
+    def _write_attributes(self, fields, solved):
+        """Objects' `H_ext`, ``{id: three floats}``, and the bodies `solved` a
+        solve by cells set the polarization of (`threejs.solved_by_cells`),
+        written on their create steps in one (`recording`, from what a scene
+        function sets on them or was given)."""
 
         def mutate(doc):
             for object_id, field in fields.items():
                 self._create_event(object_id)["H_ext"] = field
+            for object_id in solved:
+                self._create_event(object_id)["solved_by"] = "cells"
 
         return self._mutate_doc(mutate, "set H_ext")
 
@@ -7482,53 +7534,77 @@ class MagpylibStudioSession:
             ]
         return self._parts
 
-    def _partless(self):
-        """The ids of the solved sheets that keep no part to solve again from:
-        solved before material-response 0.9.1, or built from their arrays
-        alone (decision 0048) -- a pattern's copies of one among them."""
-        return [
-            key
-            for key, obj in self._objs.items()
-            if threejs.is_charge_sheet(obj) and not getattr(obj, "_part", None)
-        ]
+    def _solve_units(self):
+        """What a solve follows from, and the solves nothing here can do again,
+        found once a build: what moves alone -- a source, a pattern's copies
+        and those inside a copied group included, or a sealed collection as
+        one, its parts keeping their places among themselves -- which of
+        them are uniform fields, with no place, what they are made of as one
+        join, and by id each sheet that keeps no part to solve again from
+        (decision 0048) and each body a solve by cells set the polarization
+        of (`threejs.solved_by_cells`), with what that solve made: the
+        sheet's charges, the body's polarizations. An answer is not a cause:
+        what a sheet or a solved body is made of leaves it out."""
+        if self._units is None:
+            unsolvable = {}
+            answers = set()
+            for key, obj in self._objs.items():
+                if threejs.is_charge_sheet(obj) and not getattr(obj, "_part", None):
+                    made = [obj.charge_densities]
+                elif getattr(obj, "solved_by", None) in threejs._BY_CELLS and (
+                    threejs.is_sealed(obj) or not isinstance(obj, magpy.Collection)
+                ):
+                    leaves = obj.sources_all if threejs.is_sealed(obj) else [obj]
+                    answers.update(id(leaf) for leaf in leaves)
+                    made = [getattr(leaf, "polarization", None) for leaf in leaves]
+                else:
+                    continue
+                joined = hashlib.blake2b(digest_size=16)
+                for value in made:
+                    if value is not None:
+                        joined.update(np.asarray(value, dtype=float).tobytes())
+                unsolvable[key] = joined.digest()
+            units, made = [], []
+            for unit in _moving_alone(self.scene) if unsolvable else ():
+                units.append(unit)
+                leaves = unit.sources_all if threejs.is_sealed(unit) else [unit]
+                made.append(type(unit).__name__.encode())
+                for leaf in leaves:
+                    made.extend(_made_of(leaf, id(leaf) in answers))
+            fields = np.array([threejs.is_uniform_field(u) for u in units], dtype=bool)
+            self._units = (units, fields, b"|".join(made), unsolvable)
+        return self._units
 
     def _arrangement(self):
-        """What drives a solve, once a build: each source magpylib sums --
-        a pattern's copies and those inside a copied group included -- at
-        the last step of its pose, and what it is made of. A sheet's charge
-        is an answer, not a cause, and a uniform field has no place."""
-        sources = self.scene.sources_all
-        positions, turns, made = [], [], []
-        for source in sources:
-            turn = source.orientation
-            turn = turn if turn.single else turn[-1]
-            positions.append(np.atleast_2d(source.position)[-1])
-            turns.append(turn.as_matrix())
-            made.append(type(source).__name__.encode())
-            if not threejs.is_charge_sheet(source):
-                for name in (*_PARAM_ATTRS, "B"):
-                    value = getattr(source, name, None)
-                    if value is not None:
-                        made.append(np.asarray(value).tobytes())
-        fields = np.array([threejs.is_uniform_field(s) for s in sources], dtype=bool)
-        return (
-            np.asarray(positions, dtype=float).reshape(-1, 3),
-            np.asarray(turns, dtype=float).reshape(-1, 3, 3),
-            fields,
-            b"|".join(made),
-        )
+        """Where what drives a solve stands (`_solve_units`): each at the last
+        step of its pose, its turn as a matrix, beside which are uniform
+        fields and what they are made of."""
+        units, fields, made, _ = self._solve_units()
+        positions = np.empty((len(units), 3))
+        turns = np.empty((len(units), 3, 3))
+        for i, unit in enumerate(units):
+            positions[i] = np.atleast_2d(unit.position)[-1]
+            turn = unit.orientation
+            turns[i] = (turn if turn.single else turn[-1]).as_matrix()
+        return positions, turns, fields, made
 
-    def _solved_from(self, sheet_id, arranged=None):
-        """What a solve of `sheet_id` followed from, as the sheet sees it:
-        every source's pose in the sheet's frame (`_arrangement`), so moving
-        or turning the whole assembly together changes nothing, and moving a
-        magnet against the sheet does (#89)."""
+    def _solved_from(self, key, arranged=None):
+        """What a solve of `key`, a sheet or a body, followed from, as it sees
+        it: every source's pose in its frame (`_arrangement`), so moving or
+        turning the whole assembly together changes nothing, and moving a
+        magnet against it does (#89)."""
         positions, turns, fields, made = arranged or self._arrangement()
-        sheet = self._objs[sheet_id]
-        at = np.atleast_2d(sheet.position)[-1]
-        turn = sheet.orientation if sheet.orientation.single else sheet.orientation[-1]
+        # what another solve made is a cause of this one: a magnet's
+        # polarization typed in changes what the core was solved for
+        others = self._solve_units()[3]
+        made = b"|".join([made, *(h for k, h in others.items() if k != key)])
+        solved = self._objs[key]
+        at = np.atleast_2d(solved.position)[-1]
+        turn = (
+            solved.orientation if solved.orientation.single else solved.orientation[-1]
+        )
         back = turn.as_matrix()
-        # in the sheet's frame, R^T (p - at) and R^T M; a field has no place
+        # in its frame, R^T (p - at) and R^T M; a field has no place
         seen = (positions - at) @ back
         seen[fields] = 0.0
         faced = np.einsum("ji,njk->nik", back, turns)
@@ -7539,46 +7615,51 @@ class MagpylibStudioSession:
         """Whether two `_solved_from` say the same, to a nanometre and as
         close in a turn: a pose written in the document is rounded, and a
         turn's sign of zero is no change."""
-        if one[0] != other[0] or one[1].shape != other[1].shape:
+        if one is None or one[0] != other[0] or one[1].shape != other[1].shape:
             return False
         return np.allclose(one[1], other[1], rtol=0, atol=1e-9) and np.allclose(
             one[2], other[2], rtol=0, atol=1e-9
         )
 
     def stale_solves(self):
-        """The solved sheets that keep no part (`_partless`), whose sources
-        stand otherwise than when they were solved: solved for another
-        arrangement, and with nothing here to solve them again.
+        """The solves nothing here can do again (`_solve_units`): sheets that
+        keep no part, bodies solved by cells, whose sources stand otherwise
+        than when they were solved -- solved for another arrangement.
 
-        A sheet is taken as solved for the scene as it began (`load_scene`,
-        `forget_history`), as it was when it came in, and again whenever its
-        charges change -- solved again in a notebook. A pattern's copy of one
-        is right only where its source was solved for. Put back as it was, a
-        sheet is right again."""
+        One is taken as solved for the scene as it began (`load_scene`,
+        `forget_history`), as it was when it came in, and again whenever what
+        the solve made is new -- solved again in a notebook, or typed in; an
+        undo back to an earlier answer is judged by where that one was solved
+        for. What another such solve made is a cause like any source. A
+        pattern's copy of one is right only where its source was solved for.
+        Put back as it was, one is right again."""
         if self._stale is None:
             known = getattr(self, "_solved_for", None)
             if known is None:
                 known = self._solved_for = {}
-            partless = self._partless()
+            unsolvable = self._solve_units()[3]
             stale = []
-            if partless:
+            if unsolvable:
                 arranged = self._arrangement()
                 source_of = {c: s for s, made in self._derived.items() for c in made}
-                for key in partless:
-                    charges = np.asarray(self._objs[key].charge_densities).tobytes()
+                for key, answer in unsolvable.items():
                     now = self._solved_from(key, arranged)
                     base = source_of.get(key)
                     if base is not None:  # a copy: what its source was solved for
                         solved = known.get(base)
-                        if solved is not None and not (
-                            solved[0] == charges
-                            and self._same_arrangement(solved[1], now)
+                        if solved is not None and not self._same_arrangement(
+                            solved.get(answer), now
                         ):
                             stale.append(key)
                         continue
-                    if known.get(key, (None,))[0] != charges:
-                        known[key] = (charges, now)
-                    elif not self._same_arrangement(known[key][1], now):
+                    # each answer it has held, with what it was solved for:
+                    # an undo back to one is judged by its own
+                    seen = known.setdefault(key, {})
+                    if answer not in seen:
+                        seen[answer] = now
+                        if len(seen) > _ANSWERS_KEPT:
+                            del seen[next(iter(seen))]
+                    elif not self._same_arrangement(seen[answer], now):
                         stale.append(key)
             self._stale = stale
         return self._stale
@@ -7617,7 +7698,7 @@ class MagpylibStudioSession:
             from magpylib_material_response import solve_face_charge
 
             drives = [
-                obj.copy()
+                _as_fixed(obj)
                 for key, obj in self._objs.items()
                 if key not in ids
                 and not isinstance(obj, magpy.Sensor)
@@ -7723,6 +7804,8 @@ class MagpylibStudioSession:
             sheet._part = part
         self._animated = None  # the captured run is of a scene that no longer is
         self._stale = None  # new charges: `stale_solves` again
+        if self._units is not None and set(wanted) & set(self._units[3]):
+            self._units = None  # an answer of a solve not done here
         if snapshot is not None:
             self._record_state(label, snapshot)
         self._changed()  # as a build would have: `_whole_since` redraws it
@@ -9574,6 +9657,10 @@ class MagpylibStudioSession:
             lines.append(f"{target} = {ctor}{factory}({', '.join(parts)})")
             if spec.get("H_ext") is not None and field is None:
                 lines.append(f"{target}.H_ext = {tuple(spec['H_ext'])!r}{_H_EXT_KEPT}")
+            if spec.get("solved_by") is not None:
+                lines.append(
+                    f"{target}.solved_by = {spec['solved_by']!r}{_SOLVED_KEPT}"
+                )
             if spec.get("parts"):
                 # sealed, then what it is made of, one part a line
                 if spec.get("sealed"):

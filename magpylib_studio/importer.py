@@ -36,6 +36,7 @@ from magpylib_studio.threejs import (
     is_sealed,
     own_applied_field,
     sealed_own,
+    solved_by_cells,
 )
 
 # Constructor kwargs worth introspecting, tried in order per object.
@@ -293,6 +294,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
     applied = own_applied_field(obj)
     if applied is not None:
         spec["H_ext"] = applied
+    if solved_by_cells(obj):
+        spec["solved_by"] = "cells"
     return spec
 
 
