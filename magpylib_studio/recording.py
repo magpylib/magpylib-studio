@@ -339,9 +339,9 @@ def _note_parts(cls):
     """`sheet.part` read while a scene builds: a magnet the sheet copies out of
     the recorder's sight, noted so that a scene told to hold it says where it
     came from."""
-    if cls.__dict__.get("_studio_parts_noted"):
+    read = cls.__dict__.get("part")  # none before material-response 0.9.1
+    if cls.__dict__.get("_studio_parts_noted") or not isinstance(read, property):
         return
-    read = cls.__dict__["part"]
 
     @functools.wraps(read.fget)
     def part(sheet):

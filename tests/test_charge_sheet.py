@@ -5,6 +5,8 @@ is drawn with its charge beside field lines, saved, written and read back."""
 from __future__ import annotations
 
 import json
+import sys
+import types
 import warnings
 
 import magpylib as magpy
@@ -132,6 +134,17 @@ def test_a_scene_function_refuses_what_material_response_makes_by_name(call):
     }
     with pytest.raises(build.BuildError, match=call):
         scene(lambda: (calls[call](),)).build()
+
+
+def test_a_scene_builds_beside_a_sheet_without_a_part(monkeypatch):
+    # material-response before 0.9.1: a ChargeSheet with no part to note
+    old = types.ModuleType("magpylib_material_response.face_charge")
+    old.ChargeSheet = type("ChargeSheet", (), {})
+    monkeypatch.setitem(sys.modules, old.__name__, old)
+    sphere = scene(
+        lambda: (magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=0.01),)
+    )
+    assert len(sphere.build().session.list_objects()) == 1
 
 
 def test_field_lines_stop_at_a_solved_body():
