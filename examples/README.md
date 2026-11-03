@@ -17,10 +17,10 @@ core solved by face charge, again at every step of a drag.
 | `ucore_solve_demo.py` | `marimo edit examples/ucore_solve_demo.py`                         |
 
 The notebooks need the widget extra, and the U-core demos
-magpylib-material-response 0.9.1 too:
+magpylib-material-response 0.9.2 too:
 
 ```sh
-uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.1"
+uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.2"
 ```
 
 In marimo the sliders re-run the cells that read them. Jupyter re-runs nothing

@@ -1,8 +1,8 @@
 """A U-core solved again under your hand: `marimo edit examples/ucore_solve_demo.py`.
 
-Needs the widget extra, marimo and magpylib-material-response 0.9.1:
+Needs the widget extra, marimo and magpylib-material-response 0.9.2:
 
-    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.1"
+    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.2"
 
 The U-core of material-response's docs, three soft-iron cuboids (chi = 999)
 wound with a coil of 400 ampere-turns, with a magnet in its gap and two uniform
