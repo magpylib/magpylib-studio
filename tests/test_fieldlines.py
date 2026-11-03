@@ -277,3 +277,58 @@ def test_a_point_on_a_cells_edge_reads_no_nan():
     )
     point = [[1.4414090374556621e-18, 0.0, -0.008453260901015891]]
     assert np.isfinite(fieldlines.field([cell], point)).all()
+
+
+def test_threads_are_given_each_source_at_its_last_step(monkeypatch):
+    """#122: magpylib pads a source on a path in place while it computes
+    (magpylib#1074), so threads sharing one broke each other. Each call is
+    given the source at the step the view draws, and the field is that
+    step's."""
+    angle = np.linspace(0, 2 * np.pi, 41)
+    ring = 0.02 * np.column_stack([np.cos(angle), np.sin(angle), 0 * angle])
+    coil = magpy.current.Polyline(
+        current=1.0, vertices=ring, position=[(0.005 * i, 0, 0) for i in range(8)]
+    )
+    points = np.random.default_rng(0).uniform(-0.03, 0.03, (2000, 3))
+    steps = []
+
+    def get(sources, observers, **kwargs):
+        steps.extend(source._get_path_len() for source in sources)
+        return magpy.getB(sources, observers, **kwargs)
+
+    monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 20_000)  # several calls
+    monkeypatch.setattr(fieldlines, "THREADS", 4)  # on threads, wherever it runs
+    field = fieldlines._in_chunks(get, [coil], points)
+    assert len(steps) > 1 and set(steps) == {1}
+    np.testing.assert_allclose(field, magpy.getB(coil, points)[-1], rtol=1e-12)
+    assert coil._get_path_len() == 8
+
+
+def test_read_only_arrays_are_turned_as_copies(monkeypatch):
+    """#123: a solved sheet's triangles and a uniform field's B are
+    read-only, and scipy before 1.18 refuses a read-only array to
+    `Rotation.apply`, as it does here once the model is solved."""
+    pytest.importorskip("magpylib_material_response", minversion="0.9.1")
+    from magpylib_material_response import UniformField, solve_face_charge
+    from magpylib_material_response.face_charge import ChargeSheet
+
+    from magpylib_studio import threejs
+
+    plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006))
+    plate.susceptibility = 1000
+    coil = magpy.current.Circle(current=100, diameter=0.03, position=(0, 0, 0.01))
+    solved = solve_face_charge(magpy.Collection(plate, coil), level=1)
+    sheets = [s for s in solved.sources_all if isinstance(s, ChargeSheet)]
+    field = UniformField(B=(0, 0, 0.01))
+    apply = Rotation.apply
+
+    def as_before(self, vectors, *args, **kwargs):
+        if isinstance(vectors, np.ndarray) and not vectors.flags.writeable:
+            raise ValueError("buffer source array is read-only")
+        return apply(self, vectors, *args, **kwargs)
+
+    monkeypatch.setattr(Rotation, "apply", as_before)
+    points = np.array([(0, 0, 0), (0, 0, 0.02)])
+    assert fieldlines._inside_sheets(sheets, points).tolist() == [True, False]
+    (drawn,) = threejs.fields_of([("field", field)])
+    assert drawn["B"] == [0, 0, 0.01]

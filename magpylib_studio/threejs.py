@@ -1813,7 +1813,11 @@ def fields_of(named):
     return [
         {
             "id": key,
-            "B": np.atleast_2d(field.orientation.apply(field.B))[-1].tolist(),
+            # a copy: its B is read-only, which scipy's `apply` refuses
+            # before 1.18 (#123)
+            "B": np.atleast_2d(field.orientation.apply(np.array(field.B, dtype=float)))[
+                -1
+            ].tolist(),
         }
         for key, field in named
         if field.style.model3d.showdefault is not False

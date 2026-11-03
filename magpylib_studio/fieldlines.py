@@ -34,6 +34,7 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
+import copy
 import functools
 import os
 import warnings
@@ -300,8 +301,12 @@ def _in_chunks(get, sources, points):
     before it computes, so slicing the points instead read a body meshed
     into thousands of cells once per slice, a third of the time. A source
     on a path is answered step by step, and the last step is the one the
-    view draws and a sensor's seeds stand at (`seeds_of`). One call is made
+    view draws and a sensor's seeds stand at (`seeds_of`), so the calls are
+    given each source at that step (`_last_step`): one step computed, not
+    every one, and nothing for magpylib to pad on an object the threads
+    share, which it does in place (magpylib#1074, #122). One call is made
     where it is, and so are all where no thread can be started (Pyodide)."""
+    sources = [_last_step(source) for source in sources]
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     n = len(points)
     budget = max(1, PAIRS_PER_CALL // THREADS)
@@ -451,6 +456,21 @@ def _sheet(source):
     return type(source).__module__.startswith("magpylib_material_response.face_charge")
 
 
+def _last_step(source):
+    """`source` at the last step of its path, every path property one entry
+    long -- itself where its path is one step. A shallow copy, made as the
+    source's class makes one: material-response's bind their field to the
+    copy themselves."""
+    if source._get_path_len() == 1:
+        return source
+    out = copy.copy(source)
+    for prop in source._path_properties:
+        value = getattr(source, f"_{prop}", None)
+        if value is not None:
+            setattr(out, f"_{prop}", value[-1:])
+    return out
+
+
 def _inside_sheets(sheets, points):
     """`inside` for solved sheets at their last step: the points their
     triangles enclose, all of them together -- parts solved as one leave
@@ -463,7 +483,9 @@ def _inside_sheets(sheets, points):
     triangles = []
     for sheet in sheets:
         turn = sheet.orientation if sheet.orientation.single else sheet.orientation[-1]
-        corners = sheet.triangles.reshape(-1, 3)
+        # a copy: a sheet's arrays are read-only (material-response 0.9.1),
+        # which scipy's `apply` refuses before 1.18 (#123)
+        corners = np.array(sheet.triangles, dtype=float).reshape(-1, 3)
         moved = turn.apply(corners) + np.atleast_2d(sheet.position)[-1]
         triangles.append(moved.reshape(-1, 3, 3))
     triangles = np.concatenate(triangles)
