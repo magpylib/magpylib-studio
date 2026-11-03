@@ -15,7 +15,7 @@ from magpylib_studio import build, fieldlines, importer, session
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 
-pytest.importorskip("magpylib_material_response", minversion="0.9")
+pytest.importorskip("magpylib_material_response", minversion="0.9.1")
 face_charge = pytest.importorskip("magpylib_material_response.face_charge")
 
 POINTS = np.array([(0, 0, 0.01), (0.01, 0.005, -0.004), (0.03, 0, 0)])
@@ -222,6 +222,16 @@ def test_an_edit_followed_is_solved_in_its_step():
     np.testing.assert_array_equal(magpy.getB(session.scene, POINTS), moved)
 
 
+def test_a_new_charge_is_set_outside_a_gesture():
+    studio = SceneWidget(solved(), editable=True)._session
+    (key,) = [
+        k for k, o in studio._objs.items() if isinstance(o, face_charge.ChargeSheet)
+    ]
+    charge = studio._objs[key].charge_densities * 2
+    assert studio.set_params({key: {"charge_densities": charge.tolist()}})["ok"]
+    np.testing.assert_array_equal(studio._objs[key].charge_densities, charge)
+
+
 def test_a_failed_answer_is_said_and_the_edit_stays():
     view, _, sent = _following_view()
     key = next(k for k, o in view.objects.items() if type(o) is magpy.magnet.Cuboid)
@@ -233,3 +243,111 @@ def test_a_failed_answer_is_said_and_the_edit_stays():
     _drag(view, key, (0.002, 0, 0.02))
     assert sent == [{"kind": "refused", "message": "Not followed: no solve"}]
     assert view._session._objs[key].position[0] == 0.002
+
+
+def _solved_scene():
+    """A magnet above a soft plate, solved, and a probe, in an editable view
+    that hears of its edits as a panel does."""
+    probe = magpy.Sensor(pixel=[(0.03, 0, 0)], style_label="probe")
+    view = SceneWidget(solved_above(0.02), probe, editable=True)
+    view.send = lambda *_, **__: None
+    objects = view._session.list_objects()
+    name = next(o["id"] for o in objects if o["type"] == "magnet.Cuboid")
+    return view, name, next(o["id"] for o in objects if o["type"] == "Sensor")
+
+
+def solved_above(height, level=1):
+    """The issue's scene with the magnet up off the plate, solved."""
+    magnet = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1.2),
+        dimension=(0.01, 0.01, 0.005),
+        position=(0, 0, height),
+    )
+    plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006))
+    plate.susceptibility = 1000
+    return face_charge.solve_face_charge(magpy.Collection(magnet, plate), level=level)
+
+
+def test_the_engine_solves_a_sheet_again_in_the_edits_step():
+    view, name, probe = _solved_scene()
+    studio = view._session
+    before = magpy.getB(sheet_of(studio.scene), POINTS)
+    assert studio.doc["solve_level"] == 1
+
+    # a probe is no part of the solve: no solve, no step of its own
+    _drag(view, probe, (0.03, 0.01, 0))
+    assert "solves" not in view.last_edit
+
+    _drag(view, name, (0, 0, 0.021), (0.002, 0, 0.022))
+    solves = view.last_edit["solves"]
+    assert [s["reused"] for s in solves] == [False, True]
+    assert all(s["solved_by"] == "face_charge" for s in solves)
+    moved = solved_above(0.022)
+    magnet = next(s for s in moved.sources_all if type(s) is magpy.magnet.Cuboid)
+    magnet.position = (0.002, 0, 0.022)
+    fresh = face_charge.solve_face_charge(
+        magpy.Collection(
+            magnet.copy(),
+            *(
+                s.part
+                for s in moved.sources_all
+                if isinstance(s, face_charge.ChargeSheet)
+            ),
+        ),
+        level=1,
+    )
+    np.testing.assert_allclose(
+        sheet_of(studio.scene).charge_densities,
+        sheet_of(fresh).charge_densities,
+        atol=1e-6,
+    )
+    # the part is still there to solve from, and the undo takes back both, once
+    assert sheet_of(studio.scene).part is not None
+    assert view.undo()
+    assert studio.take_solves() == []
+    assert sheet_of(studio.scene).part is not None
+    np.testing.assert_array_equal(magpy.getB(sheet_of(studio.scene), POINTS), before)
+
+
+def test_a_slow_solve_waits_for_the_end_of_the_gesture(monkeypatch):
+    view, name, _ = _solved_scene()
+    studio = view._session
+    monkeypatch.setattr(session, "_SLOW_STEP", -1.0)  # every solve is slow
+    _drag(
+        view,
+        name,
+        (0, 0, 0.021),
+        (0, 0, 0.022),
+        (0, 0, 0.023),
+        (0, 0, 0.024),
+    )
+    # two steps, then none, and the one at the end, at where it was let go
+    assert len(view.last_edit["solves"]) == 3
+    fresh = solved_above(0.024)
+    np.testing.assert_allclose(
+        sheet_of(studio.scene).charge_densities,
+        sheet_of(fresh).charge_densities,
+        atol=1e-6,
+    )
+
+
+@pytest.mark.parametrize("route", ["saved", "script", "scene function"])
+def test_a_document_keeps_the_part_to_solve_from(route, tmp_path):
+    here = SceneWidget(solved_above(0.02), editable=True)._session
+    if route == "saved":
+        back = MagpylibStudioSession()
+        back.load_scene(json.loads(json.dumps(here.to_dict())))
+    elif route == "script":
+        path = tmp_path / "scene.py"
+        path.write_text(here.to_script(), encoding="utf-8")
+        namespace, captured, _ = importer.run_script(path)
+        doc, _ = importer.document_from_objects(captured[0], namespace)
+        back = MagpylibStudioSession()
+        back.load_scene(doc)
+    else:
+        back = build.rebuilt(here)
+        assert back.doc["solve_level"] == 1
+    assert back._broken == []
+    part = sheet_of(back.scene).part
+    assert part.susceptibility == 1000
+    np.testing.assert_array_equal(part.dimension, (0.04, 0.04, 0.006))

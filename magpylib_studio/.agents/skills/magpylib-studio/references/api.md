@@ -6,7 +6,7 @@ magpylib-studio has.
 
 ## The mark
 
-### `scene(fn=None, *, model_unit=None, field_unit=None, variants=None)`
+### `scene(fn=None, *, model_unit=None, field_unit=None, variants=None, solve_level=None)`
 
 Mark a function as a scene: its parameters are the variables, its body
 is plain magpylib, and `build()` records it. `@scene`, or
@@ -20,7 +20,8 @@ in a step; in code, `ring.variants["wide"]` is that mapping, so
 `ring(**ring.variants["wide"])` is the scene at those values in plain
 magpylib. A variant may leave parameters out, and those keep the values
 they have when it is used. It holds values only: a `derived` variable is
-a formula of the parameters, and follows them.
+a formula of the parameters, and follows them. `solve_level` is the level
+the scene's solved sheets are solved again at, which a sheet does not say.
 
 What `@scene` makes:
 

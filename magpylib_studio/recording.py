@@ -57,6 +57,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import json
 import math
 import numbers
 import sys
@@ -298,26 +299,44 @@ _H_IN_VARIABLES = (
 )
 
 
+def saved_part(written):
+    """The part a solved sheet keeps, as a document holds it: what a scene
+    function passes `ChargeSheet(part=...)`. The magnet it makes is the sheet's
+    data, and no object of the scene."""
+    from magpylib_material_response import from_json
+
+    with hook.nested():
+        (part,) = from_json(json.dumps([written]))
+    return part
+
+
 def _wrap_external():
     """Let a variable reach the classes from beside magpylib that compute with
     their arguments, if the scene's script has imported them: `UniformField`
-    takes the norm of its value. Written as `type_name` finds them, by what is
+    takes the norm of its value, and `ChargeSheet` copies its part, which is its
+    data and no step of the scene. Written as `type_name` finds them, by what is
     imported already, so that a scene with none imports nothing."""
     found = sys.modules.get("magpylib_material_response")
     field = getattr(found, "UniformField", None)
     if field is not None:
         hook.wrap_external(field)
+    sheets = sys.modules.get("magpylib_material_response.face_charge")
+    if sheets is not None:
+        hook.wrap_external(sheets.ChargeSheet)
 
 
 class SceneFunction:
     """A function that is a scene: see the module. Call it for plain magpylib
     objects at the values you pass; `build()` for the document."""
 
-    def __init__(self, fn, *, model_unit=None, field_unit=None, variants=None):
+    def __init__(
+        self, fn, *, model_unit=None, field_unit=None, variants=None, solve_level=None
+    ):
         functools.update_wrapper(self, fn)
         self._fn = fn
         self.model_unit = model_unit
         self.field_unit = field_unit
+        self.solve_level = solve_level
         try:
             hints = typing.get_type_hints(fn, include_extras=True)
         except Exception:  # noqa: BLE001 - a forward reference the module lacks
@@ -361,7 +380,10 @@ class SceneFunction:
         hook.install()
         _wrap_external()
         document = build.Scene(
-            values=values, model_unit=self.model_unit, field_unit=self.field_unit
+            values=values,
+            model_unit=self.model_unit,
+            field_unit=self.field_unit,
+            solve_level=self.solve_level,
         )
         recorder = _Recorder(document, self._fn)
         handles = {
@@ -439,7 +461,9 @@ class SceneFunction:
         return out
 
 
-def scene(fn=None, *, model_unit=None, field_unit=None, variants=None):
+def scene(
+    fn=None, *, model_unit=None, field_unit=None, variants=None, solve_level=None
+):
     """Mark a function as a scene: its parameters are the variables, its body
     is plain magpylib, and `build()` records it. `@scene`, or
     `@scene(model_unit="mm", field_unit="mT")` for the units the studio
@@ -452,8 +476,14 @@ def scene(fn=None, *, model_unit=None, field_unit=None, variants=None):
     `ring(**ring.variants["wide"])` is the scene at those values in plain
     magpylib. A variant may leave parameters out, and those keep the values
     they have when it is used. It holds values only: a `derived` variable is
-    a formula of the parameters, and follows them."""
-    marks = {"model_unit": model_unit, "field_unit": field_unit, "variants": variants}
+    a formula of the parameters, and follows them. `solve_level` is the level
+    the scene's solved sheets are solved again at, which a sheet does not say."""
+    marks = {
+        "model_unit": model_unit,
+        "field_unit": field_unit,
+        "variants": variants,
+        "solve_level": solve_level,
+    }
     if fn is None:
         return functools.partial(scene, **marks)
     if isinstance(fn, SceneFunction):
@@ -834,10 +864,13 @@ class _Recorder:
             # being its default, not something written.
             if params.get("position") == [0, 0, 0]:
                 del params["position"]
+            params.pop("part", None)  # a magnet: the document's is `external_params`'s
             # a document has a field in one form, as B
             if expressions.contains_expression(params.pop("H", None)):
                 raise BuildError(_H_IN_VARIABLES)
-            type_, params = own, {**_value(external_params(event.obj)), **params}
+            with hook.nested():  # a sheet's part is read by copying it
+                held = external_params(event.obj)
+            type_, params = own, {**_value(held), **params}
         if type_ == "misc.CustomSource":
             raise BuildError(
                 "a CustomSource holds Python code (its field_func), which a document "

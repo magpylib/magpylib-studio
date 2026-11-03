@@ -34,7 +34,9 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
+import functools
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 
 import magpylib as magpy
@@ -339,6 +341,21 @@ def _in_chunks(get, sources, points):
     return out
 
 
+def _reading_inside(fn):
+    """`fn` with no word of an observer inside a solved part: a grid runs through
+    the parts, which are left out of the lines by `inside`, and a warning from
+    every step of a drag would say nothing the view does not show."""
+
+    @functools.wraps(fn)
+    def quiet(*args, **kwargs):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Observers inside a solved part")
+            return fn(*args, **kwargs)
+
+    return quiet
+
+
+@_reading_inside
 def readings(objects):
     """What each sensor's pixels read, as magpylib's `pixel_fields` gives
     it: ``{sensor: (path_length, n_pixels, 3)}``, in the sensor's own frame,
@@ -384,6 +401,7 @@ def readings(objects):
     return out
 
 
+@_reading_inside
 def field(sources, points, kind="B"):
     """B, or H, at `points` from `sources`, summed; zero for no sources.
     Zero too where magpylib says NaN -- a point within rounding of a
@@ -396,6 +414,7 @@ def field(sources, points, kind="B"):
     return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+@_reading_inside
 def inside(sources, points):
     """Which `points` are inside a magnet: where its polarization is not
     zero, as magpylib knows its shape. Currents have no inside.

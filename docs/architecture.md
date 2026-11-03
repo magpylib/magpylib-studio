@@ -135,9 +135,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
   constructor's arguments: `vertices`, `faces`, `charge_densities`, `panels` and
   `mean_polarization`
   ([0041](decisions.md#0041-a-solved-face-charge-sheet-is-data-in-a-document)).
-  A notebook solves it again within an edit's step
-  ([0045](decisions.md#0045-a-notebook-answers-an-edit-in-its-step)). Scripts
-  import the class by name; the recorder reads them off the sheet, which
+  The engine solves it again within a host's edit
+  ([0048](decisions.md#0048-the-engine-solves-a-sheet-again)), or a notebook
+  does ([0045](decisions.md#0045-a-notebook-answers-an-edit-in-its-step)).
+  Scripts import the class by name; the recorder reads them off the sheet, which
   magpylib's hook reports as the `CustomSource` it extends. Its colour level is
   its style, `charge.level`, kept and edited as any style is. A view draws it
   with the charge `get_trace` colours it by; it moves and turns as a whole,

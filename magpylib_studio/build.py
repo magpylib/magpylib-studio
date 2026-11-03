@@ -500,7 +500,15 @@ class Scene:
     variable, the field plots. The numbers stay tesla.
     """
 
-    def __init__(self, session=None, *, values=None, model_unit=None, field_unit=None):
+    def __init__(
+        self,
+        session=None,
+        *,
+        values=None,
+        model_unit=None,
+        field_unit=None,
+        solve_level=None,
+    ):
         if session is None:
             session = MagpylibStudioSession()
             session._base_dir = _base_dir
@@ -509,6 +517,8 @@ class Scene:
             self._call("set_model_unit", model_unit)
         if field_unit is not None:
             self._call("set_field_unit", field_unit)
+        if solve_level is not None:
+            self._call("set_solve_level", solve_level)
         variants = {}
         if isinstance(values, str | pathlib.PurePath):
             path = pathlib.Path(values)
@@ -844,6 +854,7 @@ _NUMPY_NAMES = {
 #: Studio's words, imported as used; a variable of the same name has the
 #: import aliased, so the script's own names and the scene's never clash.
 _WORDS = (
+    "saved_part",
     "scene",
     "derived",
     "name",
@@ -1028,6 +1039,8 @@ class _ScriptWriter:
                 decorator.append(f"{key}={unit!r}")
             elif unit is not None:
                 self.unwritten.append(f"{key} ({unit!r})")
+        if self.doc.get("solve_level") is not None:
+            decorator.append(f"solve_level={self.doc['solve_level']!r}")
         parameters, derived = self.write_variables()
         steps, creates = self.write_events()
         body = [*derived, *steps]
@@ -1362,7 +1375,15 @@ class _ScriptWriter:
                 parts.append(("mesh_source", self.value(source)))
         else:
             call = class_call(kind, self.alias["magpy"])
-        parts += [(key, self.value(value, table=True)) for key, value in params.items()]
+        parts += [
+            (
+                key,
+                f"{self.word('saved_part')}({self.value(value)})"
+                if key == "part"
+                else self.value(value, table=True),
+            )
+            for key, value in params.items()
+        ]
         # magpylib's own spelling, `style_label="Ring"`, where a path has no
         # underscore of its own to be read wrong; the rest as `style={...}`
         spelt = {path: v for path, v in style.items() if "_" not in path}
