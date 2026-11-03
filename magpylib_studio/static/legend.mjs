@@ -524,6 +524,18 @@ export function createLegend(
       swatch.classList.add("icon", `icon-${ICONS[node.kind] || "custom"}`);
     else swatch.classList.add("none");
     row.append(caret, swatch, label);
+    if (node.shows) {
+      // a switch: the branch in the scene, which is where an addition goes
+      const shows = part(
+        "magpy-legend-shows",
+        node.shows.choice
+          ? `shows ${node.shows.branch}, as ${node.shows.choice} is: another ` +
+              `is picked along the foot of the view or in the variables panel`
+          : `shows ${node.shows.branch}, written so`,
+      );
+      shows.textContent = node.shows.branch;
+      row.append(shows);
+    }
     const drawn = drawnUnder(node);
     if (held.length) {
       // What a folded row would otherwise hide: how much is in it, the

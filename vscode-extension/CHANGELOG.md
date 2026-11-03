@@ -14,7 +14,8 @@ Python package it runs on. Open an entry for its details.
 `versions.add("v3", ...)`: one document holds every version, and the one the
 `version` dropdown has is in the scene, drawn, in the field and in the solves.
 An edit made to a version stays while another is shown, and a variant can name a
-version (#119).
+version. Added, moved or pasted into the switch from the panel, an object goes
+into the version shown, which the legend and the scene tree name (#119).
 
 </details>
 

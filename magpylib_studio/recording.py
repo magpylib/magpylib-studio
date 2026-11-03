@@ -818,7 +818,10 @@ class _Recorder:
                 f"it before anything else touches it.",
                 stacklevel=4,
             )
-            self.call(recorded, "move_object", recorded.id, parent=group.id)
+            # a collection's add, a switch's too: in every branch
+            self.call(
+                recorded, "move_object", recorded.id, parent=group.id, branch=None
+            )
 
     def add_branch(self, switch, branch, children):
         """`versions.add("v3", ...)` on a switch (`choose`): each child is
