@@ -60,6 +60,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0049](#0049-a-scene-function-refuses-what-a-solve-makes)                                      | A scene function refuses what a solve makes                  |
 | [0050](#0050-a-saved-page-carries-its-variants)                                                | A saved page carries its variants                            |
 | [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
+| [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
 
 ---
 
@@ -2692,3 +2693,70 @@ scene function cannot be recorded: only the branch taken runs.
 
 - An object with steps of its own goes into a branch as into any collection:
   moved in, its pose kept as numbers, with a warning.
+
+## 0052. A solve that cannot be done again is said out of date
+
+**Status:** accepted 2026-11-03, on Alex's word (#89).
+
+### Context
+
+A face-charge sheet that keeps no part -- solved before material-response 0.9.1,
+or built from its arrays alone -- cannot be solved again
+([0048](#0048-the-engine-solves-a-sheet-again)), nor can a body solved by
+`solve_cells`. A variant that lifted the magnet off one left it at the first
+solve's polarization, and nothing said so.
+
+### Decision
+
+- **Said, not refused**: such a sheet or body whose sources have moved since is
+  marked solved for another arrangement -- a warning on its rows in the legend
+  and the studio's tree, and `stale` in the notebook's `last_edit`. Refusing the
+  edit would leave nothing to drag.
+- **As it sees it**: what it was solved for is every other source's pose in its
+  frame and what each is made of, so moving the whole assembly together changes
+  nothing. A sealed collection counts as one, its parts keeping their places
+  among themselves, so a body of many cells costs a pose, not a pose a cell.
+- **A body solved by cells** is what material-response says it is: one in, or
+  holding, a collection whose `solved_by` names `solve_cells`, and a magnet with
+  a susceptibility that is not zero, so a meshed magnet beside it is a source,
+  not a body, and so is a loop or a sensor under a soft parent. Studio keeps the
+  body's own `solved_by`, as it keeps `H_ext`, through a saved document, a
+  script and a scene function, and takes it off the copies the engine solves a
+  sheet again with: there they are sources.
+- **What another solve made is a cause**: a recoil magnet's polarization typed
+  in leaves the core solved with it out of date.
+- **From where the scene starts**: a load or a build, or a sheet's arrival, and
+  again for each new answer, its charges or polarizations, as a notebook's solve
+  or a value typed in gives one. Each answer keeps where it was solved for, so
+  an undo back to the first is judged by the first. A second view on the scene
+  keeps what it was solved for, and so does a saved page's copy of it. Put back
+  as it was, it is right again, an undo included.
+- **A pattern's copies count**, as charges the solve never saw: a copy of such a
+  sheet away from it is stale, and so is the sheet.
+- **A run's every step has its own field lines** (#129), as a frame is drawn
+  afresh: coloured over the whole run, at a drag's grid, kept per frame, and the
+  last step the scene's own. A sensor that stands still keeps one grid for the
+  run, round its sources at every step, and the field of what stands still on it
+  is read once a run: each frame adds what moves, as a gesture's frames do.
+  Beside a core of 2,188 cells a frame takes 55 ms, not 840.
+
+### Limits
+
+- Studio keeps which bodies were solved, not their susceptibility: a script it
+  writes cannot be solved again as it stands. A result of material-response
+  older than 0.8.0 names no solve, and an FEM solution is a field a document
+  cannot hold: neither is said.
+- A sheet inside a sealed collection is not checked: its parts have no ids. Nor
+  is a sheet or body inside a copied group, and a copy made by `copy_object` is
+  taken as solved where it lands.
+- A result of `solve_cells` from material-response before 0.9.3 loses a
+  susceptibility set above the collection it was given, and its bodies are not
+  said
+  ([material-response#172](https://github.com/magpylib/magpylib-material-response/issues/172)).
+- The mark reads the scene at its last step: a run's earlier frames over such a
+  sheet or body draw its one answer, and say nothing. A sensor on a path reads
+  the whole field every frame.
+- What a sheet was solved for is not saved: reopened, the scene is taken as
+  solved for as it stands.
+- A run of more steps than are captured whole (`MAX_DRAGGABLE_PATH`, 1024) is
+  magpylib's own subsample, and its frames keep no lines.

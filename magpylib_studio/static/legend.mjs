@@ -199,6 +199,19 @@ const ICONS = {
  *  copies are drawn on their source and not listed, so a ring of ten lists
  *  one magnet; the count says ten. A sealed collection's parts are not
  *  listed either, and are counted the same way. */
+/** What a row marked stale says, by what solved it (#89): a sheet that keeps
+ *  no part, or a body solved by cells, neither of which the studio solves
+ *  again. */
+function staleText(kind) {
+  return kind === "cells"
+    ? "Solved for another arrangement: what drives it has moved since it was " +
+        "solved by cells, which the studio does not do again. Solve the " +
+        "original model again in the notebook."
+    : "Solved for another arrangement: what drives it has moved since, and it " +
+        "keeps no part to be solved again from. Solve it again in the " +
+        "notebook; material-response 0.9.1 and later keep the part.";
+}
+
 function drawnUnder(node) {
   const own = 1 + (node.copies || 0);
   if (node.parts) return own * node.parts;
@@ -565,6 +578,22 @@ export function createLegend(
     }
     const warning = overlapMark(node);
     if (warning) row.append(warning);
+    // A solve the scene has moved away from, with nothing to do it again:
+    // on its row, and on a folded group's that hides it, as an overlap is.
+    const staleBelow = (each) =>
+      (each.children || []).some((child) => child.stale || staleBelow(child));
+    if (node.stale || staleBelow(node)) {
+      const stale = part(
+        "magpy-legend-overlap magpy-legend-stale",
+        node.stale
+          ? staleText(node.stale)
+          : "Something in it is solved for another arrangement",
+      );
+      if (!node.stale) stale.classList.add("inside");
+      stale.setAttribute("role", "img");
+      stale.setAttribute("aria-label", "solved for another arrangement");
+      row.append(stale);
+    }
     // At the end of the row, as Figma's layers and VS Code's trees put a
     // row's actions: most of the time it is not showing, and a column kept
     // for it at the start pushed every name away from its caret.

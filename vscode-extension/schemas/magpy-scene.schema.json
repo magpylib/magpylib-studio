@@ -146,7 +146,8 @@
         "sealed": { "$ref": "#/definitions/sealed" },
         "parts": { "$ref": "#/definitions/parts" },
         "parts_style": { "$ref": "#/definitions/partsStyle" },
-        "H_ext": { "$ref": "#/definitions/appliedField" }
+        "H_ext": { "$ref": "#/definitions/appliedField" },
+        "solved_by": { "$ref": "#/definitions/solvedBy" }
       },
       "additionalProperties": true
     },
@@ -160,6 +161,10 @@
       "minItems": 3,
       "maxItems": 3,
       "description": "The uniform applied field of magpylib-material-response, mu0 * H in tesla, on this object and what it holds. Said in a script as `obj.H_ext = (x, y, z)`. Shown in the view's corner."
+    },
+    "solvedBy": {
+      "const": "cells",
+      "description": "A body magpylib-material-response's `solve_cells` set the polarization of: what nothing here solves again, said solved for another arrangement once its sources move. Said in a script as `obj.solved_by = 'cells'`."
     },
     "sealed": {
       "type": "boolean",
@@ -264,6 +269,7 @@
               "parts": { "$ref": "#/definitions/parts" },
               "parts_style": { "$ref": "#/definitions/partsStyle" },
               "H_ext": { "$ref": "#/definitions/appliedField" },
+              "solved_by": { "$ref": "#/definitions/solvedBy" },
               "switch": {
                 "type": "string",
                 "description": "Collections only: a switch, holding a branch for each value of the choice this expression names (`=version`); the branch it has now is in the scene."

@@ -46,8 +46,37 @@ export interface SceneObject {
    *  and what its other branches hold, set aside -- not a history gone
    *  wrong, so no headstone rows for them. */
   shows?: { choice: string | null; branch: string; out: string[] };
+  /** On a solve nothing here does again -- a sheet that keeps no part, or a
+   *  body solved by cells -- whose sources have moved since (#89). */
+  stale?: 'sheet' | 'cells';
   /** The scene the row is in, set by the tree. */
   scene?: SceneDocument;
+}
+
+/** A solve its sources have moved away from: the row says so, as for an
+ *  overlap, since nothing in the studio can solve it again. */
+function markStale(item: vscode.TreeItem, obj: SceneObject): void {
+  if (!obj.stale) return;
+  item.iconPath = new vscode.ThemeIcon(
+    'warning',
+    new vscode.ThemeColor('problemsWarningIcon.foreground'),
+  );
+  item.description = `${item.description ?? obj.type} · solved for another arrangement`;
+  const said =
+    typeof item.tooltip === 'string'
+      ? item.tooltip
+      : (item.tooltip?.value ?? `${obj.id} — ${obj.type}`);
+  const advice =
+    obj.stale === 'cells'
+      ? 'moved since it was solved by cells, which the studio does not do ' +
+        'again. Solve the original model again in a notebook.'
+      : 'moved since, and it keeps no part to be solved again from. Solve it ' +
+        'again in a notebook; material-response 0.9.1 and later keep the part.';
+  const tooltip = new vscode.MarkdownString(
+    `${said}\n\n$(warning) Solved for another arrangement: what drives it has ${advice}`,
+  );
+  tooltip.supportThemeIcons = true;
+  item.tooltip = tooltip;
 }
 
 /** Say on a row that its object overlaps others: the warning a broken
@@ -604,6 +633,7 @@ export class SceneTreeProvider
       item.description = `${obj.mesh?.source ?? obj.type} · ${fault}`;
     }
     markOverlaps(item, obj);
+    markStale(item, obj);
     item.command = {
       command: 'magpylib-studio.selectObject',
       title: 'Select in Studio',

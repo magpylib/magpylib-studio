@@ -247,6 +247,11 @@ def _drawn_ahead(session, names, payload):
     copy = MagpylibStudioSession()
     copy.load_scene(json.loads(json.dumps(session.to_dict())), session._base_dir)
     copy.follower = session.follower
+    # what the sheets were solved for is the view's, not the page's start
+    copy._solved_for = {
+        key: dict(seen) for key, seen in getattr(session, "_solved_for", {}).items()
+    }
+    copy._stale = None
     pool, places = [], {}
     start = _pooled(payload, pool, places)
     scenes = {}
@@ -1112,6 +1117,11 @@ class SceneWidget(anywidget.AnyWidget):
         solves = self._session.take_solves()
         if solves:
             edit = {**(edit or {}), "solves": solves}
+        # the sheets this leaves solved for another arrangement: none can
+        # be solved again here (#89)
+        stale = self._session.stale_solves()
+        if stale:
+            edit = {**(edit or {}), "stale": list(stale)}
         first = self._shown is None
         self._shown = doc
         payload = self._session.get_scene()
@@ -1204,12 +1214,17 @@ class SceneWidget(anywidget.AnyWidget):
             # a session's run, served a step at a time -- but the step its
             # payload draws, which the view draws from that
             step = self.payload.get("step")
-            run = [
-                None if i == step else self._session.get_scene(frame=i)
-                for i in range(frames)
-            ]
-            if limit is not None and len(json.dumps(run, allow_nan=False)) > limit:
-                run = None
+            # frame by frame, each with its field lines: past `limit`, the
+            # rest are not drawn to be left out
+            run, size = [], 2
+            for i in range(frames):
+                scene = None if i == step else self._session.get_scene(frame=i)
+                run.append(scene)
+                if limit is not None:
+                    size += len(json.dumps(scene, allow_nan=False)) + 2
+                    if size > limit:
+                        run = None
+                        break
         else:
             run = []
         if run is None:
