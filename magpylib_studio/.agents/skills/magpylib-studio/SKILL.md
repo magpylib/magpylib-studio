@@ -327,6 +327,12 @@ person saved survive the next run.
     and sensors.
   - `... was made before this scene started recording` — an object made at
     module level and used inside the function: make it inside.
+  - `solve_face_charge, called inside the scene function, makes and changes magpylib objects of its own`,
+    the same for `mesh_all` and `solve_cells`, or
+    `... is a copy made by ChargeSheet.part` — mesh and solve outside the
+    function, and inside make what they returned from its numbers: a sealed
+    collection of the cells, or `ChargeSheet(...)` with the sheet's arrays and
+    `part=`. `from_json` inside is fine.
 - Fix the line and run the script again: `.build()` starts from nothing on every
   run.
 

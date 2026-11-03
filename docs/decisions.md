@@ -57,6 +57,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0046](#0046-a-uniform-field-is-a-source)                                                      | A uniform field is a source                                  |
 | [0047](#0047-a-script-writes-h_ext-as-a-uniform-field)                                         | A script writes H_ext as a uniform field                     |
 | [0048](#0048-the-engine-solves-a-sheet-again)                                                  | The engine solves a sheet again                              |
+| [0049](#0049-a-scene-function-refuses-what-a-solve-makes)                                      | A scene function refuses what a solve makes                  |
 
 ---
 
@@ -2559,3 +2560,37 @@ solved from, so what a solve needs is in the scene.
   `@scene(solve_level=)`.
 - `apply_demag`'s cells keep no part, and do not keep up with a drag.
 - A long solve holds the engine, with nothing to say it is working.
+
+## 0049. A scene function refuses what a solve makes
+
+**Status:** accepted 2026-11-03, on Alex's word (#114).
+
+### Context
+
+Inside a `@scene` function, magpylib-material-response's calls work on magpylib
+objects of their own. Recorded, a solve's working copies added their field to
+the scene, 0.69 T for 0.43 T; unrecorded, `mesh_all`, `solve_cells` and
+`sheet.part` were refused as made outside the function, which they were not.
+
+### Decision
+
+- **A magpylib call that comes from inside such a call is refused**, naming the
+  function the scene called, and saying to call it outside and make what it
+  returned inside, from its numbers. Found by the stack, between the hook and
+  the scene function, so it holds for any function of the package.
+- **`from_json` and the package's constructors stay**: what they make is the
+  user's. A part `from_json` places before adding it is not warned about.
+- **`sheet.part` used as an object of the scene says it is that copy.** Passed
+  as `part=` to a sheet made inside, it is the sheet's data, and fine.
+
+### Rejected
+
+- **Making a solve inside work**: the recorder would have to tell the package's
+  working copies from the user's objects, and the function would solve again at
+  every build. The engine solves a sheet again by itself
+  ([0048](#0048-the-engine-solves-a-sheet-again)); a cell body is #89.
+
+### Limits
+
+- A package beside material-response that makes objects of its own is not on the
+  list (`_LIBRARIES`).

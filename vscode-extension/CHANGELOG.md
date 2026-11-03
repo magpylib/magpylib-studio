@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Fixed
+
+<details>
+<summary>A solve inside a scene function is refused by name</summary>
+
+Inside a `@scene` function, `solve_face_charge` added its working copies to the
+scene, 0.69 T where the solved model gives 0.43 T, and `mesh_all`, `solve_cells`
+and `sheet.part` were refused as made outside the function. Each is now refused
+with the call's name, and the message says to solve outside the function.
+`from_json` inside still works, without its two warnings (#114).
+
+</details>
+
 ## [0.12.0]
 
 ### Added
