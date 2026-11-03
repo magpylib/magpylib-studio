@@ -2994,6 +2994,7 @@ class MagpylibStudioSession:
         self._kept_solve = None
         self._solves: list = []
         self._solve_waiting = False
+        self._forget_gesture()  # what a gesture keeps, before any: `set_params`
         self._build()
 
     def _record_state(self, label, doc_before):

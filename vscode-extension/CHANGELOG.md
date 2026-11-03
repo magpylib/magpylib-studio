@@ -30,7 +30,7 @@ at every step, and its charge and the field lines follow, where they used to
 stay as they were. One undo takes back the move and its solve. A solve that
 takes long waits for the release. Needs magpylib-material-response 0.9.1, whose
 sheets keep the part they were solved from. `examples/ucore_solve_demo.py` shows
-it, with two uniform fields, and no solver code of its own any more (#114).
+it, with two uniform fields, and no solver code of its own any more (#115).
 
 </details>
 

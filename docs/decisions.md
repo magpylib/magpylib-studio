@@ -2508,7 +2508,7 @@ studio wrote would then solve with no applied field and say nothing about it.
 
 ## 0048. The engine solves a sheet again
 
-**Status:** accepted 2026-11-02, as built (#114), on Alex's word. Supersedes the
+**Status:** accepted 2026-11-02, as built (#115), on Alex's word. Supersedes the
 part of [0041](#0041-a-solved-face-charge-sheet-is-data-in-a-document) that
 nothing re-solves, and the part of
 [0045](#0045-a-notebook-answers-an-edit-in-its-step) that rejected a solve

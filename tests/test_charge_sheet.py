@@ -222,6 +222,16 @@ def test_an_edit_followed_is_solved_in_its_step():
     np.testing.assert_array_equal(magpy.getB(session.scene, POINTS), moved)
 
 
+def test_a_new_charge_is_set_outside_a_gesture():
+    studio = SceneWidget(solved(), editable=True)._session
+    (key,) = [
+        k for k, o in studio._objs.items() if isinstance(o, face_charge.ChargeSheet)
+    ]
+    charge = studio._objs[key].charge_densities * 2
+    assert studio.set_params({key: {"charge_densities": charge.tolist()}})["ok"]
+    np.testing.assert_array_equal(studio._objs[key].charge_densities, charge)
+
+
 def test_a_failed_answer_is_said_and_the_edit_stays():
     view, _, sent = _following_view()
     key = next(k for k, o in view.objects.items() if type(o) is magpy.magnet.Cuboid)
