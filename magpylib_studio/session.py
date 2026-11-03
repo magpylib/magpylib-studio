@@ -2579,6 +2579,47 @@ def _built_parts(spec):
     return made
 
 
+def _frame_field(held, around, every, fixed, varying, seeds, kind):
+    """A run's frame's grid, field and inside for a sensor at `seeds`
+    (`_frame_lines`): its grid round `around` -- at `every` step, for a grid
+    the run shares -- kept in `held` with the field of what is `fixed` on it,
+    read once, and the field of what is `varying` added. In the sensor's
+    plane where the field keeps to it, as at rest, else a box."""
+    from magpylib_studio import fieldlines
+
+    budget = fieldlines.DRAG_POINTS  # a frame is drawn once and passed
+
+    def grid_of(name, wanted, flat=None):
+        got = held.get(name)
+        if got is None:
+            grid = fieldlines.grid_around(
+                around, seeds, wanted, flat=flat, every_step=every
+            )
+            got = held[name] = {"grid": grid, "points": fieldlines.points_of(grid)}
+        return got
+
+    def field_on(got):
+        if "field" not in got:  # what stands still, once
+            got["field"] = fieldlines.field(fixed, got["points"], kind)
+            got["inside"] = fieldlines.inside(fixed, got["points"])
+        points = got["points"]
+        return (
+            got["grid"],
+            got["field"] + fieldlines.field(varying, points, kind),
+            got["inside"] | fieldlines.inside(varying, points),
+        )
+
+    got = grid_of("flat", budget)
+    if fieldlines.is_flat(got["grid"]) and not fieldlines.keeps_to(
+        *field_on(grid_of("probe", fieldlines.PROBE_POINTS))
+    ):
+        got = grid_of("box", budget, flat=False)
+    grid, values, within = field_on(got)
+    if fieldlines.is_flat(grid) and not fieldlines.keeps_to(grid, values, within):
+        grid, values, within = field_on(grid_of("box", budget, flat=False))
+    return grid, values, within
+
+
 def _moving_alone(collection):
     """What in `collection` a solve sums that moves on its own: each source,
     and a sealed collection holding any as one (`stale_solves`)."""
@@ -3914,7 +3955,20 @@ class MagpylibStudioSession:
             partners = self._overlap_partners(counted=copies == "count")
         except Exception:  # noqa: BLE001 - an optional check must not cost the listing
             partners = {}
-        stale = set(self.stale_solves())
+        # what is out of date, by what solved it: the advice differs
+        stale = {
+            key: "sheet" if threejs.is_charge_sheet(self._objs[key]) else "cells"
+            for key in self.stale_solves()
+        }
+
+        def stale_of(key):
+            if key in stale:
+                return stale[key]
+            if copies == "count":  # a copy's, the copies counted on this row
+                made = self._derived.get(key, ())
+                return next((stale[c] for c in made if c in stale), None)
+            return None
+
         # what is built, which is the whole document unless it is rolled back
         for spec, parent in self._iter_specs(self._objects_view):
             if spec["id"] in self._absent:
@@ -3976,19 +4030,10 @@ class MagpylibStudioSession:
                         if spec["id"] in self._switches
                         else {}
                     ),
-                    # a sheet solved for another arrangement, with no part --
-                    # or a pattern's copy of one, its copies counted here
-                    **(
-                        {"stale": True}
-                        if spec["id"] in stale
-                        or (
-                            copies == "count"
-                            and any(
-                                c in stale for c in self._derived.get(spec["id"], ())
-                            )
-                        )
-                        else {}
-                    ),
+                    # a solve for another arrangement that nothing here does
+                    # again -- or a pattern's copy of one, its copies counted
+                    # here -- as "sheet" or "cells", which solved it
+                    **({"stale": kind} if (kind := stale_of(spec["id"])) else {}),
                 }
             )
             # copies made by a duplicate event: real objects in the field and
@@ -4008,7 +4053,7 @@ class MagpylibStudioSession:
                                 if copy_id in partners
                                 else {}
                             ),
-                            **({"stale": True} if copy_id in stale else {}),
+                            **({"stale": stale[copy_id]} if copy_id in stale else {}),
                         }
                     )
         return objects
@@ -4282,7 +4327,7 @@ class MagpylibStudioSession:
                 # the branch a switch shows
                 **({"shows": entry["shows"]} if entry.get("shows") else {}),
                 # a solve it cannot keep up with
-                **({"stale": True} if entry.get("stale") else {}),
+                **({"stale": entry["stale"]} if entry.get("stale") else {}),
             }
             for entry in entries
         }
@@ -5120,61 +5165,57 @@ class MagpylibStudioSession:
 
     def _frame_lines(self, frame):
         """The field lines at `frame`, a step of the scene's paths: each
-        sensor's, drawn as at rest from the scene stood at that step
-        (`fieldlines.scene_at`), with none of a gesture's caches. Kept for
-        the frame for as long as the run captured with them is the scene's
-        (`_animated`), which a change to the scene lets go (#129)."""
+        sensor's, from the scene at that step, with none of a gesture's
+        caches. Kept for the frame for as long as the run captured with them
+        is the scene's (`_animated`), which a change to the scene lets go
+        (#129).
+
+        A sensor that stands still keeps one grid for the run, round its
+        sources at every step, and the field of what stands still on it,
+        computed once: each frame adds the field of what moves, at its step,
+        as a gesture's frames do (`_field_on`). A core meshed into thousands
+        of cells beside a magnet on a path is computed once a run, not once a
+        frame. A sensor on a path is drawn on a grid round it at that step."""
         from magpylib_studio import fieldlines
 
         kept = getattr(self, "_lines_of_frames", None)
         if kept is None or kept[0] is not self._animated:
-            kept = self._lines_of_frames = (self._animated, {}, [])
+            kept = self._lines_of_frames = (self._animated, {}, {})
         if frame in kept[1]:
             return kept[1][frame]
+        run = kept[2]
         # The colours span the whole run, as the lines at rest and the pixels'
         # arrows do, read once a run; and the last step is the scene's lines.
-        if not kept[2]:
-            kept[2].append(fieldlines.readings(self.scene))
-        readings = kept[2][0]
+        if "readings" not in run:
+            run["readings"] = fieldlines.readings(self.scene)
+        readings = run["readings"]
         if frame >= self.path_steps() - 1:
             kept[1][frame] = self._field_lines(readings)
             return kept[1][frame]
-        stood, originals = fieldlines.scene_at(self.scene, max(0, frame))
+        step = max(0, frame)
+        sources = fieldlines.sources_of(self.scene)
+        still = [s for s in sources if s._get_path_len() == 1]
+        moved = [fieldlines.at_step(s, step) for s in sources if s._get_path_len() > 1]
         key_of = self._names_of_objects()
-        sources = fieldlines.sources_of(stood)
-        # a frame is drawn once and passed: the grid of a gesture's frame
-        budget = fieldlines.DRAG_POINTS
         items = []
-        for sensor in fieldlines.sensors_of(stood):
-            key = key_of.get(id(originals[id(sensor)]))
+        for sensor in fieldlines.sensors_of(self.scene):
+            key = key_of.get(id(sensor))
             if key is None:
                 continue
             kind = fieldlines.kind_of(sensor)
-            seeds = fieldlines.seeds_of(sensor)
-            grid = fieldlines.grid_around(sources, seeds, budget)
-            if fieldlines.is_flat(grid) and not self._keeps_to_plane(
-                sources, seeds, kind
-            ):
-                grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-            points = fieldlines.points_of(grid)
-            values = fieldlines.field(sources, points, kind)
-            within = fieldlines.inside(sources, points)
-            if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
-                grid, values, within
-            ):
-                grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-                points = fieldlines.points_of(grid)
-                values = fieldlines.field(sources, points, kind)
-                within = fieldlines.inside(sources, points)
+            if sensor._get_path_len() > 1:  # its grid moves with it
+                held, fixed, varying = {}, [], [*still, *moved]
+                around, every = varying, False
+            else:
+                held, fixed, varying = run.setdefault((key, kind), {}), still, moved
+                around, every = sources, True
+            seeds = fieldlines.seeds_of(fieldlines.at_step(sensor, step))
+            grid, values, within = _frame_field(
+                held, around, every, fixed, varying, seeds, kind
+            )
             items.append(
                 fieldlines.item(
-                    sensor,
-                    key,
-                    grid,
-                    values,
-                    within,
-                    seeds,
-                    readings.get(originals[id(sensor)]),
+                    sensor, key, grid, values, within, seeds, readings.get(sensor)
                 )
             )
         kept[1][frame] = items
@@ -7572,7 +7613,15 @@ class MagpylibStudioSession:
                 for leaf in leaves:
                     made.extend(_made_of(leaf, id(leaf) in answers))
             fields = np.array([threejs.is_uniform_field(u) for u in units], dtype=bool)
-            self._units = (units, fields, b"|".join(made), unsolvable)
+            # what every unit is made of, and what every such solve made: each
+            # answer is a cause of the others', and judged against its own
+            digest = hashlib.blake2b(b"|".join(made), digest_size=16)
+            for answer in unsolvable.values():
+                digest.update(answer)
+            # where each solve stands among them, its pose read with theirs
+            index = {id(unit): i for i, unit in enumerate(units)}
+            self._unit_of = {key: index.get(id(self._objs[key])) for key in unsolvable}
+            self._units = (units, fields, digest.digest(), unsolvable)
         return self._units
 
     def _arrangement(self):
@@ -7589,37 +7638,59 @@ class MagpylibStudioSession:
         return positions, turns, fields, made
 
     def _solved_from(self, key, arranged=None):
-        """What a solve of `key`, a sheet or a body, followed from, as it sees
-        it: every source's pose in its frame (`_arrangement`), so moving or
-        turning the whole assembly together changes nothing, and moving a
-        magnet against it does (#89)."""
+        """What a solve of `key`, a sheet or a body, follows from now: the
+        arrangement (`_arrangement`), shared by every key it is read for, and
+        where `key` stands in it -- the place and the turn it is seen from
+        (`_seen`)."""
         positions, turns, fields, made = arranged or self._arrangement()
-        # what another solve made is a cause of this one: a magnet's
-        # polarization typed in changes what the core was solved for
-        others = self._solve_units()[3]
-        made = b"|".join([made, *(h for k, h in others.items() if k != key)])
+        i = self._unit_of.get(key)
+        if i is not None:
+            return made, positions, turns, fields, positions[i], turns[i]
         solved = self._objs[key]
         at = np.atleast_2d(solved.position)[-1]
         turn = (
             solved.orientation if solved.orientation.single else solved.orientation[-1]
         )
-        back = turn.as_matrix()
-        # in its frame, R^T (p - at) and R^T M; a field has no place
-        seen = (positions - at) @ back
-        seen[fields] = 0.0
-        faced = np.einsum("ji,njk->nik", back, turns)
-        return made, seen, faced
+        return made, positions, turns, fields, at, turn.as_matrix()
 
     @staticmethod
-    def _same_arrangement(one, other):
+    def _seen(solved):
+        """Every source's pose in the frame of what was solved, from a
+        `_solved_from`: R^T (p - at) and R^T M, a uniform field's place
+        none. So moving or turning the whole assembly together changes
+        nothing, and moving a magnet against it does (#89)."""
+        _, positions, turns, fields, at, back = solved
+        seen = (positions - at) @ back
+        seen[fields] = 0.0
+        return seen, np.einsum("ji,njk->nik", back, turns)
+
+    @classmethod
+    def _same_arrangement(cls, one, other, memo=None):
         """Whether two `_solved_from` say the same, to a nanometre and as
         close in a turn: a pose written in the document is rounded, and a
-        turn's sign of zero is no change."""
+        turn's sign of zero is no change. Where what was solved stands where
+        it stood, its frame is the world's, and the world's poses are
+        compared -- once for every key that shares `memo`: a magnet dragged
+        past a thousand bodies is one comparison, not a thousand."""
         if one is None or one[0] != other[0] or one[1].shape != other[1].shape:
             return False
-        return np.allclose(one[1], other[1], rtol=0, atol=1e-9) and np.allclose(
-            one[2], other[2], rtol=0, atol=1e-9
-        )
+
+        def close(a, b):  # np.allclose's answer, at a tenth of its cost
+            return float(np.max(np.abs(a - b), initial=0.0)) <= 1e-9
+
+        if not (close(one[4], other[4]) and close(one[5], other[5])):
+            return all(
+                close(a, b)
+                for a, b in zip(cls._seen(one), cls._seen(other), strict=True)
+            )
+        pair = (id(one[1]), id(other[1]))
+        if memo is not None and pair in memo:
+            return memo[pair]
+        placed = [np.where(each[3][:, None], 0.0, each[1]) for each in (one, other)]
+        same = close(*placed) and close(one[2], other[2])
+        if memo is not None:
+            memo[pair] = same
+        return same
 
     def stale_solves(self):
         """The solves nothing here can do again (`_solve_units`): sheets that
@@ -7642,13 +7713,14 @@ class MagpylibStudioSession:
             if unsolvable:
                 arranged = self._arrangement()
                 source_of = {c: s for s, made in self._derived.items() for c in made}
+                memo = {}  # `_same_arrangement`'s, for this arrangement
                 for key, answer in unsolvable.items():
                     now = self._solved_from(key, arranged)
                     base = source_of.get(key)
                     if base is not None:  # a copy: what its source was solved for
                         solved = known.get(base)
                         if solved is not None and not self._same_arrangement(
-                            solved.get(answer), now
+                            solved.get(answer), now, memo
                         ):
                             stale.append(key)
                         continue
@@ -7657,9 +7729,9 @@ class MagpylibStudioSession:
                     seen = known.setdefault(key, {})
                     if answer not in seen:
                         seen[answer] = now
-                        if len(seen) > _ANSWERS_KEPT:
-                            del seen[next(iter(seen))]
-                    elif not self._same_arrangement(seen[answer], now):
+                        if len(seen) > _ANSWERS_KEPT:  # the first one kept
+                            del seen[list(seen)[1]]
+                    elif not self._same_arrangement(seen[answer], now, memo):
                         stale.append(key)
             self._stale = stale
         return self._stale
@@ -7847,10 +7919,14 @@ class MagpylibStudioSession:
         `scene` is a document dict or a path to a JSON file containing one.
         (Script -> document is deferred by design.)
         """
-        self._solved_for = {}  # what its sheets were solved for: this scene's
+        # what its solves were solved for: this scene's, or, refused, the
+        # scene's that stays
+        kept, self._solved_for = getattr(self, "_solved_for", None), {}
         result = self._replace(scene, base_dir, "load scene")
         if result["ok"]:
             self.forget_history()
+        else:
+            self._solved_for, self._stale = kept, None
         return result
 
     def replace_scene(self, scene, base_dir=None, label="replace scene"):

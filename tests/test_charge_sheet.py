@@ -511,7 +511,9 @@ def test_a_sheet_with_no_part_is_said_solved_for_another_arrangement():
     assert studio.stale_solves() == []
     use("far")
     assert studio.stale_solves() == ["plate"] == view.last_edit["stale"]
-    assert [o["id"] for o in studio.list_objects() if o.get("stale")] == ["plate"]
+    assert {o["id"]: o["stale"] for o in studio.list_objects() if "stale" in o} == {
+        "plate": "sheet"
+    }
     assert [n["id"] for n in view.tree if n.get("stale")] == ["plate"]
     assert SceneWidget(built, editable=True)._session.stale_solves() == ["plate"]
     use("near")
@@ -629,7 +631,9 @@ def test_a_body_solved_by_cells_is_said_solved_for_another_arrangement(route, tm
     assert back.stale_solves() == []
     back.move("magnet", [0, 0, 0.01])
     assert back.stale_solves() == ["core"]
-    assert [o["id"] for o in back.list_objects() if o.get("stale")] == ["core"]
+    assert {o["id"]: o["stale"] for o in back.list_objects() if "stale" in o} == {
+        "core": "cells"
+    }
     back.move("core", [0, 0, 0.01])  # the two together again
     assert back.stale_solves() == []
 

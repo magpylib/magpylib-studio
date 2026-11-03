@@ -1214,12 +1214,17 @@ class SceneWidget(anywidget.AnyWidget):
             # a session's run, served a step at a time -- but the step its
             # payload draws, which the view draws from that
             step = self.payload.get("step")
-            run = [
-                None if i == step else self._session.get_scene(frame=i)
-                for i in range(frames)
-            ]
-            if limit is not None and len(json.dumps(run, allow_nan=False)) > limit:
-                run = None
+            # frame by frame, each with its field lines: past `limit`, the
+            # rest are not drawn to be left out
+            run, size = [], 2
+            for i in range(frames):
+                scene = None if i == step else self._session.get_scene(frame=i)
+                run.append(scene)
+                if limit is not None:
+                    size += len(json.dumps(scene, allow_nan=False)) + 2
+                    if size > limit:
+                        run = None
+                        break
         else:
             run = []
         if run is None:

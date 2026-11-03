@@ -46,15 +46,15 @@ export interface SceneObject {
    *  and what its other branches hold, set aside -- not a history gone
    *  wrong, so no headstone rows for them. */
   shows?: { choice: string | null; branch: string; out: string[] };
-  /** On a solved sheet that keeps no part: what drives it has moved since it
-   *  was solved, and nothing can solve it again (#89). */
-  stale?: boolean;
+  /** On a solve nothing here does again -- a sheet that keeps no part, or a
+   *  body solved by cells -- whose sources have moved since (#89). */
+  stale?: 'sheet' | 'cells';
   /** The scene the row is in, set by the tree. */
   scene?: SceneDocument;
 }
 
-/** A solved sheet its sources have moved away from: the row says so, as for
- *  an overlap, since nothing in the studio can solve it again. */
+/** A solve its sources have moved away from: the row says so, as for an
+ *  overlap, since nothing in the studio can solve it again. */
 function markStale(item: vscode.TreeItem, obj: SceneObject): void {
   if (!obj.stale) return;
   item.iconPath = new vscode.ThemeIcon(
@@ -66,10 +66,14 @@ function markStale(item: vscode.TreeItem, obj: SceneObject): void {
     typeof item.tooltip === 'string'
       ? item.tooltip
       : (item.tooltip?.value ?? `${obj.id} — ${obj.type}`);
+  const advice =
+    obj.stale === 'cells'
+      ? 'moved since it was solved by cells, which the studio does not do ' +
+        'again. Solve the original model again in a notebook.'
+      : 'moved since, and it keeps no part to be solved again from. Solve it ' +
+        'again in a notebook; material-response 0.9.1 and later keep the part.';
   const tooltip = new vscode.MarkdownString(
-    `${said}\n\n$(warning) Solved for another arrangement: what drives it has ` +
-      'moved since, and it keeps no part to be solved again from. Solve it ' +
-      'again in a notebook; material-response 0.9.1 and later keep the part.',
+    `${said}\n\n$(warning) Solved for another arrangement: what drives it has ${advice}`,
   );
   tooltip.supportThemeIcons = true;
   item.tooltip = tooltip;

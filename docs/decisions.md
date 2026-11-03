@@ -2735,7 +2735,10 @@ solve's polarization, and nothing said so.
   sheet away from it is stale, and so is the sheet.
 - **A run's every step has its own field lines** (#129), as a frame is drawn
   afresh: coloured over the whole run, at a drag's grid, kept per frame, and the
-  last step the scene's own.
+  last step the scene's own. A sensor that stands still keeps one grid for the
+  run, round its sources at every step, and the field of what stands still on it
+  is read once a run: each frame adds what moves, as a gesture's frames do.
+  Beside a core of 2,188 cells a frame takes 55 ms, not 840.
 
 ### Limits
 
@@ -2746,9 +2749,13 @@ solve's polarization, and nothing said so.
 - A sheet inside a sealed collection is not checked: its parts have no ids. Nor
   is a sheet or body inside a copied group, and a copy made by `copy_object` is
   taken as solved where it lands.
-- A susceptibility set above the collection given to `solve_cells` is not on the
-  result, which has no parent: its bodies are not said
+- A result of `solve_cells` from material-response before 0.9.3 loses a
+  susceptibility set above the collection it was given, and its bodies are not
+  said
   ([material-response#172](https://github.com/magpylib/magpylib-material-response/issues/172)).
+- The mark reads the scene at its last step: a run's earlier frames over such a
+  sheet or body draw its one answer, and say nothing. A sensor on a path reads
+  the whole field every frame.
 - What a sheet was solved for is not saved: reopened, the scene is taken as
   solved for as it stands.
 - A run of more steps than are captured whole (`MAX_DRAGGABLE_PATH`, 1024) is

@@ -3,6 +3,8 @@ colours, and that the switch is the document's."""
 
 from __future__ import annotations
 
+import base64
+
 import magpylib as magpy
 import numpy as np
 import pytest
@@ -336,13 +338,17 @@ def test_read_only_arrays_are_turned_as_copies(monkeypatch):
 
 def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
     """#129: a run's frame is drawn afresh, and it carried no lines, so a
-    run scrubbed back showed none. Each frame has its own step's, coloured
-    over the whole run as the lines at rest are, the last the scene's own,
-    and a saved page carries them with its run. A run subsampled past what
+    run scrubbed back showed none. Each frame has its own step's field,
+    coloured over the whole run as the lines at rest are, the last the
+    scene's own, and a saved page carries them with its run. What stands
+    still is read once a run, not once a frame. A run subsampled past what
     is captured whole keeps frames without lines."""
     path = [(0.004 * i, 0, 0) for i in range(8)]
     magnet = magpy.magnet.Cuboid(
         polarization=(0, 0, 1), dimension=(0.01,) * 3, position=path
+    )
+    still = magpy.magnet.Cuboid(
+        polarization=(1, 0, 0), dimension=(0.005,) * 3, position=(0, 0, -0.015)
     )
     lines = magpy.Sensor(
         pixel=[
@@ -352,10 +358,31 @@ def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
         ],
         style={"pixel": {"size": 0, "field": {"source": "B"}}},
     )
-    view = SceneWidget(magnet, lines, field_lines=True)
+    view = SceneWidget(magnet, still, lines, field_lines=True)
     session = view._session
+    read = []  # of each field computed, whether the still magnet was in it
+    computed = fieldlines.field
+
+    def field(sources, *args, **kwargs):
+        read.append(any(np.allclose(s.position, still.position) for s in sources))
+        return computed(sources, *args, **kwargs)
+
+    monkeypatch.setattr(fieldlines, "field", field)
     first, last = session.get_scene(frame=0), session.get_scene(frame=7)
     assert first["fieldlines"] and first["fieldlines"] != last["fieldlines"]
+    item = first["fieldlines"][0]
+    grid = {key: item[key] for key in ("origin", "step", "shape")}
+    grid["axes"] = np.reshape(item["axes"], (3, 3))
+    points = fieldlines.points_of(grid)
+    quanta = np.frombuffer(base64.b64decode(item["values"]), "<i2").reshape(-1, 3)
+    np.testing.assert_allclose(
+        quanta * item["scale"] @ grid["axes"],
+        magpy.getB([magnet.copy(position=path[0]), still], points, sumup=True),
+        atol=item["scale"],
+    )
+    read.clear()
+    session.get_scene(frame=3)
+    assert read and not any(read)
     assert last["fieldlines"] == view.payload["fieldlines"]
     assert first["fieldlines"][0]["levels"] == last["fieldlines"][0]["levels"]
     assert session.get_scene(frame=-1)["fieldlines"]

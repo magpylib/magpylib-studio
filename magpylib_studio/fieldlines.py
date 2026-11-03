@@ -146,11 +146,12 @@ def spacing_of(seeds, grid):
     return float(min(own, finest))
 
 
-def grid_around(sources, seeds, points, flat=None):
+def grid_around(sources, seeds, points, flat=None, every_step=False):
     """The grid for `seeds`: in their plane, if they lie in one and `flat` is
     not False, else a box;
     round them and the sources near them, padded by a quarter of its largest
-    side, about `points` evenly spaced points.
+    side, about `points` evenly spaced points. A source stands at its last
+    step, or, `every_step`, at each of them: the grid a run's frames share.
 
     Near is within three times the seeds' own reach of their centre: the lines
     are about what the sensor sits in, and a grid stretched to a magnet
@@ -161,7 +162,12 @@ def grid_around(sources, seeds, points, flat=None):
         axes, planar = np.eye(3), False
     centre = seeds.mean(axis=0)
     reach = 3 * max(float(np.max(np.linalg.norm(seeds - centre, axis=1))), 0.005)
-    centres = [np.atleast_2d(np.asarray(s.position, dtype=float))[-1] for s in sources]
+    rows = slice(None) if every_step else slice(-1, None)
+    centres = [
+        centre
+        for s in sources
+        for centre in np.atleast_2d(np.asarray(s.position, dtype=float))[rows]
+    ]
     near = [c for c in centres if np.linalg.norm(c - centre) <= reach]
     local = (np.vstack([*near, seeds]) - centre) @ axes.T
     low, high = local.min(axis=0), local.max(axis=0)
@@ -302,11 +308,11 @@ def _in_chunks(get, sources, points):
     into thousands of cells once per slice, a third of the time. A source
     on a path is answered step by step, and the last step is the one the
     view draws and a sensor's seeds stand at (`seeds_of`), so the calls are
-    given each source at that step (`_last_step`): one step computed, not
+    given each source at that step (`at_step`): one step computed, not
     every one, and nothing for magpylib to pad on an object the threads
     share, which it does in place (magpylib#1074, #122). One call is made
     where it is, and so are all where no thread can be started (Pyodide)."""
-    sources = [_last_step(source) for source in sources]
+    sources = [at_step(source) for source in sources]
     points = np.asarray(points, dtype=float).reshape(-1, 3)
     n = len(points)
     budget = max(1, PAIRS_PER_CALL // THREADS)
@@ -456,38 +462,19 @@ def _sheet(source):
     return type(source).__module__.startswith("magpylib_material_response.face_charge")
 
 
-def scene_at(scene, step):
-    """`scene` stood at `step` of its paths: a copy, every object's path
-    properties cut to that step's entry (or a shorter path's last), and each
-    copy's original, by `id` of the copy -- for a run's frame to draw the
-    lines of its own step (#129)."""
-    stood = copy.deepcopy(scene)
-    originals = {}
-    for made, was in zip(
-        [stood, *stood.children_all], [scene, *scene.children_all], strict=True
-    ):
-        originals[id(made)] = was
-        for prop in made._path_properties:
-            value = getattr(made, f"_{prop}", None)
-            if value is None:
-                continue
-            at = min(max(step, 0), len(value) - 1)
-            setattr(made, f"_{prop}", value[at : at + 1])
-    return stood, originals
-
-
-def _last_step(source):
-    """`source` at the last step of its path, every path property one entry
-    long -- itself where its path is one step. A shallow copy, made as the
-    source's class makes one: material-response's bind their field to the
-    copy themselves."""
-    if source._get_path_len() == 1:
-        return source
-    out = copy.copy(source)
-    for prop in source._path_properties:
-        value = getattr(source, f"_{prop}", None)
+def at_step(obj, step=None):
+    """`obj` at `step` of its path, the last where None, every path property
+    one entry long -- a shorter path at its own last -- and itself where its
+    path is one step. A shallow copy, made as the object's class makes one:
+    material-response's bind their field to the copy themselves."""
+    if obj._get_path_len() == 1:
+        return obj
+    out = copy.copy(obj)
+    for prop in obj._path_properties:
+        value = getattr(obj, f"_{prop}", None)
         if value is not None:
-            setattr(out, f"_{prop}", value[-1:])
+            at = len(value) - 1 if step is None else min(max(step, 0), len(value) - 1)
+            setattr(out, f"_{prop}", value[at : at + 1])
     return out
 
 
