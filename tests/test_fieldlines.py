@@ -297,18 +297,29 @@ def test_threads_are_given_each_source_at_its_last_step(monkeypatch):
         return magpy.getB(sources, observers, **kwargs)
 
     monkeypatch.setattr(fieldlines, "PAIRS_PER_CALL", 20_000)  # several calls
+    monkeypatch.setattr(fieldlines, "THREADS", 4)  # on threads, wherever it runs
     field = fieldlines._in_chunks(get, [coil], points)
     assert len(steps) > 1 and set(steps) == {1}
     np.testing.assert_allclose(field, magpy.getB(coil, points)[-1], rtol=1e-12)
     assert coil._get_path_len() == 8
 
 
-def test_a_solved_sheet_is_inside_tested_on_a_copy(monkeypatch):
-    """#123: a sheet's arrays are read-only, and scipy before 1.18 refuses a
-    read-only array to `Rotation.apply`, as this one now does."""
+def test_read_only_arrays_are_turned_as_copies(monkeypatch):
+    """#123: a solved sheet's triangles and a uniform field's B are
+    read-only, and scipy before 1.18 refuses a read-only array to
+    `Rotation.apply`, as it does here once the model is solved."""
     pytest.importorskip("magpylib_material_response", minversion="0.9.1")
-    from magpylib_material_response import solve_face_charge
+    from magpylib_material_response import UniformField, solve_face_charge
+    from magpylib_material_response.face_charge import ChargeSheet
 
+    from magpylib_studio import threejs
+
+    plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006))
+    plate.susceptibility = 1000
+    coil = magpy.current.Circle(current=100, diameter=0.03, position=(0, 0, 0.01))
+    solved = solve_face_charge(magpy.Collection(plate, coil), level=1)
+    sheets = [s for s in solved.sources_all if isinstance(s, ChargeSheet)]
+    field = UniformField(B=(0, 0, 0.01))
     apply = Rotation.apply
 
     def as_before(self, vectors, *args, **kwargs):
@@ -317,10 +328,7 @@ def test_a_solved_sheet_is_inside_tested_on_a_copy(monkeypatch):
         return apply(self, vectors, *args, **kwargs)
 
     monkeypatch.setattr(Rotation, "apply", as_before)
-    plate = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006))
-    plate.susceptibility = 1000
-    coil = magpy.current.Circle(current=100, diameter=0.03, position=(0, 0, 0.01))
-    solved = solve_face_charge(magpy.Collection(plate, coil), level=1)
-    sheets = [s for s in solved.sources_all if not isinstance(s, magpy.current.Circle)]
-    inside = fieldlines._inside_sheets(sheets, np.array([(0, 0, 0), (0, 0, 0.02)]))
-    assert inside.tolist() == [True, False]
+    points = np.array([(0, 0, 0), (0, 0, 0.02)])
+    assert fieldlines._inside_sheets(sheets, points).tolist() == [True, False]
+    (drawn,) = threejs.fields_of([("field", field)])
+    assert drawn["B"] == [0, 0, 0.01]

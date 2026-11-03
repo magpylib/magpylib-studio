@@ -458,9 +458,9 @@ def _sheet(source):
 
 def _last_step(source):
     """`source` at the last step of its path, every path property one entry
-    long -- itself where its path is one step. A copy whose field function
-    is a method of the source's is bound to the copy, as material-response
-    copies its own, or it would read the source's."""
+    long -- itself where its path is one step. A shallow copy, made as the
+    source's class makes one: material-response's bind their field to the
+    copy themselves."""
     if source._get_path_len() == 1:
         return source
     out = copy.copy(source)
@@ -468,9 +468,6 @@ def _last_step(source):
         value = getattr(source, f"_{prop}", None)
         if value is not None:
             setattr(out, f"_{prop}", value[-1:])
-    func = getattr(source, "_field_func", None)
-    if getattr(func, "__self__", None) is source:
-        out._field_func = getattr(out, func.__name__)
     return out
 
 

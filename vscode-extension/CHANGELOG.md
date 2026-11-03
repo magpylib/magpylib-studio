@@ -51,9 +51,9 @@ On a scene with a path, field lines failed now and then with "operands could not
 be broadcast together": the threads that compute them shared each source, which
 magpylib pads in place while it computes (magpylib#1074). Each is now given the
 source at the step the view draws, which also computes one step instead of every
-one: 16 coils on an 8-step path, 1.4 s to 0.24 s. On a solved face-charge model
-they failed with "buffer source array is read-only" with scipy before 1.18
-(#122, #123).
+one: 16 coils on an 8-step path, about six times faster (#122). On a solved
+face-charge model, or with a uniform field, they failed with "buffer source
+array is read-only" on scipy before 1.18 (#123).
 
 </details>
 
