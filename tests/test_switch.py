@@ -195,3 +195,66 @@ def test_a_switch_at_its_edges():
     assert broken.load_scene(doc)["ok"]
     assert [o["id"] for o in broken.list_objects()] == ["m"]
     assert [entry["target"] for entry in broken._broken] == ["sw"]
+
+
+def test_a_host_adds_to_the_branch_it_shows():
+    """From a panel, what goes into a switch goes into the branch in the
+    scene, so it is in the view: made there, moved there, pasted there; a
+    copy beside its source stays in the source's branch. The listing says
+    what each switch shows, and what its other branches hold."""
+    session = unit.build().session
+    session.set_variable("version", "v2")
+    cube = {"dimension": [0.004] * 3, "polarization": [0, 0, 1]}
+    assert session.add_object("extra", "magnet.Cuboid", cube, parent="versions")["ok"]
+    assert session.move_object("coil", "versions")["ok"]
+    assert session.copy_object("core2")["ok"]
+    pasted = session.copy_object("core1", parent="versions")
+    assert pasted["ok"]
+    listed = {o["id"]: o for o in session.list_objects()}
+    for each in ("extra", "coil", "core2_1", pasted["id"]):
+        assert listed[each]["parent"] == "versions", each
+    shows = listed["versions"]["shows"]
+    assert shows["choice"] == "version" and shows["branch"] == "v2"
+    assert set(shows["out"]) == {"core1"}
+    session.set_variable("version", "v1")
+    shown = [o["id"] for o in session.list_objects()]
+    assert "extra" not in shown and "coil" not in shown and "core1" in shown
+
+
+def test_what_lands_in_a_switch_from_elsewhere():
+    """From the review: code says every branch, `m.parent = versions` too,
+    and the script tab keeps it so; a paste from another scene lands in the
+    branch shown, and an object exported out of a branch takes its branch
+    nowhere -- into a plain collection, its script still runs."""
+
+    @scene
+    def placed(v: Literal["a", "b"] = "b"):
+        versions = choose(v)
+        m = magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=0.01)
+        m.move((0.01, 0, 0))
+        m.parent = versions
+        versions.add("a", magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=0.004))
+
+    session = placed.build().session
+    assert "m" in [o["id"] for o in session.list_objects()]
+    assert build.rebuilt(session).to_dict()["events"] == session.to_dict()["events"]
+
+    session = unit.build().session
+    session.set_variable("version", "v2")
+    other = MagpylibStudioSession()
+    other.add_object(
+        "ball", "magnet.Sphere", {"diameter": 0.01, "polarization": [0, 0, 1]}
+    )
+    fragment = other.export_object("ball")
+    pasted = session.import_fragments([fragment], parent="versions")
+    assert pasted["ok"]
+    session.set_variable("version", "v1")
+    assert pasted["ids"][0] not in [o["id"] for o in session.list_objects()]
+
+    out = session.export_object("core1")
+    assert all("branch" not in e for e in out["scene"]["events"] if e["op"] == "create")
+    session.add_object("grp", "Collection", parent=None)
+    assert session.import_fragments([out], parent="grp")["ok"]
+    assert build.rebuilt(session).to_dict()["events"] == session.to_dict()["events"]
+    refused = session.add_object("x", "magnet.Sphere", parent="grp", branch="v1")
+    assert not refused["ok"]

@@ -2889,6 +2889,10 @@ def _drop_from_variants(doc, name):
             del variants[variant]
 
 
+#: A host's edit into a switch: in the branch it shows (`add_object`).
+_SHOWN = object()
+
+
 class _Objects(dict):
     """The session's objects by id. Walked -- keys, values, `in` -- they are
     the scene's; asked for by id, a branch's that no switch chooses is found
@@ -3277,6 +3281,23 @@ class MagpylibStudioSession:
                 if "branch" in child and str(child["branch"]) != str(chosen):
                     out |= {each["id"] for each in _walk_specs([child])}
         return out
+
+    def _shows(self, switch):
+        """What a switch shows, for a view to say: ``{"choice", "branch",
+        "out"}``, `out` the ids of what its other branches hold -- set aside,
+        with steps of their own, and no history gone wrong."""
+        written, chosen = self._switches[switch]
+        # None for a switch on a value written out, no variable to name
+        choice = ", ".join(expressions.referenced_names([written])) or None
+        out = [oid for oid in self._absent if switch in self._ancestors(oid)]
+        return {"choice": choice, "branch": chosen, "out": out}
+
+    def _shown_branch(self, object_id):
+        """The branch `object_id` shows, if it is a switch (`choose`), else
+        None."""
+        if object_id not in self._switches:
+            return None
+        return self._switches[object_id][1]
 
     def _holds_switch(self, object_id):
         """Whether `object_id` is a switch or holds one: a pattern of it would
@@ -3898,6 +3919,12 @@ class MagpylibStudioSession:
                         if spec["id"] in partners
                         else {}
                     ),
+                    # a switch: the branch in the scene, and what chooses it
+                    **(
+                        {"shows": self._shows(spec["id"])}
+                        if spec["id"] in self._switches
+                        else {}
+                    ),
                 }
             )
             # copies made by a duplicate event: real objects in the field and
@@ -4187,6 +4214,8 @@ class MagpylibStudioSession:
                 **({"copies": entry["copies"]} if entry.get("copies") else {}),
                 # and the parts a sealed collection is made of, likewise
                 **({"parts": entry["parts"]} if entry.get("parts") else {}),
+                # the branch a switch shows
+                **({"shows": entry["shows"]} if entry.get("shows") else {}),
             }
             for entry in entries
         }
@@ -5724,7 +5753,14 @@ class MagpylibStudioSession:
         rotations=None,
         parent=None,
         switch=None,
+        branch=_SHOWN,
     ):
+        # Into a switch, from a host: in the branch it shows, so what is added
+        # is in the view. A script names its branch, or none for every one.
+        if branch is _SHOWN:
+            branch = self._shown_branch(parent)
+        elif branch is not None and parent not in self._switches:
+            return {"ok": False, "error": f"{parent!r} is no switch to have branches"}
         if any(s["id"] == object_id for s, _ in self._iter_specs()):
             return {"ok": False, "error": f"object id {object_id!r} already exists"}
         if parent is not None and (refused := self._no_room(parent)):
@@ -5747,6 +5783,7 @@ class MagpylibStudioSession:
                     **({"style": style} if style else {}),
                     **({"parent": parent} if parent else {}),
                     **({"switch": switch} if switch is not None else {}),
+                    **({"branch": branch} if branch is not None else {}),
                 }
             )
             if rotations:
@@ -6387,8 +6424,13 @@ class MagpylibStudioSession:
                 out.setdefault("style", {})["label"] = label
                 if parent is None:
                     out.pop("parent", None)
+                    out.pop("branch", None)
                 elif parent is not _BESIDE:
+                    # pasted into a group: the branch it shows, if a switch
                     out["parent"] = parent
+                    out.pop("branch", None)
+                    if (shown := self._shown_branch(parent)) is not None:
+                        out["branch"] = shown
             return out
 
         def beside(doc):
@@ -6473,6 +6515,7 @@ class MagpylibStudioSession:
             if out.get("op") == "create":
                 if out.get("parent") not in ids:
                     out.pop("parent", None)
+                    out.pop("branch", None)  # a branch is of the switch it is in
                 out.pop("overridden", None)
             if "children" in out:
                 out["children"] = [c for c in out["children"] if c in ids]
@@ -6696,10 +6739,14 @@ class MagpylibStudioSession:
             if out.get("children"):
                 out["children"] = [ids[c] for c in out["children"]]
             if out.get("op") in ("create", "reparent") and out.get("parent") is None:
-                # at their root, so at the paste's
+                # at their root, so at the paste's -- and in the branch it
+                # shows, pasted into a switch, whatever branch it came from
                 out.pop("parent", None)
+                out.pop("branch", None)
                 if parent is not None:
                     out["parent"] = parent
+                    if (shown := self._shown_branch(parent)) is not None:
+                        out["branch"] = shown
             events.append(out)
         _rebase_doc({"events": events}, base_dir, self._base_dir)
         return {
@@ -7196,11 +7243,16 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"name {object_id} {new_id}")
 
-    def move_object(self, object_id, parent=None, branch=None):
+    def move_object(self, object_id, parent=None, branch=_SHOWN):
         """Reparent an object: into a Collection, or to the root
         (parent=None). Position and orientation in world coordinates are
-        preserved across the move. `branch` puts it in that branch of
-        `parent`, a switch (`choose`)."""
+        preserved across the move. Into a switch (`choose`) it goes into the
+        branch the switch shows, unless `branch` names one, or is None for
+        every one."""
+        if branch is _SHOWN:
+            branch = self._shown_branch(parent)
+        elif branch is not None and parent not in self._switches:
+            return {"ok": False, "error": f"{parent!r} is no switch to have branches"}
         spec = self._spec(object_id)
         if parent is not None:
             subtree_ids = {s["id"] for s, _ in self._iter_specs([spec])}

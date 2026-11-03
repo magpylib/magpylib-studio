@@ -2673,6 +2673,12 @@ scene function cannot be recorded: only the branch taken runs.
   no switch, writes the chosen branch alone.
 - **A pattern of a switch, or of what holds one, is refused**: its copies would
   copy every branch. Pattern what a branch holds.
+- **From a panel, an object goes into the branch shown**: added, moved or pasted
+  into a switch, it lands in the branch in the scene, so it stays in the view; a
+  copy beside its source stays in the source's. A script says its branch, or
+  none for every one. The legend and the studio's tree name the branch each
+  switch shows, and the tree lists no headstones for the other branches, whose
+  objects are built and only not shown.
 
 ### Rejected
 
@@ -2684,6 +2690,5 @@ scene function cannot be recorded: only the branch taken runs.
 
 ### Limits
 
-- An object goes into its branch before any step on it, else it is refused.
-- The views follow in their own steps: the legend lists the chosen branch, with
-  nothing yet to add an object to a branch from the panel.
+- An object with steps of its own goes into a branch as into any collection:
+  moved in, its pose kept as numbers, with a warning.

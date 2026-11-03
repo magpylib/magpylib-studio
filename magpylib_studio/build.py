@@ -403,8 +403,12 @@ class Object:
         self._enter()
         if parent is not None:
             parent._enter()
+        # as code says it, a switch's too: in every branch
         self._scene._call(
-            "move_object", self.id, parent=None if parent is None else parent.id
+            "move_object",
+            self.id,
+            parent=None if parent is None else parent.id,
+            branch=None,
         )
         return self
 
@@ -711,7 +715,7 @@ class Scene:
                 params=obj._params or None,
                 style=obj._style or None,
                 parent=None if parent is None else parent.id,
-                **getattr(obj, "_create_keys", {}),
+                **{"branch": None, **getattr(obj, "_create_keys", {})},
             )
         except BuildError:
             obj._entered = False

@@ -1131,6 +1131,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The branch a switch shows, beside its name: what it is now, quieter. */
+.magpy-legend-shows {
+  flex: none;
+  padding-left: 6px;
+  opacity: 0.55;
+  font-size: 0.9em;
+}
+
 /* Nothing drawn under it -- an empty collection -- so nothing to hide. */
 .magpy-legend-row.empty > .magpy-legend-eye {
   visibility: hidden;

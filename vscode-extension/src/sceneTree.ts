@@ -42,6 +42,10 @@ export interface SceneObject {
    *  as for a broken mesh, the row says so rather than waiting to be
    *  clicked. Pairs marked as meant are left out. */
   overlaps?: string[];
+  /** On a switch (`choose`): the branch it shows, the choice that picks it,
+   *  and what its other branches hold, set aside -- not a history gone
+   *  wrong, so no headstone rows for them. */
+  shows?: { choice: string | null; branch: string; out: string[] };
   /** The scene the row is in, set by the tree. */
   scene?: SceneDocument;
 }
@@ -549,6 +553,14 @@ export class SceneTreeProvider
     const fault = obj.mesh && meshFault(obj.mesh);
     item.description = obj.visible ? obj.type : `${obj.type} · hidden`;
     item.tooltip = `${obj.id} — ${obj.type}${obj.visible ? '' : ' (hidden)'}`;
+    if (obj.shows) {
+      // which branch is in the scene, and so where an object dropped in goes
+      item.description = `${item.description} · ${obj.shows.branch}`;
+      item.tooltip += obj.shows.choice
+        ? ` — shows ${obj.shows.branch}, as ${obj.shows.choice} is: what is ` +
+          'added to it goes there'
+        : ` — shows ${obj.shows.branch}, written so`;
+    }
     if (obj.mesh) {
       // A mesh's row says where it came from, because that is what the object
       // is — the file, not the forty thousand numbers in it.
@@ -612,9 +624,11 @@ export class SceneTreeProvider
     operations: SceneOperation[],
   ): SceneObject[] {
     const live = new Set(objects.map((o) => o.id));
+    // what a switch's other branches hold is built, only not shown
+    const aside = new Set(objects.flatMap((o) => o.shows?.out ?? []));
     const steps = new Map<string, SceneOperation[]>();
     for (const op of operations) {
-      if (!live.has(op.target)) {
+      if (!live.has(op.target) && !aside.has(op.target)) {
         const own = steps.get(op.target) ?? [];
         own.push(op);
         steps.set(op.target, own); // insertion order is log order
