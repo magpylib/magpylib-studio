@@ -45,6 +45,19 @@ as the wires of a current (#124).
 ### Fixed
 
 <details>
+<summary>Field lines on a scene with a path, and on a solved face-charge model</summary>
+
+On a scene with a path, field lines failed now and then with "operands could not
+be broadcast together": the threads that compute them shared each source, which
+magpylib pads in place while it computes (magpylib#1074). Each is now given the
+source at the step the view draws, which also computes one step instead of every
+one: 16 coils on an 8-step path, 1.4 s to 0.24 s. On a solved face-charge model
+they failed with "buffer source array is read-only" with scipy before 1.18
+(#122, #123).
+
+</details>
+
+<details>
 <summary>A solve inside a scene function is refused by name</summary>
 
 Inside a `@scene` function, `solve_face_charge` added its working copies to the
