@@ -60,6 +60,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0049](#0049-a-scene-function-refuses-what-a-solve-makes)                                      | A scene function refuses what a solve makes                  |
 | [0050](#0050-a-saved-page-carries-its-variants)                                                | A saved page carries its variants                            |
 | [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
+| [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
 
 ---
 
@@ -2692,3 +2693,43 @@ scene function cannot be recorded: only the branch taken runs.
 
 - An object with steps of its own goes into a branch as into any collection:
   moved in, its pose kept as numbers, with a warning.
+
+## 0052. A solve that cannot be done again is said out of date
+
+**Status:** accepted 2026-11-03, on Alex's word (#89).
+
+### Context
+
+A face-charge sheet that keeps no part -- solved before material-response 0.9.1,
+or built from its arrays alone -- cannot be solved again
+([0048](#0048-the-engine-solves-a-sheet-again)). A variant that lifted the
+magnet off one left it at the first solve's charges, and nothing said so.
+
+### Decision
+
+- **Said, not refused**: such a sheet whose sources have moved since is marked
+  solved for another arrangement -- a warning on its rows in the legend and the
+  studio's tree, and `stale` in the notebook's `last_edit`. Refusing the edit
+  would leave nothing to drag.
+- **As the sheet sees it**: what it was solved for is every other source's pose
+  in the sheet's frame and what each is made of, so moving the whole assembly
+  together changes nothing.
+- **From where the scene starts**: a load or a build, or a sheet's arrival, and
+  again whenever its charges change, as a notebook's solve changes them. A
+  second view on the scene keeps what it was solved for, and so does a saved
+  page's copy of it. Put back as it was, it is right again, an undo included.
+- **A pattern's copies count**, as charges the solve never saw: a copy of such a
+  sheet away from it is stale, and so is the sheet.
+- **A run's every step has its own field lines** (#129), as a frame is drawn
+  afresh: coloured over the whole run, at a drag's grid, kept per frame, and the
+  last step the scene's own.
+
+### Limits
+
+- A body solved by `solve_cells` is not said yet: studio cannot tell its cells
+  from a meshed magnet's (#89).
+- A sheet inside a sealed collection is not checked: its parts have no ids.
+- What a sheet was solved for is not saved: reopened, the scene is taken as
+  solved for as it stands.
+- A run of more steps than are captured whole (`MAX_DRAGGABLE_PATH`, 1024) is
+  magpylib's own subsample, and its frames keep no lines.

@@ -247,6 +247,9 @@ def _drawn_ahead(session, names, payload):
     copy = MagpylibStudioSession()
     copy.load_scene(json.loads(json.dumps(session.to_dict())), session._base_dir)
     copy.follower = session.follower
+    # what the sheets were solved for is the view's, not the page's start
+    copy._solved_for = dict(getattr(session, "_solved_for", {}))
+    copy._stale = None
     pool, places = [], {}
     start = _pooled(payload, pool, places)
     scenes = {}
@@ -1112,6 +1115,11 @@ class SceneWidget(anywidget.AnyWidget):
         solves = self._session.take_solves()
         if solves:
             edit = {**(edit or {}), "solves": solves}
+        # the sheets this leaves solved for another arrangement: none can
+        # be solved again here (#89)
+        stale = self._session.stale_solves()
+        if stale:
+            edit = {**(edit or {}), "stale": list(stale)}
         first = self._shown is None
         self._shown = doc
         payload = self._session.get_scene()

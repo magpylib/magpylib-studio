@@ -460,3 +460,125 @@ def test_a_saved_page_draws_each_variant_solved_again():
         assert plate(carried["scenes"][name]) == live
         assert plate(carried["scenes"][name]) != plate(carried["start"])
         view.undo()
+
+
+def test_a_sheet_with_no_part_is_said_solved_for_another_arrangement():
+    """#89: a sheet that keeps no part cannot be solved again, so a variant
+    or a drag that lifts the magnet off it says so -- in the listing, the
+    legend's tree and the notebook's `last_edit` -- and putting it back,
+    moving or turning it all together, moving a uniform field, or a second
+    view on the scene say nothing; new charges are a solve again."""
+    from typing import Annotated
+
+    from magpylib_material_response import UniformField
+    from scipy.spatial.transform import Rotation
+
+    from magpylib_studio import Length
+
+    outside = sheet_of(solved_above(0.0085))
+
+    @scene(variants={"near": {"lift": 0.0085}, "far": {"lift": 0.03}})
+    def above(lift: Annotated[float, Length(0.005, 0.05)] = 0.0085):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(0, 0, lift),
+        )
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+        )
+        field = UniformField(B=(0, 0, 0.001))
+        return magnet, plate, field
+
+    built = above.build()
+    view = SceneWidget(built, editable=True)
+    view.send = lambda *_, **__: None
+    studio = view._session
+
+    def use(name):
+        ask = {
+            "kind": "rpc",
+            "id": 1,
+            "method": "use_variant",
+            "params": {"name": name},
+        }
+        view._on_message(view, ask, [])
+
+    assert studio.stale_solves() == []
+    use("far")
+    assert studio.stale_solves() == ["plate"] == view.last_edit["stale"]
+    assert [o["id"] for o in studio.list_objects() if o.get("stale")] == ["plate"]
+    assert [n["id"] for n in view.tree if n.get("stale")] == ["plate"]
+    assert SceneWidget(built, editable=True)._session.stale_solves() == ["plate"]
+    use("near")
+    assert studio.stale_solves() == [] and "stale" not in view.last_edit
+    _drag(view, "magnet", (0, 0, 0.02), (0, 0, 0.03))  # a drag's steps too
+    assert studio.stale_solves() == ["plate"]
+    assert view.undo()
+    assert studio.stale_solves() == []
+    studio.move("field", [0.05, 0, 0])  # a uniform field has no place
+    assert studio.stale_solves() == []
+    turn = Rotation.from_euler("x", 30, degrees=True)
+    for each in ("magnet", "plate", "field"):  # together, about the origin
+        at = np.add(studio.get_transform(each)["position"], [0.01, 0, 0])
+        studio.set_transform(
+            each,
+            position=turn.apply(at).tolist(),
+            orientation=turn.as_rotvec(degrees=True).tolist(),
+        )
+    assert studio.stale_solves() == []
+    studio.move("magnet", [0, 0.02, 0])
+    assert studio.stale_solves() == ["plate"]
+    charges = (np.asarray(outside.charge_densities) * 0.5).tolist()
+    assert studio.set_params({"plate": {"charge_densities": charges}})["ok"]
+    assert studio.stale_solves() == []  # solved again, as a notebook does
+
+
+def test_copies_and_pages_of_a_sheet_with_no_part():
+    """A pattern's copies of a sheet that keeps no part stand where it was not
+    solved for, and are charges its solve never saw: all of them are stale,
+    and the source's row says so; and a page drawn from a view at the far
+    variant marks the far scene, not the near one it began at."""
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    outside = sheet_of(solved_above(0.0085))
+
+    @scene(variants={"near": {"lift": 0.0085}, "far": {"lift": 0.03}})
+    def above(lift: Annotated[float, Length(0.005, 0.05)] = 0.0085):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(0, 0, lift),
+        )
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+        )
+        return magnet, magpy.Collection(plate, style_label="plates")
+
+    def marked(nodes):
+        here = [n["id"] for n in nodes if n.get("stale")]
+        return here + [i for n in nodes for i in marked(n["children"])]
+
+    studio = above.build().session
+    studio.duplicate_along("plate", 3, [0.1, 0, 0])
+    assert studio.stale_solves() == ["plate", "plate#1", "plate#2"]
+    tree = {n["id"]: n for n in studio.object_tree()[1]["children"]}
+    assert tree["plate"].get("stale")
+
+    view = SceneWidget(above.build(), editable=True)
+    view.send = lambda *_, **__: None
+    ask = {"kind": "rpc", "id": 1, "method": "use_variant", "params": {"name": "far"}}
+    view._on_message(view, ask, [])
+    scenes = view._saved()["variants"]["scenes"]
+    stale = {name: marked(each["tree"]) for name, each in scenes.items()}
+    assert stale == {"near": [], "far": ["plate"]}

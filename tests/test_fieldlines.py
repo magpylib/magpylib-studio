@@ -332,3 +332,39 @@ def test_read_only_arrays_are_turned_as_copies(monkeypatch):
     assert fieldlines._inside_sheets(sheets, points).tolist() == [True, False]
     (drawn,) = threejs.fields_of([("field", field)])
     assert drawn["B"] == [0, 0, 0.01]
+
+
+def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
+    """#129: a run's frame is drawn afresh, and it carried no lines, so a
+    run scrubbed back showed none. Each frame has its own step's, coloured
+    over the whole run as the lines at rest are, the last the scene's own,
+    and a saved page carries them with its run. A run subsampled past what
+    is captured whole keeps frames without lines."""
+    path = [(0.004 * i, 0, 0) for i in range(8)]
+    magnet = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01,) * 3, position=path
+    )
+    lines = magpy.Sensor(
+        pixel=[
+            (x, 0, z)
+            for z in np.linspace(-0.02, 0.02, 7)
+            for x in np.linspace(-0.03, 0.05, 15)
+        ],
+        style={"pixel": {"size": 0, "field": {"source": "B"}}},
+    )
+    view = SceneWidget(magnet, lines, field_lines=True)
+    session = view._session
+    first, last = session.get_scene(frame=0), session.get_scene(frame=7)
+    assert first["fieldlines"] and first["fieldlines"] != last["fieldlines"]
+    assert last["fieldlines"] == view.payload["fieldlines"]
+    assert first["fieldlines"][0]["levels"] == last["fieldlines"][0]["levels"]
+    assert session.get_scene(frame=-1)["fieldlines"]
+    run = view._saved()["run"]
+    assert all(frame is None or frame["fieldlines"] for frame in run)
+
+    from magpylib_studio import threejs
+
+    monkeypatch.setattr(threejs, "MAX_DRAGGABLE_PATH", 4)
+    session._animated = None  # captured again, subsampled
+    with pytest.warns(UserWarning, match="greater than the max allowed"):
+        assert "fieldlines" not in session.get_scene(frame=2)

@@ -3051,6 +3051,8 @@ class MagpylibStudioSession:
         the log relative to the children they carry.
         """
         self._animated = None  # the captured run is of a scene that no longer is
+        self._lines_of_frames = None  # and the lines of its frames
+        self._stale = None  # `stale_solves`, of the scene that was
         # Refilled as the objects are built. The cache behind it is not
         # cleared: it is keyed by what was read, not by which scene read it.
         self._mesh_status = {}
@@ -3864,6 +3866,7 @@ class MagpylibStudioSession:
             partners = self._overlap_partners(counted=copies == "count")
         except Exception:  # noqa: BLE001 - an optional check must not cost the listing
             partners = {}
+        stale = set(self.stale_solves())
         # what is built, which is the whole document unless it is rolled back
         for spec, parent in self._iter_specs(self._objects_view):
             if spec["id"] in self._absent:
@@ -3925,6 +3928,19 @@ class MagpylibStudioSession:
                         if spec["id"] in self._switches
                         else {}
                     ),
+                    # a sheet solved for another arrangement, with no part --
+                    # or a pattern's copy of one, its copies counted here
+                    **(
+                        {"stale": True}
+                        if spec["id"] in stale
+                        or (
+                            copies == "count"
+                            and any(
+                                c in stale for c in self._derived.get(spec["id"], ())
+                            )
+                        )
+                        else {}
+                    ),
                 }
             )
             # copies made by a duplicate event: real objects in the field and
@@ -3944,6 +3960,7 @@ class MagpylibStudioSession:
                                 if copy_id in partners
                                 else {}
                             ),
+                            **({"stale": True} if copy_id in stale else {}),
                         }
                     )
         return objects
@@ -4216,6 +4233,8 @@ class MagpylibStudioSession:
                 **({"parts": entry["parts"]} if entry.get("parts") else {}),
                 # the branch a switch shows
                 **({"shows": entry["shows"]} if entry.get("shows") else {}),
+                # a solve it cannot keep up with
+                **({"stale": True} if entry.get("stale") else {}),
             }
             for entry in entries
         }
@@ -4437,9 +4456,15 @@ class MagpylibStudioSession:
                 self._animated = threejs.capture_frames(
                     self._drawn(), self.path_steps()
                 )
-            return threejs.frame_payload(
+            payload = threejs.frame_payload(
                 self._animated, frame, live=self._objs, derived=self._derived
             )
+            # A frame is drawn afresh, and its lines are its own step's -- where
+            # its steps are the path's, one a frame: a run past what is captured
+            # whole (`threejs.MAX_DRAGGABLE_PATH`) is magpylib's own subsample.
+            if self.field_lines and payload.get("frames") == self.path_steps():
+                payload["fieldlines"] = self._frame_lines(payload.get("frame", frame))
+            return payload
         # The field the pixels read, once a scene: the arrows are drawn from
         # it, and the lines take their colours from it.
         readings = None
@@ -5043,6 +5068,68 @@ class MagpylibStudioSession:
                     encoded,
                 )
             )
+        return items
+
+    def _frame_lines(self, frame):
+        """The field lines at `frame`, a step of the scene's paths: each
+        sensor's, drawn as at rest from the scene stood at that step
+        (`fieldlines.scene_at`), with none of a gesture's caches. Kept for
+        the frame for as long as the run captured with them is the scene's
+        (`_animated`), which a change to the scene lets go (#129)."""
+        from magpylib_studio import fieldlines
+
+        kept = getattr(self, "_lines_of_frames", None)
+        if kept is None or kept[0] is not self._animated:
+            kept = self._lines_of_frames = (self._animated, {}, [])
+        if frame in kept[1]:
+            return kept[1][frame]
+        # The colours span the whole run, as the lines at rest and the pixels'
+        # arrows do, read once a run; and the last step is the scene's lines.
+        if not kept[2]:
+            kept[2].append(fieldlines.readings(self.scene))
+        readings = kept[2][0]
+        if frame >= self.path_steps() - 1:
+            kept[1][frame] = self._field_lines(readings)
+            return kept[1][frame]
+        stood, originals = fieldlines.scene_at(self.scene, max(0, frame))
+        key_of = self._names_of_objects()
+        sources = fieldlines.sources_of(stood)
+        # a frame is drawn once and passed: the grid of a gesture's frame
+        budget = fieldlines.DRAG_POINTS
+        items = []
+        for sensor in fieldlines.sensors_of(stood):
+            key = key_of.get(id(originals[id(sensor)]))
+            if key is None:
+                continue
+            kind = fieldlines.kind_of(sensor)
+            seeds = fieldlines.seeds_of(sensor)
+            grid = fieldlines.grid_around(sources, seeds, budget)
+            if fieldlines.is_flat(grid) and not self._keeps_to_plane(
+                sources, seeds, kind
+            ):
+                grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
+            points = fieldlines.points_of(grid)
+            values = fieldlines.field(sources, points, kind)
+            within = fieldlines.inside(sources, points)
+            if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
+                grid, values, within
+            ):
+                grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
+                points = fieldlines.points_of(grid)
+                values = fieldlines.field(sources, points, kind)
+                within = fieldlines.inside(sources, points)
+            items.append(
+                fieldlines.item(
+                    sensor,
+                    key,
+                    grid,
+                    values,
+                    within,
+                    seeds,
+                    readings.get(originals[id(sensor)]),
+                )
+            )
+        kept[1][frame] = items
         return items
 
     @staticmethod
@@ -6240,6 +6327,7 @@ class MagpylibStudioSession:
             for event in events[start : start + count]:
                 self._apply(event)
             self._animated = None  # the captured run is of a scene that no longer is
+            self._stale = None  # a pose moved: `stale_solves` again
         except Exception as e:  # noqa: BLE001 - report every failure to the caller
             events[start : start + count] = kept
             self._build()
@@ -7394,6 +7482,107 @@ class MagpylibStudioSession:
             ]
         return self._parts
 
+    def _partless(self):
+        """The ids of the solved sheets that keep no part to solve again from:
+        solved before material-response 0.9.1, or built from their arrays
+        alone (decision 0048) -- a pattern's copies of one among them."""
+        return [
+            key
+            for key, obj in self._objs.items()
+            if threejs.is_charge_sheet(obj) and not getattr(obj, "_part", None)
+        ]
+
+    def _arrangement(self):
+        """What drives a solve, once a build: each source magpylib sums --
+        a pattern's copies and those inside a copied group included -- at
+        the last step of its pose, and what it is made of. A sheet's charge
+        is an answer, not a cause, and a uniform field has no place."""
+        sources = self.scene.sources_all
+        positions, turns, made = [], [], []
+        for source in sources:
+            turn = source.orientation
+            turn = turn if turn.single else turn[-1]
+            positions.append(np.atleast_2d(source.position)[-1])
+            turns.append(turn.as_matrix())
+            made.append(type(source).__name__.encode())
+            if not threejs.is_charge_sheet(source):
+                for name in (*_PARAM_ATTRS, "B"):
+                    value = getattr(source, name, None)
+                    if value is not None:
+                        made.append(np.asarray(value).tobytes())
+        fields = np.array([threejs.is_uniform_field(s) for s in sources], dtype=bool)
+        return (
+            np.asarray(positions, dtype=float).reshape(-1, 3),
+            np.asarray(turns, dtype=float).reshape(-1, 3, 3),
+            fields,
+            b"|".join(made),
+        )
+
+    def _solved_from(self, sheet_id, arranged=None):
+        """What a solve of `sheet_id` followed from, as the sheet sees it:
+        every source's pose in the sheet's frame (`_arrangement`), so moving
+        or turning the whole assembly together changes nothing, and moving a
+        magnet against the sheet does (#89)."""
+        positions, turns, fields, made = arranged or self._arrangement()
+        sheet = self._objs[sheet_id]
+        at = np.atleast_2d(sheet.position)[-1]
+        turn = sheet.orientation if sheet.orientation.single else sheet.orientation[-1]
+        back = turn.as_matrix()
+        # in the sheet's frame, R^T (p - at) and R^T M; a field has no place
+        seen = (positions - at) @ back
+        seen[fields] = 0.0
+        faced = np.einsum("ji,njk->nik", back, turns)
+        return made, seen, faced
+
+    @staticmethod
+    def _same_arrangement(one, other):
+        """Whether two `_solved_from` say the same, to a nanometre and as
+        close in a turn: a pose written in the document is rounded, and a
+        turn's sign of zero is no change."""
+        if one[0] != other[0] or one[1].shape != other[1].shape:
+            return False
+        return np.allclose(one[1], other[1], rtol=0, atol=1e-9) and np.allclose(
+            one[2], other[2], rtol=0, atol=1e-9
+        )
+
+    def stale_solves(self):
+        """The solved sheets that keep no part (`_partless`), whose sources
+        stand otherwise than when they were solved: solved for another
+        arrangement, and with nothing here to solve them again.
+
+        A sheet is taken as solved for the scene as it began (`load_scene`,
+        `forget_history`), as it was when it came in, and again whenever its
+        charges change -- solved again in a notebook. A pattern's copy of one
+        is right only where its source was solved for. Put back as it was, a
+        sheet is right again."""
+        if self._stale is None:
+            known = getattr(self, "_solved_for", None)
+            if known is None:
+                known = self._solved_for = {}
+            partless = self._partless()
+            stale = []
+            if partless:
+                arranged = self._arrangement()
+                source_of = {c: s for s, made in self._derived.items() for c in made}
+                for key in partless:
+                    charges = np.asarray(self._objs[key].charge_densities).tobytes()
+                    now = self._solved_from(key, arranged)
+                    base = source_of.get(key)
+                    if base is not None:  # a copy: what its source was solved for
+                        solved = known.get(base)
+                        if solved is not None and not (
+                            solved[0] == charges
+                            and self._same_arrangement(solved[1], now)
+                        ):
+                            stale.append(key)
+                        continue
+                    if known.get(key, (None,))[0] != charges:
+                        known[key] = (charges, now)
+                    elif not self._same_arrangement(known[key][1], now):
+                        stale.append(key)
+            self._stale = stale
+        return self._stale
+
     def _solve_inputs(self):
         """What a solve of the scene follows from: every source's pose and what
         it is made of, of a sheet its pose alone, since its charge is the answer.
@@ -7533,6 +7722,7 @@ class MagpylibStudioSession:
             sheet._mean = None if mean is None else np.asarray(mean, float).reshape(3)
             sheet._part = part
         self._animated = None  # the captured run is of a scene that no longer is
+        self._stale = None  # new charges: `stale_solves` again
         if snapshot is not None:
             self._record_state(label, snapshot)
         self._changed()  # as a build would have: `_whole_since` redraws it
@@ -7574,6 +7764,7 @@ class MagpylibStudioSession:
         `scene` is a document dict or a path to a JSON file containing one.
         (Script -> document is deferred by design.)
         """
+        self._solved_for = {}  # what its sheets were solved for: this scene's
         result = self._replace(scene, base_dir, "load scene")
         if result["ok"]:
             self.forget_history()
@@ -7950,9 +8141,15 @@ class MagpylibStudioSession:
         """Start the undo history here: what is in the document now is where
         undo stops. `load_scene` does this itself; this is for a host that
         arrives at its starting point another way -- a scene function's
-        build, a notebook view taking a session it did not make."""
+        build, a notebook view taking a session it did not make. It is also
+        where a solve that cannot be done again is taken as right
+        (`stale_solves`)."""
         self._undo = []
         self._redo = []
+        # the sheets not known yet, as solved for the scene now: one known --
+        # a second view on the same scene -- keeps what it was solved for
+        self._stale = None
+        self.stale_solves()
 
     def restore(self, doc):
         """Put the document back to `doc`, a snapshot of this session's own,

@@ -456,6 +456,26 @@ def _sheet(source):
     return type(source).__module__.startswith("magpylib_material_response.face_charge")
 
 
+def scene_at(scene, step):
+    """`scene` stood at `step` of its paths: a copy, every object's path
+    properties cut to that step's entry (or a shorter path's last), and each
+    copy's original, by `id` of the copy -- for a run's frame to draw the
+    lines of its own step (#129)."""
+    stood = copy.deepcopy(scene)
+    originals = {}
+    for made, was in zip(
+        [stood, *stood.children_all], [scene, *scene.children_all], strict=True
+    ):
+        originals[id(made)] = was
+        for prop in made._path_properties:
+            value = getattr(made, f"_{prop}", None)
+            if value is None:
+                continue
+            at = min(max(step, 0), len(value) - 1)
+            setattr(made, f"_{prop}", value[at : at + 1])
+    return stood, originals
+
+
 def _last_step(source):
     """`source` at the last step of its path, every path property one entry
     long -- itself where its path is one step. A shallow copy, made as the
