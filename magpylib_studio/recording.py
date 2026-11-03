@@ -826,17 +826,25 @@ class _Recorder:
         it was made: one with steps would keep its pose as numbers, and a
         variable it was placed by would stop deciding it in every branch."""
         group = self.known(switch)
-        for child in children:
-            recorded = self.known(child)
+        recorded = [self.known(child) for child in children]
+        with hook.nested():
+            result = self.session._adopt_into_branch(
+                [each.id for each in recorded], group.id, branch
+            )
+        if not result["ok"]:
+            raise BuildError(result["error"])
+        for object_id in result["touched"]:
+            warnings.warn(
+                f"{object_id!r} is already placed, so adding it to {branch!r} of "
+                f"{group.id!r} moves it and keeps its pose as numbers: a "
+                f"position written in variables stops following them. Add "
+                f"it before anything else touches it.",
+                stacklevel=4,
+            )
             with hook.nested():
-                result = self.session._adopt_fresh(recorded.id, group.id, branch)
-            if not result["ok"]:
-                raise BuildError(result["error"])
-            if not result["fresh"]:
-                raise BuildError(
-                    f"{recorded.id!r} is already placed: add it to its branch "
-                    f"{branch!r} before anything else touches it"
-                )
+                moved = self.session.move_object(object_id, group.id, branch)
+            if not moved["ok"]:
+                raise BuildError(moved["error"])
 
     def call(self, recorded, method, *args, **kwargs):
         return self.document._call(method, *args, **kwargs)
@@ -1574,18 +1582,36 @@ class Switch(magpy.Collection):
         self.aside = magpy.Collection()
 
     def add(self, *children, **kwargs):
-        if not children or not isinstance(children[0], str):
+        if not children or not _is_branch(children[0]):
             return super().add(*children, **kwargs)
         branch, *objects = children
         recorder = _BUILDING.get()
         if recorder is None:
-            holder = super() if branch == self.chosen else self.aside
+            # as the document compares them: a choice of numbers takes "1"
+            chosen = str(branch) == str(self.chosen)
+            holder = super() if chosen else self.aside
             holder.add(*objects, **kwargs)
             return self
         recorder.add_branch(self, branch, objects)
         with hook.nested():  # every branch, as the document holds them
             super().add(*objects, **kwargs)
         return self
+
+    def remove(self, *children, **kwargs):
+        # called plainly, one of another branch is held aside
+        aside = [child for child in children if child.parent is self.aside]
+        rest = [child for child in children if child.parent is not self.aside]
+        if aside:
+            self.aside.remove(*aside, **kwargs)
+        if rest or not children:
+            super().remove(*rest, **kwargs)
+        return self
+
+
+def _is_branch(value):
+    """Whether `value`, first given to a switch's `add`, names a branch: a
+    choice's option, text or a number, where a collection's takes objects."""
+    return isinstance(value, str | numbers.Real) and not isinstance(value, bool)
 
 
 def choose(choice, **style):

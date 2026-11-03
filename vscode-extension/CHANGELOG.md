@@ -32,6 +32,16 @@ list of names keeps those (#118).
 
 </details>
 
+### Changed
+
+<details>
+<summary>Field lines half as thick</summary>
+
+A field line and its pulses are half as wide as before, so they no longer read
+as the wires of a current (#124).
+
+</details>
+
 ### Fixed
 
 <details>

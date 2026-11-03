@@ -828,7 +828,7 @@ _STEP_KEYS = {
     "duplicate_around": ("count", "axis", "anchor", "spin"),
     "duplicate_along": ("count", "step"),
     "mirror": ("plane", "normal", "anchor"),
-    "reparent": ("parent",),
+    "reparent": ("parent", "branch"),
     "remove": (),
 }
 
@@ -1498,6 +1498,8 @@ class _ScriptWriter:
             parts = [name]
         elif op == "reparent":
             parent = given.pop("parent", None)
+            if given.get("branch") is not None:
+                return f"{self.names[parent]}.add({given['branch']!r}, {name})"
             return f"{name}.parent = {self.names[parent] if parent else None}"
         else:  # remove
             return f"{self.word('remove')}({name})"

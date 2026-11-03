@@ -79,7 +79,7 @@ def test_the_scene_holds_the_chosen_branch(version):
     inert = {name for name, v in listed.items() if v.get("inert")}
     assert inert == ({"lift"} if version == "v2" else set())
     if version == "v2":  # and what it waits for
-        assert listed["lift"]["waits"] == [{"choice": "version", "values": ["v1"]}]
+        assert listed["lift"]["waits"] == [{"version": "v1"}]
     view = SceneWidget(built)
     drawn = {mesh["object_id"] for mesh in view.payload["meshes"]}
     assert drawn == set(held[version]) - {"inlay#1", "inlay#2"}
@@ -136,3 +136,62 @@ def test_a_switch_is_not_patterned():
 
     with pytest.raises(build.BuildError, match="holds a switch"):
         copied.build()
+
+
+def test_a_switch_at_its_edges():
+    """From the review of #124: a turned magnet goes into a branch as a
+    placed one goes into a collection; one moved out of a branch is in every
+    one; a choice of numbers is compared as the document compares it; a
+    switch whose choice cannot be read breaks alone; and a removed one no
+    longer keeps its choice live."""
+    from scipy.spatial.transform import Rotation
+
+    from magpylib_studio import remove
+
+    def cube(**kwargs):
+        return magpy.magnet.Cuboid(
+            dimension=(0.01,) * 3, polarization=(0, 0, 1), **kwargs
+        )
+
+    @scene
+    def edges(v: Literal["a", "b"] = "b", n: Literal[1, 2] = 1):
+        versions = choose(v)
+        turned = cube(orientation=Rotation.from_euler("z", 30, degrees=True))
+        versions.add("a", turned)
+        moved = cube(position=(0.03, 0, 0))
+        versions.add("a", moved)
+        versions.remove(moved)
+        versions.add(moved)
+        counts = choose(n)
+        counts.add(1, cube(position=(0, 0.03, 0)))
+        gone = choose(v)
+        gone.add("a", cube(position=(0, 0, 0.03)))
+        remove(gone)
+
+    with pytest.warns(UserWarning, match="already placed"):
+        session = edges.build().session
+    assert [o["id"] for o in session.list_objects()] == [
+        "versions",
+        "moved",
+        "counts",
+        "cuboid",
+    ]
+    edges(v="b", n=1)  # and plainly, the move out of a branch included
+    session.set_variable("v", "a")
+    assert "turned" in [o["id"] for o in session.list_objects()]
+    broken = MagpylibStudioSession()
+    doc = {
+        "variables": {"v": "a"},
+        "events": [
+            {"op": "create", "target": "sw", "type": "Collection", "switch": "=nope"},
+            {
+                "op": "create",
+                "target": "m",
+                "type": "magnet.Sphere",
+                "params": {"diameter": 0.01, "polarization": [0, 0, 1]},
+            },
+        ],
+    }
+    assert broken.load_scene(doc)["ok"]
+    assert [o["id"] for o in broken.list_objects()] == ["m"]
+    assert [entry["target"] for entry in broken._broken] == ["sw"]

@@ -621,7 +621,11 @@ export function createVariables(
         // read by a branch out of the scene: what it waits for, and that a
         // value set now is what that branch will have
         const waits = (v.waits || [])
-          .map((w) => `${w.choice} is ${w.values.join(" or ")}`)
+          .map((needs) =>
+            Object.entries(needs)
+              .map(([choice, value]) => `${choice} is ${value}`)
+              .join(" and "),
+          )
           .join(", or ");
         name.title += v.shadowed
           ? ` — nothing follows it any more: ${where(v.shadowed)} is stated` +
