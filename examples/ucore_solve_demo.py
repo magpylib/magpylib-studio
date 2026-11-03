@@ -1,16 +1,17 @@
 """A U-core solved again under your hand: `marimo edit examples/ucore_solve_demo.py`.
 
-Needs the widget extra, marimo and magpylib-material-response 0.9:
+Needs the widget extra, marimo and magpylib-material-response 0.9.1:
 
-    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9"
+    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.1"
 
 The U-core of material-response's docs, three soft-iron cuboids (chi = 999)
-wound with a coil of 400 ampere-turns, with a magnet in its gap, solved by face
-charge: sheets of charge on the core's surfaces and no volume mesh. Every step
-of a drag solves the core again (`SceneWidget.follow_edits`). What the solve
-keeps does the rest: `solve_face_charge(model, reuse=solved)` takes only a new
+wound with a coil of 400 ampere-turns, with a magnet in its gap and two uniform
+fields on it, solved by face charge: sheets of charge on the core's surfaces and no volume mesh. Each sheet
+keeps the part it was solved from, so the view solves the core again at every
+step of a drag, with nothing written here to ask for it. What the solve keeps
+does the rest: `solve_face_charge(model, reuse=solved)` takes only a new
 load and a back-substitution while the core stays as it was, so moving the
-magnet or changing the coil's current costs milliseconds. Pull a leg off the
+magnet, changing the coil's current or a field costs milliseconds. Pull a leg off the
 yoke and the matrix changes, so each step factors it again. The result stays
 right just past contact, which is where 0.8 fixed face charge. What each solve
 did is said under the view, from `solved_by` and `face_charge_info`.
@@ -29,7 +30,7 @@ def _():
     import magpylib as magpy
     import marimo as mo
     import numpy as np
-    from magpylib_material_response import solve_face_charge
+    from magpylib_material_response import UniformField, solve_face_charge
     from magpylib_material_response.face_charge import ChargeSheet
     from magpylib_material_response.polyline import (
         create_polyline_fillet,
@@ -45,6 +46,7 @@ def _():
         ChargeSheet,
         Count,
         SceneWidget,
+        UniformField,
         create_polyline_fillet,
         grid,
         magpy,
@@ -61,10 +63,14 @@ def _(mo):
     mo.md("""
     # A U-core solved while you drag
 
-    Drag the **magnet**, or slide **current** in the variables panel: the core
-    is solved again at every step, and its colours and the field lines follow.
-    Drag a **leg** off the yoke and each step costs a whole solve. One undo
-    takes back the move and its solve together.
+    Drag the **magnet**, or slide **current** or **vertical** in the variables
+    panel: the core is solved again at every step, and its colours and the field
+    lines follow. Drag a **leg** off the yoke and each step costs a whole solve.
+    One undo takes back the move and its solve together.
+
+    The arrow in the corner is the sum of the two uniform fields. Pick one in the
+    legend for its own arrow and its **B** in the object panel; pick both for
+    their sum.
     """)
     return
 
@@ -132,6 +138,7 @@ def _(
     Bounds,
     ChargeSheet,
     Count,
+    UniformField,
     grid,
     level,
     magpy,
@@ -149,25 +156,39 @@ def _(
             style_label="magnet",
         )
 
+    def _fields(vertical):
+        """A field along z, in tesla, and a weaker one turned about z. A field
+        is the same everywhere, so it has no place: only its turn counts."""
+        upward = UniformField(B=(0, 0, vertical), style_label="vertical")
+        turned = UniformField(B=(0.008, 0, 0), style_label="turned")
+        turned.rotate_from_angax(30, "z")
+        return upward, turned
+
     _coil = magpy.Collection(
         *(magpy.current.Polyline(current=100, vertices=v) for v in windings)
     )
     # Kept by `reuse=True`, for the first step of a drag to reuse: 8 n² bytes,
     # on the result, so only the last result is held.
     solved = solve_face_charge(
-        solvable(poses, _magnet(), _coil), level=level.value, reuse=True
+        solvable(poses, _magnet(), _coil, *_fields(0.01)),
+        level=level.value,
+        reuse=True,
     )
     sheets = [s for s in solved.sources_all if isinstance(s, ChargeSheet)]
+    _parts = [s.part for s in sheets]  # read here: each read makes a magnet
 
-    @scene(model_unit="mm", field_unit="mT")
+    @scene(model_unit="mm", field_unit="mT", solve_level=level.value)
     def ucore_scene(
         current: Annotated[float, Bounds(-200, 200, unit="current")] = 100,
+        vertical: Annotated[float, Bounds(-0.1, 0.1, unit="field")] = 0.01,
         density: Annotated[int, Count(4, 40, slider=(5, 25))] = 15,
     ):
         """The solved core, the coil at `current` amperes, the magnet in the
-        gap, and a probe in the core's plane of symmetry, `density` by
-        `density` pixels across 140 mm, drawn as its field lines."""
+        gap, the two fields, and a probe in the core's plane of symmetry,
+        `density` by `density` pixels across 140 mm, drawn as its field
+        lines."""
         magnet = _magnet()
+        upward, turned = _fields(vertical)
         coil = magpy.Collection(
             *(magpy.current.Polyline(current=current, vertices=v) for v in windings),
             style_label="coil",
@@ -185,23 +206,24 @@ def _(
                     charge_densities=s.charge_densities,
                     panels=s.panels,
                     mean_polarization=s.mean_polarization,
+                    part=part,
                     position=s.position,
                     style={
                         "label": s.style.label,
                         "charge": {"level": s.style.charge.level},
                     },
                 )
-                for s in sheets
+                for s, part in zip(sheets, _parts, strict=True)
             ),
             style_label="U-core",
         )
-        return iron, coil, magnet, probe
+        return iron, coil, magnet, upward, turned, probe
 
     return solved, ucore_scene
 
 
 @app.cell
-def _(SceneWidget, mo, solved, ucore_scene):
+def _(SceneWidget, mo, ucore_scene):
     view3d = SceneWidget(
         ucore_scene.build(),
         editable=True,
@@ -209,99 +231,35 @@ def _(SceneWidget, mo, solved, ucore_scene):
         open_panel="variables",
         height=720,
     )
-    last = {"solved": solved, "seconds": [], "edit": []}
+    last = {"solves": []}
     edited, set_edited = mo.state(0)
 
     def told(change):
-        """An edit let go: what it solved, for the line under the view. An
-        undo comes back to a scene solved already, but not the last one solved."""
-        if last["seconds"]:
-            last["edit"], last["seconds"] = last["seconds"], []
-        if view3d.last_edit.get("by") in ("undo", "redo", "reset"):
-            last.pop("state", None)
+        """An edit let go: what it solved, for the line under the view."""
+        last["solves"] = view3d.last_edit.get("solves", last["solves"])
         set_edited(change.new)
 
     view3d.observe(told, names="revision")
     view = mo.as_html(mo.ui.anywidget(view3d))
-    return edited, last, view, view3d
+    return edited, last, view
 
 
 @app.cell
-def _(
-    ChargeSheet,
-    last,
-    level,
-    magpy,
-    np,
-    solvable,
-    solve_face_charge,
-    view3d,
-):
-    def state_of(objects):
-        """What a solve follows from, to tell an edit that changes it from one
-        that does not, a probe dragged or its density."""
-        return [
-            (
-                obj.position.tobytes(),
-                obj.orientation.as_quat().tobytes(),
-                *(
-                    np.asarray(getattr(obj, name)).tobytes()
-                    for name in ("polarization", "dimension", "current", "vertices")
-                    if hasattr(obj, name)
-                ),
-            )
-            for obj in objects.values()
-            if not isinstance(obj, magpy.Sensor | magpy.Collection)
-        ]
-
-    def follow(objects):
-        """The core solved again where the view's objects now stand."""
-        state = state_of(objects)
-        if state == last.get("state"):
-            return None
-        last["state"] = state
-        ids = [k for k, obj in objects.items() if isinstance(obj, ChargeSheet)]
-        drives = [
-            obj.copy()
-            for obj in objects.values()
-            if isinstance(obj, magpy.magnet.Cuboid | magpy.current.Polyline)
-        ]
-        placed = [(objects[k].position, objects[k].orientation) for k in ids]
-        out = solve_face_charge(
-            solvable(placed, *drives), level=level.value, reuse=last["solved"]
-        )
-        last["solved"] = out
-        last["seconds"].append(out.face_charge_info["seconds"])
-        sheets = [s for s in out.sources_all if isinstance(s, ChargeSheet)]
-        return {
-            k: {
-                "vertices": s.vertices,
-                "faces": s.faces,
-                "panels": s.panels,
-                "charge_densities": s.charge_densities,
-                "mean_polarization": s.mean_polarization,
-            }
-            for k, s in zip(ids, sheets, strict=True)
-        }
-
-    view3d.follow_edits(follow)
-    return
-
-
-@app.cell
-def _(edited, last, mo, view):
+def _(edited, last, mo, solved, view):
     edited()  # the numbers follow each edit, when it is let go
-    _info = last["solved"].face_charge_info
+    _solves = last["solves"]
+    _info = _solves[-1] if _solves else solved.face_charge_info
     _said = (
-        f"Solved by `{last['solved'].solved_by}` at level {_info['level']}, "
+        f"Solved by `{solved.solved_by}` at level {_info['level']}, "
         f"{_info['unknowns']:,} unknowns, "
         f"in {_info['seconds'] * 1000:.0f} ms"
         f"{', on the factorization it kept' if _info['reused'] else ''}."
     )
-    if last["edit"]:
+    if _solves:
+        _mean = sum(each["seconds"] for each in _solves) / len(_solves)
         _said += (
-            f" The last edit solved {len(last['edit'])} times, "
-            f"at {sum(last['edit']) / len(last['edit']) * 1000:.0f} ms each."
+            f" The last edit solved {len(_solves)} times, "
+            f"at {_mean * 1000:.0f} ms each."
         )
     mo.vstack([view, mo.md(_said)])
     return

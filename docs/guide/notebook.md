@@ -162,11 +162,13 @@ took back); the same example logs them under the view, with what was selected
 and hidden. A drag of several objects, or a `set` of several values, is one
 edit: refused in part, none of it is made.
 
-`follow_edits(answer)` answers an edit while it happens: `answer(objects)` runs
-at every step of a drag or a slider, and what it returns,
-`{id: {parameter: value}}`, joins that edit's step, so one undo takes back both.
-`examples/ucore_solve_demo.py` solves a U-core again this way, with
-`solve_face_charge(model, reuse=solved)`.
+A part solved by `solve_face_charge` follows on its own: with
+magpylib-material-response 0.9.1, each sheet keeps the part it was solved from,
+so dragging a magnet or sliding a current solves it again, in the same step to
+undo (`examples/ucore_solve_demo.py`). `last_edit["solves"]` says what those
+solves took. `follow_edits(answer)` replaces that with your own:
+`answer(objects)` runs at every step of a drag or a slider, and what it returns,
+`{id: {parameter: value}}`, joins that edit's step.
 
 A `UniformField` from magpylib-material-response is an object like a coil: pass
 it to the view with the rest, any number of them. It has no place or body, so

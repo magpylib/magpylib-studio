@@ -119,6 +119,39 @@ _PUBLIC = {
 }
 
 
+#: The calls that make an edit a solved part may have to follow (`followed`). Not
+#: an undo, which comes back to a scene already whole, and not what replaces the
+#: scene, whose sheets are as it says.
+_FOLLOWED = frozenset(
+    {
+        "apply_edit",
+        "apply_edits",
+        "add_object",
+        "remove_object",
+        "move_object",
+        "copy_object",
+        "import_fragment",
+        "import_fragments",
+        "set_param",
+        "move",
+        "rotate",
+        "set_transform",
+        "clear_path",
+        "duplicate_around",
+        "duplicate_along",
+        "mirror",
+        "batch",
+        "set_variable",
+        "set_variables",
+        "restore_variable",
+        "use_variant",
+        "edit_event",
+        "remove_event",
+        "move_event",
+    }
+)
+
+
 def handle(session, request):
     """Dispatch one JSON-RPC request dict, return the response dict."""
     rid = request.get("id")
@@ -130,7 +163,11 @@ def handle(session, request):
             "error": {"type": "MethodError", "message": f"unknown method {method!r}"},
         }
     try:
-        result = getattr(session, method)(**params)
+        call = getattr(session, method)
+        if method in _FOLLOWED:
+            result = session.followed(lambda: call(**params))
+        else:
+            result = call(**params)
         return {"id": rid, "result": result}
     except Exception as e:  # noqa: BLE001 - report every failure to the caller
         return {"id": rid, "error": {"type": type(e).__name__, "message": str(e)}}

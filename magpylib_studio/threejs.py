@@ -1796,6 +1796,15 @@ def is_uniform_field(obj):
     )
 
 
+def is_charge_sheet(obj):
+    """Whether `obj` is magpylib-material-response's `ChargeSheet`, by name as
+    `is_uniform_field` is."""
+    cls = type(obj)
+    return cls.__name__ == "ChargeSheet" and cls.__module__.startswith(
+        "magpylib_material_response"
+    )
+
+
 def fields_of(named):
     """What a view is told of `named`, ``(id, UniformField)`` pairs: each field
     the eye has not hidden, ``{"id", "B"}``, B in tesla in the global frame, as

@@ -715,7 +715,9 @@ class SceneWidget(anywidget.AnyWidget):
                 changed[name] = _plain(value)
                 call = {"object_id": object_id, "name": name, "value": _plain(value)}
                 calls.append({"method": "set_param", "params": call})
-        result = session.apply_calls(calls, f"set {object_id}")
+        result = session.followed(
+            lambda: session.apply_calls(calls, f"set {object_id}"), from_host=False
+        )
         if not result.get("ok", True):
             raise ValueError(f"{object_id}: {result.get('error')}")
         edit = {"by": "set", "objects": [object_id], "changed": {object_id: changed}}
@@ -729,53 +731,30 @@ class SceneWidget(anywidget.AnyWidget):
         from magpylib_studio.session import _plain
 
         session = self._editing("set_variable")
-        result = session.set_variable(name, _plain(value))
+        result = session.followed(
+            lambda: session.set_variable(name, _plain(value)), from_host=False
+        )
         if not result.get("ok", True):
             raise ValueError(f"{name}: {result.get('error')}")
         self._show({"by": "set_variable", "variable": name, "value": _plain(value)})
 
     def follow_edits(self, answer):
-        """Have `answer` keep what follows an edit made in the view: a solve,
-        most often, of a part the dragged magnet acts on.
+        """Have `answer` keep what follows an edit made in the view, in place
+        of the engine, which solves a sheet again that keeps its part
+        (docs/decisions.md#0048-the-engine-solves-a-sheet-again).
 
-        ``answer(objects)`` is called after each such edit, every step of a
-        drag and of a slider included, with `objects`, and returns what follows
-        as ``{id: {parameter: value}}``, or nothing. It is set in the edit's
-        own step, so one undo takes back the magnet and the solve that went
-        with it, and an undo calls nothing: it comes back to a scene already
-        whole. `answer` runs while the pointer waits, so it has to be quick.
-        Pass None to put it away.
+        ``answer(objects)`` is called after each edit made in the view, every
+        step of a drag and of a slider included, with `objects`, and returns
+        what follows as ``{id: {parameter: value}}``, or nothing. It is set in
+        the edit's own step, so one undo takes back the magnet and the solve
+        that went with it, and an undo calls nothing: it comes back to a scene
+        already whole. `answer` runs while the pointer waits, so it has to be
+        quick. Pass None to put it away.
 
         Raised, what it raised is said in the view, and the edit stays. Edits
         made from code, `set` and `set_variable`, are the code's to answer.
         """
-        self._editing("follow_edits")
-        self._follower = answer
-
-    def _followed(self):
-        """Put what `follow_edits` answers to the edit just made in that edit's
-        step, to be drawn with what it moved."""
-        from magpylib_studio.session import _plain
-
-        session = self._session
-        try:
-            changed = {}
-            for key, params in (self._follower(self.objects) or {}).items():
-                obj = session._objs[key]
-                differ = {
-                    name: _plain(value)
-                    for name, value in params.items()
-                    if not _same(value, getattr(obj, name, None))
-                }
-                if differ:
-                    changed[key] = differ
-            result = session.set_params(changed, "follow the edit") if changed else {}
-        except Exception as error:  # noqa: BLE001 - said in the view, not lost
-            result = {"ok": False, "error": str(error)}
-        if not result.get("ok", True):
-            self.send(
-                {"kind": "refused", "message": f"Not followed: {result.get('error')}"}
-            )
+        self._editing("follow_edits").follower = answer
 
     def save_variant(self, name):
         """Keep the variables as they are now under `name`: a variant of this
@@ -888,7 +867,9 @@ class SceneWidget(anywidget.AnyWidget):
         # already was: the group's close takes back a step that changed
         # nothing, and gives back the redo it would have cost.
         session.begin_interaction()
-        result = session.set_variables(changed)
+        result = session.followed(
+            lambda: session.set_variables(changed), from_host=False
+        )
         session.end_interaction()
         if not result.get("ok", True):
             self.variables = current
@@ -975,8 +956,6 @@ class SceneWidget(anywidget.AnyWidget):
         self._shown = None
         #: The edits of the drag in progress, as the view last sent them.
         self._dragged = None
-        #: What keeps what follows an edit: see `follow_edits`.
-        self._follower = None
         # Lines asked for when the view was made are part of where editing
         # starts, not an edit; a document that has them on shows them.
         if self.field_lines and not session.field_lines:
@@ -1021,6 +1000,9 @@ class SceneWidget(anywidget.AnyWidget):
         doc = json.dumps(self._session.doc, sort_keys=True, default=str)
         if doc == self._shown:
             return False
+        solves = self._session.take_solves()
+        if solves:
+            edit = {**(edit or {}), "solves": solves}
         first = self._shown is None
         self._shown = doc
         payload = self._session.get_scene()
@@ -1256,21 +1238,12 @@ class SceneWidget(anywidget.AnyWidget):
                     k: v for k, v in params.items() if k not in ("object_id", "define")
                 }
             edit = {"by": "set", "objects": [target], "changed": {target: changed}}
-        # What follows an edit is in its step: the view's panel sets a value
-        # without a gesture round it, a drag and a slider's preview with one.
-        follows = self._follower is not None and (
-            method == "apply_edits"
-            or method in self._OBJECT_EDITS
-            or method in self._VARIABLE_EDITS
-        )
-        grouped = follows and self._session._interaction is None
-        if grouped:
-            self._session.begin_interaction()
         answer = rpc.handle(self._session, content)
-        if follows and "error" not in answer and answer["result"].get("ok", True):
-            self._followed()
-        if grouped:
-            self._session.end_interaction()
+        said = answer.get("result")
+        if isinstance(said, dict) and said.get("not_followed"):
+            self.send(
+                {"kind": "refused", "message": f"Not followed: {said['not_followed']}"}
+            )
         if method == "begin_interaction":
             # what the view is showing, for the gesture's steps to be drawn
             # against from the first: the scene it was last sent
@@ -1363,19 +1336,10 @@ def _equal(value, current):
 
 
 def _same(value, current):
-    """Whether `value` is exactly what `current` already is.
+    """`same_value`, with the engine loaded only once a view has edits to make."""
+    from magpylib_studio.session import same_value
 
-    Exactly, not to a tolerance: in SI units a real edit can be a
-    nanometre or a nanoampere-metre, and what this is for -- a control
-    handing back the number it was given -- gives back the very number."""
-    if current is None:
-        return False
-    try:
-        return np.array_equal(
-            np.asarray(value, dtype=float), np.asarray(current, dtype=float)
-        )
-    except (TypeError, ValueError):
-        return False
+    return same_value(value, current)
 
 
 def _values_of(session):

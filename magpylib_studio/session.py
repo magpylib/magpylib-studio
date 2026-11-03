@@ -97,6 +97,7 @@ from __future__ import annotations
 import ast
 import copy
 import difflib
+import functools
 import hashlib
 import importlib
 import json
@@ -1545,6 +1546,7 @@ _DOC_KEYS = (
     "generator",
     "model_unit",
     "field_unit",
+    "solve_level",
     "variables",
     "variable_bounds",
     "variants",
@@ -2357,6 +2359,7 @@ _EXTERNAL_TYPES = {
             "charge_densities",
             "panels",
             "mean_polarization",
+            "part",
         ),
     ),
     "UniformField": (
@@ -2439,7 +2442,60 @@ def external_params(obj):
     if entry is None:
         return {}
     values = {name: getattr(obj, name, None) for name in entry[2]}
-    return {name: value for name, value in values.items() if value is not None}
+    out = {name: value for name, value in values.items() if value is not None}
+    if "part" in out:
+        # a magnet, in the form its package saves one: a document holds data
+        out["part"] = _part_as_data(out["part"])
+    return out
+
+
+#: The steps of a gesture over this long, in seconds, that stop it solving again
+#: at each step: then it does at the end. A model too large to keep a
+#: factorization of, 8 n² bytes for n unknowns, does from the start.
+_SLOW_STEP = 0.25
+_SLOW_STEPS = 2
+_KEPT_UNKNOWNS = 5000
+
+
+def same_value(value, current):
+    """Whether `value` is exactly what `current` already is.
+
+    Exactly, not to a tolerance: in SI units a real edit can be a
+    nanometre or a nanoampere-metre, and what this is for -- a control
+    handing back the number it was given -- gives back the very number."""
+    if current is None:
+        return False
+    try:
+        return np.array_equal(
+            np.asarray(value, dtype=float), np.asarray(current, dtype=float)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _part_as_data(part):
+    """The magnet a solved sheet keeps, as magpylib-material-response's `to_json`
+    writes it, which a document holds and any of its part types can come back
+    from."""
+    from magpylib_material_response import to_json
+
+    (written,) = json.loads(to_json(part))
+    return written
+
+
+@functools.lru_cache(maxsize=4096)
+def _part_from(text):
+    """`_part_as_data` undone, once for each: a document is built again at every
+    edit that is no pose, and a sheet takes a copy of what it is given."""
+    from magpylib_material_response import from_json
+
+    (part,) = from_json(text)
+    return part
+
+
+def part_source(written):
+    """How a script says a sheet's part (`class_imports`): as it is saved."""
+    return f"from_json({json.dumps([written])!r})[0]"
 
 
 def class_call(type_str, magpy="magpy"):
@@ -2480,13 +2536,14 @@ def free_name(word, taken):
     return name
 
 
-def class_imports(types):
+def class_imports(types, parts=False):
     """The lines a script imports the classes among `types` that are not
-    magpylib's with, for `class_call`."""
+    magpylib's with, for `class_call`, and with `parts` what reads a sheet's
+    part (`part_source`)."""
     return [
         f"from {_EXTERNAL_TYPES[name][0]} import {name.rpartition('.')[2]}"
         for name in sorted(set(types) & set(_EXTERNAL_TYPES))
-    ]
+    ] + (["from magpylib_material_response import from_json"] if parts else [])
 
 
 def _types_in(specs):
@@ -2561,6 +2618,7 @@ def _said(doc):
         doc.get("variants"),
         doc.get("model_unit"),
         doc.get("field_unit"),
+        doc.get("solve_level"),
     )
 
 
@@ -2929,6 +2987,13 @@ class MagpylibStudioSession:
         #: (origin, variable) -> the variable an import from that origin made
         #: here, for the next import of the same to share (`import_fragment`).
         self._twins: dict = {}
+        #: Answers what a host's edit does to what follows it, or None for a
+        #: solve of the sheets that keep their parts: `followed`.
+        self.follower = None
+        #: The last solve, whose factorization the next may reuse.
+        self._kept_solve = None
+        self._solves: list = []
+        self._solve_waiting = False
         self._build()
 
     def _record_state(self, label, doc_before):
@@ -2974,6 +3039,7 @@ class MagpylibStudioSession:
             if problem:
                 raise ValueError(problem)
         self._uniforms = None  # `_uniform_fields`: of these objects, once asked
+        self._parts = None  # `_parted`: likewise
         self._objs = {}
         self._derived = {}
         self._inherited = {}
@@ -3449,6 +3515,8 @@ class MagpylibStudioSession:
         without redoing them; see `meshes`.
         """
         resolved = self._resolve(dict(params))
+        if "part" in resolved:
+            resolved["part"] = _part_from(json.dumps([resolved["part"]]))
         source = resolved.pop("mesh_source", None)
         if source is None:
             return resolved
@@ -4642,6 +4710,7 @@ class MagpylibStudioSession:
 
     def _forget_gesture(self):
         self._recharged = set()
+        self._slow_solves = 0
         self._noted = None
         self._moving = set()
         self._carried = set()
@@ -6542,13 +6611,21 @@ class MagpylibStudioSession:
         somewhere and released at the value it started from would otherwise
         leave a step that undoes to what is already on screen — and would have
         thrown away the redo stack to put it there. Both go back.
+
+        What a solve too slow for the steps left waiting is done here, in the
+        gesture's step (`followed`).
         """
+        said = None
+        if self._solve_waiting:
+            self._solve_waiting = False
+            said = self._solve_again(at_rest=True)
         if self._interaction and self._undo and self._undo[-1]["doc"] == self.doc:
             self._undo.pop()
             self._redo = self._interaction_redo
         self._interaction = None
         self._interaction_redo = []
         self._forget_gesture()
+        return {"ok": True, "not_followed": said} if said else None
 
     def apply_edits(self, edits, define=False):
         """Record what a 3D view's handles did.
@@ -7001,6 +7078,171 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"set {object_id}.{name}")
 
+    def followed(self, edit, from_host=True):
+        """Run `edit`, a call that makes one edit, and what follows it, in its
+        step: `follower`'s answer, or else, where a sheet in the scene keeps the
+        part it was solved from and the edit changed what drives the solve, that
+        solve again. What it could not do is in the answer, as `not_followed`.
+        A host's calls come here (`rpc.handle`); what a script builds does not,
+        step by step, and an undo comes back to a scene already whole. Edits from
+        code reach a `follower` only `from_host`
+        (docs/decisions.md#0048-the-engine-solves-a-sheet-again).
+        """
+        answer = self.follower if from_host else None
+        if self._rollback is not None or not (answer or self._parted()):
+            return edit()
+        before = None if answer else self._solve_inputs()
+        grouped = self._interaction is None
+        if grouped:
+            self.begin_interaction()
+        said = None
+        try:
+            result = edit()
+            if isinstance(result, dict) and not result.get("ok", True):
+                return result
+            if answer:
+                said = self._answered(answer)
+            elif self._solve_inputs() != before:
+                said = self._solve_again(at_rest=grouped)
+        finally:
+            if grouped:
+                self.end_interaction()
+        if said and isinstance(result, dict):
+            return {**result, "not_followed": said}
+        return result
+
+    def _answered(self, answer):
+        """Set what `answer` returned, or say why not."""
+        try:
+            wanted = answer(self.objects_by_id()) or {}
+            result = self.set_changed(wanted, "follow the edit")
+        except Exception as error:  # noqa: BLE001 - said in the view, not lost
+            return str(error)
+        return None if result.get("ok", True) else result.get("error")
+
+    def objects_by_id(self):
+        """The objects listed, by id, as a view's `objects` gives them."""
+        return {
+            entry["id"]: self._objs[entry["id"]]
+            for entry in self.list_objects(copies="count")
+        }
+
+    def set_changed(self, wanted, label="edit"):
+        """`set_params` of what differs from what the objects hold."""
+        changed = {}
+        for key, params in wanted.items():
+            obj = self._objs[key]
+            differ = {
+                name: _plain(value)
+                for name, value in params.items()
+                if not same_value(value, getattr(obj, name, None))
+            }
+            if differ:
+                changed[key] = differ
+        return self.set_params(changed, label) if changed else {"ok": True}
+
+    def _parted(self):
+        """The ids of the sheets that keep the part they were solved from, found
+        once a build."""
+        if self._parts is None:
+            self._parts = [
+                key
+                for key, obj in self._objs.items()
+                if threejs.is_charge_sheet(obj) and getattr(obj, "_part", None)
+            ]
+        return self._parts
+
+    def _solve_inputs(self):
+        """What a solve of the scene follows from: every source's pose and what
+        it is made of, of a sheet its pose alone, since its charge is the answer.
+        Equal, a solve would come to the same: a probe dragged, a colour set."""
+        out = []
+        for key, obj in self._objs.items():
+            if isinstance(obj, magpy.Sensor) or (
+                isinstance(obj, magpy.Collection) and not threejs.is_sealed(obj)
+            ):
+                continue
+            out.append(key)
+            out.append(np.asarray(obj.position).tobytes())
+            out.append(obj.orientation.as_quat().tobytes())
+            if not threejs.is_charge_sheet(obj):
+                for name in (*_PARAM_ATTRS, "B"):
+                    value = getattr(obj, name, None)
+                    if value is not None:
+                        out.append(np.asarray(value).tobytes())
+        return out
+
+    def _solve_again(self, at_rest):
+        """Solve the scene's parts again, with every other source driving them,
+        and put the answer on their sheets. A gesture's steps stop asking once
+        they are slow, and for a model too large to keep a factorization of, and
+        the end of the gesture does it (`end_interaction`). Returns why not."""
+        ids = self._parted()
+        size = sum(2 * len(self._objs[key].faces) for key in ids)
+        if not at_rest and (self._slow_solves >= _SLOW_STEPS or size > _KEPT_UNKNOWNS):
+            self._solve_waiting = True
+            return None
+        try:
+            from magpylib_material_response import solve_face_charge
+
+            drives = [
+                obj.copy()
+                for key, obj in self._objs.items()
+                if key not in ids
+                and not isinstance(obj, magpy.Sensor)
+                and (not isinstance(obj, magpy.Collection) or threejs.is_sealed(obj))
+                and not _computes_no_field(obj)
+            ]
+            parts = [self._objs[key].part for key in ids]
+            out = solve_face_charge(
+                magpy.Collection(*parts, *drives),
+                level=self.doc.get("solve_level"),
+                reuse=(self._kept_solve or True) if size <= _KEPT_UNKNOWNS else False,
+            )
+            info = out.face_charge_info
+            self._kept_solve = out if size <= _KEPT_UNKNOWNS else None
+            self._solves.append({**info, "solved_by": out.solved_by})
+            if info["seconds"] > _SLOW_STEP:
+                self._slow_solves += 1
+            else:
+                self._slow_solves = 0
+            sheets = out.sources_all[: len(parts)]
+            result = self.set_changed(
+                {
+                    key: {
+                        "vertices": sheet.vertices,
+                        "faces": sheet.faces,
+                        "panels": sheet.panels,
+                        "charge_densities": sheet.charge_densities,
+                        "mean_polarization": sheet.mean_polarization,
+                    }
+                    for key, sheet in zip(ids, sheets, strict=True)
+                },
+                "solve again",
+            )
+        except Exception as error:  # noqa: BLE001 - said, and the edit stays
+            return f"{type(error).__name__}: {error}"
+        return None if result.get("ok", True) else result.get("error")
+
+    def take_solves(self):
+        """What the solves since the last asked came to, each as
+        `face_charge_info` says it, with what it was solved by."""
+        solves, self._solves = self._solves, []
+        return solves
+
+    def set_solve_level(self, level=None):
+        """The level a sheet is solved again at (`solve_face_charge`): the level
+        its first solve took, which a result says and a sheet built by hand does
+        not. None is that function's own default."""
+
+        def mutate(doc):
+            if level is None:
+                doc.pop("solve_level", None)
+            else:
+                doc["solve_level"] = int(level)
+
+        return self._mutate_doc(mutate, "solve level")
+
     def set_params(self, wanted, label="edit"):
         """Set several parameters of several objects, `wanted` being ``{id:
         {name: value}}``, as one step and one build -- a sheet's new mesh and
@@ -7038,13 +7280,16 @@ class MagpylibStudioSession:
             self._create_event(object_id)["params"].update(params)
             sheet = self._objs[object_id]
             level = sheet.style.charge.level
-            # set by the constructor alone, and set back by a new charge
+            # set by the constructor alone, and set back by a new charge: the
+            # part it was solved from is the part of this one too
             mean = params.get("mean_polarization", sheet._mean)
+            part = getattr(sheet, "_part", None)
             sheet.charge_densities = params.get(
                 "charge_densities", sheet.charge_densities
             )
             sheet.style.charge.level = level
             sheet._mean = None if mean is None else np.asarray(mean, float).reshape(3)
+            sheet._part = part
         self._animated = None  # the captured run is of a scene that no longer is
         if snapshot is not None:
             self._record_state(label, snapshot)
@@ -8762,7 +9007,8 @@ class MagpylibStudioSession:
             lines.append("from scipy.spatial.transform import Rotation as R")
         field = script_field(spec_of.values())
         lines += class_imports(
-            [*_types_in(spec_of.values()), *(["UniformField"] if field else [])]
+            [*_types_in(spec_of.values()), *(["UniformField"] if field else [])],
+            any("part" in (spec.get("params") or {}) for spec in spec_of.values()),
         )
         # An expression goes into the script verbatim, which is what keeps the
         # script parametric — but `sqrt(2) * radius` needs `sqrt` in scope to
@@ -8815,6 +9061,8 @@ class MagpylibStudioSession:
                     sample, source = _sampled_source(value, taken)
                     lines.append(sample)
                     parts.append(f"{key}={source}")
+                elif key == "part":
+                    parts.append(f"part={part_source(value)}")
                 else:
                     parts.append(f"{key}={_param_lit(value)}")
             if spec.get("style"):

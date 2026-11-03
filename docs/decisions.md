@@ -56,6 +56,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0045](#0045-a-notebook-answers-an-edit-in-its-step)                                           | A notebook answers an edit in its step                       |
 | [0046](#0046-a-uniform-field-is-a-source)                                                      | A uniform field is a source                                  |
 | [0047](#0047-a-script-writes-h_ext-as-a-uniform-field)                                         | A script writes H_ext as a uniform field                     |
+| [0048](#0048-the-engine-solves-a-sheet-again)                                                  | The engine solves a sheet again                              |
 
 ---
 
@@ -2504,3 +2505,57 @@ studio wrote would then solve with no applied field and say nothing about it.
   attribute still works as it did.
 - **Adding different values up, or one field per value**: each would change what
   acts on which part, with no word.
+
+## 0048. The engine solves a sheet again
+
+**Status:** accepted 2026-11-02, as built (#114), on Alex's word. Supersedes the
+part of [0041](#0041-a-solved-face-charge-sheet-is-data-in-a-document) that
+nothing re-solves, and the part of
+[0045](#0045-a-notebook-answers-an-edit-in-its-step) that rejected a solve
+inside the studio. Closes #96.
+
+### Context
+
+A view showed a moved magnet beside the charge of the old solve, and its field
+lines were quietly wrong. `follow_edits` answered it from a notebook, with a
+page of code that knew the model. The VS Code panel has no notebook.
+magpylib-material-response 0.9.1 has each `ChargeSheet` keep the part it was
+solved from, so what a solve needs is in the scene.
+
+### Decision
+
+- **A document holds a sheet's `part`**, as material-response's `to_json` writes
+  it, and the scene's `solve_level`, which a result says and a sheet does not.
+- **The engine solves when a host's edit changes what drives the solve**: every
+  source's pose and what it is made of, and a sheet's pose. A probe dragged or a
+  colour set asks nothing. `rpc.handle` is the one place, so the panel, the
+  notebook and any other host are alike; what a script builds step by step is
+  not a host's edit. Edits from code, `set` and `set_variable`, solve too.
+- **All sheets that keep a part are one solve**, and every other source in the
+  scene drives it, whether or not it was there at the first solve: what the view
+  shows acts.
+- **In the edit's step**, so one undo takes back the magnet and its solve; an
+  undo solves nothing.
+- **A slow solve waits for the release.** Two steps in a gesture over 0.25 s
+  stop it asking, and over about 5,000 unknowns, where a factorization kept
+  takes 200 MB, it waits from the start.
+- **On by default, for a sheet that has a part.** `follow_edits` replaces it,
+  and a sheet without a part stays as it is (#89).
+- **A solve that fails is said** (`not_followed`) and the edit stays.
+
+### Rejected
+
+- **A function registered with the session**, as #96 proposed: a document cannot
+  hold one, and the panel has no kernel to run it.
+- **Recording the call that solved, and deriving the sheets**: it would want the
+  model in the document in place of its results, and a script's solve taken
+  apart. Larger, and not needed for this.
+- **A switch in the panel**: nothing yet has asked to turn it off.
+
+### Limits
+
+- `to_script` keeps the parts and not the level, so a plain script's sheets
+  solve again at `solve_face_charge`'s default. A scene function keeps it, as
+  `@scene(solve_level=)`.
+- `apply_demag`'s cells keep no part, and do not keep up with a drag.
+- A long solve holds the engine, with nothing to say it is working.

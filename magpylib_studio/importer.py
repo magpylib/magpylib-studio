@@ -370,7 +370,13 @@ def _document_from_named(named, names, script=True):
         _spec_from(obj, _unique_id(name, used_ids), used_ids, unnamed, names, left_out)
         for name, obj in unique_top
     ]
-    return {"objects": objects}, (
+    # the level of a solve, for its sheets to be solved again at, which only
+    # the result of the solve says
+    levels = {
+        getattr(obj, "face_charge_info", {}).get("level") for _, obj in unique_top
+    } - {None}
+    level = {"solve_level": max(levels)} if levels else {}
+    return {"objects": objects, **level}, (
         _flattening_warnings(unnamed, script)
         + _inert_warnings(objects)
         + _style_warnings(left_out)

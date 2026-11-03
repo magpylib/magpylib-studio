@@ -1599,7 +1599,17 @@ function engineFor(context: vscode.ExtensionContext, doc: SceneDocument): SceneE
     request: async <T = unknown>(method: string, params?: Record<string, unknown>) => {
       const client = await getRawEngine(context);
       await openSession(client, doc);
-      return client.request<T>(method, params, doc.session);
+      const result = await client.request<T>(method, params, doc.session);
+      // A solve that could not follow the edit: the edit stands, and its
+      // field is of the old solve. A word that goes, not one for each step.
+      const said = (result as { not_followed?: string } | null)?.not_followed;
+      if (said) {
+        vscode.window.setStatusBarMessage(
+          `Magpylib Studio: not solved again: ${said}`,
+          6000,
+        );
+      }
+      return result;
     },
   };
 }
