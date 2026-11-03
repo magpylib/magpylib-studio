@@ -310,6 +310,15 @@ def saved_part(written):
     return part
 
 
+#: Packages beside magpylib whose functions make and change magpylib objects of
+#: their own: a mesh's cells, a solve's working copies. Inside a scene function
+#: the scene would take them for the user's (`_Recorder._library_call`).
+_LIBRARIES = ("magpylib_material_response",)
+#: What of theirs makes the user's own objects: a model read back, and their
+#: classes' constructors.
+_LIBRARY_MAKES_YOURS = frozenset({"from_json", "__init__"})
+
+
 def _wrap_external():
     """Let a variable reach the classes from beside magpylib that compute with
     their arguments, if the scene's script has imported them: `UniformField`
@@ -323,6 +332,27 @@ def _wrap_external():
     sheets = sys.modules.get("magpylib_material_response.face_charge")
     if sheets is not None:
         hook.wrap_external(sheets.ChargeSheet)
+        _note_parts(sheets.ChargeSheet)
+
+
+def _note_parts(cls):
+    """`sheet.part` read while a scene builds: a magnet the sheet copies out of
+    the recorder's sight, noted so that a scene told to hold it says where it
+    came from."""
+    read = cls.__dict__.get("part")  # none before material-response 0.9.1
+    if cls.__dict__.get("_studio_parts_noted") or not isinstance(read, property):
+        return
+
+    @functools.wraps(read.fget)
+    def part(sheet):
+        made = read.fget(sheet)
+        recorder = _BUILDING.get()
+        if recorder is not None and made is not None:
+            recorder.library_made[id(made)] = (made, "ChargeSheet.part")
+        return made
+
+    cls.part = property(part, read.fset, read.fdel, read.__doc__)
+    cls._studio_parts_noted = True
 
 
 class SceneFunction:
@@ -594,6 +624,12 @@ class _Recorder:
         #: last written, each with the ids of objects of the scene among
         #: them, whose steps go: written once, at the next thing recorded.
         self.sealing = {}
+        #: Objects a library made out of sight (`_note_parts`), each with
+        #: the call that made it: id -> (object, call).
+        self.library_made = {}
+        #: Whether the event being recorded comes from a library call that
+        #: makes the user's objects (`_LIBRARY_MAKES_YOURS`).
+        self.by_library = False
 
     # -- values
 
@@ -620,6 +656,13 @@ class _Recorder:
     def _found(self, obj):
         found = self.objects.get(id(obj))
         if found is None:
+            made = self.library_made.get(id(obj))
+            if made is not None and made[0] is obj:
+                raise BuildError(
+                    f"{obj!r} is a copy made by {made[1]}, not an object of the "
+                    f"scene: pass it to a ChargeSheet made here as part=, or make "
+                    f"a magnet here from its numbers"
+                )
             raise BuildError(
                 f"{obj!r} was made before this scene started recording, or "
                 f"outside the function: make it inside, so the scene knows it"
@@ -764,7 +807,9 @@ class _Recorder:
             result = self.session._adopt_fresh(recorded.id, group.id)
         if not result["ok"]:
             raise BuildError(result["error"])
-        if not result["fresh"]:
+        # a model read back places its parts before adding them: numbers,
+        # with nothing written in variables to lose
+        if not result["fresh"] and not self.by_library:
             warnings.warn(
                 f"{recorded.id!r} is already placed, so adding it to "
                 f"{group.id!r} moves it and keeps its pose as numbers: a "
@@ -805,6 +850,15 @@ class _Recorder:
             )
 
     def on_event(self, event):
+        called = self._library_call()
+        if called is not None and called.co_name not in _LIBRARY_MAKES_YOURS:
+            raise BuildError(
+                f"{called.co_qualname}, called inside the scene function, makes "
+                f"and changes magpylib objects of its own, which the scene cannot "
+                f"tell from yours: call it outside, and inside make what it "
+                f"returned from its numbers"
+            )
+        self.by_library = called is not None
         self.watch()
         if (
             event.kind == "call"
@@ -1073,6 +1127,18 @@ class _Recorder:
             self.seen[object_id] = now
 
     # -- names, read from the running function
+
+    def _library_call(self):
+        """The code of the function of a package in `_LIBRARIES` that the
+        event being recorded came from, as the scene function called it -- the
+        outermost of its frames below the scene function's -- or None."""
+        called = None
+        frame = sys._getframe(2)
+        while frame is not None and frame.f_code is not self.code:
+            if frame.f_globals.get("__name__", "").startswith(_LIBRARIES):
+                called = frame.f_code
+            frame = frame.f_back
+        return called
 
     def watch(self):
         """Note which of the scene function's names hold which objects, now.

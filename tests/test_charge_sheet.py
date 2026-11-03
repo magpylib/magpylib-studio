@@ -5,17 +5,21 @@ is drawn with its charge beside field lines, saved, written and read back."""
 from __future__ import annotations
 
 import json
+import sys
+import types
 import warnings
 
 import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import build, fieldlines, importer, session
+from magpylib_studio import build, fieldlines, importer, scene, session
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 
-pytest.importorskip("magpylib_material_response", minversion="0.9.1")
+material_response = pytest.importorskip(
+    "magpylib_material_response", minversion="0.9.1"
+)
 face_charge = pytest.importorskip("magpylib_material_response.face_charge")
 
 POINTS = np.array([(0, 0, 0.01), (0.01, 0.005, -0.004), (0.03, 0, 0)])
@@ -64,7 +68,9 @@ def test_a_view_draws_the_sheet_beside_field_lines():
     assert view._session.get_params(sheet_id) == []
 
 
-@pytest.mark.parametrize("route", ["saved", "script", "scene function", "update"])
+@pytest.mark.parametrize(
+    "route", ["saved", "script", "scene function", "update", "from_json in a scene"]
+)
 def test_the_sheet_comes_back(route, tmp_path):
     given = solved()
     if route == "update":
@@ -72,6 +78,13 @@ def test_the_sheet_comes_back(route, tmp_path):
         view.update(given)
         view.field_lines = True  # copies the cell's objects into a session
         back = view._session
+    elif route == "from_json in a scene":
+        text = material_response.to_json(given)
+        back = (
+            scene(lambda: tuple(material_response.from_json(text)[0].children))
+            .build()
+            .session
+        )
     else:
         here = SceneWidget(given, editable=True)._session
         if route == "saved":
@@ -94,6 +107,44 @@ def test_the_sheet_comes_back(route, tmp_path):
     level = sheet_of(given).style.charge.level
     assert level is not None
     assert sheet_of(back.scene).style.charge.level == level
+
+
+@pytest.mark.parametrize(
+    "call", ["mesh_all", "solve_cells", "solve_face_charge", "ChargeSheet.part"]
+)
+def test_a_scene_function_refuses_what_material_response_makes_by_name(call):
+    # #114: recorded, a solve's working copies added their field to the scene,
+    # 0.69 T for 0.43 T; unrecorded, a part was said to be made outside
+    from magpylib_material_response.meshing import mesh_all
+
+    outside = solved()
+
+    def plate():
+        soft = magpy.magnet.Cuboid(
+            polarization=(0, 0, 0), dimension=(0.04, 0.04, 0.006)
+        )
+        soft.susceptibility = 1000
+        return magpy.Collection(soft)
+
+    calls = {
+        "mesh_all": lambda: mesh_all(plate(), target_elems=8),
+        "solve_cells": lambda: material_response.solve_cells(plate()),
+        "solve_face_charge": solved,
+        "ChargeSheet.part": lambda: sheet_of(outside).part.move((0.001, 0, 0)),
+    }
+    with pytest.raises(build.BuildError, match=call):
+        scene(lambda: (calls[call](),)).build()
+
+
+def test_a_scene_builds_beside_a_sheet_without_a_part(monkeypatch):
+    # material-response before 0.9.1: a ChargeSheet with no part to note
+    old = types.ModuleType("magpylib_material_response.face_charge")
+    old.ChargeSheet = type("ChargeSheet", (), {})
+    monkeypatch.setitem(sys.modules, old.__name__, old)
+    sphere = scene(
+        lambda: (magpy.magnet.Sphere(polarization=(0, 0, 1), diameter=0.01),)
+    )
+    assert len(sphere.build().session.list_objects()) == 1
 
 
 def test_field_lines_stop_at_a_solved_body():

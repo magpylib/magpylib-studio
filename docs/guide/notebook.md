@@ -170,6 +170,11 @@ solves took. `follow_edits(answer)` replaces that with your own:
 `answer(objects)` runs at every step of a drag or a slider, and what it returns,
 `{id: {parameter: value}}`, joins that edit's step.
 
+Solve outside a scene function. Inside, `mesh_all`, the solvers and `sheet.part`
+make magpylib objects of their own, which the scene cannot tell from yours, so
+it refuses them with the call's name; make what they returned inside, from its
+numbers, as both U-core demos do. `from_json` inside is fine.
+
 A `UniformField` from magpylib-material-response is an object like a coil: pass
 it to the view with the rest, any number of them. It has no place or body, so
 the corner draws it, the sum of them, or of those selected in the legend.
