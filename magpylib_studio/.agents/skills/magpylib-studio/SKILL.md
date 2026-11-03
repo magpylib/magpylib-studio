@@ -59,6 +59,11 @@ the scene cannot take fails at its line and says why.
   [Variables are handles](#variables-are-handles).
 - Repeat with a pattern — `duplicate_around`, `duplicate_along`, `mirror` —
   never with a loop over a variable. The object must sit in a collection.
+- Pick a structure with a choice, never with `if`: `versions = choose(version)`
+  for `version: Literal["v1", "v2"]`, then `versions.add("v1", core, inlay)`.
+  Every version is the document's; the one the choice has is in the scene, its
+  field and its solves. Add an object to its version before any step on it, and
+  pattern what a version holds, never the switch.
 - Read the field with `s = ring.build()` and `s.session.get_field(...)`; try
   other values with `s.session.sweep(...)`. Both return plain data, in SI.
 - Before handing a design over, check `s.session.get_overlaps()` is empty:

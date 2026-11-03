@@ -1,11 +1,12 @@
 # examples
 
 The 3D view in a notebook — the studio's three.js renderer as an `anywidget`.
-The marimo demo edits four designs written as `@scene` functions, a Halbach
-ring, a coil pair, a test unit's operating steps and material-response's U-core,
-with the view, the field and the files following every edit. It saves the steps
-as a page that clicks through them, and solves the U-core by face charge again
-at every step of a drag. The Jupyter one rebuilds two rings of magnets from
+The marimo demo edits five designs written as `@scene` functions, a Halbach
+ring, a coil pair, a test unit's operating steps, two versions of a unit that
+differ in structure, picked by a choice, and material-response's U-core, with
+the view, the field and the files following every edit. It saves the steps as a
+page that clicks through them, and solves the U-core by face charge again at
+every step of a drag. The Jupyter one rebuilds two rings of magnets from
 `ipywidgets` sliders.
 
 | File                 | Open with                                                          |

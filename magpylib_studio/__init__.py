@@ -57,6 +57,7 @@ _WORDS = (
     "duplicate_around",
     "duplicate_along",
     "mirror",
+    "choose",
     "saved_part",
     "TriangularMesh",
     "Length",

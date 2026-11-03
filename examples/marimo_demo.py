@@ -7,9 +7,9 @@ Needs the widget extra and marimo:
 A design is a plain magpylib function marked `@scene`, its parameters the
 variables. Built once, it is a document: the 3D view edits it, the field and
 the sweep read it, the code tab and the downloads write it. Called, it is plain
-magpylib. Four designs here, a Halbach ring to tune, a coil pair to flip, a test
-unit's steps to share as a page and a U-core solved while you drag, and then the
-view's other tricks.
+magpylib. Five designs here, a Halbach ring to tune, a coil pair to flip, a test
+unit's steps to share as a page, two versions of a unit that differ in what they
+are made of, and a U-core solved while you drag; then the view's other tricks.
 
 The U-core needs magpylib-material-response 0.9.2, and says so without it:
 
@@ -37,6 +37,7 @@ def _():
         Bounds,
         Count,
         Length,
+        choose,
         duplicate_along,
         duplicate_around,
         grid,
@@ -51,6 +52,7 @@ def _():
         Count,
         Length,
         SceneWidget,
+        choose,
         duplicate_along,
         duplicate_around,
         go,
@@ -640,6 +642,102 @@ def _(SceneWidget, mo, unit):
             ),
         ]
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## Versions that differ in structure
+
+    A choice can pick what a scene is made of, not only a value:
+    `versions = choose(version)`, then `versions.add("v2", ...)`. One
+    document holds both versions, a narrow core with two inlay pieces and
+    a wide one with three and a notch, and the one **version** names is in
+    the scene: drawn, listed, in the field. A piece moved in one version is
+    still where you left it when you come back to it.
+
+    The other variables mix in as before. **spacing** spreads v1's two
+    pieces, and only v1 reads it: with v2 shown its slider is dimmed.
+    **current** is the coil's, both versions'. A variant sets what it
+    names: **v2 reversed** sets the version and the current at once, and
+    **v1** then sets only the version, so the current stays reversed.
+    """)
+    return
+
+
+@app.cell
+def _(Annotated, Bounds, Length, choose, duplicate_along, grid, magpy, scene):
+    import typing
+
+    @scene(
+        model_unit="mm",
+        field_unit="mT",
+        variants={
+            "v1": {"version": "v1"},
+            "v1 wide": {"version": "v1", "spacing": 0.018},
+            "v2": {"version": "v2"},
+            "v2 reversed": {"version": "v2", "current": -2000.0},
+        },
+    )
+    def mtu(
+        version: typing.Literal["v1", "v2"] = "v1",
+        spacing: Annotated[float, Length(0.008, 0.024)] = 0.012,
+        current: Annotated[float, Bounds(-3000, 3000, unit="current")] = 2000.0,
+    ):
+        """Two versions of a test unit: a narrow core with two inlay pieces
+        `spacing` apart, and a wide one with three and a notched piece under
+        it. The coil, carrying `current` amperes, and the probe are both
+        versions'."""
+        versions = choose(version, style_label="versions")
+        core1 = magpy.magnet.Cuboid(
+            dimension=(0.03, 0.01, 0.01), polarization=(0, 0, 1), style_label="core"
+        )
+        piece1 = magpy.magnet.Cuboid(
+            dimension=(0.006, 0.008, 0.004),
+            polarization=(0.8, 0, 0),
+            position=(-spacing / 2, 0, 0.008),
+            style_label="inlay",
+        )
+        inlay1 = magpy.Collection(piece1, style_label="inlay")
+        versions.add("v1", core1, inlay1)
+        duplicate_along(piece1, count=2, step=(spacing, 0, 0))
+        core2 = magpy.magnet.Cuboid(
+            dimension=(0.044, 0.012, 0.01), polarization=(0, 0, 1), style_label="core"
+        )
+        piece2 = magpy.magnet.Cuboid(
+            dimension=(0.006, 0.008, 0.004),
+            polarization=(0.8, 0, 0),
+            position=(-0.014, 0, 0.008),
+            style_label="inlay",
+        )
+        notch = magpy.magnet.Cuboid(
+            dimension=(0.008, 0.012, 0.003),
+            polarization=(0, 0, -0.6),
+            position=(0, 0, -0.0065),
+            style_label="notch",
+        )
+        inlay2 = magpy.Collection(piece2, style_label="inlay")
+        versions.add("v2", core2, inlay2, notch)
+        duplicate_along(piece2, count=3, step=(0.014, 0, 0))
+        coil = magpy.current.Circle(
+            current=current, diameter=0.05, position=(0, 0, -0.016), style_label="coil"
+        )
+        probe = magpy.Sensor(
+            pixel=grid(0.04, 11, plane="xz"),
+            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
+        )
+        return versions, coil, probe
+
+    return (mtu,)
+
+
+@app.cell
+def _(SceneWidget, mo, mtu):
+    mtu_view3d = SceneWidget(
+        mtu.build(), editable=True, height=480, field_lines=True, open_panel="variables"
+    )
+    mo.ui.anywidget(mtu_view3d)
     return
 
 

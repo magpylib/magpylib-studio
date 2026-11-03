@@ -711,6 +711,7 @@ class Scene:
                 params=obj._params or None,
                 style=obj._style or None,
                 parent=None if parent is None else parent.id,
+                **getattr(obj, "_create_keys", {}),
             )
         except BuildError:
             obj._entered = False
@@ -827,7 +828,7 @@ _STEP_KEYS = {
     "duplicate_around": ("count", "axis", "anchor", "spin"),
     "duplicate_along": ("count", "step"),
     "mirror": ("plane", "normal", "anchor"),
-    "reparent": ("parent",),
+    "reparent": ("parent", "branch"),
     "remove": (),
 }
 
@@ -867,6 +868,7 @@ _WORDS = (
     "duplicate_around",
     "duplicate_along",
     "mirror",
+    "choose",
     "TriangularMesh",
     "Length",
     "Angle",
@@ -1355,6 +1357,8 @@ class _ScriptWriter:
                 "parts",
                 "parts_style",
                 "H_ext",
+                "switch",
+                "branch",
             ):
                 self.unwritten.append(f"{key} on {event['target']} ({event[key]!r})")
         params = dict(event.get("params") or {})
@@ -1393,7 +1397,16 @@ class _ScriptWriter:
         nested = {path: v for path, v in style.items() if path not in spelt}
         if nested:
             parts.append(("style", repr(_nested(nested))))
-        lines = [f"{name} = {call}({self.keywords(parts)})"]
+        if event.get("switch") is not None:
+            # a switch is its choice, and a collection's style
+            chooses = self.value(event["switch"])
+            given = self.keywords(parts)
+            lines = [
+                f"{name} = {self.word('choose')}"
+                f"({chooses}{', ' + given if given else ''})"
+            ]
+        else:
+            lines = [f"{name} = {call}({self.keywords(parts)})"]
         if event.get("H_ext") is not None and self.field() is None:
             lines.append(f"{name}.H_ext = {tuple(event['H_ext'])!r}{_H_EXT_KEPT}")
         if event.get("parts"):
@@ -1418,7 +1431,9 @@ class _ScriptWriter:
         if name != event["target"]:
             lines.append(f"{self.word('name')}({name}, {event['target']!r})")
         parent = event.get("parent")
-        if parent:
+        if parent and event.get("branch") is not None:
+            lines.append(f"{self.names[parent]}.add({event['branch']!r}, {name})")
+        elif parent:
             lines.append(f"{self.names[parent]}.add({name})")
         return lines
 
@@ -1483,6 +1498,8 @@ class _ScriptWriter:
             parts = [name]
         elif op == "reparent":
             parent = given.pop("parent", None)
+            if given.get("branch") is not None:
+                return f"{self.names[parent]}.add({given['branch']!r}, {name})"
             return f"{name}.parent = {self.names[parent] if parent else None}"
         else:  # remove
             return f"{self.word('remove')}({name})"

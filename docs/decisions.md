@@ -59,6 +59,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0048](#0048-the-engine-solves-a-sheet-again)                                                  | The engine solves a sheet again                              |
 | [0049](#0049-a-scene-function-refuses-what-a-solve-makes)                                      | A scene function refuses what a solve makes                  |
 | [0050](#0050-a-saved-page-carries-its-variants)                                                | A saved page carries its variants                            |
+| [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
 
 ---
 
@@ -2646,3 +2647,43 @@ and see the model move, as #118 asks for an MTU's eight operating steps.
   reads them back at the release.
 - A variant naming fewer variables than the scene has keeps the others as they
   were when the page was written, whichever was clicked before.
+
+## 0051. A choice picks a structure, with a switch
+
+**Status:** accepted 2026-11-03, on Alex's word (#119).
+
+### Context
+
+A choice variable could only be used as a value, an axis's name. A test unit's
+ten versions differ in structure -- how many inlay pieces, which are notched --
+so each was a scene of its own, picked outside studio. `if version == "v3"` in a
+scene function cannot be recorded: only the branch taken runs.
+
+### Decision
+
+- **`versions = choose(version)` is a collection, and `versions.add("v3", ...)`
+  puts objects in it for that value**: `switch` on its create, `branch` on each
+  child's. Called plainly it is a collection of the chosen branch alone, the
+  others held aside so that a pattern on them still runs.
+- **Every branch is built, and all but the chosen one set aside** at the end of
+  the build, out of the scene and out of the objects the view, the listing, the
+  field, the overlaps and the solves read. Their steps apply, so an edit made to
+  a branch stays while it is out. The document's tree keeps every branch.
+- **The builder script writes the switch back**; the plain script, magpylib with
+  no switch, writes the chosen branch alone.
+- **A pattern of a switch, or of what holds one, is refused**: its copies would
+  copy every branch. Pattern what a branch holds.
+
+### Rejected
+
+- **`hide` bound to a choice**: a hidden object still counts in the field.
+- **One scene per version as the only answer**: it stays possible, and loses the
+  one document with a dropdown.
+- **Recording `if` by running the function once per value and merging the
+  runs**: the runs name their objects apart, and matching them is guesswork.
+
+### Limits
+
+- An object goes into its branch before any step on it, else it is refused.
+- The views follow in their own steps: the legend lists the chosen branch, with
+  nothing yet to add an object to a branch from the panel.

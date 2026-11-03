@@ -5145,8 +5145,10 @@ const PULSE = `
  *  currents' pace, each a head wider and brighter than the line, its tail
  *  narrowing behind it -- the line itself stays, a little dimmer, so the
  *  picture is still the field's. Standing, it is the line as it was. */
-const FIELD_LINE_WIDTH = 1.75; // pixels, the line between pulses
-const FIELD_PULSE_WIDTH = 3.5; // pixels, a pulse's head
+// Half a current's: a field line is not a wire, and drawn as wide it read
+// as one.
+const FIELD_LINE_WIDTH = 0.875; // pixels, the line between pulses
+const FIELD_PULSE_WIDTH = 1.75; // pixels, a pulse's head
 const FIELD_FLOW_STRIDE = 3; // of the lines' spacing, from a pulse to the next
 const fieldFlow = { value: 1 }; // 1 while the field's lines flow: see `setFlow`
 const FIELD_PULSE = `

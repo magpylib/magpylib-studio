@@ -241,6 +241,9 @@ The document's variables, as written, as resolved, and as heeded.
 `shadowed` says where it is being overruled, by which steps or by
 which value written over it — enough for a view to explain a slider
 that moves nothing, and to offer the way back. See `restore_variable`.
+`waits` says what a branch out of the scene that reads it waits for,
+`[{"choice": "version", "values": ["v1"]}]` (`choose`): set now, it
+is what that branch has when it is chosen.
 
 A scene with variants lists them too, `variants`, each a variable's
 value by its name, and says which one the variables are in now,

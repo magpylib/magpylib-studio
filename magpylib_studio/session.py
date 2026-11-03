@@ -2889,6 +2889,23 @@ def _drop_from_variants(doc, name):
             del variants[variant]
 
 
+class _Objects(dict):
+    """The session's objects by id. Walked -- keys, values, `in` -- they are
+    the scene's; asked for by id, a branch's that no switch chooses is found
+    too (`_set_aside`), so that a step can still be written on it while
+    nothing that reads the scene's objects sees it."""
+
+    def __init__(self, absent):
+        super().__init__()
+        self.absent = absent
+
+    def __missing__(self, key):
+        return self.absent[key]
+
+    def get(self, key, default=None):
+        return super().get(key, self.absent.get(key, default))
+
+
 class MagpylibStudioSession:
     """A live magpylib scene plus the document it was built from."""
 
@@ -2897,7 +2914,13 @@ class MagpylibStudioSession:
         self.doc = _canonical(
             _migrate_events(scene if scene is not None else {"objects": []})
         )
-        self._objs: dict[str, object] = {}
+        #: The objects of the branches no switch chooses (`_set_aside`): built,
+        #: and out of the scene and of what walking `_objs` finds.
+        self._absent: dict[str, object] = {}
+        self._objs: dict[str, object] = _Objects(self._absent)
+        #: switch id -> (what it chooses by, as written; the branch it chooses)
+        self._switches: dict[str, tuple] = {}
+        self._branches: dict[str, str] = {}  # id -> the branch it is in
         self._vars: dict[str, float] = {}  # resolved at each build
         self._derived: dict[str, list[str]] = {}  # source id -> generated copies
         # Copying a Collection copies everything under it, and those copied
@@ -3041,11 +3064,14 @@ class MagpylibStudioSession:
                 raise ValueError(problem)
         self._uniforms = None  # `_uniform_fields`: of these objects, once asked
         self._parts = None  # `_parted`: likewise
-        self._objs = {}
+        self._absent = {}
+        self._objs = _Objects(self._absent)
         self._derived = {}
         self._inherited = {}
         self._specs = {}  # id -> the spec its create event describes
         self._parents = {}  # id -> parent id or None
+        self._switches = {}
+        self._branches = {}
         self._broken = []  # events the fold could not apply, in order
         breaks = []  # (where in the log, what broke): `_add_waiting` reports late
         self.scene = magpy.Collection()
@@ -3060,6 +3086,7 @@ class MagpylibStudioSession:
                 breaks.append((at, _broke(event, e)))
         self._add_waiting(breaks)
         self._adding = None
+        self._set_aside()
         self._broken = [entry for _, entry in sorted(breaks, key=lambda b: b[0])]
         # The object tree is a projection of the log, rebuilt here rather than
         # stored: two representations of the same structure would drift.
@@ -3122,7 +3149,7 @@ class MagpylibStudioSession:
         if target is None:
             raise ValueError(f"targets unknown object {event['target']!r}")
         if op == "reparent":
-            self._reparent(event["target"], event.get("parent"))
+            self._reparent(event["target"], event.get("parent"), event.get("branch"))
             return
         resolved = self._resolve(event)
         if op == "duplicate_around":
@@ -3139,6 +3166,9 @@ class MagpylibStudioSession:
         object_id = event["target"]
         if object_id in self._objs:
             raise ValueError(f"duplicate object id {object_id!r}")
+        # A switch chooses at its own step: one whose choice cannot be read
+        # is not built, so neither are its branches, and each says so.
+        chosen = self._resolve(event["switch"]) if "switch" in event else None
         spec = {
             "id": object_id,
             "type": event["type"],
@@ -3181,6 +3211,10 @@ class MagpylibStudioSession:
         self._specs[object_id] = spec
         parent = event.get("parent")
         self._parents[object_id] = parent
+        if event.get("switch") is not None:
+            self._switches[object_id] = (event["switch"], chosen)
+        if event.get("branch") is not None:
+            self._branches[object_id] = event["branch"]
         # A parent the build has not got, or that is no collection, is this
         # step's failure, added now so that it is reported as this step's.
         waits = parent is None or isinstance(self._objs.get(parent), magpy.Collection)
@@ -3188,6 +3222,77 @@ class MagpylibStudioSession:
             self._adding.setdefault(parent, []).append((obj, event, at))
         else:
             (self._objs[parent] if parent else self.scene).add(obj)
+
+    def _set_aside(self):
+        """The branches a switch does not choose (`choose`), out of the scene
+        and out of `_objs`, into `_absent`: built with every step the log has
+        for them, so that they come back as they were when their branch is
+        chosen, and seen by nothing that reads the scene or its objects --
+        the view, the listing, the field, the solves. Their specs and parents
+        stay, so the document's tree keeps every branch. A pattern's copies
+        go with what they were copied from."""
+        self._absent.clear()
+        out = [
+            object_id
+            for object_id, branch in self._branches.items()
+            if object_id in self._objs
+            and self._parents.get(object_id) in self._switches
+            and str(branch) != str(self._switches[self._parents[object_id]][1])
+        ]
+        if not out:
+            return
+        # what each live object is, once: a branch's subtree is what its
+        # top object holds, which `_descendants` would find by scanning every
+        # parent for every node of it
+        ids_of = {id(obj): oid for oid, obj in self._objs.items()}
+        for object_id in out:
+            top = self._objs[object_id]
+            self._objs[self._parents[object_id]].remove(top, recursive=False)
+            held = [top, *getattr(top, "children_all", ())]
+            pending = [ids_of[id(obj)] for obj in held if id(obj) in ids_of]
+            while pending:
+                gone = pending.pop()
+                obj = self._objs.pop(gone, None)
+                if obj is None:
+                    continue
+                self._absent[gone] = obj
+                for copy_id in self._derived.pop(gone, []):
+                    copy = self._objs.get(copy_id)
+                    if copy is not None:
+                        self.scene.remove(copy, recursive=True, errors="ignore")
+                    pending.append(copy_id)
+
+    def _branches_out(self, specs):
+        """The ids in `specs`, a document's tree, under a branch its switch
+        does not choose, as the variables stand."""
+        out = set()
+        for spec in _walk_specs(specs):
+            if spec.get("switch") is None:
+                continue
+            try:
+                chosen = self._resolve(spec["switch"])
+            except Exception:  # noqa: BLE001 - a choice it cannot read chooses none
+                chosen = None
+            for child in spec.get("children") or []:
+                if "branch" in child and str(child["branch"]) != str(chosen):
+                    out |= {each["id"] for each in _walk_specs([child])}
+        return out
+
+    def _holds_switch(self, object_id):
+        """Whether `object_id` is a switch or holds one: a pattern of it would
+        copy every branch, with none of them chosen."""
+        return any(
+            each == object_id or object_id in self._ancestors(each)
+            for each in self._switches
+        )
+
+    def _ancestors(self, object_id):
+        found = []
+        parent = self._parents.get(object_id)
+        while parent is not None:
+            found.append(parent)
+            parent = self._parents.get(parent)
+        return found
 
     def _add_waiting(self, breaks=None):
         """Add the objects a run of creates left waiting, each parent's in
@@ -3261,10 +3366,13 @@ class MagpylibStudioSession:
             self._objs.pop(dead, None)
             self._specs.pop(dead, None)
             self._parents.pop(dead, None)
+            self._switches.pop(dead, None)
+            self._branches.pop(dead, None)
 
-    def _reparent(self, object_id, parent):
+    def _reparent(self, object_id, parent, branch=None):
         """A reparent event: from here on the object belongs to another group,
-        so later group transforms carry it and earlier ones do not."""
+        so later group transforms carry it and earlier ones do not -- and, in
+        a switch, to `branch` of it; out of one, to no branch."""
         if parent is not None and parent not in self._objs:
             raise ValueError(f"cannot reparent into unknown object {parent!r}")
         if parent in [object_id, *self._descendants(object_id)]:
@@ -3275,6 +3383,10 @@ class MagpylibStudioSession:
         )
         (self._objs[parent] if parent else self.scene).add(self._objs[object_id])
         self._parents[object_id] = parent
+        if branch is not None:
+            self._branches[object_id] = branch
+        else:
+            self._branches.pop(object_id, None)
 
     def _descendants(self, object_id):
         below = [c for c, p in self._parents.items() if p == object_id]
@@ -3305,6 +3417,11 @@ class MagpylibStudioSession:
             # up on the projection too, so a reader of `objects` alone sees
             # everything the document holds about the object (see _SPEC_KEYS).
             spec.update({k: v for k, v in event.items() if k not in _CREATE_KEYS})
+            # the branch it is in now: a move in or out of a switch says it
+            if object_id in self._branches:
+                spec["branch"] = self._branches[object_id]
+            else:
+                spec.pop("branch", None)
             if event["type"] == "Collection":
                 spec["children"] = [
                     spec_of(child)
@@ -3460,6 +3577,11 @@ class MagpylibStudioSession:
         nowhere to belong would be invisible to the exported script, which
         names the top level explicitly.
         """
+        if self._holds_switch(object_id):
+            raise ValueError(
+                f"{object_id!r} is or holds a switch, and its copies would copy "
+                f"every branch: pattern what a branch holds instead"
+            )
         parent = self._parents.get(object_id)
         if parent is None:
             raise ValueError(
@@ -3723,6 +3845,8 @@ class MagpylibStudioSession:
             partners = {}
         # what is built, which is the whole document unless it is rolled back
         for spec, parent in self._iter_specs(self._objects_view):
+            if spec["id"] in self._absent:
+                continue  # a branch no switch chooses
             objects.append(
                 {
                     "id": spec["id"],
@@ -5599,6 +5723,7 @@ class MagpylibStudioSession:
         style=None,
         rotations=None,
         parent=None,
+        switch=None,
     ):
         if any(s["id"] == object_id for s, _ in self._iter_specs()):
             return {"ok": False, "error": f"object id {object_id!r} already exists"}
@@ -5621,6 +5746,7 @@ class MagpylibStudioSession:
                     **({"params": params} if params else {}),
                     **({"style": style} if style else {}),
                     **({"parent": parent} if parent else {}),
+                    **({"switch": switch} if switch is not None else {}),
                 }
             )
             if rotations:
@@ -6876,13 +7002,14 @@ class MagpylibStudioSession:
             return f"{parent!r} is sealed: it is made of parts and holds no objects"
         return None
 
-    def _adopt_fresh(self, object_id, parent):
+    def _adopt_fresh(self, object_id, parent, branch=None):
         """`parent.add(child)` written in code (`scene.py`): a child nothing has
         happened to since it was made is created inside `parent` -- its create
         step, and its subtree's, move to the end of the log under the new
         parent, as if it had been made there -- and the answer says so
         (`fresh`). One with steps of its own is left alone and `fresh` is
-        False: the caller reparents it, which keeps its pose as numbers."""
+        False: the caller reparents it, which keeps its pose as numbers.
+        `branch` puts it in that branch of `parent`, a switch (`choose`)."""
         spec = self._spec(object_id)
         if parent is not None:
             family_ids = {s["id"] for s, _ in self._iter_specs([spec])}
@@ -6914,13 +7041,67 @@ class MagpylibStudioSession:
             moved = [log[i] for i in creates]
             for i in reversed(creates):
                 del log[i]
-            first = {k: v for k, v in moved[0].items() if k != "parent"}
+            first = {k: v for k, v in moved[0].items() if k not in ("parent", "branch")}
             if parent is not None:
                 first["parent"] = parent
+            if branch is not None:
+                first["branch"] = branch
             log.extend([first, *moved[1:]])
 
         result = self._mutate_doc(mutate, f"adopt {object_id}")
         return {**result, "fresh": True} if result["ok"] else result
+
+    def _adopt_into_branch(self, object_ids, switch, branch):
+        """`versions.add("v3", *objects)` written in code: each object nothing
+        has happened to since it was made is created in `branch` of `switch`
+        (`_adopt_fresh`), all of them in one step. The answer lists those with
+        steps of their own (`touched`), for the caller to move in."""
+        fresh, touched = [], []
+        events = self.doc.get("events") or []
+        for object_id in object_ids:
+            spec = self._spec(object_id)
+            family = {s["id"] for s, _ in self._iter_specs([spec])}
+            if switch in family:
+                return {"ok": False, "error": f"cannot add {object_id!r} into itself"}
+            first = next(
+                (
+                    i
+                    for i, e in enumerate(events)
+                    if e.get("op") == "create" and e.get("target") in family
+                ),
+                None,
+            )
+            if first is None:
+                return {"ok": False, "error": f"unknown object id {object_id!r}"}
+            moved = any(
+                e.get("op") != "create" and e.get("target") in family
+                for e in events[first:]
+            )
+            (touched if moved else fresh).append((object_id, family))
+        if refused := self._no_room(switch):
+            return {"ok": False, "error": refused}
+
+        def mutate(doc):
+            log = doc["events"]
+            for _, family in fresh:
+                at = [
+                    i
+                    for i, e in enumerate(log)
+                    if e.get("op") == "create" and e.get("target") in family
+                ]
+                moved = [log[i] for i in at]
+                for i in reversed(at):
+                    del log[i]
+                head = {
+                    k: v for k, v in moved[0].items() if k not in ("parent", "branch")
+                }
+                log.extend([{**head, "parent": switch, "branch": branch}, *moved[1:]])
+
+        if fresh:
+            result = self._mutate_doc(mutate, f"add to {branch} of {switch}")
+            if not result["ok"]:
+                return result
+        return {"ok": True, "touched": [object_id for object_id, _ in touched]}
 
     def _write_parts(self, object_id, parts, shared, dropped=(), hidden=False):
         """A sealed collection's parts, and the style they share, written as
@@ -7015,10 +7196,11 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"name {object_id} {new_id}")
 
-    def move_object(self, object_id, parent=None):
+    def move_object(self, object_id, parent=None, branch=None):
         """Reparent an object: into a Collection, or to the root
         (parent=None). Position and orientation in world coordinates are
-        preserved across the move."""
+        preserved across the move. `branch` puts it in that branch of
+        `parent`, a switch (`choose`)."""
         spec = self._spec(object_id)
         if parent is not None:
             subtree_ids = {s["id"] for s, _ in self._iter_specs([spec])}
@@ -7037,7 +7219,14 @@ class MagpylibStudioSession:
             # Appended, not a rewrite of where the object was created: which
             # group transforms carried it depends on when it joined, and that
             # is exactly what the position in the log records.
-            self._append({"op": "reparent", "target": object_id, "parent": parent})
+            self._append(
+                {
+                    "op": "reparent",
+                    "target": object_id,
+                    "parent": parent,
+                    **({"branch": branch} if branch is not None else {}),
+                }
+            )
             # At the end, with the reparent it belongs to: this is not an edit
             # to what the object is, it is what keeps it where it was while
             # its group changed underneath it.
@@ -7780,6 +7969,44 @@ class MagpylibStudioSession:
         out[None] = list(params.values())
         return out
 
+    def _waiting_variables(self):
+        """What reads each variable in the branches out of the scene
+        (`_set_aside`): `{name: [{choice: value, ...}, ...]}`, each the values
+        of the choices that, all holding, bring a reader in -- a switch in a
+        branch of another waits for both."""
+        events_of = self._events_of()
+        found = {}
+        for spec, _ in self._iter_specs():
+            if spec["id"] not in self._absent:
+                continue
+            names = set()
+            for sources in self._object_sources(spec, events_of).values():
+                names |= set(expressions.referenced_names(sources))
+            names |= set(
+                expressions.referenced_names(
+                    [
+                        e
+                        for e in events_of.get(spec["id"], [])
+                        if e.get("op") != "create"
+                    ]
+                )
+            )
+            # every branch it is held in, out to the root
+            needs = {}
+            for each in [spec["id"], *self._ancestors(spec["id"])]:
+                switch = self._parents.get(each)
+                if each in self._branches and switch in self._switches:
+                    written = self._switches[switch][0]
+                    choice = ", ".join(expressions.referenced_names([written]))
+                    needs.setdefault(choice, str(self._branches[each]))
+            if not needs:
+                continue
+            for name in names:
+                alternatives = found.setdefault(name, [])
+                if needs not in alternatives:
+                    alternatives.append(needs)
+        return found
+
     def _live_variable_names(self):
         """Every variable that still reaches something the scene is built from.
 
@@ -7792,18 +8019,28 @@ class MagpylibStudioSession:
         live = set()
         events_of = self._events_of()
         for spec, _ in self._iter_specs():
+            if spec["id"] in self._absent:
+                continue  # a branch no switch chooses: moving it shows nothing
             for sources in self._object_sources(spec, events_of).values():
                 live |= set(expressions.referenced_names(sources))
         # The steps themselves: counts, pitches, angles. A create's parameters
         # are the object's own and were read above; the ops that write a pose
         # were read with the field they write, overruling and all.
+        # What a switch chooses by decides which branch is in the scene.
+        live |= set(
+            expressions.referenced_names(
+                [written for written, _ in self._switches.values()]
+            )
+        )
         written = {op for _, ops in _DRAG_WRITES.values() for op in ops}
         live |= set(
             expressions.referenced_names(
                 [
                     event
                     for event in (self.doc.get("events") or [])
-                    if event.get("op") not in written and event.get("op") != "create"
+                    if event.get("op") not in written
+                    and event.get("op") != "create"
+                    and event.get("target") not in self._absent
                 ]
             )
         )
@@ -7875,6 +8112,9 @@ class MagpylibStudioSession:
         `shadowed` says where it is being overruled, by which steps or by
         which value written over it — enough for a view to explain a slider
         that moves nothing, and to offer the way back. See `restore_variable`.
+        `waits` says what a branch out of the scene that reads it waits for,
+        `[{"choice": "version", "values": ["v1"]}]` (`choose`): set now, it
+        is what that branch has when it is chosen.
 
         A scene with variants lists them too, `variants`, each a variable's
         value by its name, and says which one the variables are in now,
@@ -7886,6 +8126,7 @@ class MagpylibStudioSession:
         bounds = self.doc.get("variable_bounds") or {}
         live = self._live_variable_names()
         shadowed = self._shadowed_variable_sources()
+        waits = self._waiting_variables()
         model = units.model_unit(self.doc)
         field = units.field_unit(self.doc)
 
@@ -7905,6 +8146,11 @@ class MagpylibStudioSession:
                     **shown(name),
                     **({"inert": True} if name not in live else {}),
                     **({"shadowed": shadowed[name]} if name in shadowed else {}),
+                    **(
+                        {"waits": waits[name]}
+                        if name not in live and name in waits
+                        else {}
+                    ),
                 }
                 for name, value in variables.items()
             ],
@@ -8947,7 +9193,13 @@ class MagpylibStudioSession:
         # was removed leaves no definition behind, so a step naming it would
         # be a NameError in the exported file — the removal is expressed by
         # its absence, and so is everything that was done to it.
-        alive = {spec["id"] for spec in _walk_specs(self.doc.get("objects") or [])}
+        # A branch no switch chooses is not in the scene, and plain magpylib
+        # has no switch to keep it in: it is left out, as a removed object is.
+        # Read off the document's own tree, which is the whole log's even
+        # while a build stops short of it.
+        alive = {
+            spec["id"] for spec in _walk_specs(self.doc.get("objects") or [])
+        } - self._branches_out(self.doc.get("objects") or [])
         # The tree as it ends up, which is what the definitions have to build:
         # a reparent is not written out, so an object belongs where it finally
         # is, not where it was created.

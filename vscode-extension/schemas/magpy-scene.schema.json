@@ -263,7 +263,15 @@
               "sealed": { "$ref": "#/definitions/sealed" },
               "parts": { "$ref": "#/definitions/parts" },
               "parts_style": { "$ref": "#/definitions/partsStyle" },
-              "H_ext": { "$ref": "#/definitions/appliedField" }
+              "H_ext": { "$ref": "#/definitions/appliedField" },
+              "switch": {
+                "type": "string",
+                "description": "Collections only: a switch, holding a branch for each value of the choice this expression names (`=version`); the branch it has now is in the scene."
+              },
+              "branch": {
+                "type": ["string", "number"],
+                "description": "In a switch: the value of its choice for which this object, and what it holds, is in the scene."
+              }
             }
           }
         },
