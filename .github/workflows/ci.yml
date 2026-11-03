@@ -29,8 +29,9 @@ jobs:
           enable-cache: true
       - run: uv pip install -e ".[dev]"
       # Solved sheets' and uniform fields' tests, skipped without it. 0.9.1 is
-      # the first whose sheets keep the part they were solved from.
-      - run: uv pip install "magpylib-material-response>=0.9.1"
+      # the first whose sheets keep the part they were solved from, and 0.9.2
+      # the first whose from_json keeps a UniformField inside a scene function.
+      - run: uv pip install "magpylib-material-response>=0.9.2"
       - run:
           python -c "import magpylib; print('magpylib', magpylib.__version__)"
       - run: python -m pytest -q
