@@ -21,12 +21,16 @@ POINTS = np.array([(0.003, 0.002, 0.03), (0.02, 0.0, 0.0), (0.0, 0.015, -0.01)])
 def unit(
     version: Literal["v1", "v2"] = "v1",
     shift: Annotated[float, Length(-0.02, 0.02)] = 0.0,
+    lift: Annotated[float, Length(-0.01, 0.01)] = 0.0,
 ):
-    """A core that differs between the versions, an inlay patterned in v2
-    only, and a coil both share."""
+    """A core that differs between the versions, the first `lift` up, an
+    inlay patterned in v2 only, and a coil both share."""
     versions = choose(version, style_label="versions")
     core1 = magpy.magnet.Cuboid(
-        dimension=(0.01, 0.01, 0.03), polarization=(0, 0, 1), style_label="core"
+        dimension=(0.01, 0.01, 0.03),
+        polarization=(0, 0, 1),
+        position=(0, 0, lift),
+        style_label="core",
     )
     core2 = magpy.magnet.Cuboid(
         dimension=(0.012, 0.01, 0.03), polarization=(0, 0, 1), style_label="core"
@@ -59,7 +63,8 @@ def plainly(version):
 def test_the_scene_holds_the_chosen_branch(version):
     """Drawn, listed and in the field: the branch chosen, as the function
     called plainly at that version gives it, the others kept in the
-    document. The choice decides something, so it is no inert slider."""
+    document. The choice decides something, so it is no inert slider; a
+    variable only another version reads decides nothing now, and is."""
     built = unit.build()
     session = built.session
     if version == "v2":
@@ -70,7 +75,11 @@ def test_the_scene_holds_the_chosen_branch(version):
     np.testing.assert_allclose(field(session), plainly(version), rtol=1e-5, atol=1e-12)
     every = {spec["id"] for spec, _ in session._iter_specs()}
     assert {"core1", "core2", "inlay"} <= every
-    assert not any(v.get("inert") for v in session.get_variables()["variables"])
+    listed = {v["name"]: v for v in session.get_variables()["variables"]}
+    inert = {name for name, v in listed.items() if v.get("inert")}
+    assert inert == ({"lift"} if version == "v2" else set())
+    if version == "v2":  # and what it waits for
+        assert listed["lift"]["waits"] == [{"choice": "version", "values": ["v1"]}]
     view = SceneWidget(built)
     drawn = {mesh["object_id"] for mesh in view.payload["meshes"]}
     assert drawn == set(held[version]) - {"inlay#1", "inlay#2"}

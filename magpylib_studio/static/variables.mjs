@@ -618,10 +618,17 @@ export function createVariables(
       // what the variable is comes first, and what has stopped heeding it
       // after.
       if (v.inert) {
+        // read by a branch out of the scene: what it waits for, and that a
+        // value set now is what that branch will have
+        const waits = (v.waits || [])
+          .map((w) => `${w.choice} is ${w.values.join(" or ")}`)
+          .join(", or ");
         name.title += v.shadowed
           ? ` — nothing follows it any more: ${where(v.shadowed)} is stated` +
             ` outright, and ↺ gives it back by ${how(v.shadowed)}`
-          : " — nothing in the scene is written in terms of it yet";
+          : waits
+            ? ` — read only when ${waits}: set now, it shows then`
+            : " — nothing in the scene is written in terms of it yet";
       }
       if (isExpression) {
         text.classList.add("magpy-vars-expr");

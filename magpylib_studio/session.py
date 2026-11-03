@@ -7850,6 +7850,47 @@ class MagpylibStudioSession:
         out[None] = list(params.values())
         return out
 
+    def _waiting_variables(self):
+        """What reads each variable in the branches out of the scene
+        (`_set_aside`): `{name: [{"choice": ..., "values": [...]}]}`, the
+        value of each switch's choice that would bring a reader in."""
+        events_of = self._events_of()
+        found = {}
+        for spec, _ in self._iter_specs():
+            if spec["id"] not in self._absent:
+                continue
+            names = set()
+            for sources in self._object_sources(spec, events_of).values():
+                names |= set(expressions.referenced_names(sources))
+            names |= set(
+                expressions.referenced_names(
+                    [
+                        e
+                        for e in events_of.get(spec["id"], [])
+                        if e.get("op") != "create"
+                    ]
+                )
+            )
+            # the branch it is in: its own, or the nearest it is held in
+            held = next(
+                each
+                for each in [spec["id"], *self._ancestors(spec["id"])]
+                if each in self._branches
+            )
+            choice = ", ".join(
+                expressions.referenced_names([self._switches[self._parents[held]]])
+            )
+            for name in names:
+                values = found.setdefault(name, {}).setdefault(choice, set())
+                values.add(str(self._branches[held]))
+        return {
+            name: [
+                {"choice": choice, "values": sorted(values)}
+                for choice, values in by_choice.items()
+            ]
+            for name, by_choice in found.items()
+        }
+
     def _live_variable_names(self):
         """Every variable that still reaches something the scene is built from.
 
@@ -7862,6 +7903,8 @@ class MagpylibStudioSession:
         live = set()
         events_of = self._events_of()
         for spec, _ in self._iter_specs():
+            if spec["id"] in self._absent:
+                continue  # a branch no switch chooses: moving it shows nothing
             for sources in self._object_sources(spec, events_of).values():
                 live |= set(expressions.referenced_names(sources))
         # The steps themselves: counts, pitches, angles. A create's parameters
@@ -7883,7 +7926,9 @@ class MagpylibStudioSession:
                 [
                     event
                     for event in (self.doc.get("events") or [])
-                    if event.get("op") not in written and event.get("op") != "create"
+                    if event.get("op") not in written
+                    and event.get("op") != "create"
+                    and event.get("target") not in self._absent
                 ]
             )
         )
@@ -7955,6 +8000,9 @@ class MagpylibStudioSession:
         `shadowed` says where it is being overruled, by which steps or by
         which value written over it — enough for a view to explain a slider
         that moves nothing, and to offer the way back. See `restore_variable`.
+        `waits` says what a branch out of the scene that reads it waits for,
+        `[{"choice": "version", "values": ["v1"]}]` (`choose`): set now, it
+        is what that branch has when it is chosen.
 
         A scene with variants lists them too, `variants`, each a variable's
         value by its name, and says which one the variables are in now,
@@ -7966,6 +8014,7 @@ class MagpylibStudioSession:
         bounds = self.doc.get("variable_bounds") or {}
         live = self._live_variable_names()
         shadowed = self._shadowed_variable_sources()
+        waits = self._waiting_variables()
         model = units.model_unit(self.doc)
         field = units.field_unit(self.doc)
 
@@ -7985,6 +8034,11 @@ class MagpylibStudioSession:
                     **shown(name),
                     **({"inert": True} if name not in live else {}),
                     **({"shadowed": shadowed[name]} if name in shadowed else {}),
+                    **(
+                        {"waits": waits[name]}
+                        if name not in live and name in waits
+                        else {}
+                    ),
                 }
                 for name, value in variables.items()
             ],
