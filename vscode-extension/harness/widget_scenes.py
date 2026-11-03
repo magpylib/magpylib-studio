@@ -47,6 +47,8 @@ Writes into OUT:
 * ``many-run.html`` -- those cubes and one more on a path above them, a run
   that plays as motion: the batch draws the moving one where it is;
 * ``collection-trace.html`` -- a collection drawing a trace of its own, editable;
+* ``variants.html`` -- a ring whose variants change how many magnets it has,
+  saved with them: a row of them along the foot, and a click draws that one;
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
 * ``glyphs.html`` -- a cube, and a magenta dipole beside it: an arrow the
@@ -147,6 +149,26 @@ def scene_to_edit():
     # whether y is sent as it is, or as the box rounds it
     probe = magpy.Sensor(position=(0, 0.00012345, 0.02))
     return SceneWidget(magnet, probe, editable=True)
+
+
+def ring_with_variants():
+    """A ring of `n` magnets, and variants of 3 and 8 of them: a view of it,
+    with the values in neither."""
+
+    from typing import Annotated
+
+    from magpylib_studio import Count, duplicate_around, scene
+
+    @scene(variants={"three": {"n": 3}, "eight": {"n": 8}})
+    def ring(n: Annotated[int, Count(2, 12)] = 5):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(1, 0, 0), dimension=(0.004,) * 3, position=(0.02, 0, 0)
+        )
+        held = magpy.Collection(magnet, style_label="ring")
+        duplicate_around(magnet, count=n, axis="z")
+        return (held,)
+
+    return SceneWidget(ring.build(), editable=True)
 
 
 def collection_with_a_trace():
@@ -538,6 +560,7 @@ def main(out):
     body.sealed = True
     SceneWidget(body).write_html(out / "sealed.html")
     collection_with_a_trace().write_html(out / "collection-trace.html")
+    ring_with_variants().write_html(out / "variants.html")
     dipole = magpy.misc.Dipole(
         moment=(0, 0, 1), position=(0.014, 0, 0), style_color="#ff00ff"
     )

@@ -226,10 +226,11 @@ Variants came in this step
   outputs apart, when a host asks.
 - **A scene as a page anyone can open** — `to_html` with the views for listed
   variable values computed ahead, as marimo-studio's prepared exports do; and
-  the widget inside a marimo-studio view. A scene's variants are the obvious
-  list. Editing in the page itself, with Pyodide loaded on demand, was probed
-  and parked ([#69](https://github.com/magpylib/magpylib-studio/issues/69)):
-  about 43 MB and 11 s before the first edit, paid again on each open.
+  the widget inside a marimo-studio view. A scene's variants ✅ (decision 0050,
+  [#118](https://github.com/magpylib/magpylib-studio/issues/118)). Editing in
+  the page itself, with Pyodide loaded on demand, was probed and parked
+  ([#69](https://github.com/magpylib/magpylib-studio/issues/69)): about 43 MB
+  and 11 s before the first edit, paid again on each open.
 - **More from variants**: the field per variant (`sweep` over variants,
   recording nothing), and two variants side by side, a view of one scene at
   another variant's values.

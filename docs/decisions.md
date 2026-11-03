@@ -58,6 +58,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0047](#0047-a-script-writes-h_ext-as-a-uniform-field)                                         | A script writes H_ext as a uniform field                     |
 | [0048](#0048-the-engine-solves-a-sheet-again)                                                  | The engine solves a sheet again                              |
 | [0049](#0049-a-scene-function-refuses-what-a-solve-makes)                                      | A scene function refuses what a solve makes                  |
+| [0050](#0050-a-saved-page-carries-its-variants)                                                | A saved page carries its variants                            |
 
 ---
 
@@ -2594,3 +2595,54 @@ the scene, 0.69 T for 0.43 T; unrecorded, `mesh_all`, `solve_cells` and
 
 - A package beside material-response that makes objects of its own is not on the
   list (`_LIBRARIES`).
+
+## 0050. A saved page carries its variants
+
+**Status:** accepted 2026-11-03, on Alex's word (#118).
+
+### Context
+
+A page saved from a view has no python behind it, so its variables panel does
+nothing, and the edit column it lives in is not shown. A scene's variants are a
+list known when the page is written: a colleague without Python could click one
+and see the model move, as #118 asks for an MTU's eight operating steps.
+
+### Decision
+
+- **Drawn ahead, when the page is written**: each variant's scene and tree, in a
+  copy of the session, so the view is left as it is. Each from the scene as it
+  is then, and solved again as an edit there would be (`followed`), so a sheet
+  shows the charge for that variant.
+- **What they share is held once**: a pool of the payload's items, each scene
+  the places of its own. A mesh no variant moves is stored once; the field lines
+  are each variant's own.
+- **A row along the foot of every view of a scene with variants**, over the
+  scale bar, the panel closed or open: the variables panel's toggles alone
+  (`variantsOnly`), ten across before it is a dropdown, and the widget's panel
+  without them, so they are in one place. A live view asks its session; a page
+  answers `get_variables` and `use_variant` itself. Selection, hiding, fading
+  and the camera stay across a click. Not in a view made for looking only, where
+  a click would edit the scene, nor in the studio panel, whose sidebar lists
+  them.
+- **The pressed toggle slides**: dragged sideways, each variant it passes is
+  shown as a preview, the one let go on used, and the slide is one step to undo,
+  the notebook told once. Chosen from four prototypes on a saved page; the
+  others put a track under or over the row, or a pill that opens into a slider.
+- **On by default**, for `write_html` and the Export button. `variants=False`
+  leaves them out, a list keeps those named, and a page nobody named
+  (`magpy.show`) past its size limit leaves them out with a warning.
+
+### Rejected
+
+- **Slider values computed ahead**: their combinations grow with each variable;
+  only the named variants are a list.
+- **Pyodide in the page** (#69): tens of megabytes and seconds before the first
+  click, and no material response or FEM.
+
+### Limits
+
+- A run and variants do not go together: the run is kept, with a warning.
+- While a slide is in hand the variables panel shows the values it began at, and
+  reads them back at the release.
+- A variant naming fewer variables than the scene has keeps the others as they
+  were when the page was written, whichever was clicked before.

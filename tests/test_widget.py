@@ -2523,6 +2523,99 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
         assert _ask(studio, method, name="start")["error"]["type"] == "MethodError"
 
 
+def _drawn(saved, scene):
+    """A variant's scene, or the start, as the page puts it back together."""
+    pool = saved["variants"]["pool"]
+    return {
+        **scene["values"],
+        **{key: [pool[at] for at in places] for key, places in scene["items"].items()},
+    }
+
+
+def test_a_saved_page_draws_each_variant_as_the_view_does():
+    """#118: each variant drawn ahead, tree and all -- `n` changes what there
+    is -- as a click in the live view draws it, and the view's own session
+    left where it was. What the variants share is held once: `free` moves
+    nothing, so "same" is the start's scene again."""
+    studio = _studio_of(_design())
+    studio._session.save_variant("few", {"n": 4})
+    studio._session.save_variant("many", {"n": 12, "r": 0.03})
+    studio._session.save_variant("same", {"free": 4.0})
+    studio.set_variable("r", 0.025)  # in neither
+    history = studio._session.get_history()
+    saved = json.loads(_unpacked(studio.to_html(), "magpy-scene"))
+    assert studio._session.get_history() == history
+    assert saved["state"]["variants"] == studio.variants == ["few", "many", "same"]
+    assert saved["state"]["payload"] is None
+    carried = saved["variants"]
+    assert _drawn(saved, carried["start"]) == studio.payload
+    assert carried["panel"]["variant"] is None
+    same = carried["scenes"]["same"]["items"]
+    assert same == carried["start"]["items"]
+    assert len(carried["pool"]) == len(
+        {
+            at
+            for scene in carried["scenes"].values()
+            for places in scene["items"].values()
+            for at in places
+        }
+    )
+    for name in ("few", "many", "same"):
+        assert _ask(studio, "use_variant", name=name)["result"]["ok"]
+        assert _drawn(saved, carried["scenes"][name]) == studio.payload
+        assert carried["scenes"][name]["tree"] == studio.tree
+        studio.undo()  # each from the scene as it was saved
+
+
+def test_a_slide_across_the_variants_is_one_edit():
+    """The pressed variant slid along the row: each one passed is a preview,
+    which tells the notebook nothing; the one let go on is used, told once,
+    and one undo takes the whole slide back."""
+    studio = _studio_of(_design())
+    for n in (4, 6, 8):
+        studio._session.save_variant(f"n{n}", {"n": n})
+    _ask(studio, "use_variant", name="n4")
+    revision = studio.revision
+    _ask(studio, "begin_interaction")
+    for name in ("n6", "n8"):
+        assert (
+            "scene"
+            in _ask(studio, "use_variant", preview=True, scene=True, name=name)[
+                "result"
+            ]
+        )
+    assert studio.revision == revision
+    _ask(studio, "use_variant", name="n8")
+    _ask(studio, "end_interaction")
+    assert studio.revision == revision + 1
+    assert studio.last_edit == {"by": "use_variant", "variant": "n8"}
+    assert studio.variables["n"] == 8
+    assert studio.undo()
+    assert studio.variables["n"] == 4
+
+
+def test_the_row_offers_the_variants_but_not_to_a_view_for_looking():
+    """`variants` is the row along the foot of the view: every view of the
+    scene has it, but one made for looking only, where a click would edit
+    the scene other views show."""
+    built = _design().build()
+    built.session.save_variant("few", {"n": 4})
+    assert widget.SceneWidget(built).variants == ["few"]
+    assert widget.SceneWidget(built, editable="never").variants == []
+
+
+def test_a_page_carries_the_variants_it_is_asked_for():
+    studio = _studio_of(_design())
+    studio._session.save_variant("few", {"n": 4})
+    studio._session.save_variant("many", {"n": 12})
+    saved = lambda **kw: json.loads(_unpacked(studio.to_html(**kw), "magpy-scene"))  # noqa: E731
+    assert list(saved(variants=["many"])["variants"]["scenes"]) == ["many"]
+    plain = saved(variants=False)
+    assert "variants" not in plain and plain["state"]["payload"] == studio.payload
+    with pytest.raises(ValueError, match="no variant 'other': its are few, many"):
+        studio.to_html(variants=["other"])
+
+
 def test_variables_assigned_together_rebuild_the_scene_once():
     """Several values assigned at once are one rebuild, not one each: using a
     variant from a cell costs what moving one slider does."""

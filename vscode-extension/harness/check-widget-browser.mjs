@@ -40,6 +40,8 @@
  *   `many-run.html`, from `widget_scenes.py`), and as many sealed into one
  *   body, picked, outlined and hidden whole (`sealed.html`);
  * - a collection's own trace hidden with it (`collection-trace.html`);
+ * - a saved page's variants: a click draws that one, the page answering for
+ *   itself (`variants.html`);
  * - a dragged sensor's late redraw kept under the handles;
  * - a drag's redraws paced by their cost, not stopped (`widget-pages/drag-pace.html`);
  * - a saved page's colour bar: a handle cuts the field's colours, and a
@@ -762,6 +764,49 @@ async function collectionTrace(port, base) {
       )
         return `hidden again: ${all}`;
       return null;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** A saved page's variants, along its foot: none pressed while the values are
+ *  in neither, and a click draws that variant -- here a ring of eight where
+ *  there were five -- with nothing behind the page to ask. */
+async function savedVariants(port, base) {
+  await check("a saved page draws the variant clicked", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/variants.html`);
+      const chips = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]`;
+      const drawn = await tab.until(
+        `return ${VIEW}?.querySelector("canvas") && ${chips}.length === 2`,
+        20_000,
+      );
+      if (!drawn) return "the page never drew its variants";
+      const pressed = () =>
+        tab.evaluate(
+          `return ${chips}.filter((c) => c.classList.contains("on")).map((c) => c.textContent)`,
+        );
+      // the ring's copies are drawn on its magnet's node, one child each
+      const magnets = `window.scene3d.byObjectId.get("magnet").children.length`;
+      const before = {
+        pressed: await pressed(),
+        magnets: await tab.evaluate(`return ${magnets}`),
+      };
+      await tab.evaluate(
+        `${chips}.find((c) => c.textContent === "eight").click()`,
+      );
+      const eight = await tab.until(`return ${magnets} === 8`, 5_000);
+      const after = {
+        pressed: await pressed(),
+        magnets: await tab.evaluate(`return ${magnets}`),
+      };
+      const said = JSON.stringify({ before, after });
+      if (before.pressed.length || before.magnets !== 5)
+        return `at first: ${said}`;
+      if (!eight || after.pressed.join() !== "eight") return `clicked: ${said}`;
+      return thrown(tab);
     } finally {
       await tab.close();
     }
@@ -2342,13 +2387,15 @@ async function variablesPanel(port, base) {
       ) {
         return `restore was not one step: ${grouped.join(" ")}`;
       }
-      // variants: a toggle each above the rows while they are few, none
-      // pressed to start; one press asks the session once, settled, and the
-      // rows are read back; a press on the pressed one asks nothing
+      // variants: a toggle each along the foot of the view while they are
+      // few, the panel closed, and none in the panel; none pressed to start;
+      // one press asks the session once, settled, and the rows are read
+      // back; a press on the pressed one asks nothing
       await tab.navigate(`${base}/pages/variables.html?variants`);
       const few = (await tab.until("return window.result", 20_000))?.variants;
       if (!few) return "?variants: never finished";
       if (!few.shown) return "the variants were not offered";
+      if (few.inPanel) return "the variables panel listed the variants too";
       if (few.toggles.join() !== "compact,wide" || few.dropdown.length) {
         return `two variants were ${JSON.stringify(few)}`;
       }
@@ -2361,6 +2408,11 @@ async function variablesPanel(port, base) {
         return `after wide, ${few.after} was pressed and n was ${few.n}`;
       }
       if (few.pressedAgain) return "a press on the pressed variant asked again";
+      const slide =
+        "begin_interaction use_variant:compact* use_variant:compact end_interaction";
+      if (few.slid?.join(" ") !== slide || few.slidTo?.join() !== "compact") {
+        return `a slide from wide to compact asked ${JSON.stringify(few.slid)}, and ${few.slidTo} was pressed`;
+      }
       if (few.disabled.length) return `${few.disabled} was offered as unusable`;
       // one the scene cannot use as it stands: shown, not offered, and a
       // press on it asks nothing
@@ -2378,8 +2430,8 @@ async function variablesPanel(port, base) {
       await tab.navigate(`${base}/pages/variables.html?many`);
       const many = (await tab.until("return window.result", 20_000))?.variants;
       if (!many) return "?many: never finished";
-      if (many.toggles.length || many.dropdown.length !== 7) {
-        return `six variants were ${JSON.stringify(many)}`;
+      if (many.toggles.length || many.dropdown.length !== 13) {
+        return `twelve variants were ${JSON.stringify(many)}`;
       }
       if (many.before !== "—")
         return `the values were said to be in ${many.before}`;
@@ -4294,6 +4346,7 @@ try {
   await manyRun(browser.port, base);
   await sealedBody(browser.port, base);
   await collectionTrace(browser.port, base);
+  await savedVariants(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
   await applied(browser.port, base);

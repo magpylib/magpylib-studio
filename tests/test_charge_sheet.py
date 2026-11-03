@@ -4,7 +4,10 @@ is drawn with its charge beside field lines, saved, written and read back."""
 
 from __future__ import annotations
 
+import base64
+import gzip
 import json
+import re
 import sys
 import types
 import warnings
@@ -402,3 +405,58 @@ def test_a_document_keeps_the_part_to_solve_from(route, tmp_path):
     part = sheet_of(back.scene).part
     assert part.susceptibility == 1000
     np.testing.assert_array_equal(part.dimension, (0.04, 0.04, 0.006))
+
+
+def test_a_saved_page_draws_each_variant_solved_again():
+    # #118: a variant that moves the magnet is drawn with the sheet solved for
+    # it, as a click in the live view solves it
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    outside = sheet_of(solved_above(0.02))
+    part = outside.part
+
+    @scene(solve_level=1, variants={"near": {"height": 0.012}, "far": {"height": 0.03}})
+    def above(height: Annotated[float, Length(0.01, 0.05)] = 0.02):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(0, 0, height),
+        )
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+            part=part,
+            style_label="plate",
+        )
+        return magnet, plate
+
+    view = SceneWidget(above.build(), editable=True)
+    view.send = lambda *_, **__: None
+    page = re.search(r'id="magpy-scene">([^<]*)<', view.to_html()).group(1)
+    carried = json.loads(gzip.decompress(base64.b64decode(page)))["variants"]
+
+    def plate(drawn):
+        (mesh,) = [
+            carried["pool"][at]
+            for at in drawn["items"]["meshes"]
+            if carried["pool"][at]["object_id"] == "plate"
+        ]
+        return mesh
+
+    for name in ("near", "far"):
+        ask = {
+            "kind": "rpc",
+            "id": 1,
+            "method": "use_variant",
+            "params": {"name": name},
+        }
+        view._on_message(view, ask, [])
+        (live,) = [m for m in view.payload["meshes"] if m["object_id"] == "plate"]
+        assert plate(carried["scenes"][name]) == live
+        assert plate(carried["scenes"][name]) != plate(carried["start"])
+        view.undo()

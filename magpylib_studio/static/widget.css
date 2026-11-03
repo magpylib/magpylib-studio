@@ -162,6 +162,7 @@
 .magpy-scene-readout,
 .magpy-scene-keys,
 .magpy-scene-transport,
+.magpy-scene-variants,
 .magpy-scene-notice {
   position: absolute;
   box-sizing: border-box;
@@ -706,7 +707,8 @@
 /* `display` above would otherwise outrank the `hidden` attribute, and a
    button hidden for good reason -- Export in a saved page -- would show. */
 .magpy-icon[hidden],
-.magpy-scene-transport[hidden] {
+.magpy-scene-transport[hidden],
+.magpy-scene-variants[hidden] {
   display: none;
 }
 
@@ -722,6 +724,57 @@
   gap: 6px;
   padding: 2px 10px 2px 2px;
   font-size: 11px;
+}
+
+/* A saved page's variants: the variables panel's row of toggles, alone, in
+   the transport's material, centred over the scale bar -- which stands up to
+   49px from the foot (`BAR_UP`, `BAR_ROOM` in scene3d.mjs). */
+.magpy-scene-variants {
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  /* its own width, not the half of the view right of its anchor */
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.magpy-scene-variants .magpy-vars-variant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+/* Said whole: the row is as wide as what it holds. */
+.magpy-scene-variants .magpy-vars-name {
+  flex: none;
+  overflow: visible;
+}
+
+.magpy-scene-variants select {
+  min-width: 10em;
+}
+
+/* The pressed toggle is a handle: a grip on it while the pointer is on the
+   row, and the cursor of a sideways drag. Kept in place, faint, so the row
+   does not move when the grip shows. */
+.magpy-vars-slides .magpy-vars-chip.on::before {
+  content: "⠿ ";
+  opacity: 0;
+}
+
+.magpy-scene-variants:hover .magpy-vars-slides .magpy-vars-chip.on::before,
+.magpy-vars-sliding .magpy-vars-chip.on::before {
+  opacity: 0.8;
+}
+
+.magpy-vars-slides .magpy-vars-chip.on,
+.magpy-vars-sliding {
+  cursor: ew-resize;
+  touch-action: none;
 }
 
 .magpy-scene-scrub {
@@ -750,6 +803,10 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s;
+}
+
+.magpy-varied .magpy-scene-notice {
+  bottom: 88px;
 }
 
 .magpy-scene-notice.shown {

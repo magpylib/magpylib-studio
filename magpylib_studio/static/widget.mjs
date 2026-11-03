@@ -594,6 +594,7 @@ function render({ model, el }) {
     empty: "No variables: a scene function's parameters are its variables.",
     compact: true,
     head: dockActionsVariables,
+    variants: false, // along the foot of the view instead
   });
   function showVariables(open) {
     variablesEl.hidden = !open;
@@ -828,6 +829,16 @@ function render({ model, el }) {
   counter.className = "magpy-scene-counter";
   transport.append(play, scrub, counter);
 
+  // The scene's variants (#118), along the foot of the view, over the scale
+  // bar: a toggle each, the one the values are in pressed. A click asks the
+  // session, as the variables panel did, or -- on a saved page -- the page,
+  // which drew each ahead (`_PAGE` in widget.py). Not in the studio panel,
+  // whose host lists them in its Variables view.
+  const variantsEl = document.createElement("div");
+  variantsEl.className = "magpy-scene-variants";
+  variantsEl.hidden = true;
+  let variantRow = null; // made for a scene that has variants, and only then
+
   // What the view has to say -- a file saved, full screen refused -- said
   // for a moment, and gone.
   const notice = document.createElement("div");
@@ -841,6 +852,7 @@ function render({ model, el }) {
     inspectorEl,
     keyList,
     transport,
+    variantsEl,
     notice,
   );
   el.append(stage);
@@ -1256,13 +1268,13 @@ function render({ model, el }) {
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
    *  column, which reaches down there in a view under about 520px tall, the
-   *  colour bar beside it, and the transport. Told again whenever either comes or goes, and when the
+   *  colour bar beside it, and the transport or a page's variants. Told again whenever either comes or goes, and when the
    *  view is resized. */
   function keepCorner() {
     placeColorBar(); // beside the column, as it now stands
     if (!drawing()) return;
     api.keepClear(
-      [editBar, transport, colorBarEl]
+      [editBar, transport, variantsEl, colorBarEl]
         .filter((part) => !part.hidden)
         .map((part) => part.getBoundingClientRect()),
     );
@@ -1554,6 +1566,35 @@ function render({ model, el }) {
    * again when they did -- the flicker on every re-run of the cell that made
    * the widget.
    */
+  /** The variants' row, for a scene that has some. */
+  function dressVariants() {
+    const carried =
+      (model.get("variants") || []).length > 0 && model.editor === undefined;
+    variantsEl.hidden = !carried;
+    el.classList.toggle("magpy-varied", carried);
+    if (carried) {
+      variantRow ??= createVariables(variantsEl, {
+        // a variant used, the panel's rows say the values it set; one a
+        // slide passes asks for the scene in its answer, as a slider does
+        rpc: (method, params, { preview = false } = {}) =>
+          call(method, params, { preview, scene: preview }).then((answer) => {
+            if (method === "use_variant" && !preview && !variablesEl.hidden) {
+              variables.refresh();
+            }
+            return answer;
+          }),
+        // a page draws the variant itself, and answers with no scene
+        onPreview: (answer) => answer?.scene && redrawFromSession(answer),
+        slide: true,
+        variantsOnly: true,
+        // as many as the foot of the view holds, past the panel's four
+        fits: (names) => names.length <= 10 && names.join("").length <= 90,
+      });
+      variantRow.refresh();
+    }
+    keepCorner();
+  }
+
   function dressTransport() {
     const animated = frames() > 1;
     transport.hidden = !animated;
@@ -2376,6 +2417,7 @@ function render({ model, el }) {
     "field_lines",
     "open_panel",
     "revision",
+    "variants",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2397,6 +2439,14 @@ function render({ model, el }) {
     // itself, and reads its rows back at the release.
     if ((now.has("payload") || now.has("revision")) && !variablesEl.hidden) {
       variables.refresh();
+    }
+    // which variant the values are in, after any edit of them
+    if (now.has("variants")) dressVariants();
+    else if (
+      (now.has("payload") || now.has("revision")) &&
+      !variantsEl.hidden
+    ) {
+      variantRow.refresh();
     }
     // The object panel follows the selection, and reads the scene back
     // after an edit settled -- once, since a re-pointed view is both.
@@ -2587,6 +2637,7 @@ function render({ model, el }) {
   dressLegend();
   dressColorBar();
   dressTransport();
+  dressVariants();
   dressEditing();
   openAsked();
   showAxes();

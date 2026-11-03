@@ -114,14 +114,62 @@ const [source, scene] = await Promise.all([
   unpack("magpy-widget"),
   unpack("magpy-scene"),
 ]);
-const { state, run } = JSON.parse(scene);
+const { state, run, variants } = JSON.parse(scene);
+
+// The scene's variants, when the page carries them: each a scene drawn ahead,
+// what they share held once, in `pool`, and named by its place there.
+const decoded = (drawn) => {
+  const payload = { ...drawn.values };
+  for (const [key, places] of Object.entries(drawn.items)) {
+    payload[key] = places.map((at) => variants.pool[at]);
+  }
+  return payload;
+};
+if (variants) state.payload = decoded(variants.start);
+let variant = variants ? variants.panel.variant : null;
 
 // The model the widget is written against, held here. A frame of the run --
 // what the widget would ask python for -- is answered from the run this file
-// carries, so a saved path still plays.
+// carries, so a saved path still plays; and a variant, from those it carries.
 const listeners = {};
 function emit(event, value) {
   for (const listener of listeners[event] || []) listener(value);
+}
+function ids(tree, into = new Set()) {
+  for (const node of tree) {
+    into.add(node.id);
+    ids(node.children, into);
+  }
+  return into;
+}
+// A variant's scene in place of the one drawn, keeping what is selected,
+// hidden and faded where those objects still are, as a view with python does.
+function use(name) {
+  const drawn = variants.scenes[name];
+  variant = name;
+  const kept = ids(drawn.tree);
+  model.set("tree", drawn.tree);
+  model.set("payload", decoded(drawn));
+  for (const key of ["selected", "hidden"]) {
+    model.set(key, state[key].filter((id) => kept.has(id)));
+  }
+  for (const key of ["faded", "color_range"]) {
+    const entries = Object.entries(state[key]).filter(([id]) => kept.has(id));
+    model.set(key, Object.fromEntries(entries));
+  }
+}
+function answer({ id, method, params }) {
+  let reply;
+  if (variants && method === "get_variables") {
+    reply = { result: { ...variants.panel, variant } };
+  } else if (variants && method === "use_variant" && variants.scenes[params.name]) {
+    use(params.name);
+    reply = { result: { ok: true } };
+  } else {
+    const message = "a saved page has no python to answer " + method;
+    reply = { error: { type: "MethodError", message } };
+  }
+  setTimeout(() => emit("msg:custom", { kind: "rpc", id, ...reply }));
 }
 const model = {
   get: (key) => state[key],
@@ -135,6 +183,7 @@ const model = {
   },
   off() {},
   send(message) {
+    if (message.kind === "rpc") return answer(message);
     if (message.kind !== "frame" || !run.length) return;
     const at = Math.max(0, Math.min(message.index, run.length - 1));
     if (!run[at]) return; // the payload's own step, never asked for
@@ -162,6 +211,60 @@ def _packed(text):
     """`text`, gzipped and in base64. `mtime=0`, so one scene is one file."""
     raw = gzip.compress(text.encode("utf-8"), mtime=0)
     return base64.b64encode(raw).decode("ascii")
+
+
+def _pooled(payload, pool, places):
+    """`payload` for a page that holds several: each list of items as their
+    places in `pool`, which holds each item once, and the rest as it is.
+    `places` is where each item already is, by its JSON."""
+    items, values = {}, {}
+    for key, value in payload.items():
+        if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+            values[key] = value
+            continue
+        at = items[key] = []
+        for item in value:
+            text = json.dumps(item, sort_keys=True, allow_nan=False)
+            if text not in places:
+                places[text] = len(pool)
+                pool.append(item)
+            at.append(places[text])
+    return {"items": items, "values": values}
+
+
+def _drawn_ahead(session, names, payload):
+    """The variants `names` of `session`'s scene, each as a click on a page
+    with no python behind it draws it (#118): its scene and its tree, with
+    `payload`, what the page opens on, pooled with them -- a mesh no variant
+    moves is held once. Drawn in a copy of the session, so the view's own is
+    left as it is, each from the scene as it is now -- a variant naming
+    fewer variables than the scene has leaves the others as they are here,
+    whichever was clicked before -- and solved again as an edit would solve
+    it, by the view's own `follow_edits` if it has one (`followed`). One the
+    scene cannot use is left out: the row says why, as the panel does."""
+    from magpylib_studio.session import MagpylibStudioSession
+
+    copy = MagpylibStudioSession()
+    copy.load_scene(json.loads(json.dumps(session.to_dict())), session._base_dir)
+    copy.follower = session.follower
+    pool, places = [], {}
+    start = _pooled(payload, pool, places)
+    scenes = {}
+    for name in names:
+        result = copy.followed(lambda name=name: copy.use_variant(name))
+        if result.get("ok"):
+            scenes[name] = {
+                **_pooled(copy.get_scene(), pool, places),
+                "tree": copy.object_tree(),
+            }
+        if copy.get_history()["undo"]:
+            copy.undo()  # the next from the scene as it is now
+    return {
+        "pool": pool,
+        "start": start,
+        "scenes": scenes,
+        "panel": session.get_variables(),
+    }
 
 
 def _positions(tree, at=""):
@@ -288,6 +391,12 @@ class SceneWidget(anywidget.AnyWidget):
     #: and the two move together; the view's model is the one that owns the
     #: numbers. A name the scene has no variable of is refused.
     variables = traitlets.Dict().tag(sync=True)
+    #: The scene's variants, by name, in a view with a scene of its own: a
+    #: row of them along the foot of the view, a click each setting their
+    #: values as one edit, as `use_variant` does. A page saved from the view
+    #: carries them (`to_html`). Empty in a view made for looking only, whose
+    #: scene a click would edit. Follows the scene; not for assigning.
+    variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     #: Its switch in the view is the eye on each sensor's field lines, a row
@@ -1018,6 +1127,11 @@ class SceneWidget(anywidget.AnyWidget):
             self.faded = {k: v for k, v in self.faded.items() if k in ids}
             self.color_range = {k: v for k, v in self.color_range.items() if k in ids}
             self.variables = _values_of(self._session)
+            self.variants = (
+                list(self._session.doc.get("variants") or {})
+                if self.editable is not None
+                else []
+            )
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
             if not first:
@@ -1046,7 +1160,7 @@ class SceneWidget(anywidget.AnyWidget):
                 "which offers no pencil."
             )
 
-    def to_html(self, title="magpylib scene"):
+    def to_html(self, title="magpylib scene", variants=True):
         """This view as one HTML file that needs nothing else.
 
         The widget itself, not a picture of it: orbit, legend, keys and the
@@ -1054,28 +1168,35 @@ class SceneWidget(anywidget.AnyWidget):
         page holds. A captured run travels with it -- as its motion, or every
         frame of one that changes shape -- so a path still plays.
 
+        A scene with variants carries them, each drawn ahead with its field
+        lines and solved again as an edit would solve it: a row of them along
+        the foot of the page, and a click draws that one. `variants` is
+        `False` for none, or the names of those to carry. A run and variants
+        do not go together: the run is kept.
+
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
-        return self._page(title)
+        return self._page(title, variants=variants)
 
-    def _page(self, title="magpylib scene", limit=None):
-        """`to_html`, with a run past `limit` shown as its first step: for a
-        page nobody asked for by name, which should not be hundreds of
-        megabytes because a script said `show`."""
+    def _page(self, title="magpylib scene", limit=None, variants=True):
+        """`to_html`, with a run past `limit` shown as its first step, and
+        variants past it left out: for a page nobody asked for by name, which
+        should not be hundreds of megabytes because a script said `show`."""
         return _PAGE.substitute(
             title=html.escape(title),
             css=(STATIC / "widget.css").read_text(encoding="utf-8"),
             bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
-            data=_packed(json.dumps(self._saved(limit), allow_nan=False)),
+            data=_packed(json.dumps(self._saved(limit, variants), allow_nan=False)),
         )
 
-    def _saved(self, limit=None):
+    def _saved(self, limit=None, variants=True):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
-        there is one, the page shows the first step, still, instead."""
+        there is one, the page shows the first step, still, instead. And
+        the variants named, as `_drawn_ahead` draws them."""
         frames = self.frames
         if self._scene is not None:
             run = threejs.whole_run(self._scene, limit)
@@ -1111,15 +1232,56 @@ class SceneWidget(anywidget.AnyWidget):
             height=self.height,
             camera=self._camera,
         )
-        return {"state": state, "run": run}
+        saved = {"state": state, "run": run}
+        names = self._variants_carried(variants, frames)
+        if names:
+            drawn = _drawn_ahead(self._session, names, state["payload"])
+            if limit is not None and len(json.dumps(drawn, allow_nan=False)) > limit:
+                warnings.warn(
+                    f"magpylib-studio: this scene's {len(names)} variants are "
+                    "more than a page nobody named can carry, so it shows the "
+                    "scene as it is. Write it with write_html, which carries "
+                    "them.",
+                    stacklevel=3,
+                )
+            else:
+                state["payload"] = None  # the page's from `drawn["start"]`
+                state["variants"] = list(drawn["scenes"])  # the row's
+                saved["variants"] = drawn
+        return saved
 
-    def write_html(self, file, title="magpylib scene"):
+    def _variants_carried(self, variants, frames):
+        """The variants a page is to carry: every one the scene has for
+        `True`, none for `False`, else those named -- and none beside a run,
+        which a page carries instead."""
+        session = getattr(self, "_session", None)
+        known = list((session.doc.get("variants") or {}) if session else ())
+        if variants is True:
+            names = known
+        elif variants is False or variants is None:
+            names = []
+        else:
+            names = [variants] if isinstance(variants, str) else list(variants)
+            unknown = [name for name in names if name not in known]
+            if unknown:
+                has = f"its are {', '.join(known)}" if known else "it has none"
+                raise ValueError(f"the scene has no variant {unknown[0]!r}: {has}")
+        if names and frames > 1:
+            warnings.warn(
+                "magpylib-studio: a page carries a run or variants, not both: "
+                "this one carries the run.",
+                stacklevel=4,
+            )
+            return []
+        return names
+
+    def write_html(self, file, title="magpylib scene", variants=True):
         """Write `to_html` to `file`: a path, or anything open for writing.
 
         Named and shaped as Plotly's `Figure.write_html` is, and like it
         returns nothing -- so, as the last line of a cell, it shows nothing.
         """
-        page = self.to_html(title)
+        page = self.to_html(title, variants)
         if hasattr(file, "write"):
             file.write(page)
         else:
@@ -1213,7 +1375,7 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": method, "variable": params.get("name")}
             if method == "set_variable":
                 edit["value"] = params.get("value")
-        elif method in self._VARIANT_EDITS:
+        elif method in self._VARIANT_EDITS and not preview:
             edit = {"by": method, "variant": params.get("name")}
         elif method in self._OVERLAP_EDITS:
             edit = {
@@ -1260,7 +1422,7 @@ class SceneWidget(anywidget.AnyWidget):
         settles = (
             method in self._SETTLES
             or method in self._OBJECT_EDITS
-            or method in self._VARIANT_EDITS
+            or (method in self._VARIANT_EDITS and not preview)
             or method in self._OVERLAP_EDITS
             or (method in self._VARIABLE_EDITS and not preview)
         )
