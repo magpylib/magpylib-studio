@@ -98,7 +98,12 @@ one the widget does not take: in a notebook it moves between cells.
 it — the widget itself, not a picture: orbit, legend, keys, and a captured run
 that still plays, because its motion — or, for a run that changes shape, its
 frames — travels in the file. `write_html(path)` does the same from a cell.
-Either way the page opens where the view was looking.
+Either way the page opens where the view was looking. A scene with variants
+carries them: a row along the foot of the page, a click draws that one, field
+lines and solved parts included, each drawn ahead when the page was written,
+from the scene as it was then. `write_html(path, variants=False)` leaves them
+out, and a list of names keeps those; a page carries a run or variants, not
+both.
 
 Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider

@@ -5,6 +5,20 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>An exported page carries the scene's variants</summary>
+
+A page saved with **Export** or `write_html` from a scene with variants has a
+row of them along its foot, and a click draws that variant, with its field lines
+and its solved parts, with no notebook behind the page. Each is drawn when the
+page is written; what they share is stored once.
+`write_html(path, variants=False)` leaves them out, and a list of names keeps
+those (#118).
+
+</details>
+
 ### Fixed
 
 <details>

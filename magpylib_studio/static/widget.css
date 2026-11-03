@@ -162,6 +162,7 @@
 .magpy-scene-readout,
 .magpy-scene-keys,
 .magpy-scene-transport,
+.magpy-scene-variants,
 .magpy-scene-notice {
   position: absolute;
   box-sizing: border-box;
@@ -706,7 +707,8 @@
 /* `display` above would otherwise outrank the `hidden` attribute, and a
    button hidden for good reason -- Export in a saved page -- would show. */
 .magpy-icon[hidden],
-.magpy-scene-transport[hidden] {
+.magpy-scene-transport[hidden],
+.magpy-scene-variants[hidden] {
   display: none;
 }
 
@@ -722,6 +724,36 @@
   gap: 6px;
   padding: 2px 10px 2px 2px;
   font-size: 11px;
+}
+
+/* A saved page's variants: the variables panel's row of toggles, alone, in
+   the transport's material, centred over the scale bar -- which stands up to
+   49px from the foot (`BAR_UP`, `BAR_ROOM` in scene3d.mjs). */
+.magpy-scene-variants {
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 16px);
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+.magpy-scene-variants .magpy-vars-variant {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+/* Said whole: the row is as wide as what it holds. */
+.magpy-scene-variants .magpy-vars-name {
+  flex: none;
+  overflow: visible;
+}
+
+.magpy-scene-variants select {
+  min-width: 10em;
 }
 
 .magpy-scene-scrub {
@@ -750,6 +782,10 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s;
+}
+
+.magpy-varied .magpy-scene-notice {
+  bottom: 88px;
 }
 
 .magpy-scene-notice.shown {

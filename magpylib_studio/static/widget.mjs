@@ -828,6 +828,16 @@ function render({ model, el }) {
   counter.className = "magpy-scene-counter";
   transport.append(play, scrub, counter);
 
+  // A saved page's variants (#118), along the foot of the view where a run's
+  // transport would be -- a page carries one or the other: a toggle each,
+  // the one drawn pressed, each a scene the page drew ahead and answers for
+  // itself (`_PAGE` in widget.py). Only there: a view with a kernel has its
+  // variables panel.
+  const variantsEl = document.createElement("div");
+  variantsEl.className = "magpy-scene-variants";
+  variantsEl.hidden = true;
+  let variantRow = null; // made for a page that carries them, and only there
+
   // What the view has to say -- a file saved, full screen refused -- said
   // for a moment, and gone.
   const notice = document.createElement("div");
@@ -841,6 +851,7 @@ function render({ model, el }) {
     inspectorEl,
     keyList,
     transport,
+    variantsEl,
     notice,
   );
   el.append(stage);
@@ -1256,13 +1267,13 @@ function render({ model, el }) {
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
    *  column, which reaches down there in a view under about 520px tall, the
-   *  colour bar beside it, and the transport. Told again whenever either comes or goes, and when the
+   *  colour bar beside it, and the transport or a page's variants. Told again whenever either comes or goes, and when the
    *  view is resized. */
   function keepCorner() {
     placeColorBar(); // beside the column, as it now stands
     if (!drawing()) return;
     api.keepClear(
-      [editBar, transport, colorBarEl]
+      [editBar, transport, variantsEl, colorBarEl]
         .filter((part) => !part.hidden)
         .map((part) => part.getBoundingClientRect()),
     );
@@ -1554,6 +1565,23 @@ function render({ model, el }) {
    * again when they did -- the flicker on every re-run of the cell that made
    * the widget.
    */
+  /** The variants' row, on a page that carries them. */
+  function dressVariants() {
+    const carried = Boolean(model.get("standalone") && model.get("variants"));
+    variantsEl.hidden = !carried;
+    el.classList.toggle("magpy-varied", carried);
+    if (carried) {
+      variantRow ??= createVariables(variantsEl, {
+        rpc: (method, params) => call(method, params),
+        variantsOnly: true,
+        // as many as the foot of the view holds, past the panel's four
+        fits: (names) => names.length <= 10 && names.join("").length <= 90,
+      });
+      variantRow.refresh();
+    }
+    keepCorner();
+  }
+
   function dressTransport() {
     const animated = frames() > 1;
     transport.hidden = !animated;
@@ -2587,6 +2615,7 @@ function render({ model, el }) {
   dressLegend();
   dressColorBar();
   dressTransport();
+  dressVariants();
   dressEditing();
   openAsked();
   showAxes();

@@ -36,6 +36,10 @@
  *   (the name's tooltip says them), a choice as its dropdown alone, and a
  *   number with no range as its box alone. The sidebar has the room, and
  *   shows all of it.
+ * - `variantsOnly`: the variants' row and nothing else, for a page with no
+ *   python behind it, where only the variants drawn ahead can be shown
+ *   (docs/decisions.md#0050-a-saved-page-carries-its-variants). `fits(names)`
+ *   says whether they are a toggle each there, or a dropdown.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -138,9 +142,11 @@ export function createVariables(
     empty = "No variables.",
     compact = false,
     head = null,
+    variantsOnly = false,
+    fits = asToggles,
   } = {},
 ) {
-  const withHelp = !compact;
+  const withHelp = !compact && !variantsOnly;
   const ranges = !compact;
   // The scene's variants, when it has some: a dropdown above the variables
   // they set, saying which one the values are in now.
@@ -236,7 +242,7 @@ export function createVariables(
       unusable[name]
         ? `${name} cannot be used as the scene stands: ${unusable[name]}`
         : `${name}: ${valuesOf(variants[name], variables)}`;
-    if (asToggles(names)) {
+    if (fits(names)) {
       const toggles = element("div", "magpy-vars-chips");
       for (const name of names) {
         const on = name === current;
@@ -457,6 +463,7 @@ export function createVariables(
       {},
     );
     showVariants(variants, variant, variables, unusable);
+    if (variantsOnly) return;
     listEl.innerHTML = "";
     emptyEl.hidden = variables.length > 0;
     for (const v of variables) {
