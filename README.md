@@ -7,9 +7,9 @@ exactly in milliseconds.
 
 ![The Halbach rings of the marimo example in VS Code, half in the light theme and half in the dark: the objects and the steps that built them, the variables with their sliders, the 3D view with the field lines flowing through the bore, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.gif)
 
-_The Halbach rings from `examples/marimo_demo.py`: two rings of twelve magnets,
-each ring one magnet and one pattern, and the field's lines flowing through the
-bore. Drag `n` and both rings rebuild._
+_The Halbach rings from `examples/marimo/halbach_ring.py`: two rings of twelve
+magnets, each ring one magnet and one pattern, and the field's lines flowing
+through the bore. Drag `n` and both rings rebuild._
 
 ## What you can do
 

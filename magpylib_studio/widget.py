@@ -127,6 +127,9 @@ const decoded = (drawn) => {
 };
 if (variants) state.payload = decoded(variants.start);
 let variant = variants ? variants.panel.variant : null;
+// The frames that answer: the start's run, or the variant's shown, pooled.
+let frames = run;
+let pooled = false;
 
 // The model the widget is written against, held here. A frame of the run --
 // what the widget would ask python for -- is answered from the run this file
@@ -148,7 +151,10 @@ function use(name) {
   const drawn = variants.scenes[name];
   variant = name;
   const kept = ids(drawn.tree);
+  frames = drawn.run || [];
+  pooled = true;
   model.set("tree", drawn.tree);
+  model.set("frames", drawn.frames || 1); // read as the scene is drawn
   model.set("payload", decoded(drawn));
   for (const key of ["selected", "hidden"]) {
     model.set(key, state[key].filter((id) => kept.has(id)));
@@ -184,11 +190,12 @@ const model = {
   off() {},
   send(message) {
     if (message.kind === "rpc") return answer(message);
-    if (message.kind !== "frame" || !run.length) return;
-    const at = Math.max(0, Math.min(message.index, run.length - 1));
-    if (!run[at]) return; // the payload's own step, never asked for
+    if (message.kind !== "frame" || !frames.length) return;
+    const at = Math.max(0, Math.min(message.index, frames.length - 1));
+    if (!frames[at]) return; // the payload's own step, never asked for
+    const frame = pooled ? decoded(frames[at]) : frames[at];
     setTimeout(() =>
-      emit("msg:custom", { kind: "frame", ...run[at], runId: message.runId }),
+      emit("msg:custom", { kind: "frame", ...frame, runId: message.runId }),
     );
   },
 };
@@ -258,10 +265,20 @@ def _drawn_ahead(session, names, payload):
     for name in names:
         result = copy.followed(lambda name=name: copy.use_variant(name))
         if result.get("ok"):
-            scenes[name] = {
-                **_pooled(copy.get_scene(), pool, places),
-                "tree": copy.object_tree(),
-            }
+            drawn = copy.get_scene()
+            scenes[name] = {**_pooled(drawn, pool, places), "tree": copy.object_tree()}
+            steps = copy.path_steps()
+            if steps > 1:
+                # its own run, each frame drawn ahead -- its sheets solved and
+                # its lines drawn at its step -- and pooled with the rest; the
+                # step the scene draws needs none
+                scenes[name]["frames"] = steps
+                scenes[name]["run"] = [
+                    None
+                    if i == drawn.get("step")
+                    else _pooled(copy.get_scene(frame=i), pool, places)
+                    for i in range(steps)
+                ]
         if copy.get_history()["undo"]:
             copy.undo()  # the next from the scene as it is now
     return {
@@ -1074,6 +1091,9 @@ class SceneWidget(anywidget.AnyWidget):
         # starts, not an edit; a document that has them on shows them.
         if self.field_lines and not session.field_lines:
             session.set_field_lines(True)
+        # The sheets solved for the scene as it opens, not as some cell
+        # solved them: also part of where editing starts.
+        session.solve_at_start()
         # Where editing starts: undo stops here, and `reset` comes back here.
         # What the session did before the view -- a scene function's build,
         # steps made from code -- is its starting point, not edits.
@@ -1267,8 +1287,8 @@ class SceneWidget(anywidget.AnyWidget):
 
     def _variants_carried(self, variants, frames):
         """The variants a page is to carry: every one the scene has for
-        `True`, none for `False`, else those named -- and none beside a run,
-        which a page carries instead."""
+        `True`, none for `False`, else those named -- each with its run, where
+        the scene has one (`_drawn_ahead`)."""
         session = getattr(self, "_session", None)
         known = list((session.doc.get("variants") or {}) if session else ())
         if variants is True:
@@ -1281,13 +1301,6 @@ class SceneWidget(anywidget.AnyWidget):
             if unknown:
                 has = f"its are {', '.join(known)}" if known else "it has none"
                 raise ValueError(f"the scene has no variant {unknown[0]!r}: {has}")
-        if names and frames > 1:
-            warnings.warn(
-                "magpylib-studio: a page carries a run or variants, not both: "
-                "this one carries the run.",
-                stacklevel=4,
-            )
-            return []
         return names
 
     def write_html(self, file, title="magpylib scene", variants=True):

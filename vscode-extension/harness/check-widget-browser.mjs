@@ -813,6 +813,54 @@ async function savedVariants(port, base) {
   });
 }
 
+/** A saved page carries every variant's run: scrubbed to the first step,
+ *  each variant draws its own -- the magnet where that variant starts it. */
+async function savedRunVariants(port, base) {
+  await check("a saved page plays each variant's own run", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/run-variants.html`);
+      const chips = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]`;
+      const ready = await tab.until(
+        `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && ${chips}.length === 2`,
+        20_000,
+      );
+      if (!ready) return "no transport, or no variants";
+      // where the magnet's drawing is along x, in the world: its mesh's box
+      const across = `(() => {
+        const mesh = window.scene3d.byObjectId.get("magnet").children.find((c) => c.isMesh);
+        mesh.updateWorldMatrix(true, false);
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        const box = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+        return (box.min.x + box.max.x) / 2;
+      })()`;
+      const first = async (name) => {
+        await tab.evaluate(
+          `${chips}.find((c) => c.textContent === "${name}").click()`,
+        );
+        await wait(600);
+        await tab.evaluate(
+          `const s = document.querySelector(".magpy-scene-scrub"); s.value = 0; s.dispatchEvent(new Event("input")); return 1`,
+        );
+        await tab.until(
+          `return document.querySelector(".magpy-scene-counter").textContent.startsWith("1 /")`,
+          5000,
+        );
+        await wait(600);
+        return tab.evaluate(`return ${across}`);
+      };
+      const left = await first("left");
+      const right = await first("right");
+      // 30 mm apart: the scene sets no unit, so the page draws in metres
+      if (Math.abs(right - left - 0.03) > 1e-4)
+        return `the first steps stand ${((right - left) * 1e3).toFixed(1)} mm apart, not 30`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** A hundred magnets, enough to be drawn as one batch: each one's own traces
  *  kept on the layer the camera skips, and still what a click picks; one
  *  hidden goes from the picture, and one faded or selected is drawn apart. */
@@ -4349,6 +4397,7 @@ try {
   await blocked(browser.port, base);
   await themeMidRun(browser.port, base);
   await barOverTransport(browser.port, base);
+  await savedRunVariants(browser.port, base);
   await staleFrame(browser.port, base);
   await silent(browser.port, base);
   await textFocus(browser.port, base);

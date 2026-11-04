@@ -104,11 +104,11 @@ folder.
 
 **The README's screenshot**, after a change that shows in it:
 `npm run screenshot` (macOS, after `npm run compile`) opens the Halbach rings of
-`examples/marimo_demo.py` in a VS Code of its own, with their field lines, and
-takes one period of the lines' flow in the dark theme and then the light. It
-writes the two cut along a diagonal: `docs/halbach.gif`, which both READMEs
-show, and its first frame as `docs/halbach.png`. VS Code renders its own window,
-so it needs no screen-recording permission; it takes about a minute.
+`examples/marimo/halbach_ring.py` in a VS Code of its own, with their field
+lines, and takes one period of the lines' flow in the dark theme and then the
+light. It writes the two cut along a diagonal: `docs/halbach.gif`, which both
+READMEs show, and its first frame as `docs/halbach.png`. VS Code renders its own
+window, so it needs no screen-recording permission; it takes about a minute.
 
 **The example gallery's pictures**, after changing an example or how the view
 draws one: `npm run gallery` (or `npm run gallery -- rings helmholtz` for some)
@@ -118,13 +118,14 @@ file, so commit what it changed. A new example without a picture shows as a card
 without one.
 
 **By hand, on a slow machine**, after a change to what a drag or a slider does:
-`npm run slow-machine -- examples/marimo_demo.py` (the demo by default; `--edit`
-for `marimo edit`, or any server after `--` with its page as `--url`) opens the
-notebook in a Chrome window of its own, with sliders for the browser's speed and
-the kernel's, as a share of this machine's, the latency between them, and a
-switch for the GPU -- off, WebGL is drawn on the CPU. Beside each, what it comes
-to: the page's busy share, frames and memory, the kernel's CPU and memory, the
-round trip, the renderer. For hands; `npm run drag-rate` is the number.
+`npm run slow-machine -- examples/marimo/halbach_ring.py` (the Halbach ring by
+default; `--edit` for `marimo edit`, or any server after `--` with its page as
+`--url`) opens the notebook in a Chrome window of its own, with sliders for the
+browser's speed and the kernel's, as a share of this machine's, the latency
+between them, and a switch for the GPU -- off, WebGL is drawn on the CPU. Beside
+each, what it comes to: the page's busy share, frames and memory, the kernel's
+CPU and memory, the round trip, the renderer. For hands; `npm run drag-rate` is
+the number.
 
 **By hand, the scenes**, after a change to the tabs, the side bar or the undo
 keys -- the two the script cannot do:

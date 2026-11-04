@@ -104,14 +104,15 @@ sideways to slide through them, one step to undo; and its page carries them: the
 same row, and a click draws that one, field lines and solved parts included,
 each drawn ahead when the page was written, from the scene as it was then.
 `write_html(path, variants=False)` leaves them out, and a list of names keeps
-those; a page carries a run or variants, not both.
+those. Beside a run, each variant carries its own: every step solved and drawn
+ahead, so the page plays any variant's run.
 
 Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
 rebuilds the objects, the view redraws them, and a click is an input to the next
-cell. `examples/marimo_demo.py` is that loop, and `examples/jupyter_demo.ipynb`
-the same scene in Jupyter, with `ipywidgets` sliders in place of marimo's
-reactivity.
+cell. `examples/marimo/halbach_ring.py` is that loop, and
+`examples/jupyter_demo.ipynb` the same scene in Jupyter, with `ipywidgets`
+sliders in place of marimo's reactivity.
 
 ## Editing a scene in the notebook
 
@@ -171,8 +172,8 @@ edit: refused in part, none of it is made.
 A part solved by `solve_face_charge` follows on its own: with
 magpylib-material-response 0.9.1, each sheet keeps the part it was solved from,
 so dragging a magnet or sliding a current solves it again, in the same step to
-undo (the U-core of `examples/marimo_demo.py`). `last_edit["solves"]` says what
-those solves took. `follow_edits(answer)` replaces that with your own:
+undo (`examples/marimo/ucore_solved.py`). `last_edit["solves"]` says what those
+solves took. `follow_edits(answer)` replaces that with your own:
 `answer(objects)` runs at every step of a drag or a slider, and what it returns,
 `{id: {parameter: value}}`, joins that edit's step.
 

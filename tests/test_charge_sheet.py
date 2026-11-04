@@ -334,7 +334,8 @@ def test_the_engine_solves_a_sheet_again_in_the_edits_step():
 
     _drag(view, name, (0, 0, 0.021), (0.002, 0, 0.022))
     solves = view.last_edit["solves"]
-    assert [s["reused"] for s in solves] == [False, True]
+    # the factorization the view's own solve kept when it opened
+    assert [s["reused"] for s in solves] == [True, True]
     assert all(s["solved_by"] == "face_charge" for s in solves)
     moved = solved_above(0.022)
     magnet = next(s for s in moved.sources_all if type(s) is magpy.magnet.Cuboid)
@@ -695,3 +696,80 @@ def test_a_sheet_solved_again_beside_a_body_solved_by_cells_is_not_warned_of():
         _drag(view, key, (0, 0, 0.021))
     assert len(view.last_edit["solves"]) == 1
     assert "not_followed" not in view.last_edit
+
+
+def test_a_run_over_a_solved_sheet_is_solved_at_every_step():
+    """material-response solves one configuration, not a path: the view at
+    rest is the solve at the last step -- from the moment it opens, whatever
+    pose the sheet was solved for -- each frame of the run the solve at its
+    own step, and a page carries every variant's run, each frame so solved."""
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    outside = sheet_of(solved_above(0.0085))
+    xs = (-0.01, 0.0, 0.01)
+
+    @scene(
+        solve_level=1,
+        variants={"low": {"height": 0.0085}, "high": {"height": 0.015}},
+    )
+    def slide(height: Annotated[float, Length(0.005, 0.05)] = 0.0085):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(xs[0], 0, height),
+        )
+        magnet.move(np.linspace((0, 0, 0), (xs[-1] - xs[0], 0, 0), len(xs)), start=0)
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+            part=outside.part,  # each read a magnet of its own
+        )
+        probe = magpy.Sensor(
+            pixel=[(x, 0, z) for x in (-0.02, 0, 0.02) for z in (0.004, 0.012)],
+            style={"pixel": {"size": 0, "field": {"source": "B"}}},
+        )
+        return magnet, plate, probe
+
+    def fresh(x, z):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2), dimension=(0.01, 0.01, 0.005), position=(x, 0, z)
+        )
+        return sheet_of(
+            face_charge.solve_face_charge(
+                magpy.Collection(outside.part, magnet), level=1
+            )
+        ).charge_densities
+
+    view = SceneWidget(slide.build(), editable=True, field_lines=True)
+    view.send = lambda *_, **__: None
+    studio = view._session
+    (key,) = studio._parted()
+    # opened as it stands, not as the sheet was solved, at the magnet's middle
+    np.testing.assert_allclose(
+        studio._objs[key].charge_densities, fresh(xs[-1], 0.0085), atol=1e-6
+    )
+    assert studio.get_history()["undo"] == []
+    assert "not_followed" not in studio.followed(lambda: studio.use_variant("high"))
+    np.testing.assert_allclose(
+        studio._objs[key].charge_densities, fresh(xs[-1], 0.015), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        studio._frame_sheets(0)[key].charge_densities, fresh(xs[0], 0.015), atol=1e-6
+    )
+
+    def drawn(frame):
+        meshes = studio.get_scene(frame=frame)["meshes"]
+        return [m for m in meshes if m["object_id"] == key]
+
+    assert drawn(0) != drawn(1)
+    scenes = view._saved()["variants"]["scenes"]
+    assert {name: each["frames"] for name, each in scenes.items()} == {
+        "low": 3,
+        "high": 3,
+    }
+    assert all(sum(f is not None for f in each["run"]) == 2 for each in scenes.values())

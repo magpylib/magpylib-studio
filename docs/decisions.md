@@ -2643,7 +2643,11 @@ and see the model move, as #118 asks for an MTU's eight operating steps.
 
 ### Limits
 
-- A run and variants do not go together: the run is kept, with a warning.
+- A run beside variants is carried whole: each variant holds its own run, every
+  frame drawn ahead with its sheets solved and its lines drawn at its step,
+  pooled with the rest -- three variants of a 50-step run with field lines are
+  1.5 MB gzipped. A click shows the variant at the step its scene draws, the
+  last; its transport plays its own run.
 - While a slide is in hand the variables panel shows the values it began at, and
   reads them back at the release.
 - A variant naming fewer variables than the scene has keeps the others as they
@@ -2754,8 +2758,13 @@ solve's polarization, and nothing said so.
   said
   ([material-response#172](https://github.com/magpylib/magpylib-material-response/issues/172)).
 - The mark reads the scene at its last step: a run's earlier frames over such a
-  sheet or body draw its one answer, and say nothing. A sensor on a path reads
-  the whole field every frame.
+  sheet or body draw its one answer, and say nothing. A sheet that keeps its
+  part is solved at each frame's own step instead: material-response solves one
+  configuration, not a path, so the engine hands it each step, and the view at
+  rest the last -- from the moment a view opens, whatever pose the sheet was
+  solved for in the notebook: the U-core opens in 0.46 s, not 0.30, and its
+  first drag step reuses that solve. A sensor on a path reads the whole field
+  every frame.
 - What a sheet was solved for is not saved: reopened, the scene is taken as
   solved for as it stands.
 - A run of more steps than are captured whole (`MAX_DRAGGABLE_PATH`, 1024) is

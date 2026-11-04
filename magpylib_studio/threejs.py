@@ -1399,6 +1399,23 @@ def frame_payload(scene, index, live=None, derived=None):
     }
 
 
+def redrawn(payload, objects):
+    """`payload`, a frame's (`frame_payload`), with what `objects` --
+    ``{studio id: object}`` -- draw in place of what it drew under those ids:
+    for a frame that shows what the run did not capture, a sheet solved again
+    at that frame's step."""
+    scene = _capture(list(objects.values()), on_behalf_of="studio")
+    items = _keyed([t for f in scene.frames for t in f.traces], objects)
+    for kind, name in (
+        ("mesh", "meshes"),
+        ("scatter", "scatters"),
+        ("pixels", "pixels"),
+    ):
+        kept = [p for p in payload.get(name, []) if p["object_id"] not in objects]
+        payload[name] = kept + [p for p in items if p["kind"] == kind]
+    return _shared(payload)
+
+
 def _clamp(scene, index):
     """`index` as a frame the scene has."""
     return max(0, min(int(index), len(scene.frames) - 1))

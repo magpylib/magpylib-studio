@@ -35,7 +35,7 @@ const option = (name, fallback) => {
 };
 const notebook = path.resolve(
   args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--seconds") ??
-    path.join(REPO, "examples/marimo_demo.py"),
+    path.join(REPO, "examples/marimo/halbach_ring.py"),
 );
 const mode = args.includes("--edit") ? "edit" : "run";
 const seconds = Number(option("--seconds", 4));

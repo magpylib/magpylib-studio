@@ -1,8 +1,8 @@
-"""The two designs of `examples/marimo_demo.py`, as the example gallery offers
-them: a Halbach ring to tune and a coil pair to flip.
+"""The designs of `examples/marimo/halbach_ring.py` and `coil_pair.py`, as
+the example gallery offers them: a Halbach ring to tune and a coil pair to flip.
 
-The notebook writes its functions out where it uses them, because a design
-being a plain function is what it shows. These are the same functions, and a
+The notebooks write their functions out where they use them, because a design
+being a plain function is what they show. These are the same functions, and a
 test builds both and compares the documents, so the two cannot drift apart.
 """
 

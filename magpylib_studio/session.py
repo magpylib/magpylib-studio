@@ -2631,6 +2631,25 @@ def _moving_alone(collection):
             yield inner
 
 
+def _at_step(obj, step=None):
+    """`obj` at `step` of its path, the last where None: a copy, every path
+    property of it and of what it holds one entry long -- a shorter path at
+    its own last -- or itself where nothing in it has a path. A solve takes
+    one configuration, not a path (`_solved_at`)."""
+    held = (obj, *getattr(obj, "children_all", ()))
+    if all(each._get_path_len() == 1 for each in held):
+        return obj
+    copied = obj.copy()
+    for each in (copied, *getattr(copied, "children_all", ())):
+        for prop in each._path_properties:
+            value = getattr(each, f"_{prop}", None)
+            if value is not None:
+                last = len(value) - 1
+                at = last if step is None else min(max(step, 0), last)
+                setattr(each, f"_{prop}", value[at : at + 1])
+    return copied
+
+
 def _as_fixed(obj):
     """A copy of `obj` as a solve here takes a source: fixed, so a body a
     solve by cells set is no model already solved to material-response,
@@ -4555,8 +4574,14 @@ class MagpylibStudioSession:
             # A frame is drawn afresh, and its lines are its own step's -- where
             # its steps are the path's, one a frame: a run past what is captured
             # whole (`threejs.MAX_DRAGGABLE_PATH`) is magpylib's own subsample.
-            if self.field_lines and payload.get("frames") == self.path_steps():
-                payload["fieldlines"] = self._frame_lines(payload.get("frame", frame))
+            # Its sheets are solved at that step too, and drawn so.
+            if payload.get("frames") == self.path_steps():
+                at = payload.get("frame", frame)
+                stepped = self._frame_sheets(at)
+                if stepped:
+                    payload = threejs.redrawn(payload, stepped)
+                if self.field_lines:
+                    payload["fieldlines"] = self._frame_lines(at, stepped)
             return payload
         # The field the pixels read, once a scene: the arrows are drawn from
         # it, and the lines take their colours from it.
@@ -5163,7 +5188,7 @@ class MagpylibStudioSession:
             )
         return items
 
-    def _frame_lines(self, frame):
+    def _frame_lines(self, frame, stepped=None):
         """The field lines at `frame`, a step of the scene's paths: each
         sensor's, from the scene at that step, with none of a gesture's
         caches. Kept for the frame for as long as the run captured with them
@@ -5175,7 +5200,9 @@ class MagpylibStudioSession:
         computed once: each frame adds the field of what moves, at its step,
         as a gesture's frames do (`_field_on`). A core meshed into thousands
         of cells beside a magnet on a path is computed once a run, not once a
-        frame. A sensor on a path is drawn on a grid round it at that step."""
+        frame. A sensor on a path is drawn on a grid round it at that step.
+        `stepped` are the sheets solved at that step (`_frame_sheets`), in
+        place of the scene's: what moves, as far as the field goes."""
         from magpylib_studio import fieldlines
 
         kept = getattr(self, "_lines_of_frames", None)
@@ -5194,8 +5221,10 @@ class MagpylibStudioSession:
             return kept[1][frame]
         step = max(0, frame)
         sources = fieldlines.sources_of(self.scene)
-        still = [s for s in sources if s._get_path_len() == 1]
+        swapped = {id(self._objs[key]) for key in stepped or ()}
+        still = [s for s in sources if s._get_path_len() == 1 and id(s) not in swapped]
         moved = [fieldlines.at_step(s, step) for s in sources if s._get_path_len() > 1]
+        moved += list((stepped or {}).values())
         key_of = self._names_of_objects()
         items = []
         for sensor in fieldlines.sensors_of(self.scene):
@@ -5207,7 +5236,9 @@ class MagpylibStudioSession:
                 held, fixed, varying = {}, [], [*still, *moved]
                 around, every = varying, False
             else:
-                held, fixed, varying = run.setdefault((key, kind), {}), still, moved
+                # the field of what stands still: the scene's sheets in it or not
+                held = run.setdefault((key, kind, bool(stepped)), {})
+                fixed, varying = still, moved
                 around, every = sources, True
             seeds = fieldlines.seeds_of(fieldlines.at_step(sensor, step))
             grid, values, within = _frame_field(
@@ -7767,21 +7798,9 @@ class MagpylibStudioSession:
             self._solve_waiting = True
             return None
         try:
-            from magpylib_material_response import solve_face_charge
-
-            drives = [
-                _as_fixed(obj)
-                for key, obj in self._objs.items()
-                if key not in ids
-                and not isinstance(obj, magpy.Sensor)
-                and (not isinstance(obj, magpy.Collection) or threejs.is_sealed(obj))
-                and not _computes_no_field(obj)
-            ]
-            parts = [self._objs[key].part for key in ids]
-            out = solve_face_charge(
-                magpy.Collection(*parts, *drives),
-                level=self.doc.get("solve_level"),
-                reuse=(self._kept_solve or True) if size <= _KEPT_UNKNOWNS else False,
+            # at rest the view stands at the last step of the paths
+            out, sheets = self._solved_at(
+                None, (self._kept_solve or True) if size <= _KEPT_UNKNOWNS else False
             )
             info = out.face_charge_info
             self._kept_solve = out if size <= _KEPT_UNKNOWNS else None
@@ -7790,7 +7809,6 @@ class MagpylibStudioSession:
                 self._slow_solves += 1
             else:
                 self._slow_solves = 0
-            sheets = out.sources_all[: len(parts)]
             result = self.set_changed(
                 {
                     key: {
@@ -7807,6 +7825,68 @@ class MagpylibStudioSession:
         except Exception as error:  # noqa: BLE001 - said, and the edit stays
             return f"{type(error).__name__}: {error}"
         return None if result.get("ok", True) else result.get("error")
+
+    def solve_at_start(self):
+        """Solve the sheets that keep their part for the scene as it stands,
+        at the last step of its paths, as the view at rest draws it: one
+        solved elsewhere -- in a notebook, for another pose -- showed that
+        solve until the first edit. For where a view starts, before
+        `forget_history`. Returns why not, or None."""
+        return self._solve_again(at_rest=True) if self._parted() else None
+
+    def _solved_at(self, step, reuse):
+        """The parts solved again with every other source standing at `step`
+        of its path -- the last for None: material-response solves one
+        configuration, not a path. The result, to reuse, and its sheets in
+        `_parted`'s order."""
+        from magpylib_material_response import solve_face_charge
+
+        ids = self._parted()
+        drives = [
+            _as_fixed(_at_step(obj, step))
+            for key, obj in self._objs.items()
+            if key not in ids
+            and not isinstance(obj, magpy.Sensor)
+            and (not isinstance(obj, magpy.Collection) or threejs.is_sealed(obj))
+            and not _computes_no_field(obj)
+        ]
+        parts = [_at_step(self._objs[key].part, step) for key in ids]
+        out = solve_face_charge(
+            magpy.Collection(*parts, *drives),
+            level=self.doc.get("solve_level"),
+            reuse=reuse,
+        )
+        return out, out.sources_all[: len(parts)]
+
+    def _frame_sheets(self, frame):
+        """The sheets that keep their part, solved at `frame`'s step of a run
+        (`_solved_at`), ``{id: sheet}``, dressed as the scene's -- none at the
+        last step, which the scene's own sheets are solved at, nor where
+        nothing moves. Kept for the run (`_animated`), each solve reusing the
+        last one's factorization; after one that fails, the run's frames keep
+        the scene's sheets."""
+        ids = self._parted()
+        steps = self.path_steps()
+        if not ids or steps <= 1 or frame >= steps - 1:
+            return {}
+        kept = getattr(self, "_sheets_of_frames", None)
+        if kept is None or kept[0] is not self._animated:
+            kept = self._sheets_of_frames = (self._animated, {}, [None, None])
+        if frame in kept[1] or kept[2][1] is not None:
+            return kept[1].get(frame, {})
+        try:
+            out, sheets = self._solved_at(max(0, frame), kept[2][0] or True)
+        except Exception as error:  # noqa: BLE001 - said, and the frames go on
+            kept[2][1] = f"{type(error).__name__}: {error}"
+            return {}
+        kept[2][0] = out
+        made = {}
+        for key, sheet in zip(ids, sheets, strict=True):
+            for path, value in _style_values(self._objs[key]).items():
+                sheet.style.set(path, _style_arg(path, value))
+            made[key] = sheet
+        kept[1][frame] = made
+        return made
 
     def take_solves(self):
         """What the solves since the last asked came to, each as
