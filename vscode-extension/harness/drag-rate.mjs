@@ -7,7 +7,7 @@
  *
  * Starts `marimo run` (or `edit`) on the notebook -- the marimo demo unless
  * named -- with the python the checks use, opens it in headless Chrome on the
- * GPU, drags the demo's `Inner_magnet#3` the way the renderer reports a drag, and
+ * GPU, drags the demo's `magnet#3` the way the renderer reports a drag, and
  * counts the view's answers that carry a scene as they arrive over marimo's
  * websocket. Not a check: it prints numbers, and they are the machine's. Needs
  * marimo in that python, and Chrome or Chromium (set CHROME to name one).
@@ -26,7 +26,7 @@ const { enginePython } = require("./engine-python.js");
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
-const TARGET = "Inner_magnet#3";
+const TARGET = "magnet#3";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {

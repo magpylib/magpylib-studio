@@ -210,8 +210,8 @@ const HOLD = `(() => {
 })()`;
 
 /** What a person would do in the 3D view before taking it, done through its
- *  own buttons: frame everything again at the window's new size, and hide
- *  the bore's arrows from the legend, so that only its field lines show. */
+ *  own buttons: frame everything again at the window's new size. The bore
+ *  draws no pixels, only its field lines. */
 const DRESS = `(async () => {
   const view = ${CONTENT};
   const deep = (root, selector) => [
@@ -222,15 +222,6 @@ const DRESS = `(async () => {
     deep(view.document, "button").find((b) => (b.title || b.getAttribute("aria-label") || "").startsWith(name));
   const pause = () => new Promise((resolve) => view.setTimeout(resolve, 600));
   const done = [];
-  button("Legend")?.click();
-  await pause();
-  const row = deep(view.document, ".magpy-legend-row").find((r) => /^bore's pixels/.test(r.title));
-  if (row) {
-    row.querySelector(".magpy-legend-eye").click();
-    done.push("pixels hidden");
-  }
-  await pause();
-  button("Legend")?.click();
   button("Frame everything")?.click();
   if (button("Frame everything")) done.push("framed");
   await pause();
@@ -303,7 +294,7 @@ try {
   await wait(4000);
   const view = await sceneView(port);
   const dressed = await view.evaluate(DRESS);
-  if (!dressed?.includes("pixels hidden") || !dressed.includes("framed")) {
+  if (!dressed?.includes("framed")) {
     throw new Error(`the 3D view was not dressed: ${JSON.stringify(dressed)}`);
   }
   await wait(1500);

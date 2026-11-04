@@ -918,10 +918,10 @@ def _design(name):
 # (`vscode-extension/media/gallery/`, drawn by `npm run gallery`).
 EXAMPLES = {
     "rings": (
-        "Halbach rings",
-        "Two rings of magnets, each one magnet and a circular pattern, "
-        "and the field lines across the bore — twist the inner ring, or "
-        "try the compact and wide variants",
+        "Halbach ring",
+        "A ring of magnets, one magnet and a circular pattern, and the "
+        "field lines across the bore — drag n or radius, or try the "
+        "compact and wide variants",
         lambda: _design("halbach"),
     ),
     "helmholtz": (

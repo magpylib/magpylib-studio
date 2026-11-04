@@ -48,15 +48,13 @@ def _(mo):
     # A U-core, solved while you drag
 
     Three soft-iron cuboids (χ = 999) wound with a coil of 400
-    ampere-turns, a magnet in the gap and two uniform fields on it, solved
-    by face charge: sheets of charge on the core's surfaces, no volume
-    mesh. Each sheet keeps the part it was solved from, so the view solves
-    the core again at every step of a drag, with nothing written here to ask
-    for it. Drag the **magnet**, or slide **current** or **vertical**: the
-    solve keeps its factorization, so a new load costs milliseconds. Drag
-    a **leg** off the yoke and each step factors the matrix again. One undo
-    takes back the move and its solve together. The arrow in the corner is
-    the sum of the two fields; pick one in the legend for its own.
+    ampere-turns, solved by face charge: sheets of charge on the core's
+    surfaces, no volume mesh. Each sheet keeps the part it was solved from,
+    so the view solves the core again at every step of a drag, with nothing
+    written here to ask for it. Drag the **coil**, or slide **current**: the
+    solve keeps its factorization, so a new load costs milliseconds. Drag a
+    **leg** off the yoke and each step factors the matrix again. One undo
+    takes back the move and its solve together.
     """)
     return
 
@@ -66,7 +64,7 @@ def _(mo):
     # magpylib-material-response is not one of studio's dependencies: without
     # it, or before 0.9.2, this part of the page says so and the rest runs.
     try:
-        from magpylib_material_response import UniformField, solve_face_charge
+        from magpylib_material_response import solve_face_charge
         from magpylib_material_response.face_charge import ChargeSheet
         from magpylib_material_response.polyline import (
             create_polyline_fillet,
@@ -83,7 +81,6 @@ def _(mo):
     )
     return (
         ChargeSheet,
-        UniformField,
         create_polyline_fillet,
         move_grid_along_polyline,
         solve_face_charge,
@@ -138,7 +135,7 @@ def _(create_polyline_fillet, magpy, move_grid_along_polyline, np):
     )
     # Four turns where material-response's docs wind sixteen, at the same 400
     # ampere-turns: a solve computes the coil's field on every panel again, and
-    # 400 segments made it 167 ms a step where the magnet alone is 15.
+    # 400 segments made it 167 ms a step.
     _turn = create_polyline_fillet(_square, max_radius=0.006, N=2)
     _pack = np.array([(xt, _h + 0.0011, 0) for xt in (np.arange(4) - 1.5) * 0.0044])
     ucore_windings = move_grid_along_polyline(_turn, _pack)
@@ -151,7 +148,6 @@ def _(
     Bounds,
     ChargeSheet,
     Count,
-    UniformField,
     grid,
     magpy,
     scene,
@@ -161,29 +157,13 @@ def _(
     ucore_solvable,
     ucore_windings,
 ):
-    def _magnet():
-        return magpy.magnet.Cuboid(
-            dimension=(0.02, 0.01, 0.01),
-            polarization=(1.2, 0, 0),
-            position=(0, 0, 0.055),
-            style_label="magnet",
-        )
-
-    def _fields(vertical):
-        """A field along z, in tesla, and a weaker one turned about z. A field
-        is the same everywhere, so it has no place: only its turn counts."""
-        upward = UniformField(B=(0, 0, vertical), style_label="vertical")
-        turned = UniformField(B=(0.008, 0, 0), style_label="turned")
-        turned.rotate_from_angax(30, "z")
-        return upward, turned
-
     _coil = magpy.Collection(
         *(magpy.current.Polyline(current=100, vertices=v) for v in ucore_windings)
     )
     # Kept by `reuse=True`, for the first step of a drag to reuse: 8 n² bytes,
     # on the result, so only the last result is held.
     ucore_solved = solve_face_charge(
-        ucore_solvable(ucore_poses, _magnet(), _coil, *_fields(0.01)),
+        ucore_solvable(ucore_poses, _coil),
         level=ucore_level.value,
         reuse=True,
     )
@@ -193,15 +173,11 @@ def _(
     @scene(model_unit="mm", field_unit="mT", solve_level=ucore_level.value)
     def ucore_scene(
         current: Annotated[float, Bounds(-200, 200, unit="current")] = 100,
-        vertical: Annotated[float, Bounds(-0.1, 0.1, unit="field")] = 0.01,
         density: Annotated[int, Count(4, 40, slider=(5, 25))] = 15,
     ):
-        """The solved core, the coil at `current` amperes, the magnet in the
-        gap, the two fields, and a probe in the core's plane of symmetry,
-        `density` by `density` pixels across 140 mm, drawn as its field
-        lines."""
-        magnet = _magnet()
-        upward, turned = _fields(vertical)
+        """The solved core, the coil at `current` amperes, and a probe in the
+        core's plane of symmetry, `density` by `density` points across 140
+        mm, drawn as its field lines."""
         coil = magpy.Collection(
             *(
                 magpy.current.Polyline(current=current, vertices=v)
@@ -233,7 +209,7 @@ def _(
             ),
             style_label="U-core",
         )
-        return iron, coil, magnet, upward, turned, probe
+        return iron, coil, probe
 
     return ucore_scene, ucore_solved
 

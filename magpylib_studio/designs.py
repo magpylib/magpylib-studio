@@ -6,12 +6,11 @@ being a plain function is what they show. These are the same functions, and a
 test builds both and compares the documents, so the two cannot drift apart.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 import magpylib as magpy
 
 from magpylib_studio import (
-    Angle,
     Bounds,
     Count,
     Length,
@@ -26,54 +25,34 @@ from magpylib_studio import (
     model_unit="mm",
     field_unit="mT",
     variants={
-        "compact": {"n": 8, "radius": 0.02, "gap": 0.012},
-        "wide": {"n": 16, "radius": 0.035, "gap": 0.014},
+        "compact": {"n": 8, "radius": 0.02},
+        "wide": {"n": 16, "radius": 0.035},
     },
 )
 def halbach(
     n: Annotated[int, Count(4, 48, slider=(6, 24))] = 12,
     radius: Annotated[float, Length(0.01, 0.1, slider=(0.018, 0.04))] = 0.025,
-    gap: Annotated[float, Length(0.006, 0.05, slider=(0.009, 0.03))] = 0.012,
-    twist: Annotated[float, Angle(-180, 180, slider=(-180, 180))] = 0.0,
-    tilt: Annotated[float, Angle(-180, 180, slider=(-90, 90))] = 0.0,
-    tilt_axis: Literal["x", "y", "z"] = "z",
     density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
-    layers: Annotated[int, Count(1, 9, slider=(1, 5))] = 1,
 ):
-    """Two concentric rings of magnets, the outer `gap` further out, each
-    polarization turning twice per revolution: in step their fields add
-    up across the bore, and `twist` turns the inner ring against the
-    outer. A grid of field arrows across the bore, `layers` of it."""
-    rings = magpy.Collection(style_label="Halbach rings")
-    ring = {}
-    for name, r in (("Inner", radius), ("Outer", radius + gap)):  # literals
-        ring[name] = magpy.Collection(style_label=f"{name} ring")
-        rings.add(ring[name])
-        magnet = magpy.magnet.Cuboid(
-            dimension=(0.008, 0.008, 0.008),
-            polarization=(1, 0, 0),
-            position=(r, 0, 0),
-            style_label=f"{name} magnet",
-        )
-        ring[name].add(magnet)
-        duplicate_around(magnet, count=n, axis="z", spin=360 / n)
-    ring["Inner"].rotate_from_angax(twist, "z", anchor=0)
-    rings.rotate_from_angax(tilt, tilt_axis, anchor=0)
+    """A ring of `n` magnets, each polarization turning twice per
+    revolution, so that their fields add up across the bore, and a probe
+    across the bore, `density` by `density` points, drawn as its field
+    lines."""
+    ring = magpy.Collection(style_label="Halbach ring")
+    magnet = magpy.magnet.Cuboid(
+        dimension=(0.008, 0.008, 0.008),
+        polarization=(1, 0, 0),
+        position=(radius, 0, 0),
+        style_label="magnet",
+    )
+    ring.add(magnet)
+    duplicate_around(magnet, count=n, axis="z", spin=360 / n)
 
     bore = magpy.Sensor(
-        pixel=grid(radius / 2, density, layers=layers),
-        style={
-            "label": "bore",
-            "pixel": {
-                "field": {
-                    "source": "B",
-                    "symbol": "arrow3d",
-                    "colormap": "Viridis",
-                }
-            },
-        },
+        pixel=grid(radius / 2, density),
+        style={"label": "bore", "pixel": {"size": 0, "field": {"source": "B"}}},
     )
-    return rings, bore
+    return ring, bore
 
 
 _amperes = Bounds(-100, 100, slider=(-50, 50), unit="current")
@@ -114,9 +93,6 @@ def coils(
         duplicate_along(loop, count=turns, step=(0, 0, pitch))
     probe = magpy.Sensor(
         pixel=grid(0.6 * radius, 9, plane="xz"),
-        style={
-            "label": "probe",
-            "pixel": {"field": {"source": "B", "symbol": "arrow3d"}},
-        },
+        style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
     )
     return pair, probe

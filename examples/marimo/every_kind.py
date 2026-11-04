@@ -66,7 +66,9 @@ def _(SceneWidget, magpy, mo, np):
         strip = np.empty((320, 3))
         strip[0::2], strip[1::2] = band(0), band(0.36)
         moebius = magpy.current.TriangleStrip(
-            current=20, vertices=strip * 16 * mm, style_label="Möbius band"
+            current=20,
+            vertices=strip * 16 * mm,
+            style_label="TriangleStrip - Möbius band",
         )
         moebius.rotate_from_angax(-51, "z", anchor=0)
 
@@ -138,7 +140,7 @@ def _(SceneWidget, magpy, mo, np):
             outward = np.array([np.cos(angle), np.sin(angle), 0])
             around = np.array([-np.sin(angle), np.cos(angle), 0])
             made = kinds[name](around)
-            made.style.label = name
+            made.style.label = type(made).__name__  # the legend says the class
             reach = 37 * mm
             if name == "segment":
                 # its arc bulging outward, and its own y round the ring

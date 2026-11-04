@@ -104,10 +104,7 @@ def _(Annotated, Bounds, Count, Length, duplicate_along, grid, magpy, scene):
             duplicate_along(loop, count=turns, step=(0, 0, pitch))
         probe = magpy.Sensor(
             pixel=grid(0.6 * radius, 9, plane="xz"),
-            style={
-                "label": "probe",
-                "pixel": {"field": {"source": "B", "symbol": "arrow3d"}},
-            },
+            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
         )
         return pair, probe
 
@@ -125,34 +122,38 @@ def _(SceneWidget, coils, json, mo):
     pair_view = mo.ui.anywidget(pair_view3d)
     pair_edited, set_pair_edited = mo.state(0)
     pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
-    # its files written when clicked, so they hold the scene as it is then
-    mo.vstack(
-        [
-            pair_view,
-            mo.hstack(
-                [
-                    mo.download(
-                        data=lambda: json.dumps(pair.to_dict(), indent=2),
-                        filename="coils.magpy.json",
-                        mimetype="application/json",
-                        label="coils.magpy.json",
-                    ),
-                    mo.download(
-                        data=pair_session.to_builder_script,
-                        filename="coils_scene.py",
-                        mimetype="text/x-python",
-                        label="coils_scene.py",
-                    ),
-                ],
-                justify="start",
-            ),
-        ]
+    # Shown beside the numbers below, made here, once, so the camera stays
+    # put; its files written when clicked, so they hold the scene as it is
+    # then.
+    pair_shown = mo.as_html(
+        mo.vstack(
+            [
+                pair_view,
+                mo.hstack(
+                    [
+                        mo.download(
+                            data=lambda: json.dumps(pair.to_dict(), indent=2),
+                            filename="coils.magpy.json",
+                            mimetype="application/json",
+                            label="coils.magpy.json",
+                        ),
+                        mo.download(
+                            data=pair_session.to_builder_script,
+                            filename="coils_scene.py",
+                            mimetype="text/x-python",
+                            label="coils_scene.py",
+                        ),
+                    ],
+                    justify="start",
+                ),
+            ]
+        )
     )
-    return pair_edited, pair_session, pair_view3d
+    return pair_edited, pair_session, pair_shown, pair_view3d
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, pair_edited, pair_session, pair_view3d):
+def _(go, mo, np, pair_edited, pair_session, pair_shown, pair_view3d):
     _ = pair_edited()
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
     _radius = pair_view3d.variables["radius"]
@@ -169,12 +170,13 @@ def _(go, mo, np, pair_edited, pair_session, pair_view3d):
     _figure = go.Figure(go.Scatter(x=_z * 1e3, y=_bz * 1e3))
     _figure.update_layout(
         template=_template,
+        autosize=True,
         margin={"t": 40, "r": 20},
         height=300,
         xaxis_title="z along the axis (mm)",
         yaxis_title="Bz (mT)",
     )
-    mo.vstack(
+    _numbers = mo.vstack(
         [
             mo.hstack(
                 [
@@ -199,9 +201,19 @@ def _(go, mo, np, pair_edited, pair_session, pair_view3d):
                 ],
                 widths="equal",
                 gap=1,
+                wrap=True,
             ),
-            mo.ui.plotly(_figure),
+            mo.ui.plotly(_figure, config={"responsive": True}),
         ]
+    )
+    # Side by side in a grid whose columns may shrink below what they hold,
+    # as a stack's do not: in a narrow window the numbers scroll, rather than
+    # run off the page.
+    mo.Html(
+        '<div style="display: grid; gap: 1rem; align-items: start; '
+        'grid-template-columns: minmax(0, 5fr) minmax(0, 4fr)">'
+        f"{pair_shown.text}"
+        f'<div style="overflow-x: auto">{mo.as_html(_numbers).text}</div></div>'
     )
     return
 

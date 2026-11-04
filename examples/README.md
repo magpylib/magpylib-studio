@@ -9,9 +9,8 @@ rebuilds two rings of magnets from `ipywidgets` sliders.
 | ----------------------------- | --------------------------------------------------------------------------------- |
 | `marimo/halbach_ring.py`      | A Halbach ring to tune: field map, axis, sweep, a search for the flattest bore    |
 | `marimo/coil_pair.py`         | A coil pair to flip: Helmholtz and anti-Helmholtz variants                        |
-| `marimo/operating_steps.py`   | A test unit's eight steps as variants, saved as a page that clicks through them   |
 | `marimo/unit_versions.py`     | Two versions of a unit that differ in structure, picked by `choose`               |
-| `marimo/ucore_solved.py`      | A U-core solved by face charge again at every step of a drag                      |
+| `marimo/ucore_solved.py`      | A U-core electromagnet solved by face charge again at every step of a drag        |
 | `marimo/run_with_variants.py` | A run beside variants, solved, with field lines, every combination exportable     |
 | `marimo/every_kind.py`        | Every kind of magpylib object in one view, and the view's keys                    |
 | `jupyter_demo.ipynb`          | Two rings of magnets rebuilt from `ipywidgets` sliders                            |

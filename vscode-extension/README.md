@@ -10,11 +10,11 @@ computed exactly in milliseconds.
      a subfolder of that repo — so `../docs/halbach.gif` becomes a 404 on the
      Marketplace listing while looking right on GitHub. -->
 
-![The Halbach rings of the marimo example in VS Code, half in the light theme and half in the dark: the objects and the steps that built them, the variables with their sliders, the 3D view with the field lines flowing through the bore, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.gif)
+![The Halbach ring of the marimo example in VS Code, half in the light theme and half in the dark: the objects and the steps that built them, the variables with their sliders, the 3D view with the field lines flowing through the bore, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.gif)
 
-_The Halbach rings from `examples/marimo/halbach_ring.py`: two rings of twelve
-magnets, each ring one magnet and one pattern, and the field's lines flowing
-through the bore. Drag `n` and both rings rebuild._
+_The Halbach ring from `examples/marimo/halbach_ring.py`: twelve magnets, one
+magnet and one pattern, and the field's lines flowing through the bore. Drag `n`
+and the ring rebuilds._
 
 ## Get started
 

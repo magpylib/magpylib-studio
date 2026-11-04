@@ -26,7 +26,6 @@ def _():
     import plotly.graph_objects as go
 
     from magpylib_studio import (
-        Angle,
         Count,
         Length,
         duplicate_around,
@@ -36,7 +35,6 @@ def _():
     from magpylib_studio.widget import SceneWidget
 
     return (
-        Angle,
         Annotated,
         Count,
         duplicate_around,
@@ -58,7 +56,8 @@ def _(mo):
     # A Halbach ring, tuned
 
     A design is a plain magpylib function marked `@scene`: its parameters
-    are the variables. Built once, it is a document that the view edits,
+    are the variables. Here one magnet and a pattern round the axis make
+    the ring, and a probe across the bore draws the field's lines. Built once, it is a document that the view edits,
     the field reads and the file saves. Every control on this page edits
     that one document, so they never disagree.
     """)
@@ -67,7 +66,6 @@ def _(mo):
 
 @app.cell
 def _(
-    Angle,
     Annotated,
     Count,
     Length,
@@ -76,60 +74,38 @@ def _(
     magpy,
     scene,
 ):
-    from typing import Literal
-
     @scene(
         model_unit="mm",
         field_unit="mT",
         variants={
-            "compact": {"n": 8, "radius": 0.02, "gap": 0.012},
-            "wide": {"n": 16, "radius": 0.035, "gap": 0.014},
+            "compact": {"n": 8, "radius": 0.02},
+            "wide": {"n": 16, "radius": 0.035},
         },
     )
     def halbach(
         n: Annotated[int, Count(4, 48, slider=(6, 24))] = 12,
         radius: Annotated[float, Length(0.01, 0.1, slider=(0.018, 0.04))] = 0.025,
-        gap: Annotated[float, Length(0.006, 0.05, slider=(0.009, 0.03))] = 0.012,
-        twist: Annotated[float, Angle(-180, 180, slider=(-180, 180))] = 0.0,
-        tilt: Annotated[float, Angle(-180, 180, slider=(-90, 90))] = 0.0,
-        tilt_axis: Literal["x", "y", "z"] = "z",
         density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
-        layers: Annotated[int, Count(1, 9, slider=(1, 5))] = 1,
     ):
-        """Two concentric rings of magnets, the outer `gap` further out, each
-        polarization turning twice per revolution: in step their fields add
-        up across the bore, and `twist` turns the inner ring against the
-        outer. A grid of field arrows across the bore, `layers` of it."""
-        rings = magpy.Collection(style_label="Halbach rings")
-        ring = {}
-        for name, r in (("Inner", radius), ("Outer", radius + gap)):  # literals
-            ring[name] = magpy.Collection(style_label=f"{name} ring")
-            rings.add(ring[name])
-            magnet = magpy.magnet.Cuboid(
-                dimension=(0.008, 0.008, 0.008),
-                polarization=(1, 0, 0),
-                position=(r, 0, 0),
-                style_label=f"{name} magnet",
-            )
-            ring[name].add(magnet)
-            duplicate_around(magnet, count=n, axis="z", spin=360 / n)
-        ring["Inner"].rotate_from_angax(twist, "z", anchor=0)
-        rings.rotate_from_angax(tilt, tilt_axis, anchor=0)
+        """A ring of `n` magnets, each polarization turning twice per
+        revolution, so that their fields add up across the bore, and a probe
+        across the bore, `density` by `density` points, drawn as its field
+        lines."""
+        ring = magpy.Collection(style_label="Halbach ring")
+        magnet = magpy.magnet.Cuboid(
+            dimension=(0.008, 0.008, 0.008),
+            polarization=(1, 0, 0),
+            position=(radius, 0, 0),
+            style_label="magnet",
+        )
+        ring.add(magnet)
+        duplicate_around(magnet, count=n, axis="z", spin=360 / n)
 
         bore = magpy.Sensor(
-            pixel=grid(radius / 2, density, layers=layers),
-            style={
-                "label": "bore",
-                "pixel": {
-                    "field": {
-                        "source": "B",
-                        "symbol": "arrow3d",
-                        "colormap": "Viridis",
-                    }
-                },
-            },
+            pixel=grid(radius / 2, density),
+            style={"label": "bore", "pixel": {"size": 0, "field": {"source": "B"}}},
         )
-        return rings, bore
+        return ring, bore
 
     return (halbach,)
 
@@ -307,8 +283,8 @@ def _(halbach, magpy, mo, np, session, values, view):
     # plainly at the same values: the two agree until a magnet is dragged.
     _ = view.value["revision"]
     _centre = np.linalg.norm(session.get_field(points=[[0, 0, 0]])["values"][0]) * 1e3
-    _rings, _ = halbach(**values)
-    _plain = np.linalg.norm(magpy.getB(_rings, (0, 0, 0))) * 1e3
+    _ring, _ = halbach(**values)
+    _plain = np.linalg.norm(magpy.getB(_ring, (0, 0, 0))) * 1e3
     _bore = np.asarray(session.get_field(sensor_id="bore")["values"], dtype=float)
     _magnitude = np.linalg.norm(_bore.reshape(-1, 3), axis=1)
     _picked = view.value["selected"] and view.widget.picked
@@ -333,9 +309,9 @@ def _(halbach, magpy, mo, np, session, values, view):
                 bordered=True,
             ),
             mo.stat(
-                2 * int(values["n"]),
+                int(values["n"]),
                 label="magnets",
-                caption="two rings",
+                caption="one magnet, a pattern",
                 bordered=True,
             ),
             mo.stat(
