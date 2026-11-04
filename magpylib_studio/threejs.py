@@ -1342,7 +1342,7 @@ def _mark_flows(scene, objects=None):
                     trace["arrows"] = True
 
 
-def capture_frames(objects, steps):
+def capture_frames(objects, steps, fields=None):
     """Every step of the scene's paths, computed. Kept by the session and
     served a frame at a time: the whole run is megabytes, and one frame is
     the only part anyone is looking at.
@@ -1360,13 +1360,15 @@ def capture_frames(objects, steps):
     keeps a 600-step path taking the same five seconds as a 25-step one.
 
     Beyond `MAX_DRAGGABLE_PATH` magpylib subsamples as it sees fit, and the
-    view is told how many frames it actually got.
+    view is told how many frames it actually got. `fields` are what sensors'
+    pixels read along the path, where the caller has them (`_capture`).
     """
     steps = max(2, min(int(steps), MAX_DRAGGABLE_PATH))
     return _capture(
         objects,
         animation=True,
         on_behalf_of="studio",
+        fields=fields,
         # the budget is min(time x fps, maxframes); both have to clear the path
         animation_fps=math.ceil(steps / magpy.defaults.display.animation.time),
         animation_maxfps=math.ceil(steps / magpy.defaults.display.animation.time),
@@ -1399,19 +1401,24 @@ def frame_payload(scene, index, live=None, derived=None):
     }
 
 
-def redrawn(payload, objects):
+def redrawn(payload, objects, derived=None):
     """`payload`, a frame's (`frame_payload`), with what `objects` --
     ``{studio id: object}`` -- draw in place of what it drew under those ids:
     for a frame that shows what the run did not capture, a sheet solved again
-    at that frame's step."""
+    at that frame's step. A pattern's copy among them is drawn under its
+    source's id, by `derived`, as in the frame."""
     scene = _capture(list(objects.values()), on_behalf_of="studio")
-    items = _keyed([t for f in scene.frames for t in f.traces], objects)
+    items = _keyed([t for f in scene.frames for t in f.traces], objects, derived)
     for kind, name in (
         ("mesh", "meshes"),
         ("scatter", "scatters"),
         ("pixels", "pixels"),
     ):
-        kept = [p for p in payload.get(name, []) if p["object_id"] not in objects]
+        kept = [
+            p
+            for p in payload.get(name, [])
+            if p["object_id"] not in objects and p.get("copy") not in objects
+        ]
         payload[name] = kept + [p for p in items if p["kind"] == kind]
     return _shared(payload)
 

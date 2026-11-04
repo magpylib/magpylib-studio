@@ -259,11 +259,36 @@
             );
           slidTo = pressed();
         }
+        // slid from one not pressed, with no click first: pressed and let go
+        // on, it is the one used, in one group
+        let pressSlid = null;
+        const off = chips().find((c) => !c.classList.contains("on"));
+        if (off) {
+          const box = off.getBoundingClientRect();
+          const on = {
+            bubbles: true,
+            clientX: box.left + box.width / 2,
+            clientY: 0,
+          };
+          const mark = asked.length;
+          off.dispatchEvent(new PointerEvent("pointerdown", on));
+          window.dispatchEvent(new PointerEvent("pointerup", on));
+          await wait(400);
+          pressSlid = asked
+            .slice(mark)
+            .filter((a) => a.method !== "get_variables")
+            .map((a) =>
+              a.method === "use_variant"
+                ? `${a.method}:${a.params.name}${a.preview ? "*" : ""}`
+                : a.method,
+            );
+        }
         window.result = {
           offered,
           variants: {
             slid,
             slidTo,
+            pressSlid,
             shown,
             inPanel,
             toggles,

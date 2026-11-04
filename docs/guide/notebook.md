@@ -97,15 +97,19 @@ one the widget does not take: in a notebook it moves between cells.
 **Export** saves it as one HTML file that opens anywhere with no notebook behind
 it — the widget itself, not a picture: orbit, legend, keys, and a captured run
 that still plays, because its motion — or, for a run that changes shape, its
-frames — travels in the file. `write_html(path)` does the same from a cell.
-Either way the page opens where the view was looking. A scene with variants has
-them in a row along the foot of the view, a click each, or drag the pressed one
-sideways to slide through them, one step to undo; and its page carries them: the
-same row, and a click draws that one, field lines and solved parts included,
-each drawn ahead when the page was written, from the scene as it was then.
-`write_html(path, variants=False)` leaves them out, and a list of names keeps
-those. Beside a run, each variant carries its own: every step solved and drawn
-ahead, so the page plays any variant's run.
+frames — travels in the file. A page that takes a while is counted in the foot
+of the view as it is written, and its Cancel stops it: the kernel writes it a
+piece at a time, from the scene as it was at the click, so it hears Cancel and
+an edit meanwhile between pieces. `write_html(path)` does the same from a cell,
+in one go, which only an interrupt stops. Either way the page opens where the
+view was looking. A scene with variants has them in a row along the foot of the
+view, beside a run's transport and under the scale bar, a click each, or drag
+the pressed one sideways to slide through them, one step to undo; and its page
+carries them: the same row, and a click draws that one, field lines and solved
+parts included, each drawn ahead when the page was written, from the scene as it
+was then. `write_html(path, variants=False)` leaves them out, and a list of
+names keeps those. Beside a run, each variant carries its own: every step solved
+and drawn ahead, so the page plays any variant's run.
 
 Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
@@ -180,7 +184,7 @@ solves took. `follow_edits(answer)` replaces that with your own:
 Solve outside a scene function. Inside, `mesh_all`, the solvers and `sheet.part`
 make magpylib objects of their own, which the scene cannot tell from yours, so
 it refuses them with the call's name; make what they returned inside, from its
-numbers, as the demo's U-core does. `from_json` inside is fine.
+numbers, as `examples/marimo/ucore_solved.py` does. `from_json` inside is fine.
 
 A `UniformField` from magpylib-material-response is an object like a coil: pass
 it to the view with the rest, any number of them. It has no place or body, so
@@ -216,22 +220,22 @@ numbers. `call` and `view3d` are the widgets themselves, not the
 re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
-`view3d.observe(..., names="revision")`, as the demo's field map does. A sensor
-or a dipole keeps its size on screen as the view zooms, 7 % of the view per unit
-of `style_size=`, unless `style_sizemode="absolute"` makes that metres. Beside
-the sliders, the **object** toggle opens the selection's parameters and pose, in
-the scene's units, with expressions as written: type `12`, `1.5 cm` or a
-variable's name into any of them, and a name the scene lacks is made at the
-value it replaces. Under them, **style** folds the object's style tree — colour,
-opacity, label, the magnetization arrows, the path — read when opened; a value
-set there is one step to undo, and the view's own objects carry it; a ↺ Reset
-style in the title line puts all of it back at once, the label kept. One of the
-two panels is open at a time, and both go with the handles. They open in a
-column beside the view, which refits to what is left; drag the column's inner
-edge to widen it. Narrower than 720 pixels the column is a sheet below the view.
-`V` and `O` open and close them from the keyboard, and while the object panel
-shows the pose the readout stays away, back only for a drag. How the editable
-view is built is
+`view3d.observe(..., names="revision")`, as `examples/marimo/halbach_ring.py`'s
+field map does. A sensor or a dipole keeps its size on screen as the view zooms,
+7 % of the view per unit of `style_size=`, unless `style_sizemode="absolute"`
+makes that metres. Beside the sliders, the **object** toggle opens the
+selection's parameters and pose, in the scene's units, with expressions as
+written: type `12`, `1.5 cm` or a variable's name into any of them, and a name
+the scene lacks is made at the value it replaces. Under them, **style** folds
+the object's style tree — colour, opacity, label, the magnetization arrows, the
+path — read when opened; a value set there is one step to undo, and the view's
+own objects carry it; a ↺ Reset style in the title line puts all of it back at
+once, the label kept. One of the two panels is open at a time, and both go with
+the handles. They open in a column beside the view, which refits to what is
+left; drag the column's inner edge to widen it. Narrower than 720 pixels the
+column is a sheet below the view. `V` and `O` open and close them from the
+keyboard, and while the object panel shows the pose the readout stays away, back
+only for a drag. How the editable view is built is
 [decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 ![The widget with its variables panel open in the column beside the view, and with the object panel open on the ring's source, its copies outlined faint](../widget-panels.png)

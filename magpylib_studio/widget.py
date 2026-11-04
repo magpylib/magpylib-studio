@@ -50,6 +50,7 @@ import os
 import pathlib
 import string
 import sys
+import time
 import warnings
 
 import anywidget
@@ -239,53 +240,143 @@ def _pooled(payload, pool, places):
     return {"items": items, "values": values}
 
 
-def _drawn_ahead(session, names, payload):
-    """The variants `names` of `session`'s scene, each as a click on a page
-    with no python behind it draws it (#118): its scene and its tree, with
-    `payload`, what the page opens on, pooled with them -- a mesh no variant
-    moves is held once. Drawn in a copy of the session, so the view's own is
-    left as it is, each from the scene as it is now -- a variant naming
-    fewer variables than the scene has leaves the others as they are here,
-    whichever was clicked before -- and solved again as an edit would solve
-    it, by the view's own `follow_edits` if it has one (`followed`). One the
-    scene cannot use is left out: the row says why, as the panel does."""
+def _said_of_frames(session):
+    """Warn where a run's frames could not be solved at their own step
+    (`frames_not_solved`): a page has nobody to tell when it is played."""
+    said = session.frames_not_solved()
+    if said:
+        warnings.warn(
+            f"magpylib-studio: a run's sheets are not solved at each step: {said}",
+            stacklevel=4,
+        )
+
+
+class _Progress:
+    """How far writing a page from a cell has got, `total` steps of work --
+    a variant drawn, a frame solved and drawn -- said to `view` as it goes:
+    the kernel is busy writing it, seconds for a run beside variants, and
+    the view would otherwise sit still. Said only once it has taken a
+    moment, and no more than ten times a second. Not to be cancelled from
+    the view, which the busy kernel would not hear: the view's own export
+    is written a piece at a time instead (`SceneWidget._export_more`)."""
+
+    _AFTER = 0.3
+    _EVERY = 0.1
+
+    def __init__(self, view, total):
+        self.view, self.total, self.count = view, max(int(total), 1), 0
+        self.started = time.perf_counter()
+        self.said = None  # when it last said, None before the first
+
+    def tick(self, name=None):
+        self.count = min(self.count + 1, self.total)
+        now = time.perf_counter()
+        if now - self.started < self._AFTER:
+            return
+        if self.said is not None and now - self.said < self._EVERY:
+            return
+        self.said = now
+        self.view.send(_progress(self.count, self.total, name))
+
+    def done(self):
+        if self.said is not None:
+            self.view.send(
+                {"kind": "progress", "done": self.total, "total": self.total}
+            )
+
+
+def _progress(done, total, name=None, job=None):
+    """A message telling the view how far writing a page has got: `job`
+    names the view's own export, which the view may cancel."""
+    said = {
+        "kind": "progress",
+        "done": done,
+        "total": total,
+        "text": "Writing…" + (f" {name}" if name else ""),
+    }
+    if job is not None:
+        said["job"] = job
+    return said
+
+
+def _snapshot(session):
+    """Copies of `session` as it is now, one per call: what a page is
+    written from, so that the view's own session is left as it is -- and a
+    page written a piece at a time, between edits, holds the scene as it was
+    when it was asked for."""
     from magpylib_studio.session import MagpylibStudioSession
 
-    copy = MagpylibStudioSession()
-    copy.load_scene(json.loads(json.dumps(session.to_dict())), session._base_dir)
-    copy.follower = session.follower
+    doc = json.dumps(session.to_dict())
+    base, follower = session._base_dir, session.follower
     # what the sheets were solved for is the view's, not the page's start
-    copy._solved_for = {
+    solved_for = {
         key: dict(seen) for key, seen in getattr(session, "_solved_for", {}).items()
     }
-    copy._stale = None
+
+    def copy():
+        made = MagpylibStudioSession()
+        made.load_scene(json.loads(doc), base)
+        made.follower = follower
+        made._solved_for = {key: dict(seen) for key, seen in solved_for.items()}
+        made._stale = None
+        return made
+
+    return copy
+
+
+def _finished(steps):
+    """What the generator `steps` returns, run to its end."""
+    while True:
+        try:
+            next(steps)
+        except StopIteration as done:
+            return done.value
+
+
+def _drawing_ahead(copy, names, payload, runs=True):
+    """The variants `names` of the scene of `copy`, a copy of the view's
+    session (`_snapshot`), each as a click on a page with no python behind
+    it draws it (#118): its scene and its tree, with `payload`, what the
+    page opens on, pooled with them -- a mesh no variant moves is held once.
+    Each from the scene as it is now -- a variant naming fewer variables
+    than the scene has leaves the others as they are here, whichever was
+    clicked before -- and solved again as an edit would solve it, by the
+    view's own `follow_edits` if it has one (`followed`). One the scene
+    cannot use is left out: the row says why, as the panel does. Each
+    carries its run, unless `runs` is False. A generator, which yields the
+    variant's name after each variant drawn and each frame, and returns
+    what the page holds."""
     pool, places = [], {}
     start = _pooled(payload, pool, places)
+    panel = copy.get_variables()  # as the scene is, before any variant
     scenes = {}
     for name in names:
         result = copy.followed(lambda name=name: copy.use_variant(name))
+        yield name
         if result.get("ok"):
             drawn = copy.get_scene()
             scenes[name] = {**_pooled(drawn, pool, places), "tree": copy.object_tree()}
-            steps = copy.path_steps()
+            steps = copy.path_steps() if runs else 1
             if steps > 1:
                 # its own run, each frame drawn ahead -- its sheets solved and
                 # its lines drawn at its step -- and pooled with the rest; the
                 # step the scene draws needs none
                 scenes[name]["frames"] = steps
-                scenes[name]["run"] = [
-                    None
-                    if i == drawn.get("step")
-                    else _pooled(copy.get_scene(frame=i), pool, places)
-                    for i in range(steps)
-                ]
+                run = scenes[name]["run"] = []
+                for i in range(steps):
+                    if i == drawn.get("step"):
+                        run.append(None)
+                        continue
+                    run.append(_pooled(copy.get_scene(frame=i), pool, places))
+                    yield name
+                _said_of_frames(copy)
         if copy.get_history()["undo"]:
             copy.undo()  # the next from the scene as it is now
     return {
         "pool": pool,
         "start": start,
         "scenes": scenes,
-        "panel": session.get_variables(),
+        "panel": panel,
     }
 
 
@@ -552,6 +643,10 @@ class SceneWidget(anywidget.AnyWidget):
         #: after the view is made -- the pencil, or `editable = True`.
         self._given = []
         self._named = {}
+        #: The page the view asked for, being written a piece at a time
+        #: (`_export_more`): its job number, its steps, how many there are
+        #: about and how many are done.
+        self._export = None
         self.on_msg(self._on_message)
         # The caller's names -- its own variables, then its module's -- so the
         # script that comes back out says `ring` where the cell did. Read here,
@@ -1091,13 +1186,18 @@ class SceneWidget(anywidget.AnyWidget):
         # starts, not an edit; a document that has them on shows them.
         if self.field_lines and not session.field_lines:
             session.set_field_lines(True)
-        # The sheets solved for the scene as it opens, not as some cell
-        # solved them: also part of where editing starts.
-        session.solve_at_start()
         # Where editing starts: undo stops here, and `reset` comes back here.
         # What the session did before the view -- a scene function's build,
-        # steps made from code -- is its starting point, not edits.
-        session.forget_history()
+        # steps made from code -- is its starting point, not edits. Its sheets
+        # are solved for the scene as it opens, not as some cell solved them,
+        # once: a build has done it.
+        said = session.forget_history()
+        if said:
+            warnings.warn(
+                f"magpylib-studio: the sheets are not solved for the scene as "
+                f"the view opens: {said}",
+                stacklevel=3,
+            )
         self._start = json.dumps(session.doc, sort_keys=True, default=str)
         self.editable = handles
         self._show(None)
@@ -1201,8 +1301,8 @@ class SceneWidget(anywidget.AnyWidget):
         A scene with variants carries them, each drawn ahead with its field
         lines and solved again as an edit would solve it: a row of them along
         the foot of the page, and a click draws that one. `variants` is
-        `False` for none, or the names of those to carry. A run and variants
-        do not go together: the run is kept.
+        `False` for none, or the names of those to carry. Each carries its
+        run, where the scene has one, every step solved and drawn.
 
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
@@ -1214,42 +1314,50 @@ class SceneWidget(anywidget.AnyWidget):
         """`to_html`, with a run past `limit` shown as its first step, and
         variants past it left out: for a page nobody asked for by name, which
         should not be hundreds of megabytes because a script said `show`."""
+        return self._page_of(self._saved(limit, variants), title)
+
+    @staticmethod
+    def _page_of(saved, title="magpylib scene"):
+        """The page that holds `saved` (`_saving`)."""
         return _PAGE.substitute(
             title=html.escape(title),
             css=(STATIC / "widget.css").read_text(encoding="utf-8"),
             bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
-            data=_packed(json.dumps(self._saved(limit, variants), allow_nan=False)),
+            data=_packed(json.dumps(saved, allow_nan=False)),
         )
 
     def _saved(self, limit=None, variants=True):
+        """`_saving` in one go, how far it has got said to the view as it
+        goes (`_Progress`)."""
+        total, steps = self._saving(limit, variants)
+        progress = _Progress(self, total)
+        while True:
+            try:
+                progress.tick(next(steps))
+            except StopIteration as done:
+                progress.done()
+                return done.value
+
+    def _saving(self, limit=None, variants=True):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
         there is one, the page shows the first step, still, instead. And
-        the variants named, as `_drawn_ahead` draws them."""
+        the variants named, as `_drawing_ahead` draws them. All of it from
+        the scene as it is at this call, in a copy of the session
+        (`_snapshot`).
+
+        ``(total, steps)``: `steps` a generator that yields after each frame
+        and each variant, `total` of them about, the variant's name or None
+        -- a run beside variants is solved at every step of each, seconds of
+        work -- and returns what the page holds."""
         frames = self.frames
-        if self._scene is not None:
-            run = threejs.whole_run(self._scene, limit)
-        elif frames > 1 and getattr(self, "_session", None) is not None:
-            # a session's run, served a step at a time -- but the step its
-            # payload draws, which the view draws from that
-            step = self.payload.get("step")
-            # frame by frame, each with its field lines: past `limit`, the
-            # rest are not drawn to be left out
-            run, size = [], 2
-            for i in range(frames):
-                scene = None if i == step else self._session.get_scene(frame=i)
-                run.append(scene)
-                if limit is not None:
-                    size += len(json.dumps(scene, allow_nan=False)) + 2
-                    if size > limit:
-                        run = None
-                        break
-        else:
-            run = []
-        if run is None:
-            threejs.too_big_to_carry(frames)
-            frames, run = 1, []
+        names = self._variants_carried(variants)
+        session = getattr(self, "_session", None)
+        own = self._scene is None and session is not None
+        total = (max(frames - 1, 0) if own else 0) + len(names) * max(frames, 1)
+        step = self.payload.get("step")
+        copy = _snapshot(session) if session is not None else None
         state = threejs.saved_state(
             self.payload,
             self.tree,
@@ -1267,10 +1375,46 @@ class SceneWidget(anywidget.AnyWidget):
             height=self.height,
             camera=self._camera,
         )
+        return total, self._steps(state, frames, step, names, copy, limit)
+
+    def _steps(self, state, frames, step, names, copy, limit):
+        """The steps of `_saving`, from the view's `state` as it was asked
+        for, its session's `copy` and the rest."""
+        if self._scene is not None:
+            run = threejs.whole_run(self._scene, limit)
+        elif frames > 1 and copy is not None:
+            # a session's run, served a step at a time -- but the step its
+            # payload draws, which the view draws from that
+            source = copy()
+            # frame by frame, each with its field lines: past `limit`, the
+            # rest are not drawn to be left out
+            run, size = [], 2
+            for i in range(frames):
+                scene = None if i == step else source.get_scene(frame=i)
+                if scene is not None:
+                    yield None
+                run.append(scene)
+                if limit is not None:
+                    size += len(json.dumps(scene, allow_nan=False)) + 2
+                    if size > limit:
+                        run = None
+                        break
+            if run is not None:
+                _said_of_frames(source)
+        else:
+            run = []
+        if run is None:
+            threejs.too_big_to_carry(frames)
+            frames, run = 1, []
+            state["frames"] = 1
         saved = {"state": state, "run": run}
-        names = self._variants_carried(variants, frames)
         if names:
-            drawn = _drawn_ahead(self._session, names, state["payload"])
+            drawn = yield from _drawing_ahead(copy(), names, state["payload"])
+            if limit is not None and len(json.dumps(drawn, allow_nan=False)) > limit:
+                # their runs left out first, as the scene's own is
+                drawn = _finished(
+                    _drawing_ahead(copy(), names, state["payload"], runs=False)
+                )
             if limit is not None and len(json.dumps(drawn, allow_nan=False)) > limit:
                 warnings.warn(
                     f"magpylib-studio: this scene's {len(names)} variants are "
@@ -1285,7 +1429,7 @@ class SceneWidget(anywidget.AnyWidget):
                 saved["variants"] = drawn
         return saved
 
-    def _variants_carried(self, variants, frames):
+    def _variants_carried(self, variants):
         """The variants a page is to carry: every one the scene has for
         `True`, none for `False`, else those named -- each with its run, where
         the scene has one (`_drawn_ahead`)."""
@@ -1335,6 +1479,11 @@ class SceneWidget(anywidget.AnyWidget):
                 if self._scene is not None
                 else self._session.get_scene(frame=index)
             )
+            said = self._scene is None and self._session.frames_not_solved()
+            if said:
+                self.send(
+                    {"kind": "refused", "message": f"Not solved at each step: {said}"}
+                )
             # Said back as asked: the view drops a frame of a run it has
             # since been re-pointed away from.
             self.send({"kind": "frame", **frame, "runId": content.get("runId")})
@@ -1342,8 +1491,53 @@ class SceneWidget(anywidget.AnyWidget):
             self._camera = content.get("camera")
         elif kind == "export":
             self._camera = content.get("camera") or self._camera
-            page = self.to_html()
+            if self._export is not None:
+                self._export["steps"].close()
+            total, steps = self._saving()
+            job = content.get("job", 0)
+            self._export = {"job": job, "steps": steps, "total": total, "done": 0}
+            self._export_more(job)
+        elif kind == "export-more":
+            self._export_more(content.get("job"))
+        elif (
+            kind == "export-cancel"
+            and self._export is not None
+            and self._export["job"] == content.get("job")
+        ):
+            self._export["steps"].close()
+            self._export = None
+
+    #: How long the view's export works before it lets the kernel hear the
+    #: view again, in seconds.
+    _EXPORT_PIECE = 0.2
+
+    def _export_more(self, job):
+        """Write the next piece of the page the view asked for, `job`: steps
+        of it for `_EXPORT_PIECE`, then how far it has got, for the view to
+        ask for more. Between pieces the kernel is free, so the view's
+        cancel is heard, and an edit made meanwhile is left out of the page,
+        which is written from the scene as it was when asked for
+        (`_saving`). The page, when done."""
+        export = self._export
+        if export is None or export["job"] != job:
+            return  # cancelled, or another asked for since
+        ended = time.perf_counter() + self._EXPORT_PIECE
+        try:
+            while True:  # a step at least, whatever the piece's length
+                name = next(export["steps"])
+                export["done"] = min(export["done"] + 1, export["total"])
+                if time.perf_counter() >= ended:
+                    break
+        except StopIteration as done:
+            self._export = None
+            page = self._page_of(done.value)
             self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
+            return
+        except Exception as e:
+            self._export = None
+            self.send({"kind": "progress", "job": job, "failed": str(e)})
+            raise
+        self.send(_progress(export["done"], export["total"], name, job))
 
     def _answer(self, content):
         """Answer what an editable view asks of its session -- see

@@ -58,8 +58,10 @@ def _(mo):
 
     Every step of every variant has its own solve and its own field lines:
     material-response solves one configuration, so the view hands it each
-    step. The page downloaded under the view carries them all, and plays any
-    variant's run with no notebook behind it. Dragging, or a variable the
+    step. The view's download button, in its top-right corner, writes a page
+    that carries them all and plays any variant's run with no notebook
+    behind it: fifty-one frames, each solved and drawn, a few seconds, which
+    the foot of the view counts and its Cancel stops. Dragging, or a variable the
     variants do not name, needs the notebook: a new solve, a new field.
     """)
     return
@@ -124,7 +126,7 @@ def _(
         },
     )
     def slide(
-        height: Annotated[float, Length(0.004, 0.03)] = 0.006,
+        height: Annotated[float, Length(0.005, 0.03)] = 0.006,
         strength: Annotated[float, Bounds(-1.5, 1.5, unit="field")] = 1.2,
     ):
         """A magnet `height` above a solved plate, polarized `strength` tesla
@@ -172,27 +174,17 @@ def _(SceneWidget, json, mo, slide):
     view3d = SceneWidget(
         built, editable=True, height=560, field_lines=True, open_panel="variables"
     )
-    # Written when clicked, so they hold the scene as it is then: the page
-    # draws every step of every variant ahead, which takes a moment.
+    # Written when clicked, so it holds the scene as it is then. The page is
+    # the view's own download button: written a piece at a time, so it can be
+    # stopped, where a `mo.download` keeps the kernel busy until it is done.
     mo.vstack(
         [
             mo.ui.anywidget(view3d),
-            mo.hstack(
-                [
-                    mo.download(
-                        data=lambda: view3d.to_html("a run beside variants"),
-                        filename="run_with_variants.html",
-                        mimetype="text/html",
-                        label="run_with_variants.html: every step of every variant",
-                    ),
-                    mo.download(
-                        data=lambda: json.dumps(built.to_dict(), indent=2),
-                        filename="slide.magpy.json",
-                        mimetype="application/json",
-                        label="slide.magpy.json",
-                    ),
-                ],
-                justify="start",
+            mo.download(
+                data=lambda: json.dumps(built.to_dict(), indent=2),
+                filename="slide.magpy.json",
+                mimetype="application/json",
+                label="slide.magpy.json",
             ),
         ]
     )

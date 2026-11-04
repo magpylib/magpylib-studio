@@ -259,10 +259,12 @@ export function createVariables(
         chip.setAttribute("aria-pressed", String(on));
         chip.disabled = Boolean(unusable[name]);
         chip.title = says(name);
-        chip.addEventListener("click", () => {
-          if (!on) useVariant(name);
+        // A press on a toggle that slides is the slide's, a click with no
+        // move included; a click from the keyboard is not pressed at all.
+        chip.addEventListener("click", (event) => {
+          if (!on && !(slide && event.detail > 0)) useVariant(name);
         });
-        if (slide && on) {
+        if (slide && !chip.disabled) {
           chip.title = `${says(name)} -- drag sideways for the others`;
           chip.addEventListener("pointerdown", (event) =>
             slideFrom(event, chips, names, unusable),
@@ -296,11 +298,13 @@ export function createVariables(
     variantEl.append(label, pick);
   }
 
-  /** The pressed variant, slid along the row: each one the pointer passes
-   *  shown as a preview, one on the wire at a time and the newest waiting,
-   *  and the one let go on used -- the whole slide one step to undo, as a
-   *  slider's drag is. The toggles stay as they are until the release:
-   *  `dragging` holds off the reads that would rebuild them. */
+  /** A variant pressed and slid along the row -- any, not only the one the
+   *  values are in, so a slide needs no click first: the one pressed and
+   *  each one the pointer passes shown as a preview, one on the wire at a
+   *  time and the newest waiting, and the one let go on used -- the whole
+   *  slide one step to undo, as a slider's drag is. The toggles stay as they
+   *  are until the release: `dragging` holds off the reads that would
+   *  rebuild them. */
   let variantSent = Promise.resolve();
   let variantWaiting = null;
   let variantInFlight = false;
@@ -345,12 +349,14 @@ export function createVariables(
         [at, chips[at]],
         [i, chips[i]],
       ]) {
+        if (!chip) continue; // none was pressed before
         chip.classList.toggle("on", k === i);
         chip.setAttribute("aria-pressed", String(k === i));
       }
       at = i;
       previewVariant(names[at]);
     };
+    move(event); // the one pressed, at once
     const release = async () => {
       removeEventListener("pointermove", move, true);
       removeEventListener("pointerup", release, true);

@@ -17,8 +17,13 @@ solved in a notebook for another pose showed that solve until the first edit --
 and at each frame's own step as the run plays or scrubs, its field lines with
 it. A saved page carries every variant's run, each frame drawn ahead, and plays
 any of them with no Python behind it; it carried a run or variants, not both.
-The marimo demo is now one notebook per example in `examples/marimo/`, with a
-run beside variants among them (#133).
+While the view writes it, its foot counts how far it has got, and its Cancel
+stops it; the run's transport and the variants share that one line, under the
+scale bar, and a slide through the variants starts from any of them, with no
+click first. The marimo demo is now one notebook per example in
+`examples/marimo/`, with a run beside variants among them, and fewer of them:
+the Halbach example is one ring, the U-core a core and its coil, and the probes
+there and in the coil pair draw their field lines without their pixels (#133).
 
 </details>
 

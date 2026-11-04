@@ -2487,6 +2487,11 @@ async function variablesPanel(port, base) {
       if (few.slid?.join(" ") !== slide || few.slidTo?.join() !== "compact") {
         return `a slide from wide to compact asked ${JSON.stringify(few.slid)}, and ${few.slidTo} was pressed`;
       }
+      const pressSlide =
+        "begin_interaction use_variant:wide* use_variant:wide end_interaction";
+      if (few.pressSlid?.join(" ") !== pressSlide) {
+        return `a slide from wide, not pressed, asked ${JSON.stringify(few.pressSlid)}`;
+      }
       if (few.disabled.length) return `${few.disabled} was offered as unusable`;
       // one the scene cannot use as it stands: shown, not offered, and a
       // press on it asks nothing

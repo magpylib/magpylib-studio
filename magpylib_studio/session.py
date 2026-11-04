@@ -4565,9 +4565,16 @@ class MagpylibStudioSession:
             # the magnet that makes them turns. Only magpylib can say what
             # they are, and only per frame.
             if self._animated is None:
+                # what the pixels read with the sheets solved at each step,
+                # solved first, with no run yet to keep them for
+                self._sheets_of_frames = None
+                fields = self._run_readings()
                 self._animated = threejs.capture_frames(
-                    self._drawn(), self.path_steps()
+                    self._drawn(), self.path_steps(), fields=fields
                 )
+                held = self._sheets_of_frames
+                if held is not None and held[0] is None:
+                    self._sheets_of_frames = (self._animated, *held[1:])
             payload = threejs.frame_payload(
                 self._animated, frame, live=self._objs, derived=self._derived
             )
@@ -4579,7 +4586,7 @@ class MagpylibStudioSession:
                 at = payload.get("frame", frame)
                 stepped = self._frame_sheets(at)
                 if stepped:
-                    payload = threejs.redrawn(payload, stepped)
+                    payload = threejs.redrawn(payload, stepped, self._derived)
                 if self.field_lines:
                     payload["fieldlines"] = self._frame_lines(at, stepped)
             return payload
@@ -5188,6 +5195,39 @@ class MagpylibStudioSession:
             )
         return items
 
+    def _run_readings(self):
+        """What the sensors whose pixels are drawn read along a run whose
+        sheets are solved at each step (`_frame_sheets`), as
+        `fieldlines.readings` gives it -- for the run's capture to draw them
+        from, the arrows agreeing with the sheets and the lines of their
+        frame. None where no sensor's pixels are drawn, or the frames keep the
+        scene's sheets: the capture reads them itself."""
+        from magpylib_studio import fieldlines
+
+        steps = self.path_steps()
+        sensors = [
+            s for s in fieldlines.sensors_of(self.scene) if s.style.pixel.size != 0
+        ]
+        if not sensors or steps <= 1 or steps > threejs.MAX_DRAGGABLE_PATH:
+            return None
+        stepped = [self._frame_sheets(step) for step in range(steps - 1)]
+        if not all(stepped):
+            return None
+        readings = fieldlines.readings(self.scene)
+        sources = fieldlines.sources_of(self.scene)
+        for step, sheets in enumerate(stepped):
+            swapped = {id(self._objs[key]) for key in sheets}
+            at = [fieldlines.at_step(s, step) for s in sources if id(s) not in swapped]
+            for sensor in sensors:
+                if sensor not in readings:
+                    continue
+                here = fieldlines.at_step(sensor, step)
+                read = fieldlines.readings([*at, *sheets.values(), here])
+                field = np.array(readings[sensor], dtype=float)
+                field[step] = read[here][0]
+                readings[sensor] = field
+        return {s: readings[s] for s in sensors if s in readings}
+
     def _frame_lines(self, frame, stepped=None):
         """The field lines at `frame`, a step of the scene's paths: each
         sensor's, from the scene at that step, with none of a gesture's
@@ -5223,7 +5263,11 @@ class MagpylibStudioSession:
         sources = fieldlines.sources_of(self.scene)
         swapped = {id(self._objs[key]) for key in stepped or ()}
         still = [s for s in sources if s._get_path_len() == 1 and id(s) not in swapped]
-        moved = [fieldlines.at_step(s, step) for s in sources if s._get_path_len() > 1]
+        moved = [
+            fieldlines.at_step(s, step)
+            for s in sources
+            if s._get_path_len() > 1 and id(s) not in swapped
+        ]
         moved += list((stepped or {}).values())
         key_of = self._names_of_objects()
         items = []
@@ -7830,9 +7874,27 @@ class MagpylibStudioSession:
         """Solve the sheets that keep their part for the scene as it stands,
         at the last step of its paths, as the view at rest draws it: one
         solved elsewhere -- in a notebook, for another pose -- showed that
-        solve until the first edit. For where a view starts, before
-        `forget_history`. Returns why not, or None."""
-        return self._solve_again(at_rest=True) if self._parted() else None
+        solve until the first edit, and a run's last frame with it. Where a
+        scene starts (`forget_history`), and not again for what it has been
+        solved for, so a build and the view made of it solve once; not where
+        a `follower` answers in place of the engine, nor where the level the
+        sheets were solved at is not known (`set_solve_level`): solved again
+        at another, a sheet solved right would change. Not one of the solves
+        the next edit reports (`take_solves`). Returns why not, or None."""
+        if (
+            not self._parted()
+            or self.follower is not None
+            or self.doc.get("solve_level") is None
+        ):
+            return None
+        inputs = self._solve_inputs()
+        if inputs == getattr(self, "_started_for", None):
+            return None
+        self._started_for = inputs
+        reported = len(self._solves)
+        said = self._solve_again(at_rest=True)
+        del self._solves[reported:]
+        return said
 
     def _solved_at(self, step, reuse):
         """The parts solved again with every other source standing at `step`
@@ -7861,23 +7923,36 @@ class MagpylibStudioSession:
     def _frame_sheets(self, frame):
         """The sheets that keep their part, solved at `frame`'s step of a run
         (`_solved_at`), ``{id: sheet}``, dressed as the scene's -- none at the
-        last step, which the scene's own sheets are solved at, nor where
-        nothing moves. Kept for the run (`_animated`), each solve reusing the
-        last one's factorization; after one that fails, the run's frames keep
-        the scene's sheets."""
+        last step, which the scene's own sheets are solved at (`solve_at_start`,
+        then each edit), nor where nothing moves, nor where a `follower`
+        answers the edits in place of the engine. Kept for the run
+        (`_animated`), each solve reusing the last one's factorization, as a
+        drag's steps do, and so only up to `_KEPT_UNKNOWNS`. Past that, or
+        after a solve that fails, the run's frames keep the scene's sheets,
+        and `frames_not_solved` says why."""
         ids = self._parted()
         steps = self.path_steps()
-        if not ids or steps <= 1 or frame >= steps - 1:
+        if not ids or steps <= 1 or frame >= steps - 1 or self.follower is not None:
             return {}
         kept = getattr(self, "_sheets_of_frames", None)
         if kept is None or kept[0] is not self._animated:
-            kept = self._sheets_of_frames = (self._animated, {}, [None, None])
+            # the run, its sheets by frame, and [the solve to reuse, why not, told]
+            kept = self._sheets_of_frames = (self._animated, {}, [None, None, False])
+            size = sum(2 * len(self._objs[key].faces) for key in ids)
+            if size > _KEPT_UNKNOWNS:
+                kept[2][1] = (
+                    f"{size} unknowns, more than {_KEPT_UNKNOWNS}: the run's "
+                    "frames show the solve at its last step"
+                )
         if frame in kept[1] or kept[2][1] is not None:
             return kept[1].get(frame, {})
         try:
             out, sheets = self._solved_at(max(0, frame), kept[2][0] or True)
         except Exception as error:  # noqa: BLE001 - said, and the frames go on
-            kept[2][1] = f"{type(error).__name__}: {error}"
+            kept[2][1] = (
+                f"{type(error).__name__}: {error}; the run's frames show the "
+                "solve at its last step"
+            )
             return {}
         kept[2][0] = out
         made = {}
@@ -7887,6 +7962,16 @@ class MagpylibStudioSession:
             made[key] = sheet
         kept[1][frame] = made
         return made
+
+    def frames_not_solved(self):
+        """Why the run's frames show the scene's sheets rather than ones
+        solved at their own step (`_frame_sheets`), once a run: None where
+        they are solved, or it has been said."""
+        kept = getattr(self, "_sheets_of_frames", None)
+        if kept is None or kept[2][1] is None or kept[2][2]:
+            return None
+        kept[2][2] = True
+        return kept[2][1]
 
     def take_solves(self):
         """What the solves since the last asked came to, each as
@@ -7997,14 +8082,17 @@ class MagpylibStudioSession:
         see `_replace`, which keeps the step.
 
         `scene` is a document dict or a path to a JSON file containing one.
-        (Script -> document is deferred by design.)
+        (Script -> document is deferred by design.) Its sheets are taken as
+        solved for it as it stands, not solved again: what they were solved
+        for is not saved
+        (docs/decisions.md#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date).
         """
         # what its solves were solved for: this scene's, or, refused, the
         # scene's that stays
         kept, self._solved_for = getattr(self, "_solved_for", None), {}
         result = self._replace(scene, base_dir, "load scene")
         if result["ok"]:
-            self.forget_history()
+            self.forget_history(solve=False)
         else:
             self._solved_for, self._stale = kept, None
         return result
@@ -8376,19 +8464,24 @@ class MagpylibStudioSession:
             self._build()  # snapshots built before, so this cannot fail
         return {"ok": True}
 
-    def forget_history(self):
+    def forget_history(self, solve=True):
         """Start the undo history here: what is in the document now is where
         undo stops. `load_scene` does this itself; this is for a host that
         arrives at its starting point another way -- a scene function's
         build, a notebook view taking a session it did not make. It is also
         where a solve that cannot be done again is taken as right
-        (`stale_solves`)."""
+        (`stale_solves`), and where the sheets that keep their part are solved
+        for it (`solve_at_start`), unless `solve` is False: a scene loaded,
+        taken as solved as it stands. Returns why they could not be, or
+        None."""
+        said = self.solve_at_start() if solve else None
         self._undo = []
         self._redo = []
         # the sheets not known yet, as solved for the scene now: one known --
         # a second view on the same scene -- keeps what it was solved for
         self._stale = None
         self.stale_solves()
+        return said
 
     def restore(self, doc):
         """Put the document back to `doc`, a snapshot of this session's own,
