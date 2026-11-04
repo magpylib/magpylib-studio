@@ -103,8 +103,8 @@ piece at a time, from the scene as it was at the click, so it hears Cancel and
 an edit meanwhile between pieces. `write_html(path)` does the same from a cell,
 in one go, which only an interrupt stops. Either way the page opens where the
 view was looking. A scene with variants has them in a row along the foot of the
-view, beside a run's transport and under the scale bar, a click each, or drag
-the pressed one sideways to slide through them, one step to undo; and its page
+view, beside a run's transport and under the scale bar, a click each, or press
+any and drag sideways to slide through them, one step to undo; and its page
 carries them: the same row, and a click draws that one, field lines and solved
 parts included, each drawn ahead when the page was written, from the scene as it
 was then. `write_html(path, variants=False)` leaves them out, and a list of

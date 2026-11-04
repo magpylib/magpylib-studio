@@ -669,7 +669,7 @@ function render({ model, el }) {
     "Save as one HTML file that works anywhere — orbit, legend, keys and " +
       "playback, no notebook needed",
     () => {
-      exportJob += 1;
+      exportJob = `${viewTag}-${++exports}`;
       showWriting({ text: "Writing…", done: 0, total: 0, job: exportJob });
       // The camera with it, so the file opens on what is on screen now
       // rather than on what was last reported.
@@ -680,9 +680,13 @@ function render({ model, el }) {
       });
     },
   );
-  // The view's own exports, numbered: python writes one a piece at a time,
-  // asking for each next piece, so a cancel is heard between them.
-  let exportJob = 0;
+  // The view's own export, named: python writes one a piece at a time, this
+  // view asking for each next piece, so a cancel is heard between them. The
+  // name is this view's -- another view of the same widget hears the same
+  // messages -- and null once it is done or stopped.
+  const viewTag = Math.random().toString(36).slice(2, 10);
+  let exports = 0;
+  let exportJob = null;
   exportButton.hidden = Boolean(model.get("standalone"));
   // Taken here, not by python: the picture is what the browser drew, and a
   // page that is itself an export can take one as well.
@@ -864,7 +868,7 @@ function render({ model, el }) {
   stopButton.title = "Stop writing the file";
   stopButton.addEventListener("click", () => {
     model.send({ kind: "export-cancel", job: exportJob });
-    exportJob += 1; // what is still on its way is for none
+    exportJob = null; // what is still on its way is for none
     hideWriting();
     notify("Stopped writing the file");
   });
@@ -1793,6 +1797,9 @@ function render({ model, el }) {
       return;
     }
     if (message.kind === "export") {
+      // only the page this view asked for, and not since stopped
+      if (message.job !== undefined && message.job !== exportJob) return;
+      exportJob = null;
       hideWriting();
       download(message);
       return;
@@ -1802,11 +1809,12 @@ function render({ model, el }) {
       // next asked for here unless it was stopped; or one a cell writes.
       if (message.job !== undefined && message.job !== exportJob) return;
       if (message.failed !== undefined) {
+        exportJob = null;
         hideWriting();
         notify(`Could not write the file: ${message.failed}`, { stay: true });
         return;
       }
-      if (message.job === undefined && message.done >= message.total) {
+      if (message.job === undefined && message.final) {
         hideWriting();
         notify("File written");
         return;

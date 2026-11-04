@@ -784,6 +784,11 @@
 .magpy-vars-slides .magpy-vars-chip.on,
 .magpy-vars-sliding {
   cursor: ew-resize;
+}
+
+/* Any toggle starts a slide, by finger too: the browser is not to take the
+   sideways move for a scroll. */
+.magpy-vars-slides .magpy-vars-chip {
   touch-action: none;
 }
 

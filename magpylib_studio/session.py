@@ -7927,19 +7927,24 @@ class MagpylibStudioSession:
         then each edit), nor where nothing moves, nor where a `follower`
         answers the edits in place of the engine. Kept for the run
         (`_animated`), each solve reusing the last one's factorization, as a
-        drag's steps do, and so only up to `_KEPT_UNKNOWNS`. Past that, or
-        after a solve that fails, the run's frames keep the scene's sheets,
-        and `frames_not_solved` says why."""
+        drag's steps do, and so only up to `_KEPT_UNKNOWNS`. Past that, with
+        a follower, or after a solve that fails, the run's frames keep the
+        scene's sheets, and `frames_not_solved` says why."""
         ids = self._parted()
         steps = self.path_steps()
-        if not ids or steps <= 1 or frame >= steps - 1 or self.follower is not None:
+        if not ids or steps <= 1 or frame >= steps - 1:
             return {}
         kept = getattr(self, "_sheets_of_frames", None)
         if kept is None or kept[0] is not self._animated:
             # the run, its sheets by frame, and [the solve to reuse, why not, told]
             kept = self._sheets_of_frames = (self._animated, {}, [None, None, False])
             size = sum(2 * len(self._objs[key].faces) for key in ids)
-            if size > _KEPT_UNKNOWNS:
+            if self.follower is not None:
+                kept[2][1] = (
+                    "follow_edits answers the solves in place of the engine: the "
+                    "run's frames show its answer at the last step"
+                )
+            elif size > _KEPT_UNKNOWNS:
                 kept[2][1] = (
                     f"{size} unknowns, more than {_KEPT_UNKNOWNS}: the run's "
                     "frames show the solve at its last step"

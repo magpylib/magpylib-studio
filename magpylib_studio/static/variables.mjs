@@ -325,12 +325,12 @@ export function createVariables(
   }
 
   function slideFrom(event, chips, names, unusable) {
+    if (event.button !== 0) return; // the main button, a finger or a pen
     event.preventDefault(); // no text selected along the way
     const start = chips.findIndex((chip) => chip.classList.contains("on"));
     let at = start;
+    let slid = false; // past the toggle pressed: a slide, not a click
     dragging = true;
-    variantEl.classList.add("magpy-vars-sliding");
-    rpc("begin_interaction").catch(() => {});
     const nearest = (x) => {
       let best = at;
       let gap = Infinity;
@@ -342,9 +342,7 @@ export function createVariables(
       });
       return best;
     };
-    const move = (e) => {
-      const i = nearest(e.clientX);
-      if (i === at) return;
+    const press = (i) => {
       for (const [k, chip] of [
         [at, chips[at]],
         [i, chips[i]],
@@ -354,13 +352,31 @@ export function createVariables(
         chip.setAttribute("aria-pressed", String(k === i));
       }
       at = i;
+    };
+    // the one pressed shows pressed at once, and asks nothing until the
+    // pointer leaves it: a click is one use, as a click on any toggle is
+    press(nearest(event.clientX));
+    const pressedAt = at;
+    const move = (e) => {
+      const i = nearest(e.clientX);
+      if (i === at) return;
+      if (!slid) {
+        slid = true;
+        variantEl.classList.add("magpy-vars-sliding");
+        rpc("begin_interaction").catch(() => {});
+      }
+      press(i);
       previewVariant(names[at]);
     };
-    move(event); // the one pressed, at once
     const release = async () => {
       removeEventListener("pointermove", move, true);
       removeEventListener("pointerup", release, true);
       removeEventListener("pointercancel", release, true);
+      if (!slid) {
+        dragging = false;
+        if (pressedAt !== start) await useVariant(names[pressedAt]);
+        return;
+      }
       variantEl.classList.remove("magpy-vars-sliding");
       variantWaiting = null;
       await variantSent;

@@ -798,23 +798,42 @@ def test_a_run_over_a_solved_sheet_is_solved_at_every_step(monkeypatch):
     }
     assert all(sum(f is not None for f in each["run"]) == 2 for each in scenes.values())
 
-    # The view's own export: a piece at a time, each asked for, the same page
-    # in the end; stopped, nothing more is written.
+    # The view's own export: a piece at a time, each asked for, the page of
+    # the scene as it was asked for -- an edit between pieces is the live
+    # session's alone -- and tagged with its job; stopped, nothing more is
+    # written; a page that cannot be made is said to have failed.
     monkeypatch.setattr(SceneWidget, "_EXPORT_PIECE", 0)
     page = view.to_html()
     sent.clear()
     view._on_message(view, {"kind": "export", "job": 1}, None)
-    while sent[-1]["kind"] == "progress":
-        assert sent[-1]["job"] == 1
+    edit = {"name": "height", "value": 0.012}
+    view._on_message(
+        view, {"kind": "rpc", "id": 9, "method": "set_variable", "params": edit}, None
+    )
+    while sent[-1]["kind"] != "export":
         view._on_message(view, {"kind": "export-more", "job": 1}, None)
-    assert [m["done"] for m in sent[:-1]] == list(range(1, 9))
-    assert sent[-1]["kind"] == "export"
+    done = [m["done"] for m in sent if m.get("kind") == "progress"]
+    assert done == list(range(1, 9))
+    assert sent[-1]["job"] == 1
     assert sent[-1]["html"] == page
+    assert studio.get_variables()["variables"][0]["value"] == 0.012
     sent.clear()
     view._on_message(view, {"kind": "export", "job": 2}, None)
     view._on_message(view, {"kind": "export-cancel", "job": 2}, None)
     view._on_message(view, {"kind": "export-more", "job": 2}, None)
     assert [m["kind"] for m in sent] == ["progress"]
+
+    def unmade(saved, title=None):
+        raise ValueError("no page")
+
+    monkeypatch.setattr(SceneWidget, "_page_of", staticmethod(unmade))
+    sent.clear()
+    view._on_message(view, {"kind": "export", "job": 3}, None)
+    with pytest.raises(ValueError, match="no page"):
+        while "failed" not in sent[-1]:
+            view._on_message(view, {"kind": "export-more", "job": 3}, None)
+    assert sent[-1] == {"kind": "progress", "job": 3, "failed": "no page"}
+    assert view._export is None
 
 
 def test_a_run_too_large_to_solve_at_every_step_says_so(monkeypatch):

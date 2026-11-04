@@ -259,8 +259,8 @@
             );
           slidTo = pressed();
         }
-        // slid from one not pressed, with no click first: pressed and let go
-        // on, it is the one used, in one group
+        // pressed on one not pressed, and let go: that one used, once, with no
+        // click first -- a slide from it starts the same way
         let pressSlid = null;
         const off = chips().find((c) => !c.classList.contains("on"));
         if (off) {

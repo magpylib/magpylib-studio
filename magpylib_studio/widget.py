@@ -269,7 +269,9 @@ class _Progress:
         self.said = None  # when it last said, None before the first
 
     def tick(self, name=None):
-        self.count = min(self.count + 1, self.total)
+        self.count += 1
+        # a variant whose run is longer than the scene's
+        self.total = max(self.total, self.count)
         now = time.perf_counter()
         if now - self.started < self._AFTER:
             return
@@ -280,8 +282,15 @@ class _Progress:
 
     def done(self):
         if self.said is not None:
+            # said as done, which no count is taken for: a variant whose
+            # run is longer than the scene's reaches its total early
             self.view.send(
-                {"kind": "progress", "done": self.total, "total": self.total}
+                {
+                    "kind": "progress",
+                    "done": self.count,
+                    "total": self.count,
+                    "final": True,
+                }
             )
 
 
@@ -1384,14 +1393,26 @@ class SceneWidget(anywidget.AnyWidget):
             run = threejs.whole_run(self._scene, limit)
         elif frames > 1 and copy is not None:
             # a session's run, served a step at a time -- but the step its
-            # payload draws, which the view draws from that
-            source = copy()
+            # payload draws, which the view draws from that. From the view's
+            # own session, whose frames a run played has already drawn, while
+            # it stands as it did -- the same captured run, the same lines --
+            # and from a copy of the scene as it was once an edit between
+            # pieces has moved it on.
+            live, source, seen = self._session, None, None
             # frame by frame, each with its field lines: past `limit`, the
             # rest are not drawn to be left out
             run, size = [], 2
             for i in range(frames):
-                scene = None if i == step else source.get_scene(frame=i)
-                if scene is not None:
+                if i == step:
+                    scene = None
+                else:
+                    if source is None and seen is not None:
+                        now = (live._animated, live.field_lines)
+                        if now[0] is not seen[0] or now[1] != seen[1]:
+                            source = copy()
+                    scene = (source or live).get_scene(frame=i)
+                    if seen is None:
+                        seen = (live._animated, live.field_lines)
                     yield None
                 run.append(scene)
                 if limit is not None:
@@ -1400,7 +1421,7 @@ class SceneWidget(anywidget.AnyWidget):
                         run = None
                         break
             if run is not None:
-                _said_of_frames(source)
+                _said_of_frames(source or live)
         else:
             run = []
         if run is None:
@@ -1493,8 +1514,13 @@ class SceneWidget(anywidget.AnyWidget):
             self._camera = content.get("camera") or self._camera
             if self._export is not None:
                 self._export["steps"].close()
-            total, steps = self._saving()
+                self._export = None
             job = content.get("job", 0)
+            try:
+                total, steps = self._saving()
+            except Exception as e:
+                self.send({"kind": "progress", "job": job, "failed": str(e)})
+                raise
             self._export = {"job": job, "steps": steps, "total": total, "done": 0}
             self._export_more(job)
         elif kind == "export-more":
@@ -1522,17 +1548,32 @@ class SceneWidget(anywidget.AnyWidget):
         if export is None or export["job"] != job:
             return  # cancelled, or another asked for since
         ended = time.perf_counter() + self._EXPORT_PIECE
+        saved = None
         try:
-            while True:  # a step at least, whatever the piece's length
-                name = next(export["steps"])
-                export["done"] = min(export["done"] + 1, export["total"])
-                if time.perf_counter() >= ended:
-                    break
-        except StopIteration as done:
-            self._export = None
-            page = self._page_of(done.value)
-            self.send({"kind": "export", "html": page, "filename": EXPORT_NAME})
-            return
+            try:
+                while True:  # a step at least, whatever the piece's length
+                    name = next(export["steps"])
+                    export["done"] += 1
+                    # a variant whose run is longer than the scene's
+                    export["total"] = max(export["total"], export["done"])
+                    if time.perf_counter() >= ended:
+                        break
+            except StopIteration as done:
+                saved = done.value
+            if saved is not None:
+                self._export = None
+                page = self._page_of(saved)
+                # tagged, so a page asked for before a cancel or another
+                # export is not saved for it
+                self.send(
+                    {
+                        "kind": "export",
+                        "html": page,
+                        "filename": EXPORT_NAME,
+                        "job": job,
+                    }
+                )
+                return
         except Exception as e:
             self._export = None
             self.send({"kind": "progress", "job": job, "failed": str(e)})

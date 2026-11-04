@@ -54,7 +54,7 @@ def _(mo):
     plate is solved by face charge, sheets of charge on its surfaces, and
     keeps the part it was solved from, so the view solves it again when the
     magnet's height or strength changes. The **low**, **high** and
-    **reversed** variants are a click each, over the transport.
+    **reversed** variants are a click each, beside the transport.
 
     Every step of every variant has its own solve and its own field lines:
     material-response solves one configuration, so the view hands it each
