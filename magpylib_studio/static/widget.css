@@ -728,7 +728,8 @@
 
 /* A saved page's variants: the variables panel's row of toggles, alone, in
    the transport's material, centred over the scale bar -- which stands up to
-   49px from the foot (`BAR_UP`, `BAR_ROOM` in scene3d.mjs). */
+   49px from the foot (`BAR_UP`, `BAR_ROOM` in scene3d.mjs), and up to 81px
+   over a run's transport, which lifts it (`keepClear`). */
 .magpy-scene-variants {
   left: 50%;
   bottom: 52px;
@@ -738,6 +739,10 @@
   max-width: calc(100% - 16px);
   padding: 3px 6px;
   font-size: 11px;
+}
+
+.magpy-animated .magpy-scene-variants {
+  bottom: 84px;
 }
 
 .magpy-scene-variants .magpy-vars-variant {
@@ -792,7 +797,7 @@
 }
 
 /* A notice -- a file saved, full screen refused -- said for a moment and
-   gone; above the transport when there is one. */
+   gone; above the scale bar and what stands at the foot. */
 .magpy-scene-notice {
   left: 50%;
   bottom: 8px;
@@ -814,7 +819,11 @@
 }
 
 .magpy-animated .magpy-scene-notice {
-  bottom: 42px;
+  bottom: 84px;
+}
+
+.magpy-varied.magpy-animated .magpy-scene-notice {
+  bottom: 120px;
 }
 
 /* ---- legend ---------------------------------------------------------------

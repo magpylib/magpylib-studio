@@ -81,6 +81,17 @@ with the call's name, and the message says to solve outside the function.
 
 </details>
 
+<details>
+<summary>The scale bar stands over a run's transport, crisp</summary>
+
+A run's transport covered the scale bar, which now stands over it, the variants
+over both in a live view. At a pixel ratio that is not whole -- VS Code zoomed,
+Windows at 125% -- the bar and the applied field's tag had a grey ring round
+their halo and a soft name: they are now drawn on whole pixels, blended
+premultiplied (#131).
+
+</details>
+
 ## [0.12.0]
 
 ### Added

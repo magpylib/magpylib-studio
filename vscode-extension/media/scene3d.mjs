@@ -5994,7 +5994,8 @@ let bar = null; // the scale bar's canvas, and what was last painted on it
 let applied = null; // the scene's `H_ext`: three numbers, "differs" or null
 let uniformFields = []; // the scene's `UniformField`s: {id, B}, B global in tesla
 let tag = null; // what says it, as `bar` is: drawn above the corner
-let insets = { right: 0, bottom: 0 }; // how far in the host pushes the square
+let insets = { right: 0, bottom: 0, bar: 0 }; // how far in the host pushes the square, and the scale bar up
+let barBox = null; // where the scale bar was last drawn, in CSS pixels from the view's top left
 const cubeRay = new THREE.Raycaster();
 const cornerEye = new THREE.Vector3(); // toward the eye, for `aimCorner`
 
@@ -6561,7 +6562,7 @@ function cornerAt(size, side = cornerSide()) {
  *  short of the corner. The host says again whenever what it floats comes,
  *  goes or moves; nothing is measured between times. */
 function keepClear(rects) {
-  insets = { right: 0, bottom: 0 };
+  insets = { right: 0, bottom: 0, bar: 0 };
   if (!host) return;
   // The element the view hangs in, not the canvas: a host asks from its own
   // resize observer, which runs before this module's has sized the canvas to
@@ -6581,6 +6582,38 @@ function keepClear(rects) {
     if (left < up) insets.right = Math.max(insets.right, left);
     else insets.bottom = Math.max(insets.bottom, up);
   }
+  // The scale bar stands up off whatever floats at the foot under it -- a
+  // run's transport, along the middle -- as the square does off a bar that
+  // reaches its corner: never under it. What stands above it, a page's
+  // variants, is left where it is.
+  const [middle, foot] = barAt({ x: view.width, y: view.height });
+  const room = {
+    left: middle - BAR_ROOM.width / 2,
+    right: middle + BAR_ROOM.width / 2,
+  };
+  for (const rect of rects ?? []) {
+    const up = view.bottom - rect.top;
+    if (
+      rect.right - view.left > room.left &&
+      rect.left - view.left < room.right &&
+      view.bottom - rect.bottom < foot + BAR_ROOM.height / 2 &&
+      up > foot - BAR_ROOM.height / 2
+    ) {
+      insets.bar = Math.max(insets.bar, up - CORNER_MARGIN);
+    }
+  }
+}
+
+/** Where the scale bar's middle stands on a view `size` across, as the
+ *  corner leaves it: across, low beside the square at rest -- and left of
+ *  it, in a view too narrow for both -- and up from the foot, in CSS
+ *  pixels. */
+function barAt(size) {
+  const [restLeft] = cornerAt(size, CORNER_SIDE.rest);
+  return [
+    Math.min(size.x / 2, restLeft - BAR_ROOM.width / 2),
+    CORNER_MARGIN + insets.bottom + BAR_UP,
+  ];
 }
 
 /** Mark the part of the cube a click would look from -- given nothing,
@@ -6623,15 +6656,11 @@ function drawCorner(withCube) {
   }
   drawApplied(size, withCube);
   // Across the foot, low beside the axes at rest -- and left of them, in a
-  // view too narrow for both. Nothing floats over a picture, so there it
-  // stands at the foot whatever the host has over it now.
-  const lift = withCube ? insets.bottom : 0;
-  const [restLeft] = cornerAt(size, CORNER_SIDE.rest);
-  drawBar(
-    size,
-    Math.min(size.x / 2, restLeft - BAR_ROOM.width / 2),
-    CORNER_MARGIN + lift + BAR_UP,
-  );
+  // view too narrow for both -- above what floats under it (`keepClear`).
+  // Nothing floats over a picture, so there it stands at the foot whatever
+  // the host has over it now.
+  const [across, up] = barAt(size);
+  drawBar(size, across, withCube ? up + insets.bar : up - insets.bottom);
   renderer.autoClear = true;
 }
 
@@ -6708,7 +6737,8 @@ function drawTag(size, right, up, pills) {
   }
   paintTag(pills);
   const { width, height } = TAG_ROOM;
-  tag.plane.position.set(right - width / 2, up + height / 2, 0);
+  const [x, y] = [right - width, up].map((v) => Math.round(v * ratio) / ratio);
+  tag.plane.position.set(x + width / 2, y + height / 2, 0);
   tag.plane.scale.set(width, height, 1);
   Object.assign(tag.camera, { right: size.x, top: size.y });
   tag.camera.updateProjectionMatrix();
@@ -6791,7 +6821,13 @@ function drawBar(size, across, up) {
   }
   paintBar(text, length / perPixel);
   const { width, height } = BAR_ROOM;
-  bar.plane.position.set(across, up, 0);
+  // on whole device pixels, its texture's pixel for pixel: half a pixel off
+  // blurred its name, and blended the halo's edge
+  const [x, y] = [across - width / 2, up - height / 2].map(
+    (v) => Math.round(v * ratio) / ratio,
+  );
+  bar.plane.position.set(x + width / 2, y + height / 2, 0);
+  barBox = { left: x, top: size.y - y - height, width, height };
   bar.plane.scale.set(width, height, 1);
   Object.assign(bar.camera, { right: size.x, top: size.y });
   bar.camera.updateProjectionMatrix();
@@ -6818,11 +6854,17 @@ function makeBar(ratio, room = BAR_ROOM) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = false; // drawn pixel for pixel
   texture.minFilter = THREE.LinearFilter;
+  // Premultiplied, and blended so: straight, a pixel between the halo and
+  // the clear round it -- black, at no alpha -- came out a grey ring.
+  texture.premultiplyAlpha = true;
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
       depthTest: false,
       depthWrite: false,
     }),
@@ -7379,6 +7421,8 @@ export const scene3d = drawingAfter({
   setFlow,
   setColorRanges,
   keepClear,
+  /** Where the scale bar was last drawn (`drawBar`), for a host's checks. */
+  barBox: () => barBox && { ...barBox },
   setHidden,
   setFades,
   setGizmoMode,
