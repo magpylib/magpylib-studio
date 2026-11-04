@@ -1840,6 +1840,32 @@ async function themeMidRun(port, base) {
   });
 }
 
+/** A run's transport along the foot lifts the scale bar off it: the bar
+ *  stands over it, never under it. */
+async function barOverTransport(port, base) {
+  await check("the scale bar stands over a run's transport", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/run.html`);
+      const ready = await tab.until(
+        `const t = document.querySelector(".magpy-scene-transport"); return t && !t.hidden && window.scene3d?.barBox()`,
+        20_000,
+      );
+      if (!ready) return "no transport, or no scale bar";
+      await wait(300);
+      const gap = await tab.evaluate(`
+        const view = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+        const t = document.querySelector(".magpy-scene-transport").getBoundingClientRect();
+        const bar = window.scene3d.barBox();
+        return Math.round(t.top - view.top - (bar.top + bar.height));`);
+      if (gap < 0) return `the bar reaches ${-gap} px down into the transport`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** A frame of one run, answered after the view has moved to another, must
  *  neither land on the new scene nor stop it playing. */
 async function staleFrame(port, base) {
@@ -4322,6 +4348,7 @@ try {
   await room(browser.port, base, expected);
   await blocked(browser.port, base);
   await themeMidRun(browser.port, base);
+  await barOverTransport(browser.port, base);
   await staleFrame(browser.port, base);
   await silent(browser.port, base);
   await textFocus(browser.port, base);
