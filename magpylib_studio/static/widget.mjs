@@ -948,7 +948,7 @@ function render({ model, el }) {
     const run = frames() > 1;
     stopChoosing();
     saveAs({
-      run: run && last > first,
+      run: true,
       steps: run ? [first, last] : null,
       variants: names.length ? names : false,
     });
@@ -983,9 +983,9 @@ function render({ model, el }) {
     counter.hidden = false;
     choose.hidden = true;
     foot.classList.remove("magpy-choosing");
-    for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
-      chip.classList.remove("magpy-left-out");
-    }
+    pickedBefore = null;
+    // the row as it was: drawn again, its titles and labels are its own
+    if (!variantsEl.hidden) variantRow?.refresh();
     pressed(exportButton, false);
     keepCorner();
   }
@@ -1009,8 +1009,48 @@ function render({ model, el }) {
     chooseText.textContent = `Save ${said.join(", ")}`;
     for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
       chip.classList.toggle("magpy-left-out", out.has(chip.textContent));
+      chip.title = out.has(chip.textContent)
+        ? `${chip.textContent}: left out of the page -- click to keep it`
+        : `${chip.textContent}: kept in the page -- click to leave it out`;
+    }
+    for (const option of variantsEl.querySelectorAll("option")) {
+      if (option.value) {
+        option.textContent = out.has(option.value)
+          ? `${option.value} (left out)`
+          : option.value;
+      }
     }
   }
+  // Too many for a chip each, the variants are a dropdown: while the foot
+  // asks, a pick in it leaves that one out or takes it back, and is no use
+  // of it -- the change is taken before the dropdown's own handler hears
+  // it, and the dropdown put back where it stood.
+  let pickedBefore = null;
+  for (const type of ["pointerdown", "focusin"]) {
+    variantsEl.addEventListener(
+      type,
+      (event) => {
+        if (choosing && event.target.tagName === "SELECT") {
+          pickedBefore ??= event.target.value;
+        }
+      },
+      true,
+    );
+  }
+  variantsEl.addEventListener(
+    "change",
+    (event) => {
+      const pick = event.target;
+      if (!choosing || pick.tagName !== "SELECT") return;
+      event.stopPropagation();
+      const name = pick.value;
+      if (choosing.out.has(name)) choosing.out.delete(name);
+      else choosing.out.add(name);
+      pick.value = pickedBefore ?? "";
+      describeChoice();
+    },
+    true,
+  );
   // While the foot asks, a chip says whether its variant is kept: its click
   // is taken before the chip hears it, so nothing is used or slid.
   for (const type of ["pointerdown", "click"]) {
@@ -1031,13 +1071,6 @@ function render({ model, el }) {
       true,
     );
   }
-  choose.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      stopChoosing();
-      exportButton.focus();
-    }
-  });
   const progressBar = document.createElement("div");
   progressBar.className = "magpy-scene-progress";
   progressBar.hidden = true;
@@ -1049,6 +1082,14 @@ function render({ model, el }) {
   foot.className = "magpy-scene-foot";
   foot.hidden = true;
   foot.append(transport, variantsEl, choose, writing, progressBar);
+  // Escape, from anywhere in the foot, puts the choice away
+  foot.addEventListener("keydown", (event) => {
+    if (choosing && event.key === "Escape") {
+      event.stopPropagation();
+      stopChoosing();
+      exportButton.focus();
+    }
+  });
 
   // What the view has to say -- a file saved, full screen refused -- said
   // for a moment, and gone.
@@ -1751,10 +1792,14 @@ function render({ model, el }) {
   /** The step of the run the payload draws: the first of a run captured,
    *  the last of a session's, where magpylib draws an object on a path. */
   const drawnStep = () => model.get("payload")?.step ?? 0;
+  /** The step the view opens on: the payload's, or -- a saved page whose
+   *  payload draws a step cut from its run, -1 (`_cut` in widget.py) -- the
+   *  first kept, which a draw then asks for. */
+  const openStep = () => Math.max(drawnStep(), 0);
   let playing = false;
   let inFlight = false;
   let wanted = null; // the frame last asked for, which may not be the one shown
-  let shown = drawnStep(); // the step on screen
+  let shown = openStep(); // the step on screen
   let runId = 0; // which scene a frame was asked for; the model's, per payload
   let silence = null; // how long a frame has gone unanswered
   let startedAt = 0;
@@ -2731,7 +2776,7 @@ function render({ model, el }) {
       inFlight = false;
       answered(); // nothing is owed any more
       wanted = null;
-      shown = drawnStep();
+      shown = openStep();
     }
     if (scene || now.has("tree")) {
       dressLegend();

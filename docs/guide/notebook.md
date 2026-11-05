@@ -111,10 +111,11 @@ parts included, each drawn ahead when the page was written, from the scene as it
 was then. `write_html(path, variants=False)` leaves them out, and a list of
 names keeps those. Beside a run, each variant carries its own: every step solved
 and drawn ahead, so the page plays any variant's run. `run=False` leaves the
-runs out, the page holding the step on screen. For a scene with a run or
-variants, **Export** asks in the view's foot first: two markers on the run's
-slider keep a stretch of steps, a click on a variant leaves it out, and **Save**
-writes what is kept, everything to start.
+runs out, the page holding the step the scene is drawn at, and
+`steps=(first, last)`, counted from 0, keeps that stretch of them. For a scene
+with a run or variants, **Export** asks in the view's foot first: two markers on
+the run's slider keep a stretch of steps, a click on a variant leaves it out,
+and **Save** writes what is kept, everything to start.
 
 Which is
 [direction.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/direction.md)

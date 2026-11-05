@@ -2716,6 +2716,48 @@ def test_a_page_leaves_its_run_out_when_asked():
     assert list(near["scenes"]) == list(near["panel"]["variants"]) == ["near"]
 
 
+def test_a_page_keeps_the_stretch_of_steps_asked_for():
+    """`steps=(first, last)`: those steps alone, the variants' runs too, each
+    counted from 0, and a payload whose own step is cut away opening on the
+    first kept (-1, which the view asks the first frame for); one step is a
+    still page; a run carried as motion keeps those poses."""
+    from typing import Annotated
+
+    from magpylib_studio import Length, scene
+
+    @scene(variants={"near": {"gap": 0.004}})
+    def sliding(gap: Annotated[float, Length(0.002, 0.02)] = 0.008):
+        moving = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(-0.01, 0, gap)
+        )
+        moving.move(np.linspace((0, 0, 0), (0.02, 0, 0), 5), start=0)
+        return moving
+
+    view = widget.SceneWidget(sliding.build())
+    saved = _scene_of(view.to_html(steps=(1, 3)))
+    near = saved["variants"]["scenes"]["near"]
+    assert saved["state"]["frames"] == near["frames"] == 3
+    assert [f["values"]["frame"] for f in near["run"]] == [0, 1, 2]
+    assert saved["variants"]["start"]["values"]["step"] == -1  # its 4 is cut
+    (path,) = saved["variants"]["start"]["values"]["paths"].values()
+    assert len(path["position"]) == len(path["orientation"]) == 3
+    # the last kept: the payload draws it, and no frame is carried for it
+    alone = _scene_of(view.to_html(variants=False, steps=(2, 4)))
+    assert alone["state"]["payload"]["step"] == 2 and alone["run"][2] is None
+    assert [f["frame"] for f in alone["run"][:2]] == [0, 1]
+    still = _scene_of(view.to_html(variants=False, steps=(1, 1)))
+    assert still["state"]["frames"] == 1 and still["run"][0]["frame"] == 0
+    with pytest.raises(ValueError, match="not a stretch"):
+        view.to_html(steps=(3, 5))
+
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(1, 1, 1))
+    magnet.move(np.linspace((0, 0, 0), (4, 0, 0), 5), start=0)
+    played = widget.SceneWidget(magnet, animation=True)
+    cut = _scene_of(played.to_html(steps=(1, 3)))["state"]["payload"]
+    assert cut["step"] == -1
+    assert cut["tracks"] == [t[1:4] for t in played.payload["tracks"]]
+
+
 def test_a_page_weighs_its_variants_as_it_holds_them():
     """#137: past `limit`, a page a script opens leaves its variants out,
     weighed as the page holds them -- each mesh's arrays once -- and not as

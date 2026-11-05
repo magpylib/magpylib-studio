@@ -165,12 +165,25 @@
             last.dispatchEvent(new Event("input"));
           }
           const before = asked.length;
-          const chip = [
-            ...el.querySelectorAll(".magpy-scene-variants .magpy-vars-chip"),
-          ].find((c) => c.textContent === "compact");
-          chip.click();
-          await wait(50);
-          save.leftOut = chip.classList.contains("magpy-left-out");
+          const pick = el.querySelector(".magpy-scene-variants select");
+          if (pick) {
+            // too many for chips: a pick in the dropdown leaves one out
+            pick.dispatchEvent(new Event("focusin", { bubbles: true }));
+            const was = pick.value;
+            pick.value = "n4";
+            pick.dispatchEvent(new Event("change", { bubbles: true }));
+            await wait(50);
+            const option = [...pick.options].find((o) => o.value === "n4");
+            save.leftOut =
+              option.textContent === "n4 (left out)" && pick.value === was;
+          } else {
+            const chip = [
+              ...el.querySelectorAll(".magpy-scene-variants .magpy-vars-chip"),
+            ].find((c) => c.textContent === "compact");
+            chip.click();
+            await wait(50);
+            save.leftOut = chip.classList.contains("magpy-left-out");
+          }
           save.usedOnClick = asked
             .slice(before)
             .some((a) => a.method === "use_variant");

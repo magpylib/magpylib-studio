@@ -2525,6 +2525,19 @@ async function variablesPanel(port, base) {
         return `Save sent ${JSON.stringify(save.sent)}`;
       }
       if (!save.closed) return "the foot kept asking after Save";
+      // too many for a chip each: the dropdown's pick leaves one out
+      await tab.navigate(`${base}/pages/variables.html?many&save`);
+      const crowded = (await tab.until("return window.result", 20_000))?.save;
+      if (!crowded?.shown) return "?many&save: the foot did not ask";
+      if (!crowded.leftOut || crowded.usedOnClick) {
+        return "a pick in the dropdown while choosing was used, not left out";
+      }
+      if (crowded.said !== "Save 11 of 12 variants") {
+        return `with a dropdown the foot said ${JSON.stringify(crowded.said)}`;
+      }
+      if (crowded.sent[0]?.variants?.includes("n4")) {
+        return `Save sent the variant left out: ${JSON.stringify(crowded.sent)}`;
+      }
       await tab.navigate(`${base}/pages/variables.html?save`);
       const plain = (await tab.until("return window.result", 20_000))?.save;
       if (!plain) return "?save, nothing to choose: never finished";

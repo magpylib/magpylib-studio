@@ -97,7 +97,8 @@ import pathlib
 page = view.to_html()  # the run, every variant, the field lines
 pathlib.Path("pair.html").write_text(page, encoding="utf-8")
 view.write_html("pair_now.html", variants=False)  # the run, no variants
-view.write_html("pair_still.html", run=False)  # the step on screen, still
+view.write_html("pair_still.html", run=False)  # the step drawn, still
+view.write_html("pair_part.html", steps=(3, 9))  # steps 3 to 9 alone
 ```
 
 No notebook or browser is needed: this runs in a plain Python script.
