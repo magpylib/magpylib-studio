@@ -45,7 +45,8 @@ pointed at. They share one renderer now, which draws each view onto a canvas of
 its own, so twenty views on a page draw, with one WebGL context, and the shaders
 are compiled once for all of them. A view that a marimo cell run again takes off
 the page lets go of what it held; one that JupyterLab puts back draws again,
-looking where it was (#25).
+looking where it was (#25,
+[#146](https://github.com/magpylib/magpylib-studio/pull/146)).
 
 </details>
 
