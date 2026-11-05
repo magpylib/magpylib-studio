@@ -1,7 +1,7 @@
 # The 3D view in a notebook
 
 _The full guide. The short version is in the
-[README](../../README.md#use-it-in-a-notebook)._
+[README](https://github.com/magpylib/magpylib-studio/blob/main/README.md#use-it-in-a-notebook)._
 
 ```sh
 pip install "magpylib-studio[widget]"
@@ -112,12 +112,13 @@ was then. `write_html(path, variants=False)` leaves them out, and a list of
 names keeps those. Beside a run, each variant carries its own: every step solved
 and drawn ahead, so the page plays any variant's run.
 
-Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
-binding_ — with the notebook's own reactivity in place of a protocol: a slider
-rebuilds the objects, the view redraws them, and a click is an input to the next
-cell. `examples/marimo/halbach_ring.py` is that loop, and
-`examples/jupyter_demo.ipynb` the same scene in Jupyter, with `ipywidgets`
-sliders in place of marimo's reactivity.
+Which is
+[direction.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/direction.md)
+§5.3 — _a viewer with parameter binding_ — with the notebook's own reactivity in
+place of a protocol: a slider rebuilds the objects, the view redraws them, and a
+click is an input to the next cell. `examples/marimo/halbach_ring.py` is that
+loop, and `examples/jupyter_demo.ipynb` the same scene in Jupyter, with
+`ipywidgets` sliders in place of marimo's reactivity.
 
 ## Editing a scene in the notebook
 
@@ -253,7 +254,7 @@ left; drag the column's inner edge to widen it. Narrower than 720 pixels the
 column is a sheet below the view. `V` and `O` open and close them from the
 keyboard, and while the object panel shows the pose the readout stays away, back
 only for a drag. How the editable view is built is
-[decision 0010](../decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
+[decision 0010](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md#0010-the-notebook-widget-edits-with-the-package-alone).
 
 ![The widget with its variables panel open in the column beside the view, and with the object panel open on the ring's source, its copies outlined faint](../widget-panels.png)
 

@@ -42,6 +42,20 @@ widget = "magpylib_studio.backend:WidgetBackend"
 widget = ["anywidget>=0.9"]
 dev = ["pytest>=8", "jsonschema>=4", "anywidget>=0.9"]
 
+[dependency-groups]
+# The docs site (Sphinx, MyST-NB, the pydata theme), as magpylib's and
+# magpylib-material-response's are built: `uv sync --group docs`, then
+# `sphinx-build docs docs/_build/html`. The example pages run their scenes in
+# a SceneWidget, so the widget extra comes with it.
+docs = [
+  "magpylib-studio[widget]",
+  "pydata-sphinx-theme",
+  "sphinx>=7.0",
+  "myst_nb>=1.4",
+  "sphinx_copybutton",
+  "sphinx_autodoc_typehints",
+]
+
 [project.urls]
 Homepage = "https://github.com/magpylib/magpylib-studio"
 "Bug Tracker" = "https://github.com/magpylib/magpylib-studio/issues"

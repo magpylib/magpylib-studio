@@ -1,0 +1,60 @@
+/* PyData Sphinx Theme Full Width CSS - Simplest Approach */
+/* Apply full-width to all main containers */
+
+.bd-container,
+.bd-container__inner {
+  max-width: 100% !important;
+}
+
+.bd-main,
+.bd-content {
+  max-width: 100% !important;
+}
+
+.bd-article-container,
+.bd-article {
+  max-width: 100em !important;
+}
+
+/* Ensure notebook cells use full width */
+.cell,
+.cell_input,
+.cell_output {
+  max-width: 100% !important;
+}
+
+/*
+Dark mode paints a light panel behind notebook html outputs. Plotly figures
+follow the page theme themselves (webcode/plotlySync.js, which tags their outputs
+with this class), so for those the panel goes. Same rule as magpylib's
+docs/_static/custom.css; `body` is in the selector only to outweigh the theme's.
+*/
+html[data-theme="dark"]
+  body
+  .bd-content
+  div.cell_output
+  div.text_html.magpy-plotly-output {
+  background: none;
+  padding: 0;
+}
+
+/*
+The same for the magpylib-studio views: the theme paints a light panel round
+every widget, and a studio view wears what it sits on.
+*/
+html[data-theme="dark"]
+  body
+  .bd-content
+  div.cell_output
+  div.widget-subarea:has(.magpy-scene) {
+  background: none;
+  padding: 0;
+}
+
+/* An example's view: its saved page, as tall as a notebook cell would draw it. */
+iframe.magpy-example {
+  width: 100%;
+  height: 520px;
+  border: 1px solid var(--pst-color-border);
+  border-radius: 6px;
+}
