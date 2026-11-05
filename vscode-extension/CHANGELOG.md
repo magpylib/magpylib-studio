@@ -36,7 +36,7 @@ notebook's scene is one of them now, and the gallery shows thirteen: unit
 versions, every kind of object, the solved U-core, the run over a solved plate
 and the Halbach stack joined it, the two solved ones when
 magpylib-material-response is installed. Each notebook names what it needs in
-its script header, and its example's docs page runs it in molab (#PR).
+its script header, and its example's docs page runs it in molab (#144).
 
 </details>
 
