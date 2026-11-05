@@ -1,15 +1,3 @@
-"""Every kind of magpylib object in one scene, round a Möbius band whose current
-runs over both its faces.
-
-Each object is named by its magpylib class in the legend: the magnets (Cuboid,
-Cylinder, CylinderSegment, Sphere, Tetrahedron, TriangularMesh), the currents
-(Circle, Polyline, TriangleSheet, TriangleStrip), a Triangle, a Dipole, and a
-Sensor at the centre. `radius` sets the ring they stand on.
-In the studio each takes the handles: R on a magnet's faces resizes it, a
-sphere and a loop resize by the rim, and a shape made of points has a dot on
-each point to drag.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -18,10 +6,6 @@ import numpy as np
 from magpylib_studio import Length, scene
 
 TITLE = "Every kind of object"
-SUMMARY = (
-    "One of every magpylib magnet, current and source round a Möbius band, "
-    "each named by its class — and each takes the handles"
-)
 
 MM = 1e-3
 
@@ -61,9 +45,17 @@ def _sheet():
 
 @scene
 def every_kind(radius: Annotated[float, Length(0.03, 0.08)] = 0.037):
-    """A Möbius band, round it on a ring of `radius` one object of every
-    other kind, each made with its magnetization along the ring, and a
-    sensor at the centre."""
+    """Every kind of magpylib object in one scene, round a Möbius band whose
+    current runs over both its faces.
+
+    Each object is named by its magpylib class in the legend: the magnets
+    (Cuboid, Cylinder, CylinderSegment, Sphere, Tetrahedron,
+    TriangularMesh), the currents (Circle, Polyline, TriangleSheet,
+    TriangleStrip), a Triangle, a Dipole, and a Sensor at the centre.
+    `radius` sets the ring they stand on. In the studio each takes the
+    handles: R on a magnet's faces resizes it, a sphere and a loop resize
+    by the rim, and a shape made of points has a dot on each point to drag.
+    """
     # vertices from the band's middle line out to its edge, twice round, which
     # covers both halves of it; turned so that its twist shows at first look
     round_twice = np.linspace(0, 4 * np.pi, 160)

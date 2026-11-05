@@ -1,15 +1,3 @@
-"""A magnet sliding across a solved soft-iron plate in thirteen steps, with
-variants, and the plate solved again at every step of the run.
-
-The scene's path is the run, played by the transport at the foot of the view.
-The plate is solved by face charge, sheets of charge on its surfaces, and
-keeps the part it was solved from, so the studio solves it again when the
-magnet's height or strength changes, and at each step of the run: every step of
-every variant has its own solve and its own field lines. The low, high and
-reversed variants are a click each, beside the transport. It needs
-magpylib-material-response.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -20,10 +8,6 @@ from magpylib_material_response.face_charge import ChargeSheet
 from magpylib_studio import Bounds, Length, grid, scene
 
 TITLE = "A run over a solved plate"
-SUMMARY = (
-    "A magnet sliding over a soft-iron plate solved by face charge at every "
-    "step of the run, beside low, high and reversed variants"
-)
 
 
 def _solved():
@@ -57,9 +41,21 @@ def solved_plate_run(
     height: Annotated[float, Length(0.005, 0.03)] = 0.006,
     strength: Annotated[float, Bounds(-1.5, 1.5, unit="field")] = 1.2,
 ):
-    """A magnet `height` above a solved plate, polarized `strength` tesla
-    up, sliding across it in thirteen steps, and a probe in the plane of
-    the slide, drawn as its field lines."""
+    """A magnet sliding across a solved soft-iron plate in thirteen steps,
+    with variants, and the plate solved again at every step of the run.
+
+    The scene's path is the run, played by the transport at the foot of the
+    view. The plate is solved by face charge, sheets of charge on its
+    surfaces, and keeps the part it was solved from, so the studio solves
+    it again when the magnet's height or strength changes, and at each step
+    of the run: every step of every variant has its own solve and its own
+    field lines. The low, high and reversed variants are a click each,
+    beside the transport. It needs magpylib-material-response.
+
+    A magnet `height` above a solved plate, polarized `strength` tesla up,
+    sliding across it in thirteen steps, and a probe in the plane of the
+    slide, drawn as its field lines.
+    """
     magnet = magpy.magnet.Cuboid(
         polarization=(0, 0, strength),
         dimension=(0.01, 0.01, 0.005),

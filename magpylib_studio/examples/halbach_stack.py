@@ -1,10 +1,3 @@
-"""Two Halbach rings stacked on one axis, the upper one turned by half a step.
-
-Each ring is one magnet and one circular pattern, so changing `n` rebuilds both
-rings, and the stagger follows, being half a step by definition. The whole
-stack can be tilted about any axis.
-"""
-
 from typing import Annotated, Literal
 
 import magpylib as magpy
@@ -13,7 +6,6 @@ import numpy as np
 from magpylib_studio import Angle, Count, Length, derived, duplicate_around, scene
 
 TITLE = "Halbach stack"
-SUMMARY = "Two staggered Halbach rings on one axis, and a sensor along the bore"
 
 
 @scene
@@ -24,8 +16,16 @@ def halbach_stack(
     tilt: Annotated[float, Angle(-180, 180, slider=(-90, 90))] = 0.0,
     tilt_axis: Literal["x", "y", "z"] = "z",
 ):
-    """Two rings of `n` cubes on a radius `radius`, `gap` apart, and a
-    sensor along the bore."""
+    """Two Halbach rings stacked on one axis, the upper one turned by half a
+    step.
+
+    Each ring is one magnet and one circular pattern, so changing `n`
+    rebuilds both rings, and the stagger follows, being half a step by
+    definition. The whole stack can be tilted about any axis.
+
+    Two rings of `n` cubes on a radius `radius`, `gap` apart, and a sensor
+    along the bore.
+    """
     stagger = derived("stagger", 360 / (2 * n), unit="angle")
     halbach = magpy.Collection(style_label="Halbach stack")
     ring1 = magpy.Collection(style_label="Ring 1")

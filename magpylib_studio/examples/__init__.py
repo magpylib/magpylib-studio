@@ -1,10 +1,11 @@
 """The studio's examples, each written once, as a scene function.
 
 The VS Code gallery, the docs and the marimo notebooks all read them from
-here: each module holds one `@scene` function, its `TITLE`, the `SUMMARY` the
-gallery shows under it, and, as its docstring, what the docs page says about
-it. A scene function is how a scene is meant to be written, so an example is
-also a lesson in writing one::
+here: each module holds one `@scene` function, named as the module, and its
+`TITLE`. The function's docstring is the one description of it: its first
+sentence is the gallery's line, the whole of it the docs page's text. A scene
+function is how a scene is meant to be written, so an example is also a
+lesson in writing one::
 
     from magpylib_studio.examples import EXAMPLES
 
@@ -20,6 +21,7 @@ import functools
 import importlib
 import importlib.util
 import pathlib
+import re
 
 
 @dataclasses.dataclass(frozen=True)
@@ -63,12 +65,16 @@ class Example:
 
     @property
     def summary(self):
-        """The line the gallery shows under the title."""
-        return _said(self.module)["SUMMARY"]
+        """The line the gallery shows under the title: the first sentence of
+        its `text`."""
+        head = " ".join(self.text.split("\n\n")[0].split())
+        match = re.match(r"(.+?[.!?])(\s|$)", head)
+        return match.group(1) if match else head
 
     @property
     def text(self):
-        """What the docs page says about it: the module's docstring."""
+        """What it is, once: its scene function's docstring, which its docs
+        page shows."""
         return _said(self.module)["text"]
 
     def document(self):
@@ -81,17 +87,19 @@ class Example:
 
 @functools.cache
 def _said(module):
-    """A module's title, gallery line and text, read from its source rather
-    than by importing it: listing the gallery imports no example, so it
-    solves nothing and needs nothing an example does."""
+    """A module's title and its scene function's docstring, read from its
+    source rather than by importing it: listing the gallery imports no
+    example, so it solves nothing and needs nothing an example does."""
     tree = ast.parse(
         (pathlib.Path(__file__).parent / f"{module}.py").read_text("utf-8")
     )
-    said = {"text": ast.get_docstring(tree)}
+    said = {}
     for node in tree.body:
         target = node.targets[0] if isinstance(node, ast.Assign) else None
-        if isinstance(target, ast.Name) and target.id in {"TITLE", "SUMMARY"}:
-            said[target.id] = ast.literal_eval(node.value)
+        if isinstance(target, ast.Name) and target.id == "TITLE":
+            said["TITLE"] = ast.literal_eval(node.value)
+        if isinstance(node, ast.FunctionDef) and node.name == module:
+            said["text"] = ast.get_docstring(node)
     return said
 
 

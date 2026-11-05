@@ -1,12 +1,3 @@
-"""A pair of coils on one axis, each current a variable of its own.
-
-Run the same current through both, at a spacing equal to their radius, and the
-field between them is the flattest a pair of loops can make: the Helmholtz
-condition. Reverse one, and the field is zero at the centre and grows evenly
-away from it: the anti-Helmholtz pair of a magnetic trap. Both are variants. The
-probe across the gap, in the plane of the axis, is drawn as its field lines.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -14,11 +5,6 @@ import magpylib as magpy
 from magpylib_studio import Bounds, Count, Length, duplicate_along, grid, scene
 
 TITLE = "Helmholtz coil pair"
-SUMMARY = (
-    "Two coils on one axis, each current a variable — the Helmholtz variant "
-    "runs them together for a flat field, anti-Helmholtz against each other "
-    "for a zero"
-)
 
 _amperes = Bounds(-100, 100, slider=(-50, 50), unit="current")
 
@@ -38,8 +24,18 @@ def coil_pair(
     upper: Annotated[float, _amperes] = 20.0,
     turns: Annotated[int, Count(1, 20, slider=(1, 12))] = 6,
 ):
-    """Two coils of `turns` loops, `spacing` apart centre to centre, and
-    a probe across the gap between them, in the plane of the axis."""
+    """A pair of coils on one axis, each current a variable of its own.
+
+    Run the same current through both, at a spacing equal to their radius,
+    and the field between them is the flattest a pair of loops can make:
+    the Helmholtz condition. Reverse one, and the field is zero at the
+    centre and grows evenly away from it: the anti-Helmholtz pair of a
+    magnetic trap. Both are variants. The probe across the gap, in the
+    plane of the axis, is drawn as its field lines.
+
+    Two coils of `turns` loops, `spacing` apart centre to centre, and a
+    probe across the gap between them, in the plane of the axis.
+    """
     pitch = 0.002
     pair = magpy.Collection(style_label="coil pair")
     for name, current, centre in (

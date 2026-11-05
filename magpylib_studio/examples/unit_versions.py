@@ -1,16 +1,3 @@
-"""Two versions of a test unit that differ in structure, not only in a value:
-a narrow core with two inlay pieces, and a wide one with three and a notch.
-
-A choice can pick what a scene is made of: `versions = choose(version)`, then
-`versions.add("v2", ...)`. One document holds both versions, and the one
-`version` names is the one in the scene: drawn, listed, in the field. A piece
-moved in one version is still where it was left when the scene comes back to
-it. The other variables mix in as before: `spacing` spreads v1's two pieces,
-and only v1 reads it; `current` is the coil's, in both versions. A variant sets
-what it names: "v2 reversed" sets the version and the current at once, and
-"v1" then sets only the version, so the current stays reversed.
-"""
-
 import typing
 from typing import Annotated
 
@@ -19,10 +6,6 @@ import magpylib as magpy
 from magpylib_studio import Bounds, Length, choose, duplicate_along, grid, scene
 
 TITLE = "Two versions of a unit"
-SUMMARY = (
-    "One scene, two versions that differ in structure, picked by a choice — "
-    "a narrow core with two inlays, a wide one with three and a notch"
-)
 
 
 @scene(
@@ -40,10 +23,20 @@ def unit_versions(
     spacing: Annotated[float, Length(0.008, 0.024)] = 0.012,
     current: Annotated[float, Bounds(-3000, 3000, unit="current")] = 2000.0,
 ):
-    """Two versions of a test unit: a narrow core with two inlay pieces
-    `spacing` apart, and a wide one with three and a notched piece under
-    it. The coil, carrying `current` amperes, and the probe are both
-    versions'."""
+    """Two versions of a test unit that differ in structure, not only in a
+    value: a narrow core with two inlay pieces, and a wide one with three
+    and a notch.
+
+    A choice can pick what a scene is made of: `versions =
+    choose(version)`, then `versions.add("v2", ...)`. One document holds
+    both versions, and the one `version` names is the one in the scene:
+    drawn, listed, in the field. A piece moved in one version is still
+    where it was left when the scene comes back to it. The other variables
+    mix in as before: `spacing` spreads v1's two pieces, and only v1 reads
+    it; `current` is the coil's, in both versions. A variant sets what it
+    names: "v2 reversed" sets the version and the current at once, and "v1"
+    then sets only the version, so the current stays reversed.
+    """
     versions = choose(version, style_label="versions")
     core1 = magpy.magnet.Cuboid(
         dimension=(0.03, 0.01, 0.01), polarization=(0, 0, 1), style_label="core"

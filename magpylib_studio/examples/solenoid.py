@@ -1,10 +1,3 @@
-"""A solenoid: one current loop and a linear pattern, rather than a stack of
-loops written out one by one.
-
-`turns` and `pitch` reshape the whole coil, and its length is derived from
-them.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -13,7 +6,6 @@ import numpy as np
 from magpylib_studio import Bounds, Count, Length, derived, duplicate_along, scene
 
 TITLE = "Solenoid"
-SUMMARY = "One current loop patterned along an axis, and a sensor along the bore"
 
 
 @scene
@@ -25,8 +17,15 @@ def solenoid(
         float, Bounds(-10000, 10000, slider=(0, 500), unit="current")
     ] = 100,
 ):
-    """`turns` loops of radius `coil_radius`, `pitch` apart, carrying
-    `amps`, and a sensor along the axis."""
+    """A solenoid: one current loop and a linear pattern, rather than a stack
+    of loops written out one by one.
+
+    `turns` and `pitch` reshape the whole coil, and its length is derived
+    from them.
+
+    `turns` loops of radius `coil_radius`, `pitch` apart, carrying `amps`,
+    and a sensor along the axis.
+    """
     height = derived("height", pitch * (turns - 1), unit="length")
     coil = magpy.Collection(style_label="Solenoid")
     turn = magpy.current.Circle(

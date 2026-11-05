@@ -1,15 +1,3 @@
-"""A U-core electromagnet, solved while it is dragged: three soft-iron cuboids
-(χ = 999) wound with a coil of 400 ampere-turns.
-
-The core is solved by face charge, magpylib-material-response's sheets of charge
-on its surfaces, with no volume mesh. Each sheet keeps the part it was solved
-from, so the studio solves the core again at every step of a drag, with nothing
-in the scene asking for it. Drag the coil, or slide `current`: the solve keeps
-its factorization, so a new load costs milliseconds. Drag a leg off the yoke
-and each step factors the matrix again. One undo takes back a move and its solve
-together. It needs magpylib-material-response.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -24,10 +12,6 @@ from magpylib_material_response.polyline import (
 from magpylib_studio import Bounds, Count, grid, scene
 
 TITLE = "U-core electromagnet, solved"
-SUMMARY = (
-    "A soft-iron U-core and its coil, solved by face charge again at every "
-    "step of a drag — move the coil or slide the current"
-)
 
 #: The level the core's panels are solved at, and solved again at.
 LEVEL = 2
@@ -95,9 +79,22 @@ def ucore_electromagnet(
     current: Annotated[float, Bounds(-200, 200, unit="current")] = 100,
     density: Annotated[int, Count(4, 40, slider=(5, 25))] = 15,
 ):
-    """The solved core, the coil at `current` amperes, and a probe in the
-    core's plane of symmetry, `density` by `density` points across 140
-    mm, drawn as its field lines."""
+    """A U-core electromagnet, solved while it is dragged: three soft-iron
+    cuboids (χ = 999) wound with a coil of 400 ampere-turns.
+
+    The core is solved by face charge, magpylib-material-response's sheets
+    of charge on its surfaces, with no volume mesh. Each sheet keeps the
+    part it was solved from, so the studio solves the core again at every
+    step of a drag, with nothing in the scene asking for it. Drag the coil,
+    or slide `current`: the solve keeps its factorization, so a new load
+    costs milliseconds. Drag a leg off the yoke and each step factors the
+    matrix again. One undo takes back a move and its solve together. It
+    needs magpylib-material-response.
+
+    The solved core, the coil at `current` amperes, and a probe in the
+    core's plane of symmetry, `density` by `density` points across 140 mm,
+    drawn as its field lines.
+    """
     coil = magpy.Collection(
         *(magpy.current.Polyline(current=current, vertices=v) for v in WINDINGS),
         style_label="coil",
