@@ -7,6 +7,7 @@ turns a click back into a magpylib object, and the frames it serves.
 """
 
 import base64
+import copy
 import gzip
 import io
 import json
@@ -1112,6 +1113,76 @@ def _unpacked(page, name):
     return gzip.decompress(base64.b64decode(found.group(1))).decode("utf-8")
 
 
+def _put_back(value, arrays):
+    """`value` with each mesh's arrays put back from `arrays`, by place."""
+    if isinstance(value, dict):
+        if value.get("kind") == "mesh":
+            return {
+                key: arrays[v] if key in widget._SHARED and isinstance(v, int) else v
+                for key, v in value.items()
+            }
+        return {key: _put_back(v, arrays) for key, v in value.items()}
+    if isinstance(value, list):
+        return [_put_back(v, arrays) for v in value]
+    return value
+
+
+def _scene_of(page):
+    """The scene a saved page draws, its arrays put back as the page does."""
+    saved = json.loads(_unpacked(page, "magpy-scene"))
+    return _put_back(saved, saved.pop("arrays"))
+
+
+def _as_page(value):
+    """`value`, a payload or a frame, as a saved page writes it: each mesh's
+    coordinates to 12 digits of its largest, its colour coordinates to 4
+    decimals. Written out here, apart from `widget._compacted`."""
+    if isinstance(value, dict):
+        if value.get("kind") != "mesh":
+            return {key: _as_page(v) for key, v in value.items()}
+        mesh = dict(value)
+        position = mesh.get("position")
+        if position and None not in position:
+            largest = max(abs(v) for v in position)
+            if largest:
+                digits = 12 - int(np.ceil(np.log10(largest)))
+                mesh["position"] = np.round(position, digits).tolist()
+        for key in ("uv", "back_uv"):
+            if mesh.get(key) and None not in mesh[key]:
+                mesh[key] = np.round(mesh[key], 4).tolist()
+        return mesh
+    if isinstance(value, list):
+        return [_as_page(v) for v in value]
+    return value
+
+
+def test_a_page_holds_each_mesh_array_once_without_its_noise():
+    """#137: a plate no step moves is the same arrays in every frame, held
+    once; its coordinates kept to 12 digits of the largest, past what the
+    view's float32 buffer draws, and its colour coordinates to 4 decimals,
+    finer than its table of 256 colours. The view's payload is left as it
+    was."""
+    position = [0.08030000000000001, -0.013999999999999999, 1e-3 / 3] * 3
+    plate = {"kind": "mesh", "position": position, "index": [0, 1, 2]}
+    frames = [
+        {"meshes": [{**plate, "uv": [0.6924399408113256, 0.5] * 3}]},
+        {"meshes": [{**plate, "uv": [0.1, 0.5] * 3}]},
+        None,  # the step the payload draws
+    ]
+    held = copy.deepcopy(frames)
+    compact = widget._compacted({"run": frames})
+    assert frames == held
+    first, second = (frame["meshes"][0] for frame in compact["run"][:2])
+    assert first["position"] == second["position"]
+    assert first["index"] == second["index"]
+    assert first["uv"] != second["uv"]
+    assert len(compact["arrays"]) == 4
+    arrays = compact["arrays"]
+    assert arrays[first["position"]][:3] == [0.0803, -0.014, 0.0003333333333]
+    assert arrays[first["uv"]][:2] == [0.6924, 0.5]
+    assert _put_back(compact, arrays)["run"][2] is None
+
+
 def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_path):
     """The widget and its scene, with nothing to fetch and no kernel to ask."""
     magnet, sensor = scene_objects
@@ -1126,8 +1197,8 @@ def test_a_view_saves_as_one_file_that_needs_nothing_else(scene_objects, tmp_pat
 
     # The bundle is the one that ships, byte for byte.
     assert _unpacked(page, "magpy-widget") == (widget.STATIC / "widget.js").read_text()
-    saved = json.loads(_unpacked(page, "magpy-scene"))
-    assert saved["state"]["payload"] == view.payload
+    saved = _scene_of(page)
+    assert saved["state"]["payload"] == _as_page(view.payload)
     assert saved["state"]["tree"] == view.tree
     assert saved["state"]["hidden"] == [str(id(sensor))]
     assert saved["state"]["faded"] == {str(id(magnet)): 0.4}
@@ -1151,9 +1222,9 @@ def test_a_view_writes_to_an_open_file_as_well(scene_objects):
 def test_a_saved_run_plays_without_python(morphing, served):
     """Every frame travels with the file, so the page answers for them."""
     view = widget.SceneWidget(*morphing, animation=True)
-    saved = json.loads(_unpacked(view.to_html(), "magpy-scene"))
+    saved = _scene_of(view.to_html())
     assert len(saved["run"]) == view.frames
-    assert saved["run"][3] == threejs.frame_payload(view._scene, 3)
+    assert saved["run"][3] == _as_page(threejs.frame_payload(view._scene, 3))
 
 
 def test_the_export_button_is_answered_with_the_file(scene_objects):
@@ -2543,12 +2614,12 @@ def test_a_saved_page_draws_each_variant_as_the_view_does():
     studio._session.save_variant("same", {"free": 4.0})
     studio.set_variable("r", 0.025)  # in neither
     history = studio._session.get_history()
-    saved = json.loads(_unpacked(studio.to_html(), "magpy-scene"))
+    saved = _scene_of(studio.to_html())
     assert studio._session.get_history() == history
     assert saved["state"]["variants"] == studio.variants == ["few", "many", "same"]
     assert saved["state"]["payload"] is None
     carried = saved["variants"]
-    assert _drawn(saved, carried["start"]) == studio.payload
+    assert _drawn(saved, carried["start"]) == _as_page(studio.payload)
     assert carried["panel"]["variant"] is None
     same = carried["scenes"]["same"]["items"]
     assert same == carried["start"]["items"]
@@ -2562,7 +2633,7 @@ def test_a_saved_page_draws_each_variant_as_the_view_does():
     )
     for name in ("few", "many", "same"):
         assert _ask(studio, "use_variant", name=name)["result"]["ok"]
-        assert _drawn(saved, carried["scenes"][name]) == studio.payload
+        assert _drawn(saved, carried["scenes"][name]) == _as_page(studio.payload)
         assert carried["scenes"][name]["tree"] == studio.tree
         studio.undo()  # each from the scene as it was saved
 
@@ -2608,12 +2679,31 @@ def test_a_page_carries_the_variants_it_is_asked_for():
     studio = _studio_of(_design())
     studio._session.save_variant("few", {"n": 4})
     studio._session.save_variant("many", {"n": 12})
-    saved = lambda **kw: json.loads(_unpacked(studio.to_html(**kw), "magpy-scene"))  # noqa: E731
+    saved = lambda **kw: _scene_of(studio.to_html(**kw))  # noqa: E731
     assert list(saved(variants=["many"])["variants"]["scenes"]) == ["many"]
     plain = saved(variants=False)
-    assert "variants" not in plain and plain["state"]["payload"] == studio.payload
+    assert "variants" not in plain and plain["state"]["payload"] == _as_page(
+        studio.payload
+    )
     with pytest.raises(ValueError, match="no variant 'other': it has few, many"):
         studio.to_html(variants=["other"])
+
+
+def test_a_page_weighs_its_variants_as_it_holds_them():
+    """#137: past `limit`, a page a script opens leaves its variants out,
+    weighed as the page holds them -- each mesh's arrays once -- and not as
+    the studio's panel is handed them, which holds them again in each."""
+    studio = _studio_of(_design())
+    studio._session.save_variant("few", {"n": 4})
+    studio._session.save_variant("many", {"n": 12})
+    drawn = studio._saved()["variants"]
+    as_page, as_json = widget._weigher(True)(drawn), widget._weigher(False)(drawn)
+    assert as_page < as_json
+    limit = (as_page + as_json) // 2
+    page = _scene_of(studio._page(limit=limit))
+    assert list(page["variants"]["scenes"]) == ["few", "many"]
+    with pytest.warns(UserWarning, match="more than a page nobody named"):
+        assert "variants" not in studio._saved(limit)
 
 
 def test_variables_assigned_together_rebuild_the_scene_once():

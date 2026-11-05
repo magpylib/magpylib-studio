@@ -308,6 +308,22 @@ const centreOf = (selector) => `
 const tool = (name) =>
   `[...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith(${JSON.stringify(name)}))`;
 const VIEW = `document.querySelector(".magpy-scene-view")`;
+/** Page code: `payload`, the scene a saved page opens on, read as the page
+ *  reads it -- each mesh's arrays put back from `arrays`, where the page
+ *  holds them once (#137). */
+const SAVED_PAYLOAD = `
+  const text = document.getElementById("magpy-scene").textContent.trim();
+  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  const unzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const saved = JSON.parse(await new Response(unzipped).text());
+  const payload = saved.state.payload;
+  (function share(value) {
+    if (!value || typeof value !== "object") return;
+    if (value.kind !== "mesh") return Object.values(value).forEach(share);
+    for (const key of ["position", "index", "uv", "back_uv"]) {
+      if (typeof value[key] === "number") value[key] = saved.arrays[value[key]];
+    }
+  })(payload);`;
 const WEARS = `document.querySelector(".magpy-scene").classList.contains("magpy-dark") ? "dark" : "light"`;
 const row = (label) =>
   `[...document.querySelectorAll(".magpy-legend-row")].find((r) => r.querySelector(".magpy-legend-label").textContent === ${JSON.stringify(label)})`;
@@ -973,10 +989,7 @@ async function manyMagnets(port, base) {
       // drawn again from its payload: one batch of the hundred, not the old
       // one left drawn under the new
       const again = await tab.evaluate(`
-        const text = document.getElementById("magpy-scene").textContent.trim();
-        const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-        const unzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-        const payload = JSON.parse(await new Response(unzipped).text()).state.payload;
+        ${SAVED_PAYLOAD}
         const s = window.scene3d;
         s.render(${VIEW}.querySelector("canvas").parentElement, payload, { keepCamera: true });
         s.still();
@@ -1452,10 +1465,7 @@ async function heldReading(port, base) {
         );
         if (!drawn) return "the page never drew";
         const where = await tab.evaluate(`
-        const text = document.getElementById("magpy-scene").textContent.trim();
-        const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-        const unzipped = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-        const payload = JSON.parse(await new Response(unzipped).text()).state.payload;
+        ${SAVED_PAYLOAD}
         const s = window.scene3d;
         const first = () => {
           let at = null;

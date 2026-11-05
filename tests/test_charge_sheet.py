@@ -4,10 +4,7 @@ is drawn with its charge beside field lines, saved, written and read back."""
 
 from __future__ import annotations
 
-import base64
-import gzip
 import json
-import re
 import sys
 import types
 import warnings
@@ -19,6 +16,7 @@ import pytest
 from magpylib_studio import build, fieldlines, importer, scene, session, widget
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
+from tests.test_widget import _as_page, _scene_of
 
 material_response = pytest.importorskip(
     "magpylib_material_response", minversion="0.9.1"
@@ -438,8 +436,7 @@ def test_a_saved_page_draws_each_variant_solved_again():
 
     view = SceneWidget(above.build(), editable=True)
     view.send = lambda *_, **__: None
-    page = re.search(r'id="magpy-scene">([^<]*)<', view.to_html()).group(1)
-    carried = json.loads(gzip.decompress(base64.b64decode(page)))["variants"]
+    carried = _scene_of(view.to_html())["variants"]
 
     def plate(drawn):
         (mesh,) = [
@@ -458,7 +455,7 @@ def test_a_saved_page_draws_each_variant_solved_again():
         }
         view._on_message(view, ask, [])
         (live,) = [m for m in view.payload["meshes"] if m["object_id"] == "plate"]
-        assert plate(carried["scenes"][name]) == live
+        assert plate(carried["scenes"][name]) == _as_page(live)
         assert plate(carried["scenes"][name]) != plate(carried["start"])
         view.undo()
 
