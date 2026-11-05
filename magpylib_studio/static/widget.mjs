@@ -45,6 +45,7 @@ import { watchDrags } from "./drag.mjs";
 import { createColorBar } from "./colorbar.mjs";
 import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
+import { HOME, MARK } from "./mark.mjs";
 import {
   declaredTheme,
   nearestBackdrop,
@@ -817,12 +818,25 @@ function render({ model, el }) {
     span.append(...buttons);
     return span;
   };
+  // Last, as Plotly's toolbar ends with its own mark: magpylib's, a link
+  // to where the studio is explained, opened beside the notebook.
+  const mark = document.createElement("a");
+  mark.className = "magpy-icon magpy-mark";
+  mark.href = HOME;
+  mark.target = "_blank";
+  mark.rel = "noopener";
+  name(mark, "Built with magpylib-studio");
+  const markImage = document.createElement("img");
+  markImage.src = MARK;
+  markImage.alt = "";
+  mark.append(markImage);
   tools.append(
     group(fitButton, projectionButton),
     group(legendButton, axesButton, flowButton, themeButton),
     group(editButton),
     group(pictureButton, exportButton),
     group(keysButton, fullscreenButton),
+    group(mark),
   );
 
   const transport = document.createElement("div");

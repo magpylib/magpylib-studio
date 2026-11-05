@@ -698,6 +698,23 @@
   background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
 }
 
+/* magpylib's mark, in its own colours: the one tool that is not a line
+   drawing, so not dimmed with them until the pointer is on it. */
+.magpy-mark {
+  opacity: 1;
+}
+
+.magpy-mark img {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* Its magpie is navy, lost on a dark view: a hairline of light round it. */
+.magpy-dark .magpy-mark img {
+  filter: drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.6px #fff);
+}
+
 .magpy-icon:focus-visible {
   outline: 2px solid var(--vscode-focusBorder);
   outline-offset: -2px;
