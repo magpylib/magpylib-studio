@@ -30,16 +30,24 @@ there and in the coil pair draw their field lines without their pixels (#133).
 ### Changed
 
 <details>
-<summary>A slider dragged beside a solved plate a fifth faster</summary>
+<summary>A slider dragged beside a solved plate five times faster</summary>
 
-With field lines on, a sensor that stands still reads what stands still once,
-and only what moves along its path: a magnet sliding over a solved plate had the
-plate read at every one of its steps. A scene's document is checked a row of
-numbers at a time, not a number at a time, which a mesh's thousands of numbers
-made a tenth of every step. A step of the height slider in the solved example
-takes 104 ms, 128 before. Beside a magnet whose polarization changes along its
-path while it stands in place, the pixels are read at every step; they were read
-at one (#134).
+With field lines on, a solved sheet solved again where it stands keeps its mesh
+and changes only its charge, so its field at the points the lines are traced
+from is kept as one matrix, built the second time running that mesh is read
+there (material-response's `field_matrix`, from 0.10.0): then each step reads it
+in under a millisecond, where it took about 50 ms. Single precision, at most 150
+MB in all (`fieldlines.MATRIX_MEMORY`, 0 for none); past it, and with
+material-response 0.9.3 or earlier, the sheets are read as before. A sensor that
+stands still reads what stands still once, and only what moves along its path: a
+magnet sliding over a solved plate had the plate read at every one of its steps.
+A scene's document is checked a row of numbers at a time, not a number at a
+time. A step of the height slider in the solved example takes 25 ms, 128 before,
+and its page with its variants is written in 2.9 s, 6.1 before. Beside a magnet
+whose polarization changes along its path while it stands in place, the pixels
+are read at every step; they were read at one. The agent skill has a reference
+for the notebook view: its kinds, field lines, variants and runs, one HTML file
+written from a script, and what takes the time (#134, #PR).
 
 </details>
 
