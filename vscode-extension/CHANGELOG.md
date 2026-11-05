@@ -12,7 +12,7 @@ Python package it runs on. Open an entry for its details.
 
 As Plotly's toolbar ends with its own mark, the view's ends with magpylib's:
 "Built with magpylib-studio" under the pointer, and a click opens the studio's
-home beside the notebook. A page saved from the view carries it (#PR).
+home beside the notebook. A page saved from the view carries it (#138).
 
 </details>
 
