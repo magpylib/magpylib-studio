@@ -202,7 +202,12 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   <link rel="stylesheet" href="${widgetCssUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
   <script type="importmap" nonce="${nonce}">${importMap}</script>
-  <script type="module" nonce="${nonce}" src="${scene3dUri}"></script>
+  <script type="module" nonce="${nonce}">
+    // The panel's own view, the first made here: on window as scene3d,
+    // which scriptView.js drives.
+    import { createScene3d } from "${scene3dUri}";
+    createScene3d();
+  </script>
 </head>
 <body data-widget="${widgetUri}">
   <div id="bar">

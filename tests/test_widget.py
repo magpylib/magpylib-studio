@@ -511,8 +511,8 @@ def test_updating_a_view_is_not_itself_a_view(scene_objects):
     """A cell's value is its last expression, and this is the last line of one.
 
     Returning the widget would draw a second live view of the same scene under
-    the one being updated, with a second WebGL context — which is what the
-    demo notebook did until it was counted.
+    the one being updated — which is what the demo notebook did until it was
+    counted.
     """
     assert widget.SceneWidget().update(*scene_objects) is None
 
