@@ -56,6 +56,7 @@ docs = [
   "myst_nb>=1.4",
   "sphinx_copybutton",
   "sphinx_autodoc_typehints",
+  "sphinx_design",
 ]
 
 [project.urls]

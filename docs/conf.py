@@ -25,6 +25,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
+    "sphinx_design",
 ]
 
 source_suffix = [".rst", ".md"]
@@ -69,6 +70,8 @@ html_theme_options: dict[str, Any] = {
     "use_edit_page_button": True,
     "navigation_depth": 3,
     "collapse_navigation": False,
+    # the examples' gallery takes the width the page's contents would
+    "secondary_sidebar_items": {"**": ["page-toc", "sourcelink"], "examples/index": []},
 }
 
 html_context = {
@@ -137,11 +140,17 @@ _INDEX = """\
 
 Each example is a scene written as a plain magpylib function whose parameters
 are its variables. Its page shows it in the 3D view, says how to open it to
-edit, and shows how it is written. They are all in `magpylib_studio.examples`,
-and the VS Code gallery (**Magpylib Studio: Load Example Scene…**) offers most
-of them.
+edit, and shows how it is written. These are the VS Code gallery's own
+(**Magpylib Studio: Load Example Scene…**), with its pictures, and all are in
+`magpylib_studio.examples`.
 
-{items}
+::::{{grid}} 1 2 2 2
+:gutter: 3
+
+{cards}
+::::
+
+{others}
 
 ```{{toctree}}
 :maxdepth: 1
@@ -149,6 +158,38 @@ of them.
 
 {pages}
 ```
+"""
+
+#: A gallery card, with the picture the extension's gallery shows
+#: (`vscode-extension/media/gallery/`, drawn by `npm run gallery`) in the
+#: page's theme.
+_CARD = """\
+:::{{grid-item-card}}
+:link: {module}
+:link-type: doc
+:class-card: magpy-gallery-card
+
+```{{image}} ../../vscode-extension/media/gallery/{key}-light.webp
+:alt: {title}
+:class: only-light
+```
+
+```{{image}} ../../vscode-extension/media/gallery/{key}-dark.webp
+:alt: {title}
+:class: only-dark
+```
+
+**{title}**
+
+{sentence}
+:::
+"""
+
+_OTHERS = """\
+The tests and the evaluations are written against two more, which the gallery
+does not show:
+
+{items}
 """
 
 
@@ -198,7 +239,7 @@ def _write_examples(_app=None):
 
     EXAMPLES_DIR.mkdir(exist_ok=True)
     VIEWS_DIR.mkdir(parents=True, exist_ok=True)
-    items, pages = [], []
+    cards, others, pages = [], [], []
     for key, example in EXAMPLES.items():
         where = (
             "in VS Code, **Magpylib Studio: Load Example Scene…**, or in a notebook:"
@@ -218,14 +259,26 @@ def _write_examples(_app=None):
         view = SceneWidget(example.scene.build(), field_lines=example.field_lines)
         _write(VIEWS_DIR / f"{example.module}.html", view.to_html(title=example.title))
         _write(EXAMPLES_DIR / f"{example.module}.md", page)
-        items.append(
-            f"- [{example.title}]({example.module}.md) — "
-            f"{_first_sentence(example.text)}"
-        )
+        sentence = _first_sentence(example.text)
+        if example.gallery:
+            cards.append(
+                _CARD.format(
+                    title=example.title,
+                    module=example.module,
+                    key=key,
+                    sentence=sentence,
+                )
+            )
+        else:
+            others.append(f"- [{example.title}]({example.module}.md) — {sentence}")
         pages.append(example.module)
     _write(
         EXAMPLES_DIR / "index.md",
-        _INDEX.format(items="\n".join(items), pages="\n".join(pages)),
+        _INDEX.format(
+            cards="\n".join(cards),
+            others=_OTHERS.format(items="\n".join(others)) if others else "",
+            pages="\n".join(pages),
+        ),
     )
     for folder, suffix in ((EXAMPLES_DIR, ".md"), (VIEWS_DIR, ".html")):
         for stale in folder.glob(f"*{suffix}"):

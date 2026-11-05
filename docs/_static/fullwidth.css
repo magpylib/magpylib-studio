@@ -22,3 +22,14 @@ iframe.magpy-example {
   height: 520px;
   border: 0;
 }
+
+/* The examples' gallery, as the VS Code extension's: the picture across the
+   top of its card, the name and a sentence under it. */
+.magpy-gallery-card .sd-card-body img {
+  display: block;
+  width: calc(100% + 2rem);
+  max-width: none;
+  margin: -1rem -1rem 0.9rem;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
