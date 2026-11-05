@@ -5,6 +5,18 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>magpylib's mark at the end of the view's tools</summary>
+
+As Plotly's toolbar ends with its own mark, the view's ends with magpylib's:
+"Built with magpylib-studio" under the pointer, and a click opens magpylib's
+page on GitHub beside the notebook. A page saved from the view carries it
+(#138).
+
+</details>
+
 ## [0.14.0]
 
 ### Added
