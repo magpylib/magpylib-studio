@@ -103,6 +103,8 @@ always_document_param_types = False
 
 html_static_path = ["_static"]
 html_css_files = ["fullwidth.css"]
+# the example views follow the theme switch, as the pages round them do
+html_js_files = ["webcode/viewTheme.js"]
 
 HERE = pathlib.Path(__file__).parent
 REPO = HERE.parent
