@@ -1,3 +1,11 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "magpylib-studio[widget]>=0.15.0",
+#     "magpylib-material-response>=0.10.0",
+#     "marimo",
+# ]
+# ///
 """A U-core solved by face charge while you drag:
 `marimo edit examples/marimo/ucore_solved.py`.
 
@@ -15,31 +23,14 @@ app = marimo.App(width="full", app_title="A U-core, solved")
 
 @app.cell
 def _():
-    from typing import Annotated
+    import inspect
+    import json
 
-    import magpylib as magpy
     import marimo as mo
-    import numpy as np
 
-    from magpylib_studio import (
-        Bounds,
-        Count,
-        grid,
-        scene,
-    )
     from magpylib_studio.widget import SceneWidget
 
-    return (
-        Annotated,
-        Bounds,
-        Count,
-        grid,
-        magpy,
-        mo,
-        np,
-        scene,
-        SceneWidget,
-    )
+    return SceneWidget, inspect, json, mo
 
 
 @app.cell(hide_code=True)
@@ -60,158 +51,31 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    # magpylib-material-response is not one of studio's dependencies: without
-    # it, or before 0.9.2, this part of the page says so and the rest runs.
+def _(inspect, mo):
+    # The scene, from the package that the gallery and the docs read too,
+    # solved as its module is imported. magpylib-material-response is not one
+    # of studio's dependencies: without it this part of the page says so.
     try:
-        from magpylib_material_response import solve_face_charge
-        from magpylib_material_response.face_charge import ChargeSheet
-        from magpylib_material_response.polyline import (
-            create_polyline_fillet,
-            move_grid_along_polyline,
-        )
+        from magpylib_studio.examples import ucore_electromagnet as solved_example
     except ImportError:
-        ChargeSheet = None
+        solved_example = None
     mo.stop(
-        ChargeSheet is None or not hasattr(ChargeSheet, "part"),
+        solved_example is None,
         mo.md(
-            "_Needs magpylib-material-response 0.9.2: "
-            '`uv pip install "magpylib-material-response>=0.9.2"`._'
+            "_Needs magpylib-material-response 0.10: "
+            '`uv pip install "magpylib-material-response>=0.10.0"`._'
         ),
     )
-    return (
-        ChargeSheet,
-        create_polyline_fillet,
-        move_grid_along_polyline,
-        solve_face_charge,
+    ucore_scene = solved_example.ucore_electromagnet
+    ucore_scene_solved = solved_example.SOLVED
+    mo.accordion(
+        {
+            "How it is written": mo.md(
+                f"```python\n{inspect.getsource(solved_example)}```"
+            )
+        }
     )
-
-
-@app.cell
-def _(mo):
-    ucore_level = mo.ui.dropdown(
-        options={"2": 2, "3": 3, "4": 4}, value="2", label="panels: level"
-    )
-    ucore_level
-    return (ucore_level,)
-
-
-@app.cell
-def _(create_polyline_fillet, magpy, move_grid_along_polyline, np):
-    _a = 0.02
-    #: The core's parts, each its label and its dimension, in the order solved.
-    _parts = {
-        "yoke": (0.10, _a, _a),
-        "left leg": (_a, _a, 0.06),
-        "right leg": (_a, _a, 0.06),
-    }
-
-    def ucore_solvable(placed, *drives):
-        """The model to solve: a soft cuboid for each of `_parts`, at the pose
-        in `placed`, and the sources that `drives` hold."""
-        core = magpy.Collection(
-            *(
-                magpy.magnet.Cuboid(
-                    dimension=dimension,
-                    position=position,
-                    orientation=orientation,
-                    style_label=label,
-                )
-                for (label, dimension), (position, orientation) in zip(
-                    _parts.items(), placed, strict=True
-                )
-            ),
-            style_label="U-core",
-        )
-        core.susceptibility = 999
-        return magpy.Collection(core, *drives)
-
-    # Where the parts start: the yoke, and a leg standing on each end of it.
-    ucore_poses = [((0, 0, 0), None), ((-0.04, 0, 0.04), None), ((0.04, 0, 0.04), None)]
-
-    _h = 0.014
-    _square = np.array(
-        [[0, _h, 0], [0, _h, _h], [0, -_h, _h], [0, -_h, -_h], [0, _h, -_h], [0, _h, 0]]
-    )
-    # Four turns where material-response's docs wind sixteen, at the same 400
-    # ampere-turns: a solve computes the coil's field on every panel again, and
-    # 400 segments made it 167 ms a step.
-    _turn = create_polyline_fillet(_square, max_radius=0.006, N=2)
-    _pack = np.array([(xt, _h + 0.0011, 0) for xt in (np.arange(4) - 1.5) * 0.0044])
-    ucore_windings = move_grid_along_polyline(_turn, _pack)
-    return ucore_poses, ucore_solvable, ucore_windings
-
-
-@app.cell
-def _(
-    Annotated,
-    Bounds,
-    ChargeSheet,
-    Count,
-    grid,
-    magpy,
-    scene,
-    solve_face_charge,
-    ucore_level,
-    ucore_poses,
-    ucore_solvable,
-    ucore_windings,
-):
-    _coil = magpy.Collection(
-        *(magpy.current.Polyline(current=100, vertices=v) for v in ucore_windings)
-    )
-    # Kept by `reuse=True`, for the first step of a drag to reuse: 8 n² bytes,
-    # on the result, so only the last result is held.
-    ucore_solved = solve_face_charge(
-        ucore_solvable(ucore_poses, _coil),
-        level=ucore_level.value,
-        reuse=True,
-    )
-    _sheets = [s for s in ucore_solved.sources_all if isinstance(s, ChargeSheet)]
-    _parts = [s.part for s in _sheets]  # read here: each read makes a magnet
-
-    @scene(model_unit="mm", field_unit="mT", solve_level=ucore_level.value)
-    def ucore_scene(
-        current: Annotated[float, Bounds(-200, 200, unit="current")] = 100,
-        density: Annotated[int, Count(4, 40, slider=(5, 25))] = 15,
-    ):
-        """The solved core, the coil at `current` amperes, and a probe in the
-        core's plane of symmetry, `density` by `density` points across 140
-        mm, drawn as its field lines."""
-        coil = magpy.Collection(
-            *(
-                magpy.current.Polyline(current=current, vertices=v)
-                for v in ucore_windings
-            ),
-            style_label="coil",
-        )
-        probe = magpy.Sensor(
-            position=(0, 0, 0.0325),
-            pixel=grid(0.07, density, plane="xz"),
-            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
-        )
-        iron = magpy.Collection(
-            *(
-                ChargeSheet(
-                    vertices=s.vertices,
-                    faces=s.faces,
-                    charge_densities=s.charge_densities,
-                    panels=s.panels,
-                    mean_polarization=s.mean_polarization,
-                    part=part,
-                    position=s.position,
-                    style={
-                        "label": s.style.label,
-                        "charge": {"level": s.style.charge.level},
-                    },
-                )
-                for s, part in zip(_sheets, _parts, strict=True)
-            ),
-            style_label="U-core",
-        )
-        return iron, coil, probe
-
-    return ucore_scene, ucore_solved
+    return ucore_scene, ucore_scene_solved
 
 
 @app.cell
@@ -239,12 +103,12 @@ def _(SceneWidget, mo, ucore_scene):
 
 
 @app.cell
-def _(mo, ucore_edited, ucore_last, ucore_solved, ucore_view):
+def _(mo, ucore_edited, ucore_last, ucore_scene_solved, ucore_view):
     ucore_edited()  # the numbers follow each edit, when it is let go
     _solves = ucore_last["solves"]
-    _info = _solves[-1] if _solves else ucore_solved.face_charge_info
+    _info = _solves[-1] if _solves else ucore_scene_solved.face_charge_info
     _said = (
-        f"Solved by `{ucore_solved.solved_by}` at level {_info['level']}, "
+        f"Solved by `{ucore_scene_solved.solved_by}` at level {_info['level']}, "
         f"{_info['unknowns']:,} unknowns, "
         f"in {_info['seconds'] * 1000:.0f} ms"
         f"{', on the factorization it kept' if _info['reused'] else ''}."

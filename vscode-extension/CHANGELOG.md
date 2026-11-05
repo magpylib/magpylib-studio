@@ -31,7 +31,12 @@ the same scenes as before. A sampled curve with a coordinate that reads only
 variables, such as a line at the height `lift`, written to a script came back
 refusing to load. And a scene function that uses `pi`, `tau` or `e`, called
 plainly, raised a TypeError where numpy met the constant: they are numbers there
-now, and stay names in what a build records (#140, #143).
+now, and stay names in what a build records (#140, #143). Every marimo
+notebook's scene is one of them now, and the gallery shows thirteen: unit
+versions, every kind of object, the solved U-core, the run over a solved plate
+and the Halbach stack joined it, the two solved ones when
+magpylib-material-response is installed. Each notebook names what it needs in
+its script header, and its example's docs page runs it in molab (#144).
 
 </details>
 

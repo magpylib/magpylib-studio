@@ -103,6 +103,8 @@ always_document_param_types = False
 
 html_static_path = ["_static"]
 html_css_files = ["fullwidth.css"]
+# the example views follow the theme switch, as the pages round them do
+html_js_files = ["webcode/viewTheme.js"]
 
 HERE = pathlib.Path(__file__).parent
 REPO = HERE.parent
@@ -113,7 +115,7 @@ VIEWS_DIR = HERE / "_static" / "examples"
 _PAGE = """\
 # {title}
 
-{text}
+{notebook}{text}
 
 <iframe class="magpy-example" src="../_static/examples/{module}.html"
   title="{title}, in the 3D view" loading="lazy"></iframe>
@@ -133,6 +135,13 @@ Written as a scene function, with what it imports, it reads:
 ```python
 {code}
 ```
+"""
+
+#: Where an example has a marimo notebook: a link that runs it in molab,
+#: marimo's hosted notebooks, which install what its script header names.
+_NOTEBOOK = """\
+[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/magpylib/magpylib-studio/blob/main/examples/marimo/{path})
+
 """
 
 _INDEX = """\
@@ -186,8 +195,8 @@ _CARD = """\
 """
 
 _OTHERS = """\
-The tests and the evaluations are written against two more, which the gallery
-does not show:
+The tests and the evaluations are written against {count} more, which the
+gallery does not show:
 
 {items}
 """
@@ -204,28 +213,23 @@ def _holds(example):
     return ", ".join(does[:-1]) + " and " + does[-1]
 
 
-def _first_sentence(text):
-    """The first sentence of an example's text, for the index."""
-    head = " ".join(text.split("\n\n")[0].split())
-    match = re.match(r"(.+?[.!?])(\s|$)", head)
-    return match.group(1) if match else head
-
-
 def _code(module):
     """The example's module as it would be copied: its imports, helpers and
-    scene function, without its docstring, title and gallery line."""
+    scene function, without its title, and without the function's docstring,
+    which the page shows above as its text."""
     path = REPO / "magpylib_studio" / "examples" / f"{module}.py"
     source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
     drop = set()
     for node in ast.parse(source).body:
-        docstring = isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
-        labels = isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id in {"TITLE", "SUMMARY"}
-            for t in node.targets
+        title = isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "TITLE" for t in node.targets
         )
-        if docstring or labels:
+        if title:
             drop.update(range(node.lineno - 1, node.end_lineno))
+        if isinstance(node, ast.FunctionDef) and node.name == module:
+            doc = node.body[0]
+            drop.update(range(doc.lineno - 1, doc.end_lineno))
     kept = "\n".join(line for k, line in enumerate(lines) if k not in drop)
     return re.sub(r"\n{3,}", "\n\n\n", kept).strip()
 
@@ -255,11 +259,14 @@ def _write_examples(_app=None):
             key=key,
             lines=", field_lines=True" if example.field_lines else "",
             code=_code(example.module),
+            notebook=_NOTEBOOK.format(path=example.notebook)
+            if example.notebook
+            else "",
         )
         view = SceneWidget(example.scene.build(), field_lines=example.field_lines)
         _write(VIEWS_DIR / f"{example.module}.html", view.to_html(title=example.title))
         _write(EXAMPLES_DIR / f"{example.module}.md", page)
-        sentence = _first_sentence(example.text)
+        sentence = example.summary
         if example.gallery:
             cards.append(
                 _CARD.format(
@@ -276,7 +283,16 @@ def _write_examples(_app=None):
         EXAMPLES_DIR / "index.md",
         _INDEX.format(
             cards="\n".join(cards),
-            others=_OTHERS.format(items="\n".join(others)) if others else "",
+            others=(
+                _OTHERS.format(
+                    count=["one", "two", "three"][len(others) - 1]
+                    if len(others) <= 3
+                    else len(others),
+                    items="\n".join(others),
+                )
+                if others
+                else ""
+            ),
             pages="\n".join(pages),
         ),
     )

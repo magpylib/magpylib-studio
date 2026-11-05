@@ -1,3 +1,11 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "magpylib-studio[widget]>=0.15.0",
+#     "magpylib-material-response>=0.10.0",
+#     "marimo",
+# ]
+# ///
 """A run beside variants, solved and drawn with field lines, every combination
 exportable: `marimo edit examples/marimo/run_with_variants.py`.
 
@@ -15,33 +23,14 @@ app = marimo.App(width="full", app_title="A run beside variants")
 
 @app.cell
 def _():
+    import inspect
     import json
-    from typing import Annotated
 
-    import magpylib as magpy
     import marimo as mo
-    import numpy as np
 
-    from magpylib_studio import (
-        Bounds,
-        Length,
-        grid,
-        scene,
-    )
     from magpylib_studio.widget import SceneWidget
 
-    return (
-        Annotated,
-        Bounds,
-        json,
-        Length,
-        grid,
-        magpy,
-        mo,
-        np,
-        scene,
-        SceneWidget,
-    )
+    return SceneWidget, inspect, json, mo
 
 
 @app.cell(hide_code=True)
@@ -68,104 +57,31 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    # magpylib-material-response is not one of studio's dependencies: without
-    # it, or before 0.9.2, this page says so.
+def _(inspect, mo):
+    # The scene, from the package that the gallery and the docs read too,
+    # solved as its module is imported. magpylib-material-response is not one
+    # of studio's dependencies: without it this part of the page says so.
     try:
-        from magpylib_material_response import solve_face_charge
-        from magpylib_material_response.face_charge import ChargeSheet
+        from magpylib_studio.examples import solved_plate_run as solved_example
     except ImportError:
-        ChargeSheet = None
+        solved_example = None
     mo.stop(
-        ChargeSheet is None or not hasattr(ChargeSheet, "part"),
+        solved_example is None,
         mo.md(
-            "_Needs magpylib-material-response 0.9.2: "
-            '`uv pip install "magpylib-material-response>=0.9.2"`._'
+            "_Needs magpylib-material-response 0.10: "
+            '`uv pip install "magpylib-material-response>=0.10.0"`._'
         ),
     )
-    return ChargeSheet, solve_face_charge
-
-
-@app.cell
-def _(ChargeSheet, magpy, solve_face_charge):
-    # Solved once here, outside the scene function -- a solve inside one is
-    # refused -- each sheet keeping the part it was solved from, for the view
-    # to solve again from.
-    _start = magpy.magnet.Cuboid(
-        polarization=(0, 0, 1.2), dimension=(0.01, 0.01, 0.005), position=(0, 0, 0.0085)
+    slide = solved_example.solved_plate_run
+    slide_solved = solved_example.SOLVED
+    mo.accordion(
+        {
+            "How it is written": mo.md(
+                f"```python\n{inspect.getsource(solved_example)}```"
+            )
+        }
     )
-    _iron = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.06, 0.03, 0.004))
-    _iron.susceptibility = 1000
-    _solved = solve_face_charge(magpy.Collection(_start, _iron), level=1)
-    plate_sheets = [s for s in _solved.sources_all if isinstance(s, ChargeSheet)]
-    plate_parts = [s.part for s in plate_sheets]  # read here: each read makes a magnet
-    return plate_parts, plate_sheets
-
-
-@app.cell
-def _(
-    Annotated,
-    Bounds,
-    ChargeSheet,
-    Length,
-    grid,
-    magpy,
-    np,
-    plate_parts,
-    plate_sheets,
-    scene,
-):
-    @scene(
-        model_unit="mm",
-        field_unit="mT",
-        solve_level=1,
-        variants={
-            "low": {"height": 0.006, "strength": 1.2},
-            "high": {"height": 0.016, "strength": 1.2},
-            "reversed": {"height": 0.006, "strength": -1.2},
-        },
-    )
-    def slide(
-        height: Annotated[float, Length(0.005, 0.03)] = 0.006,
-        strength: Annotated[float, Bounds(-1.5, 1.5, unit="field")] = 1.2,
-    ):
-        """A magnet `height` above a solved plate, polarized `strength` tesla
-        up, sliding across it in thirteen steps, and a probe in the plane of
-        the slide, drawn as its field lines."""
-        magnet = magpy.magnet.Cuboid(
-            polarization=(0, 0, strength),
-            dimension=(0.01, 0.01, 0.005),
-            position=(-0.024, 0, height),
-            style_label="magnet",
-        )
-        magnet.move(np.linspace((0, 0, 0), (0.048, 0, 0), 13), start=0)
-        plate = magpy.Collection(
-            *(
-                ChargeSheet(
-                    vertices=s.vertices,
-                    faces=s.faces,
-                    charge_densities=s.charge_densities,
-                    panels=s.panels,
-                    mean_polarization=s.mean_polarization,
-                    part=part,
-                    position=s.position,
-                    style={
-                        "label": s.style.label,
-                        "charge": {"level": s.style.charge.level},
-                    },
-                )
-                for s, part in zip(plate_sheets, plate_parts, strict=True)
-            ),
-            style_label="plate",
-        )
-        probe = magpy.Sensor(
-            position=(0, 0, 0.004),
-            pixel=grid(0.04, 13, plane="xz"),
-            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
-        )
-        return plate, magnet, probe
-
-    return (slide,)
+    return slide, slide_solved
 
 
 @app.cell

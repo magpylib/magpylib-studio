@@ -908,6 +908,19 @@ wheels = [
 ]
 
 [[package]]
+name = "loguru"
+version = "0.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "win32-setctime", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/29/0348de65b8cc732daa3e33e67806420b2ae89bdce2b04af740289c5c6c8c/loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c", size = 61595, upload-time = "2024-12-06T11:20:54.538Z" },
+]
+
+[[package]]
 name = "magpylib"
 version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -922,6 +935,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fd/10/84e46added8bd58d3d95ed87da20bf02fefeb6223dea337de0a39d3ea4bc/magpylib-6.1.0.tar.gz", hash = "sha256:16a7b11c82dc76d156aa72bbbe3927590cf097dc6a052abb5530d5ee0e81d2e6", size = 16241606, upload-time = "2026-10-31T09:07:12.51Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/2e/343918c6fcf1fe03f32041a52363d74b0b55410e19b63f4e814015067904/magpylib-6.1.0-py3-none-any.whl", hash = "sha256:54933be3fdbc0a17b7f2e3287c2238d64b99d750b2775c7df6269e3a7baae767", size = 290837, upload-time = "2026-10-31T09:07:10.424Z" },
+]
+
+[[package]]
+name = "magpylib-material-response"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "loguru" },
+    { name = "magpylib" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/c1/644a1aaa8f59058598a2f9bf7e857ed9fcb8a7f2fde71a6f21919210df38/magpylib_material_response-0.10.2.tar.gz", hash = "sha256:455739957591f01bb21abe5df94772e6e0e0a3742360a840306b9e80ac186616", size = 2528233, upload-time = "2026-11-05T17:54:57.59Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/94/b4f49f6e7fbbb0cd92523f2030043fbac061e34207c24ed3ac7491ade1aa/magpylib_material_response-0.10.2-py3-none-any.whl", hash = "sha256:d95de955207650a715a83c8199eeaa1f2dcf06d3335dfff0504dbf9b107da34c", size = 313659, upload-time = "2026-11-05T17:54:56.19Z" },
 ]
 
 [[package]]
@@ -945,6 +975,7 @@ widget = [
 
 [package.dev-dependencies]
 docs = [
+    { name = "magpylib-material-response" },
     { name = "magpylib-studio", extra = ["widget"] },
     { name = "myst-nb" },
     { name = "pydata-sphinx-theme" },
@@ -971,6 +1002,7 @@ provides-extras = ["dev", "widget"]
 
 [package.metadata.requires-dev]
 docs = [
+    { name = "magpylib-material-response", specifier = ">=0.10.0" },
     { name = "magpylib-studio", extras = ["widget"] },
     { name = "myst-nb", specifier = ">=1.4" },
     { name = "pydata-sphinx-theme" },
@@ -2669,6 +2701,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bf/60/bc7a980fc78837d6ef8f5940cca4cadc433364503a4c4d42e2a7a0de3231/widgetsnbextension-4.0.16.tar.gz", hash = "sha256:adeea0ae78f0856ee4945f413299801b82a0a01416303301f39a704282a37b73", size = 1111094, upload-time = "2026-08-18T08:52:55.859Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/34/95/40e17e20046b7bc820d29d09ae84ec157ec8dd6e6f6cd722626292c31b2e/widgetsnbextension-4.0.16-py3-none-any.whl", hash = "sha256:a31a8774885b96fe825462f5d6496166f0c7cae111195b6465c801d230eb5a4e", size = 2225148, upload-time = "2026-08-18T08:52:53.736Z" },
+]
+
+[[package]]
+name = "win32-setctime"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/e4/f0f252c65f9bf7c4042b1f707ef338d49f799da582234e1d3e6e2cfca291/win32_setctime-1.2.1.tar.gz", hash = "sha256:077b35471bf1ff1d71e165c919ddc0cecf51b8e1802f5d820d33a96e2f6717dd", size = 4983, upload-time = "2026-10-25T18:21:32.318Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/df/5593480bc1e932eeae28e4fa182ab68174edd0d77409ced3b6491d02d1d5/win32_setctime-1.2.1-py3-none-any.whl", hash = "sha256:a9edc685b35414bec69392c866ed82456ad125ac4a6a4b703ec1d8b462d4f477", size = 4215, upload-time = "2026-10-25T18:21:30.939Z" },
 ]
 
 [[package]]

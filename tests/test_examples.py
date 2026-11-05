@@ -14,6 +14,8 @@ def test_an_example_says_what_it_is_and_opens(key):
     scene function named as its module, which opens as a document and,
     called plainly, is magpylib."""
     example = EXAMPLES[key]
+    if not example.available:  # as the gallery leaves it out
+        pytest.skip(f"{key} needs {', '.join(example.needs)}")
     assert isinstance(example.scene, SceneFunction)
     assert example.scene._fn.__name__ == example.module
     assert example.title and example.summary and len(example.text) > 80

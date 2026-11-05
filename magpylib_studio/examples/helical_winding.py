@@ -1,13 +1,3 @@
-"""One wire spiralling through space: a helical winding, written as the curve it
-is.
-
-A solenoid of separate loops is a pattern, but a continuous helix is a single
-object, and what it is is a formula. Its vertices are sampled from that formula,
-so `radius`, `turns` and `height` reshape the winding, and `per_turn` sets how
-finely it is drawn. `pitch` is derived: a coil is wound to a
-length and a number of turns, and the space left between turns follows.
-"""
-
 from typing import Annotated
 
 import magpylib as magpy
@@ -16,10 +6,6 @@ import numpy as np
 from magpylib_studio import Bounds, Count, Length, derived, sampled, scene, tau
 
 TITLE = "Helical winding"
-SUMMARY = (
-    "One wire spiralling through space — vertices written as expressions, so "
-    "radius, turns and pitch reshape the winding"
-)
 
 
 @scene
@@ -29,8 +15,19 @@ def helical_winding(
     height: Annotated[float, Length(0.0002, 0.4, slider=(0.004, 0.04))] = 0.015,
     per_turn: Annotated[int, Count(3, 400, slider=(8, 40))] = 20,
 ):
-    """A helix of `turns` turns, `height` long, drawn with `per_turn`
-    points a turn, and a sensor along its axis."""
+    """One wire spiralling through space: a helical winding, written as the
+    curve it is.
+
+    A solenoid of separate loops is a pattern, but a continuous helix is a
+    single object, and what it is is a formula. Its vertices are sampled
+    from that formula, so `radius`, `turns` and `height` reshape the
+    winding, and `per_turn` sets how finely it is drawn. `pitch` is
+    derived: a coil is wound to a length and a number of turns, and the
+    space left between turns follows.
+
+    A helix of `turns` turns, `height` long, drawn with `per_turn` points a
+    turn, and a sensor along its axis.
+    """
     derived("pitch", height / turns, unit="length")
     winding = magpy.current.Polyline(
         current=400,
