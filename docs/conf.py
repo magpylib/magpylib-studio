@@ -144,8 +144,8 @@ edit, and shows how it is written. These are the VS Code gallery's own
 (**Magpylib Studio: Load Example Scene…**), with its pictures, and all are in
 `magpylib_studio.examples`.
 
-::::{{grid}} 1 2 2 2
-:gutter: 3
+::::{{grid}} 1 2 3 4
+:gutter: 2
 
 {cards}
 ::::
