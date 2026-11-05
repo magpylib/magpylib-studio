@@ -579,6 +579,35 @@ def test_an_examples_script_names_nothing_by_hand(example):
     assert "name(" not in session.to_builder_script()
 
 
+def test_a_constant_is_its_number_called_plainly_and_its_name_in_a_build():
+    """`pi`, `tau` and `e` stay names in the document, so the curve follows
+    `turns`, and are numbers in a plain call, where numpy computes with them:
+    there they were handles, and `np.cos(tau * turns * t)` a TypeError."""
+    from magpylib_studio import e, pi, sampled, tau
+
+    @scene
+    def coil(turns: float = 2.0):
+        return magpy.current.Polyline(
+            current=1,
+            vertices=sampled(
+                lambda t: (np.cos(tau * turns * t), np.sin(tau * turns * t), e * t),
+                count=9,
+            ),
+            position=(pi / 100, 0, 0),
+        )
+
+    plain = coil(turns=2.0)
+    t = np.linspace(0, 1, 9)
+    np.testing.assert_allclose(
+        plain.vertices,
+        np.column_stack([np.cos(4 * np.pi * t), np.sin(4 * np.pi * t), np.e * t]),
+    )
+    np.testing.assert_allclose(plain.position, (np.pi / 100, 0, 0))
+    params = coil.build().to_dict()["objects"][0]["params"]
+    assert params["vertices"]["sampled"]["of"][0] == "=cos(tau * turns * t)"
+    assert params["position"][0] == "=pi / 100"
+
+
 def test_a_pose_set_outright_and_a_turn_by_rotation():
     @scene
     def design(lift: float = 0.01):

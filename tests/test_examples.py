@@ -11,11 +11,13 @@ from magpylib_studio.session import MagpylibStudioSession
 @pytest.mark.parametrize("key", list(EXAMPLES))
 def test_an_example_says_what_it_is_and_opens(key):
     """A title and a line for the gallery, a text for its docs page, and a
-    scene function named as its module, which opens as a document."""
+    scene function named as its module, which opens as a document and,
+    called plainly, is magpylib."""
     example = EXAMPLES[key]
     assert isinstance(example.scene, SceneFunction)
     assert example.scene._fn.__name__ == example.module
     assert example.title and example.summary and len(example.text) > 80
+    assert example.scene()  # called plainly, plain magpylib
     session = MagpylibStudioSession()
     assert session.load_example(key) == {"ok": True}
     assert session.field_lines is example.field_lines

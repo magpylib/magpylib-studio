@@ -29,7 +29,9 @@ the gallery, the marimo notebooks and the docs read them from there, and the two
 notebooks that kept a copy of theirs import it and show its source. They open as
 the same scenes as before. A sampled curve with a coordinate that reads only
 variables, such as a line at the height `lift`, written to a script came back
-refusing to load (#140).
+refusing to load. And a scene function that uses `pi`, `tau` or `e`, called
+plainly, raised a TypeError where numpy met the constant: they are numbers there
+now, and stay names in what a build records (#140, #143).
 
 </details>
 
