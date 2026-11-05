@@ -18,7 +18,8 @@ own: a solved plate's page, a tenth of the size. `to_html` and `write_html` take
 `run=False` beside `variants=False`, and a page saved with some variants named
 offers only those, where it listed every one. The Halbach ring and coil pair
 notebooks name what they need in their script header too, so molab installs it
-rather than asking (#PR).
+rather than asking
+([#145](https://github.com/magpylib/magpylib-studio/pull/145)).
 
 </details>
 
