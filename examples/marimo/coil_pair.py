@@ -17,37 +17,21 @@ app = marimo.App(width="full", app_title="A coil pair")
 
 @app.cell
 def _():
+    import inspect
     import json
-    from typing import Annotated
 
-    import magpylib as magpy
     import marimo as mo
     import numpy as np
     import plotly.graph_objects as go
 
-    from magpylib_studio import (
-        Bounds,
-        Count,
-        Length,
-        duplicate_along,
-        grid,
-        scene,
-    )
     from magpylib_studio.widget import SceneWidget
 
     return (
-        Annotated,
-        Bounds,
-        Count,
-        duplicate_along,
         go,
-        grid,
+        inspect,
         json,
-        Length,
-        magpy,
         mo,
         np,
-        scene,
         SceneWidget,
     )
 
@@ -66,48 +50,12 @@ def _(mo):
 
 
 @app.cell
-def _(Annotated, Bounds, Count, Length, duplicate_along, grid, magpy, scene):
-    _amperes = Bounds(-100, 100, slider=(-50, 50), unit="current")
+def _(inspect, mo):
+    # The scene, from the package that the gallery and the docs read too:
+    # its source shown, so the page still says how it is written.
+    from magpylib_studio.examples.coil_pair import coil_pair as coils
 
-    @scene(
-        model_unit="mm",
-        field_unit="mT",
-        variants={
-            "Helmholtz": {"lower": 20.0, "upper": 20.0, "spacing": 0.04},
-            "anti-Helmholtz": {"lower": 20.0, "upper": -20.0, "spacing": 0.04},
-        },
-    )
-    def coils(
-        radius: Annotated[float, Length(0.01, 0.1, slider=(0.02, 0.06))] = 0.04,
-        spacing: Annotated[float, Length(0.005, 0.15, slider=(0.01, 0.1))] = 0.04,
-        lower: Annotated[float, _amperes] = 20.0,
-        upper: Annotated[float, _amperes] = 20.0,
-        turns: Annotated[int, Count(1, 20, slider=(1, 12))] = 6,
-    ):
-        """Two coils of `turns` loops, `spacing` apart centre to centre, and
-        a probe across the gap between them, in the plane of the axis."""
-        pitch = 0.002
-        pair = magpy.Collection(style_label="coil pair")
-        for name, current, centre in (
-            ("lower", lower, -spacing / 2),
-            ("upper", upper, spacing / 2),
-        ):  # literals
-            coil = magpy.Collection(style_label=f"{name} coil")
-            pair.add(coil)
-            loop = magpy.current.Circle(
-                current=current,
-                diameter=2 * radius,
-                position=(0, 0, centre - (turns - 1) * pitch / 2),
-                style_label=f"{name} loop",
-            )
-            coil.add(loop)
-            duplicate_along(loop, count=turns, step=(0, 0, pitch))
-        probe = magpy.Sensor(
-            pixel=grid(0.6 * radius, 9, plane="xz"),
-            style={"label": "probe", "pixel": {"size": 0, "field": {"source": "B"}}},
-        )
-        return pair, probe
-
+    mo.md(f"```python\n{inspect.getsource(coils)}```")
     return (coils,)
 
 

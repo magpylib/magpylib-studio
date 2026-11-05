@@ -509,14 +509,15 @@ box of a webview undoes the typing: the webviews say when a box has the focus
 never reaches, the host asks the page to undo it.
 
 **Load Example Scene…** opens the example gallery (`src/gallery.ts`,
-`media/gallery.mjs`): one tab of cards, one per entry of the engine's `EXAMPLES`
-as `list_examples` gives them, each with its picture from `media/gallery/` in
-the editor's theme. A card opens its example as the command passed a name does,
-in a preview tab, clean until edited. The pictures are drawn by
-`npm run gallery`, the studio taking each example in headless Chrome
-([0039](decisions.md#0039-examples-open-from-a-gallery)). `UNLISTED_EXAMPLES`
-are loaded by name and not shown: the Halbach stack and the solenoid the tests
-are written against.
+`media/gallery.mjs`): one tab of cards, one per example the gallery offers
+(`magpylib_studio/examples/`, each a scene function written once, which the docs
+and the marimo notebooks read too) as `list_examples` gives them, each with its
+picture from `media/gallery/` in the editor's theme. A card opens its example as
+the command passed a name does, in a preview tab, clean until edited. The
+pictures are drawn by `npm run gallery`, the studio taking each example in
+headless Chrome ([0039](decisions.md#0039-examples-open-from-a-gallery)). Two
+examples are loaded by name and not shown: the Halbach stack and the solenoid
+the tests are written against.
 
 Webview JavaScript lives in `media/*.js|mjs` under a nonce CSP, never inside
 TypeScript template literals; `harness/` checks that, the message contract, the

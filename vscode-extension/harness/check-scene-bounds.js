@@ -35,10 +35,11 @@ const REPO = path.join(EXT, "..");
 
 const PAYLOADS = `
 import json
-from magpylib_studio.session import EXAMPLES, MagpylibStudioSession
+from magpylib_studio.examples import GALLERY
+from magpylib_studio.session import MagpylibStudioSession
 
 out = {}
-for name in EXAMPLES:
+for name in GALLERY:
     s = MagpylibStudioSession()
     s.load_example(name)
     scene = s.get_scene()

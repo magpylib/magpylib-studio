@@ -1,7 +1,6 @@
 """A scene written as a plain magpylib function, recorded
 (`docs/plans/recording.md`), and the script tab that writes one back."""
 
-import ast
 import io
 import json
 import math
@@ -578,37 +577,6 @@ def test_an_examples_script_names_nothing_by_hand(example):
     session = MagpylibStudioSession()
     session.load_example(example)
     assert "name(" not in session.to_builder_script()
-
-
-@pytest.mark.parametrize(
-    ("design", "notebook"), [("halbach", "halbach_ring.py"), ("coils", "coil_pair.py")]
-)
-def test_the_gallerys_designs_are_the_notebooks(design, notebook):
-    """`designs.py` holds two marimo examples' functions for the gallery: the
-    cell that defines each, run as marimo would run it, builds the same
-    document."""
-    import magpylib_studio
-    from magpylib_studio import designs
-
-    demo = pathlib.Path(__file__).parents[1] / "examples" / "marimo" / notebook
-    cell = next(
-        node
-        for node in ast.parse(demo.read_text()).body
-        if isinstance(node, ast.FunctionDef)
-        and any(
-            isinstance(inner, ast.FunctionDef) and inner.name == design
-            for inner in node.body
-        )
-    )
-    given = {"Annotated": Annotated, "magpy": magpy}
-    namespace = {
-        arg.arg: given.get(arg.arg) or getattr(magpylib_studio, arg.arg)
-        for arg in cell.args.args
-    }
-    body = [node for node in cell.body if not isinstance(node, ast.Return)]
-    exec(compile(ast.Module(body, []), demo, "exec"), namespace)  # noqa: S102
-    built = getattr(designs, design).build().to_dict()
-    assert namespace[design].build().to_dict() == built
 
 
 def test_a_pose_set_outright_and_a_turn_by_rotation():

@@ -17,35 +17,23 @@ app = marimo.App(width="full", app_title="A Halbach ring")
 
 @app.cell
 def _():
+    import inspect
     import json
-    from typing import Annotated
 
     import magpylib as magpy
     import marimo as mo
     import numpy as np
     import plotly.graph_objects as go
 
-    from magpylib_studio import (
-        Count,
-        Length,
-        duplicate_around,
-        grid,
-        scene,
-    )
     from magpylib_studio.widget import SceneWidget
 
     return (
-        Annotated,
-        Count,
-        duplicate_around,
         go,
-        grid,
+        inspect,
         json,
-        Length,
         magpy,
         mo,
         np,
-        scene,
         SceneWidget,
     )
 
@@ -65,48 +53,12 @@ def _(mo):
 
 
 @app.cell
-def _(
-    Annotated,
-    Count,
-    Length,
-    duplicate_around,
-    grid,
-    magpy,
-    scene,
-):
-    @scene(
-        model_unit="mm",
-        field_unit="mT",
-        variants={
-            "compact": {"n": 8, "radius": 0.02},
-            "wide": {"n": 16, "radius": 0.035},
-        },
-    )
-    def halbach(
-        n: Annotated[int, Count(4, 48, slider=(6, 24))] = 12,
-        radius: Annotated[float, Length(0.01, 0.1, slider=(0.018, 0.04))] = 0.025,
-        density: Annotated[int, Count(2, 25, slider=(3, 15))] = 7,
-    ):
-        """A ring of `n` magnets, each polarization turning twice per
-        revolution, so that their fields add up across the bore, and a probe
-        across the bore, `density` by `density` points, drawn as its field
-        lines."""
-        ring = magpy.Collection(style_label="Halbach ring")
-        magnet = magpy.magnet.Cuboid(
-            dimension=(0.008, 0.008, 0.008),
-            polarization=(1, 0, 0),
-            position=(radius, 0, 0),
-            style_label="magnet",
-        )
-        ring.add(magnet)
-        duplicate_around(magnet, count=n, axis="z", spin=360 / n)
+def _(inspect, mo):
+    # The scene, from the package that the gallery and the docs read too:
+    # its source shown, so the page still says how it is written.
+    from magpylib_studio.examples.halbach_ring import halbach_ring as halbach
 
-        bore = magpy.Sensor(
-            pixel=grid(radius / 2, density),
-            style={"label": "bore", "pixel": {"size": 0, "field": {"source": "B"}}},
-        )
-        return ring, bore
-
+    mo.md(f"```python\n{inspect.getsource(halbach)}```")
     return (halbach,)
 
 
