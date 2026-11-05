@@ -37,7 +37,9 @@ and only what moves along its path: a magnet sliding over a solved plate had the
 plate read at every one of its steps. A scene's document is checked a row of
 numbers at a time, not a number at a time, which a mesh's thousands of numbers
 made a tenth of every step. A step of the height slider in the solved example
-takes 104 ms, 128 before (#134).
+takes 104 ms, 128 before. Beside a magnet whose polarization changes along its
+path while it stands in place, the pixels are read at every step; they were read
+at one (#134).
 
 </details>
 

@@ -371,10 +371,10 @@ def readings(objects):
     """What each sensor's pixels read, as magpylib's `pixel_fields` gives
     it: ``{sensor: (path_length, n_pixels, 3)}``, in the sensor's own frame,
     of the field its pixels' source names. On `THREADS` threads
-    (`_in_chunks`) where nothing has a path and each reads B or H: magpylib
+    (`_in_chunks`) for sensors that stand still and read B or H: magpylib
     reads every source at every pixel on one, three quarters of a second
     for a probe past the U-core of material-response's docs, 5,888 cells.
-    Magpylib's own otherwise."""
+    Magpylib's own for a sensor on a path or another field."""
     from magpylib.graphics.backend import pixel_fields
 
     objects = list(objects)
@@ -400,28 +400,40 @@ def readings(objects):
     # beside it: a magnet sliding over a solved plate had magpylib read the
     # plate at every one of its steps, a sixth of a drag step in the solved
     # example. Only what moves is read along the path, by magpylib, which
-    # gives it as `pixel_fields` would, padded to the longest path.
+    # gives it as `pixel_fields` would, padded to the longest path -- and
+    # everything is, in one call, where the steps saved would cost less than
+    # the second call (`APART_FROM`).
     moving = [s for s in sources if s._get_path_len() > 1]
     still = [s for s in sources if s._get_path_len() == 1]
+    steps = max((s._get_path_len() for s in moving), default=1)
+    weight = sum(_weight(s) for s in still)
     for sensor in sensors:
         source = sensor.style.pixel.field.source
         pixel = np.zeros(3) if sensor.pixel is None else sensor.pixel
         pixel = np.asarray(pixel, dtype=float).reshape(-1, 3)
-        pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
-        turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
-        get = magpy.getH if source[0] == "H" else magpy.getB
-        values = np.zeros((len(pixel), 3))
-        if still:
+        if moving and weight * len(pixel) * (steps - 1) < APART_FROM:
+            values = _along_paths(sources, sensor, source[0])
+        else:
+            pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
+            turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
+            get = magpy.getH if source[0] == "H" else magpy.getB
             values = turn.inv().apply(_in_chunks(get, still, turn.apply(pixel) + pose))
-        if getattr(sensor, "handedness", "right") == "left":
-            values[:, 0] *= -1
-        values = values.reshape(1, -1, 3)
-        if moving:
-            values = values + _along_paths(moving, sensor, source[0])
+            if getattr(sensor, "handedness", "right") == "left":
+                values[:, 0] *= -1
+            values = values.reshape(1, -1, 3)
+            if moving:
+                values = values + _along_paths(moving, sensor, source[0])
         named = source[1:] or "xyz"
         values[..., [i for i, axis in enumerate("xyz") if axis not in named]] = 0
         out[sensor] = values
     return out
+
+
+#: The element-pixel readings at the steps of a path past the first below
+#: which a still sensor reads what stands still along the path with what
+#: moves, in one call: a second call costs about 0.15 ms, which twenty still
+#: sensors of four pixels beside a cube on a path paid twice over.
+APART_FROM = 10_000
 
 
 def _along_paths(sources, sensor, field):

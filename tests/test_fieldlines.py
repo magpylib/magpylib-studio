@@ -306,11 +306,18 @@ def test_threads_are_given_each_source_at_its_last_step(monkeypatch):
     assert coil._get_path_len() == 8
 
 
-@pytest.mark.parametrize(("source", "handedness"), [("B", "right"), ("Hxz", "left")])
-def test_a_still_sensor_reads_what_stands_still_once(monkeypatch, source, handedness):
+@pytest.mark.parametrize(
+    ("source", "handedness", "apart_from", "once"),
+    [("B", "right", 0, [True]), ("Hxz", "left", np.inf, [])],
+    ids=["apart", "in one call"],
+)
+def test_a_still_sensor_reads_what_stands_still_once(
+    monkeypatch, source, handedness, apart_from, once
+):
     """A magnet on a path beside a still cube: the cube is read once, on
-    the threads, the magnet step by step, and the pixels read what
-    magpylib's `pixel_fields` gives -- a shorter path at its last step."""
+    the threads, the magnet step by step -- or both along the path, where
+    that saves less than a call -- and the pixels read what magpylib's
+    `pixel_fields` gives, a shorter path at its last step."""
     from magpylib.graphics import backend
 
     still = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
@@ -337,9 +344,10 @@ def test_a_still_sensor_reads_what_stands_still_once(monkeypatch, source, handed
         return chunks(get, sources, points)
 
     monkeypatch.setattr(fieldlines, "_in_chunks", counted)
+    monkeypatch.setattr(fieldlines, "APART_FROM", apart_from)
     monkeypatch.setattr(backend, "pixel_fields", None)  # not magpylib's, every step
     got = fieldlines.readings(objects)[sensor]
-    assert read == [still]
+    assert read == [still] * len(once)
     assert got.shape == expected.shape == (6, 25, 3)
     np.testing.assert_allclose(got, expected, rtol=0, atol=1e-12 * abs(expected).max())
 
