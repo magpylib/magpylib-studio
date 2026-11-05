@@ -187,8 +187,8 @@ at the points the field lines are traced from is most of it, about 50 ms. From
 magpylib-material-response 0.10.0 that field is kept as a matrix: the second
 step of a drag on the same mesh builds it, in about one and a half steps without
 one, and every step after reads the plate in under a millisecond. A step of that
-example's slider takes 25 ms, and its page with its variants is written in
-2.9 s. Two things keep a scene as slow as without a matrix, never slower. A part
+example's slider takes 25 ms, and its page with its variants is written in 2.9
+s. Two things keep a scene as slow as without a matrix, never slower. A part
 moved along a solved part within about a tenth of its own size (1 mm for a 10 mm
 magnet) grades the sheet's panels anew at every step, so no two steps share a
 mesh. And the matrices take at most `fieldlines.MATRIX_MEMORY`, 150 MB in all,
