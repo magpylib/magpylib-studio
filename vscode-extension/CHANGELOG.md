@@ -47,7 +47,7 @@ and its page with its variants is written in 2.9 s, 6.1 before. Beside a magnet
 whose polarization changes along its path while it stands in place, the pixels
 are read at every step; they were read at one. The agent skill has a reference
 for the notebook view: its kinds, field lines, variants and runs, one HTML file
-written from a script, and what takes the time (#134, #PR).
+written from a script, and what takes the time (#134, #135).
 
 </details>
 
