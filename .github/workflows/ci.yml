@@ -1,10 +1,11 @@
 # Everything green on a machine that is not the one it was written on.
 #
-# Four jobs because they fail for different reasons: the engine, the extension
+# Five jobs because they fail for different reasons: the engine, the extension
 # end to end in a real VS Code — which needs the engine installed, since that
 # is what it drives — the notebook widget in a real browser, which is where it
-# has broken before, and the package alone, as it installs from its wheel, with
-# none of this checkout.
+# has broken before, the package alone, as it installs from its wheel, with
+# none of this checkout, and the docs site, as Read the Docs builds it but
+# with warnings as errors.
 #
 # Python is uv's, with its cache: an install was 21-29 s a job with pip, and
 # is a few with uv.
@@ -37,6 +38,22 @@ jobs:
       - run:
           python -c "import magpylib; print('magpylib', magpylib.__version__)"
       - run: python -m pytest -q
+
+  # Warnings are errors: a docstring Sphinx cannot read, an example page that
+  # no longer builds or an include that moved fails here, not on the site.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          # Read the Docs' (.readthedocs.yaml)
+          python-version: "3.14"
+          activate-environment: true
+          enable-cache: true
+      - run: uv sync --group docs
+      - run: sphinx-build -W --keep-going -b html docs docs/_build/html
 
   extension:
     name: extension

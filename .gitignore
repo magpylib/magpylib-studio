@@ -29,3 +29,8 @@ sandbox/*
 # transcripts; a run's summary.md and summary.json are kept.
 evals/.envs/
 evals/results/*/runs/
+
+# the docs site: written at each build from magpylib_studio.examples
+docs/examples/
+docs/_static/examples/
+docs/_build/

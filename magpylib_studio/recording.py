@@ -357,7 +357,7 @@ def _note_parts(cls):
 
 
 class SceneFunction:
-    """A function that is a scene: see the module. Call it for plain magpylib
+    """A function that is a scene: see `scene`. Call it for plain magpylib
     objects at the values you pass; `build()` for the document."""
 
     def __init__(
@@ -1698,10 +1698,85 @@ TriangularMesh.from_superquadric = _mesh_from_superquadric
 
 # --- what an expression may say -----------------------------------------------
 
+
+class _Constant(Expression):
+    """A constant an expression has: its name while a scene is built, so
+    `tau * turns` stays `tau` in the document, and its number in a plain
+    call, where the function is plain magpylib and numpy has to compute with
+    it. As a handle alone, `np.cos(tau * turns * t)` called plainly was a
+    TypeError."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, source, value):
+        super().__init__(source)
+        self._value = value
+
+
+def _plainly(name, plain):
+    """`Expression`'s `name` while a scene is built; `plain(value, *args)`,
+    with the number, in a plain call."""
+    symbolic = getattr(Expression, name)
+
+    def method(self, *args, **kwargs):
+        if _BUILDING.get() is not None:
+            return symbolic(self, *args, **kwargs)
+        return plain(self._value, *args, **kwargs)
+
+    method.__name__ = name
+    return method
+
+
+def _plain_ufunc(value, ufunc, method, *inputs, **kwargs):
+    numbers_ = [x._value if isinstance(x, _Constant) else x for x in inputs]
+    return getattr(ufunc, method)(*numbers_, **kwargs)
+
+
+for _name, _plain in {
+    **{
+        f"__{op}__": getattr(float, f"__{op}__")
+        for op in [
+            "add",
+            "radd",
+            "sub",
+            "rsub",
+            "mul",
+            "rmul",
+            "truediv",
+            "rtruediv",
+            "floordiv",
+            "rfloordiv",
+            "mod",
+            "rmod",
+            "pow",
+            "rpow",
+            "neg",
+            "pos",
+            "abs",
+            "round",
+            "float",
+            "int",
+            "bool",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "eq",
+            "ne",
+        ]
+    },
+    "__array_ufunc__": lambda value, *args, **kwargs: _plain_ufunc(
+        value, *args, **kwargs
+    ),
+    "__array__": lambda value, *args, **kwargs: np.asarray(value, *args, **kwargs),
+}.items():
+    setattr(_Constant, _name, _plainly(_name, _plain))
+del _name, _plain
+
 #: The constants an expression has, as handles: `pi * radius` stays `pi`.
-pi = Expression("pi")
-tau = Expression("tau")
-e = Expression("e")
+pi = _Constant("pi", math.pi)
+tau = _Constant("tau", math.tau)
+e = _Constant("e", math.e)
 
 for _fname in expressions._FUNCTIONS:
     globals()[_fname] = build._function(_fname).__func__

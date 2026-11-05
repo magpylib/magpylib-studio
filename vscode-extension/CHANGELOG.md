@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>A docs site</summary>
+
+The docs are a site, built as magpylib's and magpylib-material-response's are:
+the README, the VS Code extension, the 3D view in a notebook, an API reference
+and the changelog, and a page per example, written at each build from
+`magpylib_studio.examples` with the example's text, its view as a saved page and
+its scene function's source (#143).
+
+</details>
+
 ### Changed
 
 <details>
@@ -16,7 +29,9 @@ the gallery, the marimo notebooks and the docs read them from there, and the two
 notebooks that kept a copy of theirs import it and show its source. They open as
 the same scenes as before. A sampled curve with a coordinate that reads only
 variables, such as a line at the height `lift`, written to a script came back
-refusing to load (#140).
+refusing to load. And a scene function that uses `pi`, `tau` or `e`, called
+plainly, raised a TypeError where numpy met the constant: they are numbers there
+now, and stay names in what a build records (#140, #143).
 
 </details>
 

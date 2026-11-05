@@ -40,6 +40,12 @@ it, as GitHub already does.
 
 The engine's tests: `.venv/bin/python -m pytest -q`.
 
+The docs site: `uv pip install --group docs`, then
+`sphinx-build -W docs docs/_build/html`, as the `docs` job runs it; Read the
+Docs builds the same pages. Its example pages are written at each build from
+`magpylib_studio.examples`, so an example is changed there, never in
+`docs/examples/`.
+
 The extension is checked at three levels, all wired into `npm run compile` so
 they run before every F5 and before packaging: type-checking and ESLint over
 both the host code and the webview scripts; two contribution checks (every

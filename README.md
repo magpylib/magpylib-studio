@@ -1,5 +1,7 @@
 # Magpylib Studio
 
+<!-- SPHINX-START -->
+
 Build and explore [magpylib](https://github.com/magpylib/magpylib) magnet
 designs visually — in VS Code, in a notebook, or in code. Name the numbers that
 matter, drag a slider, and the whole design follows, with the field computed

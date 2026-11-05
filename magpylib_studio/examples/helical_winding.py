@@ -1,10 +1,10 @@
 """One wire spiralling through space: a helical winding, written as the curve it
 is.
 
-A solenoid of separate loops is a pattern (see the solenoid), but a continuous
-helix is a single object, and what it is is a formula. Its vertices are sampled
-from that formula, so `radius`, `turns` and `height` reshape the winding, and
-`per_turn` sets how finely it is drawn. `pitch` is derived: a coil is wound to a
+A solenoid of separate loops is a pattern, but a continuous helix is a single
+object, and what it is is a formula. Its vertices are sampled from that formula,
+so `radius`, `turns` and `height` reshape the winding, and `per_turn` sets how
+finely it is drawn. `pitch` is derived: a coil is wound to a
 length and a number of turns, and the space left between turns follows.
 """
 
