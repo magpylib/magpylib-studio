@@ -148,9 +148,11 @@ s.save("halbach.magpy.json")
 - **Called plainly** — `halbach(n=16)` — the function is plain magpylib:
   patterns make real copies, `derived` returns the number, and nothing is
   recorded. Use that to compute with the objects directly.
-- **Starting points:** `MagpylibStudioSession().list_examples()` names the
-  built-in scenes; `load_example(name)` and `to_builder_script()` show how each
-  is written.
+- **Starting points:** the built-in scenes are scene functions in
+  `magpylib_studio.examples`, one module each, to read and copy:
+  `EXAMPLES["rings"].scene` is the Halbach ring's, and `inspect.getsource(...)`
+  prints it. `MagpylibStudioSession().list_examples()` names the ones the
+  gallery offers.
 
 ## Variables are handles
 

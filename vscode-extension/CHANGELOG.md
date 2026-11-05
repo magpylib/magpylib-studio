@@ -5,6 +5,21 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>The examples written once, as scene functions</summary>
+
+The gallery's scenes are scene functions in `magpylib_studio.examples`, one
+module each with its title, its line for the gallery and its text for the docs:
+the gallery, the marimo notebooks and the docs read them from there, and the two
+notebooks that kept a copy of theirs import it and show its source. They open as
+the same scenes as before. A sampled curve with a coordinate that reads only
+variables, such as a line at the height `lift`, written to a script came back
+refusing to load (#140).
+
+</details>
+
 ## [0.14.1]
 
 ### Added

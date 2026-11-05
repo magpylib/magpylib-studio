@@ -13,10 +13,10 @@ import numpy as np
 import pytest
 
 from magpylib_studio import Count, derived, duplicate_along, grid, scene, threejs
+from magpylib_studio.examples import GALLERY as EXAMPLES
 from magpylib_studio.rpc import serve
 from magpylib_studio.session import (
     DOC_VERSION,
-    EXAMPLES,
     MagpylibStudioSession,
     _calls_for,
     _linspace_lit,
@@ -1678,7 +1678,6 @@ def test_removing_an_object_takes_its_generated_copies_with_it():
     gone — while still standing in the scene and contributing to every field
     it computes: nine magnets you cannot see, select or delete.
     """
-    from magpylib_studio.session import EXAMPLES
 
     for name in EXAMPLES:
         s = MagpylibStudioSession()
@@ -1811,8 +1810,6 @@ def test_every_example_builds_and_is_worth_opening():
     """Every scene leans on a different feature — an example is the shortest
     documentation there is, so each has to show something."""
     import numpy as np
-
-    from magpylib_studio.session import EXAMPLES
 
     s = MagpylibStudioSession()
     assert [e["name"] for e in s.list_examples()["examples"]] == list(EXAMPLES)
@@ -2664,7 +2661,7 @@ def test_load_script_says_what_running_it_flattened(tmp_path):
     [
         ("quiver", ["lift", "width", "density"], []),
         # `to_script`'s patterns leave their loop index behind; it is not one
-        ("halbach", ["n", "radius", "gap", "stagger", "tilt"], ["i"]),
+        ("halbach", ["n", "radius", "gap", "tilt", "stagger"], ["i"]),
     ],
 )
 def test_load_script_names_the_variables_it_turned_into_numbers(
@@ -3189,6 +3186,33 @@ def test_a_sampled_node_stores_only_what_it_does_not_default():
     assert "over" not in stored and "name" not in stored
     assert stored == {"count": 5, "of": ["=t", 0, "=t"]}
     assert "np.full_like(t, 0)" in s.to_script()
+
+
+def test_a_sampled_column_naming_no_sample_survives_the_script(tmp_path):
+    """A column that reads only variables -- a line at a height of `lift` --
+    is one number in the script as in the document, and has to be as long
+    as the sample there too: the script came back refusing to stack it."""
+    s = MagpylibStudioSession()
+    assert s.load_scene(
+        {
+            "variables": {"lift": 0.02},
+            "objects": [
+                {
+                    "id": "s",
+                    "type": "Sensor",
+                    "params": {
+                        "position": {"sampled": {"count": 5, "of": ["=t", 0, "=lift"]}}
+                    },
+                }
+            ],
+        }
+    ) == {"ok": True}
+    script = s.to_script()
+    assert "np.full_like(t, lift)" in script
+    (tmp_path / "scene.py").write_text(script, encoding="utf-8")
+    rebuilt = MagpylibStudioSession()
+    assert rebuilt.load_script(str(tmp_path / "scene.py"))["ok"] is True
+    assert np.allclose(rebuilt._objs["s"].position, s._objs["s"].position)
 
 
 def test_a_script_imports_the_maths_its_expressions_use(tmp_path):

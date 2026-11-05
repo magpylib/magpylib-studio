@@ -2,8 +2,10 @@
 
 The 3D view in a notebook — the studio's three.js renderer as an `anywidget`.
 Each marimo notebook in `marimo/` is one design written as a `@scene` function,
-with the view, the field and the files following every edit. The Jupyter one
-rebuilds two rings of magnets from `ipywidgets` sliders.
+with the view, the field and the files following every edit. The Halbach ring
+and the coil pair are the gallery's own, imported from
+`magpylib_studio.examples` and shown there, so they are written once. The
+Jupyter one rebuilds two rings of magnets from `ipywidgets` sliders.
 
 | File                          | What it shows                                                                     |
 | ----------------------------- | --------------------------------------------------------------------------------- |
