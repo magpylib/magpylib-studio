@@ -17,6 +17,21 @@ page on GitHub beside the notebook. A page saved from the view carries it
 
 </details>
 
+### Changed
+
+<details>
+<summary>A saved page of a run beside variants is about half the size</summary>
+
+A page saved from the view held each mesh's arrays again in every frame of every
+variant, with float64 noise in their numbers: `0.08030000000000001` for 0.0803.
+It now holds each array once, its coordinates kept to 12 digits and its colour
+coordinates to 4 decimals, more than the view draws. The page of
+`examples/marimo/run_with_variants.py` carries 0.82 MB of scene where it carried
+1.98 MB. A page a script opens weighs a run and variants this way against its
+limit too, so it leaves fewer out (#137, #141).
+
+</details>
+
 ## [0.14.0]
 
 ### Added

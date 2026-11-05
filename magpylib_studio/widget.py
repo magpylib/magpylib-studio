@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import base64
 import gzip
+import hashlib
 import html
 import json
 import os
@@ -115,7 +116,24 @@ const [source, scene] = await Promise.all([
   unpack("magpy-widget"),
   unpack("magpy-scene"),
 ]);
-const { state, run, variants } = JSON.parse(scene);
+const { state, run, variants, arrays } = JSON.parse(scene);
+
+// Each mesh's arrays, held once in `arrays` and named by their place there.
+const SHARED = ["position", "index", "uv", "back_uv"];
+(function share(value) {
+  if (Array.isArray(value)) {
+    if (value.length && typeof value[0] !== "object") return; // numbers
+    for (const item of value) if (item && typeof item === "object") share(item);
+  } else if (value.kind === "mesh") {
+    for (const key of SHARED) {
+      if (typeof value[key] === "number") value[key] = arrays[value[key]];
+    }
+  } else {
+    for (const item of Object.values(value)) {
+      if (item && typeof item === "object") share(item);
+    }
+  }
+})({ state, run, variants });
 
 // The scene's variants, when the page carries them: each a scene drawn ahead,
 // what they share held once, in `pool`, and named by its place there.
@@ -219,6 +237,103 @@ def _packed(text):
     """`text`, gzipped and in base64. `mtime=0`, so one scene is one file."""
     raw = gzip.compress(text.encode("utf-8"), mtime=0)
     return base64.b64encode(raw).decode("ascii")
+
+
+#: The arrays of a mesh a page holds once (`_compacted`).
+_SHARED = ("position", "index", "uv", "back_uv")
+#: The digits a page keeps of a mesh's coordinates, counted from its largest:
+#: past the seven of the float32 buffer the view draws, so a snap on a page
+#: still lands where the engine put it, and short of float64's noise --
+#: ``0.08030000000000001`` for 0.0803 -- which compresses poorly.
+_POSITION_DIGITS = 12
+#: The decimals a page keeps of a mesh's colour coordinate: its place on a
+#: table of `threejs.LUT_SIZE` colours, forty times finer than a step.
+_UV_DECIMALS = 4
+
+
+def _rounded(values, digits=None, decimals=None):
+    """`values` rounded to `decimals`, or to `digits` counted from the
+    largest of them; as they are where one is a pen lift (None)."""
+    array = np.asarray(values, dtype=float)
+    if not array.size or np.isnan(array).any():
+        return values
+    if decimals is None:
+        largest = float(np.abs(array).max())
+        if largest == 0:
+            return values
+        decimals = digits - int(np.ceil(np.log10(largest)))
+    return np.round(array, decimals).tolist()
+
+
+class _Shared:
+    """Mesh arrays held once, as a page holds them (`_compacted`), and how
+    much a page weighs as values are added to it (`weight`)."""
+
+    def __init__(self):
+        self.arrays, self.places = [], {}
+        self.added = 0  # the JSON of the arrays held, in characters
+
+    def _place(self, values):
+        # by a digest of its JSON, not the JSON: one array's text at a time
+        text = json.dumps(values, allow_nan=False)
+        key = hashlib.blake2b(text.encode(), digest_size=16).digest()
+        if key not in self.places:
+            self.places[key] = len(self.arrays)
+            self.arrays.append(values)
+            self.added += len(text) + 1
+        return self.places[key]
+
+    def _mesh(self, item):
+        item = dict(item)
+        if item.get("position") is not None:
+            item["position"] = _rounded(item["position"], digits=_POSITION_DIGITS)
+        for key in ("uv", "back_uv"):
+            if item.get(key) is not None:
+                item[key] = _rounded(item[key], decimals=_UV_DECIMALS)
+        for key in _SHARED:
+            if isinstance(item.get(key), list):
+                item[key] = self._place(item[key])
+        return item
+
+    def compacted(self, value):
+        """`value` with its meshes' arrays named by their place in `arrays`,
+        which holds each once. `value` is left as it was."""
+        if isinstance(value, dict):
+            if value.get("kind") == "mesh":
+                return self._mesh(value)
+            return {key: self.compacted(v) for key, v in value.items()}
+        if isinstance(value, list):
+            if value and isinstance(value[0], (int, float, str)):
+                return value  # numbers, or names: no mesh in them
+            return [self.compacted(v) for v in value]
+        return value
+
+    def weight(self, value):
+        """What `value` adds to a page holding what was weighed before, as
+        JSON: itself, its arrays named, and the arrays it was first to hold."""
+        before = self.added
+        text = json.dumps(self.compacted(value), allow_nan=False)
+        return len(text) + self.added - before
+
+
+def _compacted(saved):
+    """`saved` as a page holds it (#137): each mesh's arrays held once, in
+    ``arrays``, and named by their place there, which the page puts back --
+    a plate no step moves is the same in every frame of every variant, and
+    gzip, its window 32 KB, does not see it repeated. Their float64 noise is
+    rounded off first, so equal arrays read equal and the rest compress.
+    `saved` is left as it was: its payload is the view's own."""
+    shared = _Shared()
+    return {**shared.compacted(saved), "arrays": shared.arrays}
+
+
+def _weigher(page):
+    """What `limit` weighs a view's run and variants by: their JSON, as the
+    studio's panel is handed them -- or for a page, as it holds them, each
+    mesh's arrays once (`_Shared.weight`), often a third of that."""
+    if page:
+        return _Shared().weight
+    return lambda value: len(json.dumps(value, allow_nan=False))
 
 
 def _pooled(payload, pool, places):
@@ -1323,7 +1438,7 @@ class SceneWidget(anywidget.AnyWidget):
         """`to_html`, with a run past `limit` shown as its first step, and
         variants past it left out: for a page nobody asked for by name, which
         should not be hundreds of megabytes because a script said `show`."""
-        return self._page_of(self._saved(limit, variants), title)
+        return self._page_of(self._saved(limit, variants, page=True), title)
 
     @staticmethod
     def _page_of(saved, title="magpylib scene"):
@@ -1332,13 +1447,13 @@ class SceneWidget(anywidget.AnyWidget):
             title=html.escape(title),
             css=(STATIC / "widget.css").read_text(encoding="utf-8"),
             bundle=_packed((STATIC / "widget.js").read_text(encoding="utf-8")),
-            data=_packed(json.dumps(saved, allow_nan=False)),
+            data=_packed(json.dumps(_compacted(saved), allow_nan=False)),
         )
 
-    def _saved(self, limit=None, variants=True):
+    def _saved(self, limit=None, variants=True, page=False):
         """`_saving` in one go, how far it has got said to the view as it
         goes (`_Progress`)."""
-        total, steps = self._saving(limit, variants)
+        total, steps = self._saving(limit, variants, page)
         progress = _Progress(self, total)
         while True:
             try:
@@ -1347,11 +1462,13 @@ class SceneWidget(anywidget.AnyWidget):
                 progress.done()
                 return done.value
 
-    def _saving(self, limit=None, variants=True):
+    def _saving(self, limit=None, variants=True, page=False):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
-        there is one, the page shows the first step, still, instead. And
+        there is one, the page shows the first step, still, instead -- each
+        weighed as a page holds it for `page`, else as the panel is handed
+        it (`_weigher`). And
         the variants named, as `_drawing_ahead` draws them. All of it from
         the scene as it is at this call, in a copy of the session
         (`_snapshot`).
@@ -1384,9 +1501,9 @@ class SceneWidget(anywidget.AnyWidget):
             height=self.height,
             camera=self._camera,
         )
-        return total, self._steps(state, frames, step, names, copy, limit)
+        return total, self._steps(state, frames, step, names, copy, limit, page)
 
-    def _steps(self, state, frames, step, names, copy, limit):
+    def _steps(self, state, frames, step, names, copy, limit, page=False):
         """The steps of `_saving`, from the view's `state` as it was asked
         for, its session's `copy` and the rest."""
         if self._scene is not None:
@@ -1401,7 +1518,7 @@ class SceneWidget(anywidget.AnyWidget):
             live, source, seen = self._session, None, None
             # frame by frame, each with its field lines: past `limit`, the
             # rest are not drawn to be left out
-            run, size = [], 2
+            run, size, weigh = [], 2, _weigher(page)
             for i in range(frames):
                 if i == step:
                     scene = None
@@ -1416,7 +1533,7 @@ class SceneWidget(anywidget.AnyWidget):
                     yield None
                 run.append(scene)
                 if limit is not None:
-                    size += len(json.dumps(scene, allow_nan=False)) + 2
+                    size += weigh(scene) + 2
                     if size > limit:
                         run = None
                         break
@@ -1431,12 +1548,12 @@ class SceneWidget(anywidget.AnyWidget):
         saved = {"state": state, "run": run}
         if names:
             drawn = yield from _drawing_ahead(copy(), names, state["payload"])
-            if limit is not None and len(json.dumps(drawn, allow_nan=False)) > limit:
+            if limit is not None and _weigher(page)(drawn) > limit:
                 # their runs left out first, as the scene's own is
                 drawn = _finished(
                     _drawing_ahead(copy(), names, state["payload"], runs=False)
                 )
-            if limit is not None and len(json.dumps(drawn, allow_nan=False)) > limit:
+            if limit is not None and _weigher(page)(drawn) > limit:
                 warnings.warn(
                     f"magpylib-studio: this scene's {len(names)} variants are "
                     "more than a page nobody named can carry, so it shows the "
