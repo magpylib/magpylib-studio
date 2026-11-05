@@ -28,7 +28,7 @@ It now holds each array once, its coordinates kept to 12 digits and its colour
 coordinates to 4 decimals, more than the view draws. The page of
 `examples/marimo/run_with_variants.py` carries 0.82 MB of scene where it carried
 1.98 MB. A page a script opens weighs a run and variants this way against its
-limit too, so it leaves fewer out (#137).
+limit too, so it leaves fewer out (#137, #141).
 
 </details>
 
