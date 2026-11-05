@@ -4,7 +4,8 @@
 # end to end in a real VS Code — which needs the engine installed, since that
 # is what it drives — the notebook widget in a real browser, which is where it
 # has broken before, the package alone, as it installs from its wheel, with
-# none of this checkout, and the docs site, as Read the Docs builds it.
+# none of this checkout, and the docs site, as Read the Docs builds it but
+# with warnings as errors.
 #
 # Python is uv's, with its cache: an install was 21-29 s a job with pip, and
 # is a few with uv.
@@ -46,7 +47,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.13"
+          # Read the Docs' (.readthedocs.yaml)
+          python-version: "3.14"
           activate-environment: true
           enable-cache: true
       - run: uv sync --group docs

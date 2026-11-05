@@ -4,7 +4,7 @@ The VS Code gallery, the docs and the marimo notebooks all read them from
 here: each module holds one `@scene` function, its `TITLE`, the `SUMMARY` the
 gallery shows under it, and, as its docstring, what the docs page says about
 it. A scene function is how a scene is meant to be written, so an example is
-also a lesson in writing one.
+also a lesson in writing one::
 
     from magpylib_studio.examples import EXAMPLES
 
@@ -45,6 +45,7 @@ class Example:
 
     @property
     def title(self):
+        """Its name, as the gallery and its docs page head it."""
         return self._module.TITLE
 
     @property

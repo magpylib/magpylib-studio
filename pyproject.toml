@@ -44,9 +44,11 @@ dev = ["pytest>=8", "jsonschema>=4", "anywidget>=0.9"]
 
 [dependency-groups]
 # The docs site (Sphinx, MyST-NB, the pydata theme), as magpylib's and
-# magpylib-material-response's are built: `uv sync --group docs`, then
-# `sphinx-build docs docs/_build/html`. The example pages run their scenes in
-# a SceneWidget, so the widget extra comes with it.
+# magpylib-material-response's are built. Read the Docs and CI install it with
+# `uv sync --group docs` into a fresh environment; in a checkout set up for
+# development, `uv pip install --group docs` adds it without taking the dev
+# tools away, as `uv sync` would. Then `sphinx-build docs docs/_build/html`.
+# The example pages save each example's view, so the widget extra comes too.
 docs = [
   "magpylib-studio[widget]",
   "pydata-sphinx-theme",

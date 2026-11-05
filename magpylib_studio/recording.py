@@ -357,7 +357,7 @@ def _note_parts(cls):
 
 
 class SceneFunction:
-    """A function that is a scene: see the module. Call it for plain magpylib
+    """A function that is a scene: see `scene`. Call it for plain magpylib
     objects at the values you pass; `build()` for the document."""
 
     def __init__(
