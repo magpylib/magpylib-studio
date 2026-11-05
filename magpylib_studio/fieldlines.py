@@ -34,9 +34,12 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 """
 
 import base64
+import collections
 import copy
 import functools
+import hashlib
 import os
+import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 
@@ -416,8 +419,9 @@ def readings(objects):
         else:
             pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
             turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
-            get = magpy.getH if source[0] == "H" else magpy.getB
-            values = turn.inv().apply(_in_chunks(get, still, turn.apply(pixel) + pose))
+            values = turn.inv().apply(
+                _summed(still, turn.apply(pixel) + pose, source[0])
+            )
             if getattr(sensor, "handedness", "right") == "left":
                 values[:, 0] *= -1
             values = values.reshape(1, -1, 3)
@@ -454,8 +458,191 @@ def field(sources, points, kind="B"):
     drawn."""
     if not sources:
         return np.zeros((len(points), 3))
-    values = _in_chunks(magpy.getH if kind == "H" else magpy.getB, sources, points)
+    values = _summed(sources, points, kind)
     return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def _summed(sources, points, kind):
+    """B, or H, at `points` from `sources` at their last step: the solved
+    sheets among them from a kept matrix where there is one
+    (`_sheets_by_matrix`), the rest on the threads (`_in_chunks`)."""
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    kept, rest = _sheets_by_matrix(sources, points, kind)
+    if not rest:
+        return np.zeros((len(points), 3)) if kept is None else kept
+    values = _in_chunks(magpy.getH if kind == "H" else magpy.getB, rest, points)
+    return values if kept is None else values + kept
+
+
+#: The memory, in bytes, the field matrices of solved sheets may take, all of
+#: them together, the oldest let go first; 0 for none. A sheet solved again
+#: where it stands keeps its mesh and changes only its charge, so its field
+#: at the points the lines are traced from is one matrix times that charge
+#: (material-response's `field_matrix`): a drag beside the solved plate of
+#: `run_with_variants` read the plate there in 64 ms a step, and reads it in
+#: under one. Single precision, which a line cannot tell from double: 31 MB
+#: for that plate's 996 unknowns at the 2,601 points of a drag, 99 MB at the
+#: 8,281 of a scene at rest. Past it, the sheets are read as before: a scene
+#: is never slower for it, only not faster.
+MATRIX_MEMORY = 150_000_000
+
+#: The matrices kept, by the sheets' fingerprint, the points' and the field:
+#: `_Kept`s, the oldest first.
+_matrices = collections.OrderedDict()
+#: The sheets last read at each set of points, by fingerprint, and how many
+#: times running: a matrix is built the second time a mesh is read there --
+#: the third for fewer than `FEW_POINTS`, which a build reads no faster than
+#: the kernel and a scene at rest reads once. Near contact a solve grades the
+#: panels again at every step, and a matrix built for each would be thrown
+#: away the next; once they settle, the steps after are fast.
+_last_read = collections.OrderedDict()
+#: The bytes of matrices that came out larger than `MATRIX_MEMORY` allowed,
+#: by key, not built again while it allows less: material-response takes
+#: three unknowns a face, not a panel, for a sheet whose charge is not linear
+#: across its panels, twice what `_unknowns_at_most` counts.
+_too_large = collections.OrderedDict()
+_lock = threading.Lock()
+FEW_POINTS = 1_500
+#: How many sets of points, and matrices, are remembered at most.
+_REMEMBERED = 256
+
+
+class _Kept:
+    """A built matrix, and the field matrix that reads a sheet's unknowns
+    for it -- without the sheets it was built from, which it would keep, and
+    with them the solve they came from: 8 to 35 MB a solve kept for reuse."""
+
+    def __init__(self, reader, matrix):
+        reader._sheets = None  # material-response's, read only when none are given
+        self.reader, self.matrix = reader, matrix
+        # the meshes it compares sheets with are its own copies
+        self.nbytes = matrix.nbytes + sum(k[0].nbytes for k in reader._kinds)
+
+    def __call__(self, sheets):
+        charges = self.reader.charges(sheets).astype(self.matrix.dtype)
+        return (self.matrix @ charges).astype(float).reshape(-1, 3)
+
+
+def _sheets_by_matrix(sources, points, kind):
+    """The field of the solved sheets among `sources` at `points` from a
+    kept matrix, and the sources it leaves to compute -- or None and all of
+    them, where there is no matrix to use: none built yet, one past
+    `MATRIX_MEMORY`, a sheet on a path, a field other than B or H, or a
+    material-response without `field_matrix`."""
+    with _lock:
+        _within(MATRIX_MEMORY)
+    if MATRIX_MEMORY <= 0 or kind not in ("B", "H") or not len(points):
+        return None, sources
+    sheets = [s for s in sources if _charge_sheet(s) and s._get_path_len() == 1]
+    if not sheets:
+        return None, sources
+    try:
+        from magpylib_material_response.face_charge import field_matrix
+    except ImportError:  # material-response 0.9.3 or earlier
+        return None, sources
+    meshes = _fingerprint(sheets)
+    where = (hashlib.blake2b(points.tobytes(), digest_size=16).digest(), kind)
+    key = (meshes, *where)
+    with _lock:
+        made = _matrices.get(key)
+        if made is None:
+            seen, times = _last_read.pop(where, (None, 0))
+            times = times + 1 if seen == meshes else 1
+            _last_read[where] = (meshes, times)
+            while len(_last_read) > _REMEMBERED:
+                _last_read.popitem(last=False)
+            size = 3 * len(points) * _unknowns_at_most(sheets) * 4
+            if (
+                times < (2 if len(points) >= FEW_POINTS else 3)
+                or max(size, _too_large.get(key, 0)) > MATRIX_MEMORY
+            ):
+                return None, sources
+    if made is None:
+        made = _built(field_matrix, sheets, points, kind)
+        with _lock:
+            if made.nbytes > MATRIX_MEMORY:
+                _too_large[key] = made.nbytes
+                while len(_too_large) > _REMEMBERED:
+                    _too_large.popitem(last=False)
+                return None, sources
+            _matrices[key] = made
+            _within(MATRIX_MEMORY)
+    with _lock:
+        if key in _matrices:
+            _matrices.move_to_end(key)
+    try:
+        values = made(sheets)
+    except ValueError:  # a mesh the fingerprint took for another
+        with _lock:
+            _matrices.pop(key, None)
+        return None, sources
+    ids = {id(s) for s in sheets}
+    return values, [s for s in sources if id(s) not in ids]
+
+
+def _within(memory):
+    """Let the oldest matrices go until those kept take at most `memory`
+    bytes, and at most `_REMEMBERED` of them; all of them for none."""
+    while _matrices and (
+        sum(m.nbytes for m in _matrices.values()) > memory
+        or len(_matrices) > _REMEMBERED
+    ):
+        _matrices.popitem(last=False)
+    if memory <= 0:
+        _last_read.clear()
+
+
+def _built(field_matrix, sheets, points, kind):
+    """The sheets' matrix at `points`, built a slice of points at a time on
+    the `THREADS` threads, as `_in_chunks` reads a field: in one call,
+    material-response's own chunks took a gigabyte to build 99 MB."""
+    faces = max(1, sum(len(s.faces) for s in sheets))
+    rows = max(1, PAIRS_PER_CALL // THREADS // faces)
+    slices = [(i, min(len(points), i + rows)) for i in range(0, len(points), rows)]
+
+    def build(piece):
+        i, j = piece
+        return i, field_matrix(sheets, points[i:j], kind, dtype=np.float32)
+
+    first = build(slices[0])
+    matrix = np.empty((3 * len(points), first[1].matrix.shape[1]), dtype=np.float32)
+    matrix[: 3 * slices[0][1]] = first[1].matrix
+    rest = slices[1:]
+    if THREADS == 1 or len(rest) < 2:
+        built = map(build, rest)
+    else:
+        try:
+            with ThreadPoolExecutor(min(THREADS, len(rest))) as pool:
+                built = list(pool.map(build, rest))
+        except RuntimeError:  # no thread to be had: one slice after another
+            built = map(build, rest)
+    for i, part in built:
+        matrix[3 * i : 3 * i + part.matrix.shape[0]] = part.matrix
+    return _Kept(first[1], matrix)
+
+
+def _charge_sheet(source):
+    return type(source).__name__ == "ChargeSheet" and _sheet(source)
+
+
+def _fingerprint(sheets):
+    """The sheets' meshes and poses, in one digest: what a matrix is built
+    for, whatever their charge."""
+    digest = hashlib.blake2b(digest_size=16)
+    for sheet in sheets:
+        digest.update(np.asarray(sheet.triangles).tobytes())
+        digest.update(np.asarray(sheet.position, dtype=float).tobytes())
+        digest.update(sheet.orientation.as_quat().tobytes())
+    return digest.digest()
+
+
+def _unknowns_at_most(sheets):
+    """The unknowns a matrix of `sheets` takes, three per panel, as solved
+    cuboids have them -- three per face for a sheet without panels."""
+    return sum(
+        3 * (len(np.unique(s.panels)) if s.panels is not None else len(s.faces))
+        for s in sheets
+    )
 
 
 @_reading_inside

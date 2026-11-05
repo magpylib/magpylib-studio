@@ -441,3 +441,159 @@ def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
     session._animated = None  # captured again, subsampled
     with pytest.warns(UserWarning, match="greater than the max allowed"):
         assert "fieldlines" not in session.get_scene(frame=2)
+
+
+def _solved_plate(height=0.008, level=1):
+    """Sheets of a plate under a magnet `height` above it, solved again."""
+    pytest.importorskip("magpylib_material_response", minversion="0.10.0")
+    from magpylib_material_response import face_charge
+
+    magnet = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1.2), dimension=(0.01, 0.01, 0.005), position=(0, 0, height)
+    )
+    iron = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.06, 0.03, 0.004))
+    iron.susceptibility = 1000
+    solved = face_charge.solve_face_charge(magpy.Collection(magnet, iron), level=level)
+    return [s for s in solved.sources_all if isinstance(s, face_charge.ChargeSheet)]
+
+
+BESIDE = np.stack(np.meshgrid(PIXELS, 0.02, PIXELS), -1).reshape(-1, 3)  # off the plate
+ABOVE = BESIDE[:, [0, 2, 1]] + (0, 0, 0.03)  # as many points, elsewhere
+
+
+def _moved(sheets):
+    for sheet in sheets:
+        sheet.move((0.001, 0, 0))
+    return sheets
+
+
+def _on_a_path(sheets):
+    for sheet in sheets:
+        sheet.move([(0, 0, 0), (0.001, 0, 0)], start=0)
+    return sheets
+
+
+def _not_linear(sheets):
+    rng = np.random.default_rng(0)
+    for sheet in sheets:
+        q = sheet.charge_densities
+        sheet.charge_densities = q * rng.uniform(0.5, 1.5, q.shape)
+    return sheets
+
+
+@pytest.mark.parametrize(
+    "reads",
+    [
+        [("B", BESIDE, None), ("B", ABOVE, None)] * 3,  # as many points: their own
+        [("B", BESIDE, None)] * 3 + [("H", BESIDE, None)] * 2,
+        [("B", BESIDE, None)] * 3 + [("B", BESIDE, _moved)],
+        [("B", BESIDE, None)] * 3 + [("B", BESIDE, _not_linear)],
+        [("B", BESIDE, None)] * 3 + [("B", BESIDE, _on_a_path)] * 3,
+    ],
+    ids=["two sets", "H after B", "moved after", "not linear after", "on a path"],
+)
+def test_a_kept_matrix_gives_what_getB_gives(reads):
+    """However the sheets or the points change, the field from a kept matrix
+    is getB's, to single precision: each set of points, and B and H, its own
+    matrix; a sheet moved, or charged other than its panels allow, read as
+    before."""
+    kept = 0
+    for k, (kind, points, change) in enumerate(reads):
+        sheets = _solved_plate(0.008 + 0.0005 * k)
+        sheets = change(sheets) if change else sheets
+        get = magpy.getH if kind == "H" else magpy.getB
+        expected = get(sheets, points, sumup=True).reshape(-1, len(points), 3)[-1]
+        got = fieldlines.field(sheets, points, kind)
+        np.testing.assert_allclose(
+            got, expected, rtol=0, atol=1e-6 * abs(expected).max()
+        )
+        kept = max(kept, len(fieldlines._matrices))
+    assert kept  # a matrix was read from
+
+
+@pytest.mark.parametrize(
+    ("few", "memory", "built"),
+    [
+        (0, None, [0, 1, 1]),
+        (fieldlines.FEW_POINTS, None, [0, 0, 1]),  # a few points: the third read
+        (0, 1, [0, 0, 0]),
+        (0, "one", [0, 1, 1, 1, 1]),  # one fits: the other set's evicts it
+        (0, 0, [0, 0, 0]),
+    ],
+    ids=["second read", "few points", "past the cap", "one of two fits", "none"],
+)
+def test_a_matrix_is_built_once_a_mesh_is_read_again(monkeypatch, few, memory, built):
+    """Kept from the second read running of one mesh at the same points (the
+    third for a few points), while all of them take at most `MATRIX_MEMORY`:
+    the oldest is let go, one past it never built, and none kept at 0."""
+    monkeypatch.setattr(fieldlines, "FEW_POINTS", few)
+    if memory == "one":
+        fieldlines.field(_solved_plate(), BESIDE)
+        fieldlines.field(_solved_plate(), BESIDE)
+        (one,) = fieldlines._matrices.values()
+        memory = one.nbytes + 1
+        fieldlines._matrices.clear()
+        fieldlines._last_read.clear()
+    if memory is not None:
+        monkeypatch.setattr(fieldlines, "MATRIX_MEMORY", memory)
+    sets = [BESIDE, BESIDE, BESIDE, ABOVE, ABOVE][: len(built)]
+    for k, (points, count) in enumerate(zip(sets, built, strict=True)):
+        fieldlines.field(_solved_plate(0.008 + 0.0005 * k), points)
+        assert len(fieldlines._matrices) == count
+    if len(built) == 5:  # the newest kept
+        (key,) = fieldlines._matrices
+        assert (
+            key[1]
+            == fieldlines.hashlib.blake2b(ABOVE.tobytes(), digest_size=16).digest()
+        )
+    monkeypatch.setattr(fieldlines, "MATRIX_MEMORY", 0)
+    fieldlines.field(_solved_plate(), BESIDE)
+    assert not fieldlines._matrices
+
+
+def test_a_matrix_larger_than_its_estimate_is_built_once(monkeypatch):
+    """A sheet charged other than its panels allow takes three unknowns a
+    face, twice the estimate: past `MATRIX_MEMORY`, it is built once, found
+    too large, and read as before from then on."""
+    monkeypatch.setattr(fieldlines, "FEW_POINTS", 0)
+    built = []
+    build = fieldlines._built
+
+    def counted(*args):
+        built.append(build(*args))
+        return built[-1]
+
+    monkeypatch.setattr(fieldlines, "_built", counted)
+    estimate = 3 * len(BESIDE) * fieldlines._unknowns_at_most(_solved_plate()) * 4
+    monkeypatch.setattr(fieldlines, "MATRIX_MEMORY", int(1.5 * estimate))
+    for _ in range(4):
+        sheets = _not_linear(_solved_plate())
+        expected = magpy.getB(sheets, BESIDE, sumup=True)
+        got = fieldlines.field(sheets, BESIDE)
+        np.testing.assert_allclose(
+            got, expected, rtol=0, atol=1e-6 * abs(expected).max()
+        )
+    assert len(built) == 1
+    assert built[0].nbytes > fieldlines.MATRIX_MEMORY
+    assert not fieldlines._matrices
+
+
+def test_a_kept_matrix_keeps_no_sheet_alive(monkeypatch):
+    """The sheets a matrix was built from would keep their solve, kept for
+    reuse; a still sensor's pixels beside them are read from a matrix too."""
+    import gc
+    import weakref
+
+    monkeypatch.setattr(fieldlines, "FEW_POINTS", 0)
+    sensor = magpy.Sensor(
+        pixel=BESIDE, style={"pixel": {"size": 0, "field": {"source": "B"}}}
+    )
+    sheets = None
+    for k in range(2):  # the second read builds it, from these sheets
+        sheets = _solved_plate(0.008 + 0.0005 * k)
+        fieldlines.readings([*sheets, sensor])
+    assert fieldlines._matrices
+    gone = weakref.ref(sheets[0])
+    del sheets
+    gc.collect()
+    assert gone() is None

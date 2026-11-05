@@ -706,7 +706,11 @@ def test_a_run_over_a_solved_sheet_is_solved_at_every_step(monkeypatch):
     each frame so solved, saying how far it has got as it goes."""
     from typing import Annotated
 
-    from magpylib_studio import Length
+    from magpylib_studio import Length, fieldlines
+
+    # pages compared byte for byte: the plate's field in double every time,
+    # where a kept matrix gives it in single (`fieldlines.MATRIX_MEMORY`)
+    monkeypatch.setattr(fieldlines, "MATRIX_MEMORY", 0)
 
     outside = sheet_of(solved_above(0.0085))
     xs = (-0.01, 0.0, 0.01)
