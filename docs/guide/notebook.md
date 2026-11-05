@@ -181,6 +181,22 @@ solves took. `follow_edits(answer)` replaces that with your own:
 `answer(objects)` runs at every step of a drag or a slider, and what it returns,
 `{id: {parameter: value}}`, joins that edit's step.
 
+Beside a solved part, the solve is the least of a step: 12 ms for the plate of
+`examples/marimo/run_with_variants.py` on an M4 Pro. Without a matrix, its field
+at the points the field lines are traced from is most of it, about 50 ms. From
+magpylib-material-response 0.10.0 that field is kept as a matrix: the second
+step of a drag on the same mesh builds it, in about one and a half steps without
+one, and every step after reads the plate in under a millisecond. A step of that
+example's slider takes 25 ms, and its page with its variants is written in 2.9
+s. Two things keep a scene as slow as without a matrix, never slower. A part
+moved along a solved part within about a tenth of its own size (1 mm for a 10 mm
+magnet) grades the sheet's panels anew at every step, so no two steps share a
+mesh. And the matrices take at most `fieldlines.MATRIX_MEMORY`, 150 MB in all,
+the oldest let go first: a plate at level 3 takes 392 MB at rest. Set it from
+`magpylib_studio.fieldlines` before the view draws, or to 0 for none. A matrix
+is single precision, which a line cannot tell from double, so a page written
+twice may differ in the last digits of its lines.
+
 Solve outside a scene function. Inside, `mesh_all`, the solvers and `sheet.part`
 make magpylib objects of their own, which the scene cannot tell from yours, so
 it refuses them with the call's name; make what they returned inside, from its

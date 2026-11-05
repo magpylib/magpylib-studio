@@ -1464,7 +1464,7 @@ class SceneWidget(anywidget.AnyWidget):
             names = [variants] if isinstance(variants, str) else list(variants)
             unknown = [name for name in names if name not in known]
             if unknown:
-                has = f"its are {', '.join(known)}" if known else "it has none"
+                has = f"it has {', '.join(known)}" if known else "it has none"
                 raise ValueError(f"the scene has no variant {unknown[0]!r}: {has}")
         return names
 

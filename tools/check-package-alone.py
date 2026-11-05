@@ -38,7 +38,7 @@ for name in ("widget.js", "widget.css"):
 # The agent skill ships inside the package, where `uvx library-skills` looks
 # for it; a dot-folder is the kind of thing a build backend quietly leaves out.
 skill = package / ".agents" / "skills" / "magpylib-studio"
-for name in ("SKILL.md", "references/api.md"):
+for name in ("SKILL.md", "references/api.md", "references/notebook-view.md"):
     if not (skill / name).is_file():
         fail(f"the wheel has no .agents/skills/magpylib-studio/{name}")
 

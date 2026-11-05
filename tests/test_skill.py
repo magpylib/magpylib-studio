@@ -82,6 +82,23 @@ def test_every_example_in_the_skill_runs(tmp_path, monkeypatch):
     assert "duplicate_around" in (tmp_path / "halbach_scene.py").read_text()
 
 
+def test_every_example_in_the_notebook_reference_runs(tmp_path, monkeypatch):
+    """The same, for the view's own reference: it writes its pages."""
+    monkeypatch.chdir(tmp_path)
+    text = (SKILL / "references" / "notebook-view.md").read_text(encoding="utf-8")
+    examples = re.findall(r"^```python\n(.*?)^```$", text, re.DOTALL | re.MULTILINE)
+    namespace = {"__name__": "__main__"}
+    for number, example in enumerate(examples, 1):
+        code = compile(example, f"notebook-view.md, example {number}", "exec")
+        exec(code, namespace)  # noqa: S102 - the skill's own examples
+    assert len(examples) == 3
+    view = namespace["view"]
+    assert view.payload["fieldlines"], "the example's probe draws its lines"
+    assert list(view._saved()["variants"]["scenes"]) == ["near", "far"]
+    assert (tmp_path / "pair.html").is_file()
+    assert (tmp_path / "pair_now.html").is_file()
+
+
 def test_the_reference_is_what_the_code_says():
     """Regenerate it with `python tools/write-skill-reference.py`."""
     writer = runpy.run_path(str(ROOT / "tools" / "write-skill-reference.py"))
