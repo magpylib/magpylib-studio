@@ -103,10 +103,11 @@ function scenes() {
       "-c",
       `
 import json, sys
-from magpylib_studio.session import MagpylibStudioSession, EXAMPLES, UNLISTED_EXAMPLES
+from magpylib_studio.examples import EXAMPLES
+from magpylib_studio.session import MagpylibStudioSession
 out = {}
 # the gallery's, and the unlisted ones the checks below open
-for name in [*EXAMPLES, *UNLISTED_EXAMPLES]:
+for name in EXAMPLES:
     s = MagpylibStudioSession()
     s.load_example(name)
     path = f"{sys.argv[1]}/{name}.magpy.json"
