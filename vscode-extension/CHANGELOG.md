@@ -14,7 +14,7 @@ The docs are a site, built as magpylib's and magpylib-material-response's are:
 the README, the VS Code extension, the 3D view in a notebook, an API reference
 and the changelog, and a page per example, written at each build from
 `magpylib_studio.examples` with the example's text, its view as a saved page and
-its scene function's source (#PR).
+its scene function's source (#143).
 
 </details>
 
