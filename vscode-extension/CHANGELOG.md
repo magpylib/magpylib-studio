@@ -8,6 +8,21 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>The export asks what the page carries</summary>
+
+For a scene with a run or variants, the view's export button turns its foot into
+a choice: two markers on the run's slider keep a stretch of steps, a click on a
+variant's chip leaves it out, and Save or Cancel end the line. A run left out,
+the page holds the step on screen, and its variants theirs, with no run of their
+own: a solved plate's page, a tenth of the size. `to_html` and `write_html` take
+`run=False` beside `variants=False`, and a page saved with some variants named
+offers only those, where it listed every one. The Halbach ring and coil pair
+notebooks name what they need in their script header too, so molab installs it
+rather than asking (#PR).
+
+</details>
+
+<details>
 <summary>A docs site</summary>
 
 The docs are a site, built as magpylib's and magpylib-material-response's are:

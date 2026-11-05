@@ -2689,6 +2689,33 @@ def test_a_page_carries_the_variants_it_is_asked_for():
         studio.to_html(variants=["other"])
 
 
+def test_a_page_leaves_its_run_out_when_asked():
+    """`run=False`: the step on screen, still, and the variants at theirs
+    too, with no run of their own; a list of variants, those alone."""
+    from typing import Annotated
+
+    from magpylib_studio import Length, scene
+
+    @scene(variants={"near": {"gap": 0.004}, "far": {"gap": 0.012}})
+    def sliding(gap: Annotated[float, Length(0.002, 0.02)] = 0.008):
+        moving = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(-0.01, 0, gap)
+        )
+        moving.move(np.linspace((0, 0, 0), (0.02, 0, 0), 5), start=0)
+        return moving
+
+    view = widget.SceneWidget(sliding.build())
+    whole = _scene_of(view.to_html())
+    still = _scene_of(view.to_html(run=False))
+    assert whole["state"]["frames"] == 5 and still["state"]["frames"] == 1
+    assert len(whole["variants"]["scenes"]["near"]["run"]) == 5
+    assert "run" not in still["variants"]["scenes"]["near"]
+    assert list(still["variants"]["scenes"]) == ["near", "far"]
+    # named, the page's row offers only those it carries
+    near = _scene_of(view.to_html(variants=["near"]))["variants"]
+    assert list(near["scenes"]) == list(near["panel"]["variants"]) == ["near"]
+
+
 def test_a_page_weighs_its_variants_as_it_holds_them():
     """#137: past `limit`, a page a script opens leaves its variants out,
     weighed as the page holds them -- each mesh's arrays once -- and not as

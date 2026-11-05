@@ -2502,6 +2502,36 @@ async function variablesPanel(port, base) {
         return `a press on wide, not pressed, asked ${JSON.stringify(few.pressSlid)}`;
       }
       if (few.disabled.length) return `${few.disabled} was offered as unusable`;
+      // the save button: with a run and variants, the foot asks what the
+      // page keeps -- two markers on the run, a chip a variant left out,
+      // its click not a use -- and Save sends that; with nothing to choose,
+      // a click saves at once
+      await tab.navigate(`${base}/pages/variables.html?variants&run&save`);
+      const save = (await tab.until("return window.result", 20_000))?.save;
+      if (!save) return "?save: never finished";
+      if (!save.shown) return "a scene with a run and variants saved unasked";
+      if (!save.trimmed || !save.scrubHidden) {
+        return "the run's slider did not become two markers";
+      }
+      if (save.sentBefore) return "the foot saved before Save";
+      if (!save.leftOut || save.usedOnClick) {
+        return "a chip clicked while choosing was used, not left out";
+      }
+      if (save.said !== "Save steps 4–10, 1 of 2 variants") {
+        return `the foot said ${JSON.stringify(save.said)}`;
+      }
+      const chosen = '[{"run":true,"steps":[3,9],"variants":["wide"]}]';
+      if (JSON.stringify(save.sent) !== chosen) {
+        return `Save sent ${JSON.stringify(save.sent)}`;
+      }
+      if (!save.closed) return "the foot kept asking after Save";
+      await tab.navigate(`${base}/pages/variables.html?save`);
+      const plain = (await tab.until("return window.result", 20_000))?.save;
+      if (!plain) return "?save, nothing to choose: never finished";
+      if (plain.shown) return "a scene with nothing to choose asked";
+      if (JSON.stringify(plain.sent) !== '[{"run":true,"variants":true}]') {
+        return `one click with nothing to choose sent ${JSON.stringify(plain.sent)}`;
+      }
       // one the scene cannot use as it stands: shown, not offered, and a
       // press on it asks nothing
       await tab.navigate(`${base}/pages/variables.html?variants&broken`);

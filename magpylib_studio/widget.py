@@ -473,6 +473,12 @@ def _drawing_ahead(copy, names, payload, runs=True):
     pool, places = [], {}
     start = _pooled(payload, pool, places)
     panel = copy.get_variables()  # as the scene is, before any variant
+    # the page's row offers only the variants it carries
+    for key in ("variants", "unusable"):
+        if key in panel:
+            panel[key] = {k: v for k, v in panel[key].items() if k in names}
+    if panel.get("variant") not in names:
+        panel["variant"] = None
     scenes = {}
     for name in names:
         result = copy.followed(lambda name=name: copy.use_variant(name))
@@ -1414,7 +1420,7 @@ class SceneWidget(anywidget.AnyWidget):
                 "which offers no pencil."
             )
 
-    def to_html(self, title="magpylib scene", variants=True):
+    def to_html(self, title="magpylib scene", variants=True, run=True):
         """This view as one HTML file that needs nothing else.
 
         The widget itself, not a picture of it: orbit, legend, keys and the
@@ -1428,17 +1434,20 @@ class SceneWidget(anywidget.AnyWidget):
         `False` for none, or the names of those to carry. Each carries its
         run, where the scene has one, every step solved and drawn.
 
+        `run` is `False` for a page without the run: it holds the step on
+        screen, and its variants hold theirs at that step too.
+
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
-        return self._page(title, variants=variants)
+        return self._page(title, variants=variants, run=run)
 
-    def _page(self, title="magpylib scene", limit=None, variants=True):
+    def _page(self, title="magpylib scene", limit=None, variants=True, run=True):
         """`to_html`, with a run past `limit` shown as its first step, and
         variants past it left out: for a page nobody asked for by name, which
         should not be hundreds of megabytes because a script said `show`."""
-        return self._page_of(self._saved(limit, variants, page=True), title)
+        return self._page_of(self._saved(limit, variants, page=True, run=run), title)
 
     @staticmethod
     def _page_of(saved, title="magpylib scene"):
@@ -1450,10 +1459,10 @@ class SceneWidget(anywidget.AnyWidget):
             data=_packed(json.dumps(_compacted(saved), allow_nan=False)),
         )
 
-    def _saved(self, limit=None, variants=True, page=False):
+    def _saved(self, limit=None, variants=True, page=False, run=True):
         """`_saving` in one go, how far it has got said to the view as it
         goes (`_Progress`)."""
-        total, steps = self._saving(limit, variants, page)
+        total, steps = self._saving(limit, variants, page, run)
         progress = _Progress(self, total)
         while True:
             try:
@@ -1462,14 +1471,15 @@ class SceneWidget(anywidget.AnyWidget):
                 progress.done()
                 return done.value
 
-    def _saving(self, limit=None, variants=True, page=False):
+    def _saving(self, limit=None, variants=True, page=False, run=True):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
         there is one, the page shows the first step, still, instead -- each
         weighed as a page holds it for `page`, else as the panel is handed
         it (`_weigher`). And
-        the variants named, as `_drawing_ahead` draws them. All of it from
+        the variants named, as `_drawing_ahead` draws them. Without `run`,
+        the step on screen alone, the variants' too. All of it from
         the scene as it is at this call, in a copy of the session
         (`_snapshot`).
 
@@ -1477,7 +1487,7 @@ class SceneWidget(anywidget.AnyWidget):
         and each variant, `total` of them about, the variant's name or None
         -- a run beside variants is solved at every step of each, seconds of
         work -- and returns what the page holds."""
-        frames = self.frames
+        frames = self.frames if run else 1
         names = self._variants_carried(variants)
         session = getattr(self, "_session", None)
         own = self._scene is None and session is not None
@@ -1501,12 +1511,18 @@ class SceneWidget(anywidget.AnyWidget):
             height=self.height,
             camera=self._camera,
         )
+        if not run:
+            state["frames"] = 1  # the step on screen, still
         return total, self._steps(state, frames, step, names, copy, limit, page)
 
     def _steps(self, state, frames, step, names, copy, limit, page=False):
         """The steps of `_saving`, from the view's `state` as it was asked
-        for, its session's `copy` and the rest."""
-        if self._scene is not None:
+        for, its session's `copy` and the rest. One frame is the step on
+        screen alone, its variants' with no run either."""
+        runs = frames > 1 or self.frames <= 1
+        if self._scene is not None and frames <= 1 < self.frames:
+            run = []
+        elif self._scene is not None:
             run = threejs.whole_run(self._scene, limit)
         elif frames > 1 and copy is not None:
             # a session's run, served a step at a time -- but the step its
@@ -1547,7 +1563,9 @@ class SceneWidget(anywidget.AnyWidget):
             state["frames"] = 1
         saved = {"state": state, "run": run}
         if names:
-            drawn = yield from _drawing_ahead(copy(), names, state["payload"])
+            drawn = yield from _drawing_ahead(
+                copy(), names, state["payload"], runs=runs
+            )
             if limit is not None and _weigher(page)(drawn) > limit:
                 # their runs left out first, as the scene's own is
                 drawn = _finished(
@@ -1585,13 +1603,13 @@ class SceneWidget(anywidget.AnyWidget):
                 raise ValueError(f"the scene has no variant {unknown[0]!r}: {has}")
         return names
 
-    def write_html(self, file, title="magpylib scene", variants=True):
+    def write_html(self, file, title="magpylib scene", variants=True, run=True):
         """Write `to_html` to `file`: a path, or anything open for writing.
 
         Named and shaped as Plotly's `Figure.write_html` is, and like it
         returns nothing -- so, as the last line of a cell, it shows nothing.
         """
-        page = self.to_html(title, variants)
+        page = self.to_html(title, variants, run)
         if hasattr(file, "write"):
             file.write(page)
         else:
@@ -1634,7 +1652,14 @@ class SceneWidget(anywidget.AnyWidget):
                 self._export = None
             job = content.get("job", 0)
             try:
-                total, steps = self._saving()
+                # the variants chosen in the foot by name, or all or none;
+                # the stretch of steps chosen there is not cut yet
+                variants = content.get("variants", True)
+                if not isinstance(variants, list):
+                    variants = bool(variants)
+                total, steps = self._saving(
+                    variants=variants, run=bool(content.get("run", True))
+                )
             except Exception as e:
                 self.send({"kind": "progress", "job": job, "failed": str(e)})
                 raise

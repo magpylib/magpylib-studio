@@ -1,3 +1,11 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "magpylib-studio[widget]>=0.15.0",
+#     "marimo",
+#     "plotly",
+# ]
+# ///
 """A Halbach ring to tune: `marimo edit examples/marimo/halbach_ring.py`.
 
 The view edits the document; the field map, the axis, a sweep, the magnets

@@ -24,3 +24,21 @@ def test_an_example_says_what_it_is_and_opens(key):
     assert session.load_example(key) == {"ok": True}
     assert session.field_lines is example.field_lines
     assert [e["name"] for e in session.list_examples()["examples"]] == list(GALLERY)
+
+
+def test_every_notebook_names_what_it_needs():
+    """molab, and a WASM export, install what a notebook's script header
+    names: without one, molab asks for each package an import misses. Each
+    notebook has one naming the studio, and every example's notebook is
+    there."""
+    import pathlib
+    import re
+
+    notebooks = pathlib.Path(__file__).parents[1] / "examples" / "marimo"
+    for path in sorted(notebooks.glob("*.py")):
+        head = re.match(r"# /// script\n(.*?)# ///\n", path.read_text("utf-8"), re.S)
+        assert head, f"{path.name} has no script header"
+        assert '"magpylib-studio[widget]' in head.group(1), path.name
+    for example in EXAMPLES.values():
+        if example.notebook:
+            assert (notebooks / example.notebook).is_file(), example.notebook
