@@ -2612,7 +2612,7 @@ def test_a_page_carries_the_variants_it_is_asked_for():
     assert list(saved(variants=["many"])["variants"]["scenes"]) == ["many"]
     plain = saved(variants=False)
     assert "variants" not in plain and plain["state"]["payload"] == studio.payload
-    with pytest.raises(ValueError, match="no variant 'other': its are few, many"):
+    with pytest.raises(ValueError, match="no variant 'other': it has few, many"):
         studio.to_html(variants=["other"])
 
 
