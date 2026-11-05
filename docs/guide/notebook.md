@@ -94,23 +94,23 @@ one the widget does not take: in a notebook it moves between cells.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.
-The magpylib mark at the end of the tools opens the studio's home. **Export**
-saves it as one HTML file that opens anywhere with no notebook behind it — the
-widget itself, not a picture: orbit, legend, keys, and a captured run that still
-plays, because its motion — or, for a run that changes shape, its frames —
-travels in the file. A page that takes a while is counted in the foot of the
-view as it is written, and its Cancel stops it: the kernel writes it a piece at
-a time, from the scene as it was at the click, so it hears Cancel and an edit
-meanwhile between pieces. `write_html(path)` does the same from a cell, in one
-go, which only an interrupt stops. Either way the page opens where the view was
-looking. A scene with variants has them in a row along the foot of the view,
-beside a run's transport and under the scale bar, a click each, or press any and
-drag sideways to slide through them, one step to undo; and its page carries
-them: the same row, and a click draws that one, field lines and solved parts
-included, each drawn ahead when the page was written, from the scene as it was
-then. `write_html(path, variants=False)` leaves them out, and a list of names
-keeps those. Beside a run, each variant carries its own: every step solved and
-drawn ahead, so the page plays any variant's run.
+The magpylib mark at the end of the tools opens magpylib's page on GitHub.
+**Export** saves it as one HTML file that opens anywhere with no notebook behind
+it — the widget itself, not a picture: orbit, legend, keys, and a captured run
+that still plays, because its motion — or, for a run that changes shape, its
+frames — travels in the file. A page that takes a while is counted in the foot
+of the view as it is written, and its Cancel stops it: the kernel writes it a
+piece at a time, from the scene as it was at the click, so it hears Cancel and
+an edit meanwhile between pieces. `write_html(path)` does the same from a cell,
+in one go, which only an interrupt stops. Either way the page opens where the
+view was looking. A scene with variants has them in a row along the foot of the
+view, beside a run's transport and under the scale bar, a click each, or press
+any and drag sideways to slide through them, one step to undo; and its page
+carries them: the same row, and a click draws that one, field lines and solved
+parts included, each drawn ahead when the page was written, from the scene as it
+was then. `write_html(path, variants=False)` leaves them out, and a list of
+names keeps those. Beside a run, each variant carries its own: every step solved
+and drawn ahead, so the page plays any variant's run.
 
 Which is [direction.md](../direction.md) §5.3 — _a viewer with parameter
 binding_ — with the notebook's own reactivity in place of a protocol: a slider
