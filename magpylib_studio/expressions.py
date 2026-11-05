@@ -410,10 +410,19 @@ def normalized(value, naming=False):
             del spec["over"]
         return {SAMPLED: spec}
     if isinstance(value, list):
+        # A row of numbers is itself, and a mesh is thousands of rows: a
+        # solved plate's vertices and charges, walked one number at a time,
+        # were a tenth of every step of a drag beside it.
+        if all(type(v) in _PLAIN for v in value):
+            return list(value)
         return [normalized(v, naming) for v in value]
     if isinstance(value, dict):
         return {k: normalized(v, naming or k in _NAMING_KEYS) for k, v in value.items()}
     return value if naming else as_number(value)
+
+
+#: What `normalized` hands back as it is, in a list or not.
+_PLAIN = frozenset((int, float, bool, type(None)))
 
 
 class _Rename(ast.NodeTransformer):
