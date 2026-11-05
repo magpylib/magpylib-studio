@@ -389,13 +389,20 @@ def readings(objects):
             ):
                 seen.add(id(each))
                 sensors.append(each)
-    if any(len(np.atleast_2d(o.position)) > 1 for o in (*sources, *sensors)) or any(
+    if any(s._get_path_len() > 1 for s in sensors) or any(
         s.style.pixel.field.source[0] not in "BH" for s in sensors
     ):
         return pixel_fields(objects)
     out = {}
     if not sources:
         return out
+    # A sensor that stands still reads what stands still once, whatever moves
+    # beside it: a magnet sliding over a solved plate had magpylib read the
+    # plate at every one of its steps, a sixth of a drag step in the solved
+    # example. Only what moves is read along the path, by magpylib, which
+    # gives it as `pixel_fields` would, padded to the longest path.
+    moving = [s for s in sources if s._get_path_len() > 1]
+    still = [s for s in sources if s._get_path_len() == 1]
     for sensor in sensors:
         source = sensor.style.pixel.field.source
         pixel = np.zeros(3) if sensor.pixel is None else sensor.pixel
@@ -403,13 +410,27 @@ def readings(objects):
         pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
         turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
         get = magpy.getH if source[0] == "H" else magpy.getB
-        values = turn.inv().apply(_in_chunks(get, sources, turn.apply(pixel) + pose))
+        values = np.zeros((len(pixel), 3))
+        if still:
+            values = turn.inv().apply(_in_chunks(get, still, turn.apply(pixel) + pose))
         if getattr(sensor, "handedness", "right") == "left":
             values[:, 0] *= -1
+        values = values.reshape(1, -1, 3)
+        if moving:
+            values = values + _along_paths(moving, sensor, source[0])
         named = source[1:] or "xyz"
-        values[:, [i for i, axis in enumerate("xyz") if axis not in named]] = 0
-        out[sensor] = values.reshape(1, -1, 3)
+        values[..., [i for i, axis in enumerate("xyz") if axis not in named]] = 0
+        out[sensor] = values
     return out
+
+
+def _along_paths(sources, sensor, field):
+    """What `sensor`'s pixels read of `sources` at every step of their paths,
+    ``(path_length, n_pixels, 3)`` in its own frame, as `pixel_fields` reads
+    them -- the shorter paths at their last step."""
+    get = magpy.getH if field == "H" else magpy.getB
+    read = np.asarray(get(sources, sensor, sumup=True, squeeze=False))
+    return read[0].reshape(read.shape[1], -1, 3)
 
 
 @_reading_inside
