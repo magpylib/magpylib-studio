@@ -6,7 +6,8 @@
   `?standalone` is a saved page, `?readonly` a view with its handles away;
   neither offers the panel. `?variants` gives the scene two variants, the
   values in neither, and `?many` twelve, too many for a toggle each; `?broken`
-  says one of them cannot be used as the scene stands. `window.result` is what the panel showed and
+  says one of them cannot be used as the scene stands; `?save` presses the save
+  button and chooses in the foot, `?run` gives the view a run of 13 steps. `window.result` is what the panel showed and
   what it asked the session, in order, with a previewed value marked `*` and a
   committed one `=`.
 -->
@@ -60,6 +61,7 @@
       const values = { ...state };
       // the trait python sets from the scene's variants
       values.variants = Object.keys(variables.variants || {});
+      if (query.has("run")) values.frames = 13; // a run, to trim
       if (query.has("standalone")) values.standalone = true;
       if (query.has("readonly")) values.editable = false;
       // For a look: the view wears what it sits on, and a headless browser's
@@ -68,6 +70,7 @@
       if (query.has("light")) document.body.style.background = "#ffffff";
 
       const asked = [];
+      const sent = [];
       const listeners = {};
       const emit = (event, value) =>
         (listeners[event] || []).forEach((listener) => listener(value));
@@ -81,7 +84,10 @@
         on: (event, listener) => (listeners[event] ||= []).push(listener),
         off() {},
         send(message) {
-          if (message.kind !== "rpc") return;
+          if (message.kind !== "rpc") {
+            sent.push(message); // an export, for `?save`
+            return;
+          }
           const { method, params } = message;
           asked.push({
             method,
@@ -134,7 +140,63 @@
         );
       const hidden = (b) => !b || Boolean(b.closest("[hidden]"));
       const offered = !hidden(button("Variables"));
-      if (!offered) {
+      if (query.has("save")) {
+        // the save button: with a run or variants, the foot asks what the
+        // page keeps -- here steps 4 to 10 and the variants but compact,
+        // whose click is not a use -- then Save; with neither, it saves
+        const sentNow = () =>
+          sent
+            .filter((m) => m.kind === "export")
+            .map((m) => ({ run: m.run, steps: m.steps, variants: m.variants }));
+        button("Save as one HTML").click();
+        await wait(100);
+        const choose = el.querySelector(".magpy-scene-choose");
+        const trim = el.querySelector(".magpy-scene-trim");
+        const shown = Boolean(choose && !choose.hidden);
+        const save = { shown, sentBefore: sentNow().length };
+        if (shown) {
+          save.trimmed = !trim.hidden;
+          save.scrubHidden = el.querySelector(".magpy-scene-scrub").hidden;
+          if (save.trimmed) {
+            const [first, last] = trim.querySelectorAll("input");
+            first.value = "3";
+            first.dispatchEvent(new Event("input"));
+            last.value = "9";
+            last.dispatchEvent(new Event("input"));
+          }
+          const before = asked.length;
+          const pick = el.querySelector(".magpy-scene-variants select");
+          if (pick) {
+            // too many for chips: a pick in the dropdown leaves one out
+            pick.dispatchEvent(new Event("focusin", { bubbles: true }));
+            const was = pick.value;
+            pick.value = "n4";
+            pick.dispatchEvent(new Event("change", { bubbles: true }));
+            await wait(50);
+            const option = [...pick.options].find((o) => o.value === "n4");
+            save.leftOut =
+              option.textContent === "n4 (left out)" && pick.value === was;
+          } else {
+            const chip = [
+              ...el.querySelectorAll(".magpy-scene-variants .magpy-vars-chip"),
+            ].find((c) => c.textContent === "compact");
+            chip.click();
+            await wait(50);
+            save.leftOut = chip.classList.contains("magpy-left-out");
+          }
+          save.usedOnClick = asked
+            .slice(before)
+            .some((a) => a.method === "use_variant");
+          save.said = choose.querySelector("span").textContent;
+          [...choose.querySelectorAll("button")]
+            .find((b) => b.textContent === "Save")
+            .click();
+          await wait(100);
+          save.closed = choose.hidden && trim.hidden;
+        }
+        save.sent = sentNow();
+        window.result = { save };
+      } else if (!offered) {
         window.result = { offered, asked };
       } else if (query.has("taken")) {
         // the one restore in the dock's title line, none in the rows, and

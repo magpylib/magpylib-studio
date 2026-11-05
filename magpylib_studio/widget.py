@@ -457,7 +457,7 @@ def _finished(steps):
             return done.value
 
 
-def _drawing_ahead(copy, names, payload, runs=True):
+def _drawing_ahead(copy, names, payload, runs=True, keep=None):
     """The variants `names` of the scene of `copy`, a copy of the view's
     session (`_snapshot`), each as a click on a page with no python behind
     it draws it (#118): its scene and its tree, with `payload`, what the
@@ -467,12 +467,19 @@ def _drawing_ahead(copy, names, payload, runs=True):
     clicked before -- and solved again as an edit would solve it, by the
     view's own `follow_edits` if it has one (`followed`). One the scene
     cannot use is left out: the row says why, as the panel does. Each
-    carries its run, unless `runs` is False. A generator, which yields the
+    carries its run, unless `runs` is False -- of its steps those `keep`
+    names (`_within`), where it names some. A generator, which yields the
     variant's name after each variant drawn and each frame, and returns
     what the page holds."""
     pool, places = [], {}
     start = _pooled(payload, pool, places)
     panel = copy.get_variables()  # as the scene is, before any variant
+    # the page's row offers only the variants it carries
+    for key in ("variants", "unusable"):
+        if key in panel:
+            panel[key] = {k: v for k, v in panel[key].items() if k in names}
+    if panel.get("variant") not in names:
+        panel["variant"] = None
     scenes = {}
     for name in names:
         result = copy.followed(lambda name=name: copy.use_variant(name))
@@ -488,8 +495,8 @@ def _drawing_ahead(copy, names, payload, runs=True):
                 scenes[name]["frames"] = steps
                 run = scenes[name]["run"] = []
                 for i in range(steps):
-                    if i == drawn.get("step"):
-                        run.append(None)
+                    if i == drawn.get("step") or not _within(i, keep):
+                        run.append(None)  # drawn from its payload, or cut
                         continue
                     run.append(_pooled(copy.get_scene(frame=i), pool, places))
                     yield name
@@ -502,6 +509,121 @@ def _drawing_ahead(copy, names, payload, runs=True):
         "scenes": scenes,
         "panel": panel,
     }
+
+
+def _kept(steps, frames):
+    """`steps`, the ``(first, last)`` of a run of `frames` a page keeps, as
+    two steps it has -- or None for the whole of it, or no run."""
+    if steps is None or frames <= 1:
+        return None
+    try:
+        first, last = (int(step) for step in steps)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"steps is (first, last), two steps of the run: not {steps!r}"
+        ) from None
+    if not 0 <= first <= last < frames:
+        raise ValueError(
+            f"steps {first}..{last} are not a stretch of the run's {frames} "
+            f"steps, 0..{frames - 1}"
+        )
+    return None if (first, last) == (0, frames - 1) else (first, last)
+
+
+def _within(step, keep):
+    """Whether `step` is one of those `keep` names, the whole run for None."""
+    return keep is None or keep[0] <= step <= keep[1]
+
+
+def _cut(saved, first, last):
+    """`saved`, a page's (`SceneWidget._saving`), holding only the steps
+    `first` to `last` of its run, and its variants' runs as far as they go:
+    their frames, the paths and poses that play them, and the overlaps at
+    each, counted again from 0. A payload whose own step is cut away draws
+    none of those kept, `step` -1, and the view asks for the first. The
+    view's own payload is left as it was; what is cut is copied."""
+    state = saved["state"]
+    whole = state["frames"]
+    if whole <= 1:
+        return  # carried still after all: too big to carry its run
+    kept = last - first + 1
+    state["frames"] = kept
+    if state.get("duration"):
+        state["duration"] = state["duration"] * (kept - 1) / (whole - 1)
+    if state.get("payload") is not None:
+        state["payload"] = _cut_drawn(state["payload"], first, last, whole)
+    saved["run"] = _cut_run(saved["run"], first, last, kept, whole)
+    variants = saved.get("variants")
+    if not variants:
+        return
+    start = variants["start"]
+    variants["start"] = {
+        **start,
+        "values": _cut_drawn(start["values"], first, last, whole),
+    }
+    for name, scene in variants["scenes"].items():
+        steps = scene.get("frames", 1)
+        if steps <= 1:
+            continue
+        at, to = min(first, steps - 1), min(last, steps - 1)
+        variants["scenes"][name] = {
+            **scene,
+            "values": _cut_drawn(scene["values"], at, to, steps),
+            "run": _cut_run(scene["run"], at, to, to - at + 1, steps),
+            "frames": to - at + 1,
+        }
+
+
+def _cut_run(run, first, last, kept, whole):
+    """A run's frames `first` to `last`, numbered again; a run the payload
+    carries as motion has none (``[]``)."""
+    if len(run) != whole:
+        return run
+    out = []
+    for i, frame in enumerate(run[first : last + 1]):
+        if frame is not None:
+            if "items" in frame:  # pooled with a variant's (`_pooled`)
+                values = {**frame["values"], "frame": i, "frames": kept}
+                frame = {**frame, "values": values}
+            else:
+                frame = {**frame, "frame": i, "frames": kept}
+        out.append(frame)
+    return out
+
+
+def _cut_drawn(payload, first, last, whole):
+    """A payload of a run of `whole` steps, as `_cut` keeps it: each pose,
+    change, path and step's overlaps from `first` to `last`, and its own step
+    counted from `first` -- -1 once that is cut away."""
+    payload = dict(payload)
+
+    def kept(steps):
+        if not steps:
+            return steps
+        return [steps[min(i, len(steps) - 1)] for i in range(first, last + 1)]
+
+    for key in ("tracks", "changes"):
+        if payload.get(key):
+            payload[key] = [kept(steps) for steps in payload[key]]
+    if payload.get("paths"):
+        payload["paths"] = {
+            key: {part: kept(steps) for part, steps in path.items()}
+            for key, path in payload["paths"].items()
+        }
+    by_step = payload.get("overlaps_by_step")
+    if by_step:
+        # held a few steps apart, as the view reads them (`overlapsAt`)
+        span = max(whole - 1, 1)
+        payload["overlaps_by_step"] = [
+            by_step[round(i * (len(by_step) - 1) / span)]
+            for i in range(first, last + 1)
+        ]
+    elif last < whole - 1 and payload.get("overlaps"):
+        payload["overlaps"] = []  # those of the last step, which is cut
+    # a session's payload draws its last step, a captured run's its first
+    drawn = payload.get("step") or 0
+    payload["step"] = drawn - first if first <= drawn <= last else -1
+    return payload
 
 
 def _positions(tree, at=""):
@@ -1414,7 +1536,7 @@ class SceneWidget(anywidget.AnyWidget):
                 "which offers no pencil."
             )
 
-    def to_html(self, title="magpylib scene", variants=True):
+    def to_html(self, title="magpylib scene", variants=True, run=True, steps=None):
         """This view as one HTML file that needs nothing else.
 
         The widget itself, not a picture of it: orbit, legend, keys and the
@@ -1428,17 +1550,27 @@ class SceneWidget(anywidget.AnyWidget):
         `False` for none, or the names of those to carry. Each carries its
         run, where the scene has one, every step solved and drawn.
 
+        `run` is `False` for a page without the run: it holds the step the
+        scene is drawn at -- a session's last, a captured run's first -- and
+        its variants theirs. `steps`, ``(first, last)`` counted from 0, keeps
+        that stretch of the run alone, the variants' too, and opens on its
+        first step where the scene's own is cut away; ``(k, k)`` is the one
+        step, still.
+
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
-        return self._page(title, variants=variants)
+        return self._page(title, variants=variants, run=run, steps=steps)
 
-    def _page(self, title="magpylib scene", limit=None, variants=True):
+    def _page(
+        self, title="magpylib scene", limit=None, variants=True, run=True, steps=None
+    ):
         """`to_html`, with a run past `limit` shown as its first step, and
         variants past it left out: for a page nobody asked for by name, which
         should not be hundreds of megabytes because a script said `show`."""
-        return self._page_of(self._saved(limit, variants, page=True), title)
+        saved = self._saved(limit, variants, page=True, run=run, steps=steps)
+        return self._page_of(saved, title)
 
     @staticmethod
     def _page_of(saved, title="magpylib scene"):
@@ -1450,26 +1582,28 @@ class SceneWidget(anywidget.AnyWidget):
             data=_packed(json.dumps(_compacted(saved), allow_nan=False)),
         )
 
-    def _saved(self, limit=None, variants=True, page=False):
+    def _saved(self, limit=None, variants=True, page=False, run=True, steps=None):
         """`_saving` in one go, how far it has got said to the view as it
         goes (`_Progress`)."""
-        total, steps = self._saving(limit, variants, page)
+        total, pieces = self._saving(limit, variants, page, run, steps)
         progress = _Progress(self, total)
         while True:
             try:
-                progress.tick(next(steps))
+                progress.tick(next(pieces))
             except StopIteration as done:
                 progress.done()
                 return done.value
 
-    def _saving(self, limit=None, variants=True, page=False):
+    def _saving(self, limit=None, variants=True, page=False, run=True, steps=None):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
         there is one, the page shows the first step, still, instead -- each
         weighed as a page holds it for `page`, else as the panel is handed
         it (`_weigher`). And
-        the variants named, as `_drawing_ahead` draws them. All of it from
+        the variants named, as `_drawing_ahead` draws them. Without `run`,
+        the step the scene is drawn at alone, the variants' too; with
+        `steps`, that stretch of the run (`_kept`, `_cut`). All of it from
         the scene as it is at this call, in a copy of the session
         (`_snapshot`).
 
@@ -1477,11 +1611,13 @@ class SceneWidget(anywidget.AnyWidget):
         and each variant, `total` of them about, the variant's name or None
         -- a run beside variants is solved at every step of each, seconds of
         work -- and returns what the page holds."""
-        frames = self.frames
+        frames = self.frames if run else 1
+        keep = _kept(steps, frames)
         names = self._variants_carried(variants)
         session = getattr(self, "_session", None)
         own = self._scene is None and session is not None
-        total = (max(frames - 1, 0) if own else 0) + len(names) * max(frames, 1)
+        drawn = frames if keep is None else keep[1] - keep[0] + 1
+        total = (max(drawn - 1, 0) if own else 0) + len(names) * max(drawn, 1)
         step = self.payload.get("step")
         copy = _snapshot(session) if session is not None else None
         state = threejs.saved_state(
@@ -1501,12 +1637,20 @@ class SceneWidget(anywidget.AnyWidget):
             height=self.height,
             camera=self._camera,
         )
-        return total, self._steps(state, frames, step, names, copy, limit, page)
+        if not run:
+            state["frames"] = 1  # the step drawn, still
+        pieces = self._steps(state, frames, step, names, copy, limit, page, keep)
+        return total, pieces
 
-    def _steps(self, state, frames, step, names, copy, limit, page=False):
+    def _steps(self, state, frames, step, names, copy, limit, page=False, keep=None):
         """The steps of `_saving`, from the view's `state` as it was asked
-        for, its session's `copy` and the rest."""
-        if self._scene is not None:
+        for, its session's `copy` and the rest. One frame is the step on
+        screen alone, its variants' with no run either; `keep`, the stretch
+        of steps kept, the rest not drawn."""
+        runs = frames > 1 or self.frames <= 1
+        if self._scene is not None and frames <= 1 < self.frames:
+            run = []
+        elif self._scene is not None:
             run = threejs.whole_run(self._scene, limit)
         elif frames > 1 and copy is not None:
             # a session's run, served a step at a time -- but the step its
@@ -1520,8 +1664,8 @@ class SceneWidget(anywidget.AnyWidget):
             # rest are not drawn to be left out
             run, size, weigh = [], 2, _weigher(page)
             for i in range(frames):
-                if i == step:
-                    scene = None
+                if i == step or not _within(i, keep):
+                    scene = None  # drawn from the payload, or cut
                 else:
                     if source is None and seen is not None:
                         now = (live._animated, live.field_lines)
@@ -1547,7 +1691,9 @@ class SceneWidget(anywidget.AnyWidget):
             state["frames"] = 1
         saved = {"state": state, "run": run}
         if names:
-            drawn = yield from _drawing_ahead(copy(), names, state["payload"])
+            drawn = yield from _drawing_ahead(
+                copy(), names, state["payload"], runs=runs, keep=keep
+            )
             if limit is not None and _weigher(page)(drawn) > limit:
                 # their runs left out first, as the scene's own is
                 drawn = _finished(
@@ -1565,6 +1711,8 @@ class SceneWidget(anywidget.AnyWidget):
                 state["payload"] = None  # the page's from `drawn["start"]`
                 state["variants"] = list(drawn["scenes"])  # the row's
                 saved["variants"] = drawn
+        if keep is not None:
+            _cut(saved, *keep)
         return saved
 
     def _variants_carried(self, variants):
@@ -1585,13 +1733,15 @@ class SceneWidget(anywidget.AnyWidget):
                 raise ValueError(f"the scene has no variant {unknown[0]!r}: {has}")
         return names
 
-    def write_html(self, file, title="magpylib scene", variants=True):
+    def write_html(
+        self, file, title="magpylib scene", variants=True, run=True, steps=None
+    ):
         """Write `to_html` to `file`: a path, or anything open for writing.
 
         Named and shaped as Plotly's `Figure.write_html` is, and like it
         returns nothing -- so, as the last line of a cell, it shows nothing.
         """
-        page = self.to_html(title, variants)
+        page = self.to_html(title, variants, run, steps)
         if hasattr(file, "write"):
             file.write(page)
         else:
@@ -1634,7 +1784,16 @@ class SceneWidget(anywidget.AnyWidget):
                 self._export = None
             job = content.get("job", 0)
             try:
-                total, steps = self._saving()
+                # what the foot chose: the variants by name, or all or none,
+                # and the stretch of the run's steps
+                variants = content.get("variants", True)
+                if not isinstance(variants, list):
+                    variants = bool(variants)
+                total, steps = self._saving(
+                    variants=variants,
+                    run=bool(content.get("run", True)),
+                    steps=content.get("steps"),
+                )
             except Exception as e:
                 self.send({"kind": "progress", "job": job, "failed": str(e)})
                 raise

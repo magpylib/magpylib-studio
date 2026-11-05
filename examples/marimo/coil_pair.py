@@ -1,3 +1,11 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "magpylib-studio[widget]>=0.15.0",
+#     "marimo",
+#     "plotly",
+# ]
+# ///
 """A coil pair to flip: `marimo edit examples/marimo/coil_pair.py`.
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs

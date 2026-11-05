@@ -97,6 +97,8 @@ import pathlib
 page = view.to_html()  # the run, every variant, the field lines
 pathlib.Path("pair.html").write_text(page, encoding="utf-8")
 view.write_html("pair_now.html", variants=False)  # the run, no variants
+view.write_html("pair_still.html", run=False)  # the step drawn, still
+view.write_html("pair_part.html", steps=(2, 6))  # steps 2 to 6 alone
 ```
 
 No notebook or browser is needed: this runs in a plain Python script.
@@ -107,7 +109,8 @@ value outside its variants needs the notebook. A view never drawn on screen has
 no camera to keep, so the page opens framed on the whole scene. A run carries
 every step, and each variant its own run, so a page with a long run and many
 variants takes a while to write. In a notebook, the view's own export button
-writes it a piece at a time, with a count and a Cancel.
+asks first, in the view's foot, which steps of the run and which variants to
+carry, and writes it a piece at a time, with a count and a Cancel.
 
 ## What takes the time
 
