@@ -259,10 +259,12 @@ export function createVariables(
         chip.setAttribute("aria-pressed", String(on));
         chip.disabled = Boolean(unusable[name]);
         chip.title = says(name);
-        chip.addEventListener("click", () => {
-          if (!on) useVariant(name);
+        // A press on a toggle that slides is the slide's, a click with no
+        // move included; a click from the keyboard is not pressed at all.
+        chip.addEventListener("click", (event) => {
+          if (!on && !(slide && event.detail > 0)) useVariant(name);
         });
-        if (slide && on) {
+        if (slide && !chip.disabled) {
           chip.title = `${says(name)} -- drag sideways for the others`;
           chip.addEventListener("pointerdown", (event) =>
             slideFrom(event, chips, names, unusable),
@@ -296,11 +298,13 @@ export function createVariables(
     variantEl.append(label, pick);
   }
 
-  /** The pressed variant, slid along the row: each one the pointer passes
-   *  shown as a preview, one on the wire at a time and the newest waiting,
-   *  and the one let go on used -- the whole slide one step to undo, as a
-   *  slider's drag is. The toggles stay as they are until the release:
-   *  `dragging` holds off the reads that would rebuild them. */
+  /** A variant pressed and slid along the row -- any, not only the one the
+   *  values are in, so a slide needs no click first: the one pressed and
+   *  each one the pointer passes shown as a preview, one on the wire at a
+   *  time and the newest waiting, and the one let go on used -- the whole
+   *  slide one step to undo, as a slider's drag is. The toggles stay as they
+   *  are until the release: `dragging` holds off the reads that would
+   *  rebuild them. */
   let variantSent = Promise.resolve();
   let variantWaiting = null;
   let variantInFlight = false;
@@ -321,12 +325,12 @@ export function createVariables(
   }
 
   function slideFrom(event, chips, names, unusable) {
+    if (event.button !== 0) return; // the main button, a finger or a pen
     event.preventDefault(); // no text selected along the way
     const start = chips.findIndex((chip) => chip.classList.contains("on"));
     let at = start;
+    let slid = false; // past the toggle pressed: a slide, not a click
     dragging = true;
-    variantEl.classList.add("magpy-vars-sliding");
-    rpc("begin_interaction").catch(() => {});
     const nearest = (x) => {
       let best = at;
       let gap = Infinity;
@@ -338,23 +342,41 @@ export function createVariables(
       });
       return best;
     };
-    const move = (e) => {
-      const i = nearest(e.clientX);
-      if (i === at) return;
+    const press = (i) => {
       for (const [k, chip] of [
         [at, chips[at]],
         [i, chips[i]],
       ]) {
+        if (!chip) continue; // none was pressed before
         chip.classList.toggle("on", k === i);
         chip.setAttribute("aria-pressed", String(k === i));
       }
       at = i;
+    };
+    // the one pressed shows pressed at once, and asks nothing until the
+    // pointer leaves it: a click is one use, as a click on any toggle is
+    press(nearest(event.clientX));
+    const pressedAt = at;
+    const move = (e) => {
+      const i = nearest(e.clientX);
+      if (i === at) return;
+      if (!slid) {
+        slid = true;
+        variantEl.classList.add("magpy-vars-sliding");
+        rpc("begin_interaction").catch(() => {});
+      }
+      press(i);
       previewVariant(names[at]);
     };
     const release = async () => {
       removeEventListener("pointermove", move, true);
       removeEventListener("pointerup", release, true);
       removeEventListener("pointercancel", release, true);
+      if (!slid) {
+        dragging = false;
+        if (pressedAt !== start) await useVariant(names[pressedAt]);
+        return;
+      }
       variantEl.classList.remove("magpy-vars-sliding");
       variantWaiting = null;
       await variantSent;

@@ -16,7 +16,7 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import build, fieldlines, importer, scene, session
+from magpylib_studio import build, fieldlines, importer, scene, session, widget
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 
@@ -334,7 +334,8 @@ def test_the_engine_solves_a_sheet_again_in_the_edits_step():
 
     _drag(view, name, (0, 0, 0.021), (0.002, 0, 0.022))
     solves = view.last_edit["solves"]
-    assert [s["reused"] for s in solves] == [False, True]
+    # the factorization the view's own solve kept when it opened
+    assert [s["reused"] for s in solves] == [True, True]
     assert all(s["solved_by"] == "face_charge" for s in solves)
     moved = solved_above(0.022)
     magnet = next(s for s in moved.sources_all if type(s) is magpy.magnet.Cuboid)
@@ -695,3 +696,176 @@ def test_a_sheet_solved_again_beside_a_body_solved_by_cells_is_not_warned_of():
         _drag(view, key, (0, 0, 0.021))
     assert len(view.last_edit["solves"]) == 1
     assert "not_followed" not in view.last_edit
+
+
+def test_a_run_over_a_solved_sheet_is_solved_at_every_step(monkeypatch):
+    """material-response solves one configuration, not a path: the view at
+    rest is the solve at the last step -- from the moment it opens, whatever
+    pose the sheet was solved for -- each frame of the run the solve at its
+    own step, its pixels reading it, and a page carries every variant's run,
+    each frame so solved, saying how far it has got as it goes."""
+    from typing import Annotated
+
+    from magpylib_studio import Length
+
+    outside = sheet_of(solved_above(0.0085))
+    xs = (-0.01, 0.0, 0.01)
+
+    @scene(
+        solve_level=1,
+        variants={"low": {"height": 0.0085}, "high": {"height": 0.015}},
+    )
+    def slide(height: Annotated[float, Length(0.005, 0.05)] = 0.0085):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(xs[0], 0, height),
+        )
+        magnet.move(np.linspace((0, 0, 0), (xs[-1] - xs[0], 0, 0), len(xs)), start=0)
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+            part=outside.part,  # each read a magnet of its own
+        )
+        probe = magpy.Sensor(
+            pixel=[(x, 0, z) for x in (-0.02, 0, 0.02) for z in (0.004, 0.012)],
+            style={"pixel": {"size": 0, "field": {"source": "B"}}},
+        )
+        arrows = magpy.Sensor(
+            pixel=[(-0.01, 0, 0.004), (0.01, 0, 0.004)],
+            style={"label": "arrows", "pixel": {"field": {"source": "B"}}},
+        )
+        return magnet, plate, probe, arrows
+
+    def fresh(x, z):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2), dimension=(0.01, 0.01, 0.005), position=(x, 0, z)
+        )
+        return face_charge.solve_face_charge(
+            magpy.Collection(outside.part, magnet), level=1
+        )
+
+    def charges(x, z):
+        return sheet_of(fresh(x, z)).charge_densities
+
+    # a build is where the scene starts, solved for it as it stands
+    built = slide.build()
+    (key,) = built.session._parted()
+    np.testing.assert_allclose(
+        built.session._objs[key].charge_densities, charges(xs[-1], 0.0085), atol=1e-6
+    )
+    view = SceneWidget(built, editable=True, field_lines=True)
+    sent = []
+    view.send = sent.append
+    studio = view._session
+    assert studio.get_history()["undo"] == []
+    assert "not_followed" not in studio.followed(lambda: studio.use_variant("high"))
+    np.testing.assert_allclose(
+        studio._objs[key].charge_densities, charges(xs[-1], 0.015), atol=1e-6
+    )
+    np.testing.assert_allclose(
+        studio._frame_sheets(0)[key].charge_densities, charges(xs[0], 0.015), atol=1e-6
+    )
+    (arrows,) = (k for k, o in studio._objs.items() if o.style.label == "arrows")
+    (read,) = (
+        p for p in studio.get_scene(frame=0)["pixels"] if p["object_id"] == arrows
+    )
+    field = fresh(xs[0], 0.015).getB(studio._objs[arrows].pixel)
+    np.testing.assert_allclose(
+        np.reshape(read["vectors"], (-1, 3)),
+        field / np.linalg.norm(field, axis=1, keepdims=True),
+        atol=1e-4,
+    )
+
+    def drawn(frame):
+        meshes = studio.get_scene(frame=frame)["meshes"]
+        return [m for m in meshes if m["object_id"] == key]
+
+    assert drawn(0) != drawn(1)
+    monkeypatch.setattr(widget._Progress, "_AFTER", 0)
+    monkeypatch.setattr(widget._Progress, "_EVERY", 0)
+    sent.clear()
+    scenes = view._saved()["variants"]["scenes"]
+    # the run's 2 frames, and each variant drawn and its 2 frames
+    said = [(m["done"], m["total"]) for m in sent if m.get("kind") == "progress"]
+    assert said == [(n, 8) for n in range(1, 9)] + [(8, 8)]
+    assert {name: each["frames"] for name, each in scenes.items()} == {
+        "low": 3,
+        "high": 3,
+    }
+    assert all(sum(f is not None for f in each["run"]) == 2 for each in scenes.values())
+
+    # The view's own export: a piece at a time, each asked for, the page of
+    # the scene as it was asked for -- an edit between pieces is the live
+    # session's alone -- and tagged with its job; stopped, nothing more is
+    # written; a page that cannot be made is said to have failed.
+    monkeypatch.setattr(SceneWidget, "_EXPORT_PIECE", 0)
+    page = view.to_html()
+    sent.clear()
+    view._on_message(view, {"kind": "export", "job": 1}, None)
+    edit = {"name": "height", "value": 0.012}
+    view._on_message(
+        view, {"kind": "rpc", "id": 9, "method": "set_variable", "params": edit}, None
+    )
+    while sent[-1]["kind"] != "export":
+        view._on_message(view, {"kind": "export-more", "job": 1}, None)
+    done = [m["done"] for m in sent if m.get("kind") == "progress"]
+    assert done == list(range(1, 9))
+    assert sent[-1]["job"] == 1
+    assert sent[-1]["html"] == page
+    assert studio.get_variables()["variables"][0]["value"] == 0.012
+    sent.clear()
+    view._on_message(view, {"kind": "export", "job": 2}, None)
+    view._on_message(view, {"kind": "export-cancel", "job": 2}, None)
+    view._on_message(view, {"kind": "export-more", "job": 2}, None)
+    assert [m["kind"] for m in sent] == ["progress"]
+
+    def unmade(saved, title=None):
+        raise ValueError("no page")
+
+    monkeypatch.setattr(SceneWidget, "_page_of", staticmethod(unmade))
+    sent.clear()
+    view._on_message(view, {"kind": "export", "job": 3}, None)
+    with pytest.raises(ValueError, match="no page"):
+        while "failed" not in sent[-1]:
+            view._on_message(view, {"kind": "export-more", "job": 3}, None)
+    assert sent[-1] == {"kind": "progress", "job": 3, "failed": "no page"}
+    assert view._export is None
+
+
+def test_a_run_too_large_to_solve_at_every_step_says_so(monkeypatch):
+    """Past the unknowns a factorization is kept for, a run's frames draw the
+    solve at rest, and the view says so, once a run."""
+    outside = sheet_of(solved_above(0.0085))
+    monkeypatch.setattr(session, "_KEPT_UNKNOWNS", 10)
+
+    @scene(solve_level=1)
+    def slide():
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1.2),
+            dimension=(0.01, 0.01, 0.005),
+            position=(-0.01, 0, 0.0085),
+        )
+        magnet.move(np.linspace((0, 0, 0), (0.02, 0, 0), 3), start=0)
+        plate = face_charge.ChargeSheet(
+            vertices=outside.vertices,
+            faces=outside.faces,
+            charge_densities=outside.charge_densities,
+            panels=outside.panels,
+            mean_polarization=outside.mean_polarization,
+            part=outside.part,
+        )
+        return magnet, plate
+
+    view = SceneWidget(slide.build(), editable=True)
+    sent = []
+    view.send = sent.append
+    for index in (0, 1):
+        view._on_message(view, {"kind": "frame", "index": index}, None)
+    refused = [m["message"] for m in sent if m.get("kind") == "refused"]
+    assert len(refused) == 1
+    assert "unknowns" in refused[0]
+    assert view._session._frame_sheets(0) == {}

@@ -7,7 +7,7 @@
  * The studio is installed into a VS Code of its own -- the one the test runner
  * downloaded, with a fresh profile: no AI features, no tips -- beside the
  * driver in `screenshot-driver/`, which opens the scene and lays the window
- * out. The scene is the Halbach design of `examples/marimo_demo.py` with its
+ * out. The scene is the Halbach design of `examples/marimo/halbach_ring.py` with its
  * field lines, its `density` at the top of its slider (`screenshot.py scene`).
  * VS Code then renders its own window through its DevTools protocol, so no
  * screen-recording permission is needed and nothing else on the screen can end
@@ -38,7 +38,7 @@ const PYTHON = path.join(REPO, ".venv", "bin", "python");
 const WIDTH = 1800;
 const HEIGHT = 1080;
 const SCALE = 4 / 3;
-const EXAMPLE = path.join(REPO, "examples", "marimo_demo.py");
+const EXAMPLE = path.join(REPO, "examples", "marimo", "halbach_ring.py");
 const HELPER = path.join(HERE, "screenshot.py");
 /** One period of the flow, `scene3d.mjs`'s FLOW_RATE of 0.8 pulses a second. */
 const PERIOD_MS = 1250;
@@ -210,8 +210,8 @@ const HOLD = `(() => {
 })()`;
 
 /** What a person would do in the 3D view before taking it, done through its
- *  own buttons: frame everything again at the window's new size, and hide
- *  the bore's arrows from the legend, so that only its field lines show. */
+ *  own buttons: frame everything again at the window's new size. The bore
+ *  draws no pixels, only its field lines. */
 const DRESS = `(async () => {
   const view = ${CONTENT};
   const deep = (root, selector) => [
@@ -222,15 +222,6 @@ const DRESS = `(async () => {
     deep(view.document, "button").find((b) => (b.title || b.getAttribute("aria-label") || "").startsWith(name));
   const pause = () => new Promise((resolve) => view.setTimeout(resolve, 600));
   const done = [];
-  button("Legend")?.click();
-  await pause();
-  const row = deep(view.document, ".magpy-legend-row").find((r) => /^bore's pixels/.test(r.title));
-  if (row) {
-    row.querySelector(".magpy-legend-eye").click();
-    done.push("pixels hidden");
-  }
-  await pause();
-  button("Legend")?.click();
   button("Frame everything")?.click();
   if (button("Frame everything")) done.push("framed");
   await pause();
@@ -303,7 +294,7 @@ try {
   await wait(4000);
   const view = await sceneView(port);
   const dressed = await view.evaluate(DRESS);
-  if (!dressed?.includes("pixels hidden") || !dressed.includes("framed")) {
+  if (!dressed?.includes("framed")) {
     throw new Error(`the 3D view was not dressed: ${JSON.stringify(dressed)}`);
   }
   await wait(1500);

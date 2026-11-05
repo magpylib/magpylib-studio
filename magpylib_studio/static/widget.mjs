@@ -669,12 +669,24 @@ function render({ model, el }) {
     "Save as one HTML file that works anywhere — orbit, legend, keys and " +
       "playback, no notebook needed",
     () => {
-      notify("Writing the file…");
+      exportJob = `${viewTag}-${++exports}`;
+      showWriting({ text: "Writing…", done: 0, total: 0, job: exportJob });
       // The camera with it, so the file opens on what is on screen now
       // rather than on what was last reported.
-      model.send({ kind: "export", camera: api?.cameraState() ?? kept });
+      model.send({
+        kind: "export",
+        camera: api?.cameraState() ?? kept,
+        job: exportJob,
+      });
     },
   );
+  // The view's own export, named: python writes one a piece at a time, this
+  // view asking for each next piece, so a cancel is heard between them. The
+  // name is this view's -- another view of the same widget hears the same
+  // messages -- and null once it is done or stopped.
+  const viewTag = Math.random().toString(36).slice(2, 10);
+  let exports = 0;
+  let exportJob = null;
   exportButton.hidden = Boolean(model.get("standalone"));
   // Taken here, not by python: the picture is what the browser drew, and a
   // page that is itself an export can take one as well.
@@ -829,8 +841,8 @@ function render({ model, el }) {
   counter.className = "magpy-scene-counter";
   transport.append(play, scrub, counter);
 
-  // The scene's variants (#118), along the foot of the view, over the scale
-  // bar: a toggle each, the one the values are in pressed. A click asks the
+  // The scene's variants (#118), in the foot beside the transport: a toggle
+  // each, the one the values are in pressed. A click asks the
   // session, as the variables panel did, or -- on a saved page -- the page,
   // which drew each ahead (`_PAGE` in widget.py). Not in the studio panel,
   // whose host lists them in its Variables view.
@@ -839,22 +851,47 @@ function render({ model, el }) {
   variantsEl.hidden = true;
   let variantRow = null; // made for a scene that has variants, and only then
 
+  // A page being written: how far, and -- the view's own export -- a button
+  // that stops it.
+  const writing = document.createElement("div");
+  writing.className = "magpy-scene-writing";
+  writing.hidden = true;
+  writing.setAttribute("role", "status");
+  const writingText = document.createElement("span");
+  const writingCount = document.createElement("span");
+  writingCount.className = "magpy-scene-counter";
+  // a word, in the variants' material, rather than an icon to puzzle out
+  const stopButton = document.createElement("button");
+  stopButton.type = "button";
+  stopButton.className = "magpy-vars-chip";
+  stopButton.textContent = "Cancel";
+  stopButton.title = "Stop writing the file";
+  stopButton.addEventListener("click", () => {
+    model.send({ kind: "export-cancel", job: exportJob });
+    exportJob = null; // what is still on its way is for none
+    hideWriting();
+    notify("Stopped writing the file");
+  });
+  writing.append(writingText, writingCount, stopButton);
+  const progressBar = document.createElement("div");
+  progressBar.className = "magpy-scene-progress";
+  progressBar.hidden = true;
+
+  // The foot: one line of what stands there -- the run's transport, the
+  // variants, a page being written -- under the scale bar, which stands up
+  // off it (`keepCorner`).
+  const foot = document.createElement("div");
+  foot.className = "magpy-scene-foot";
+  foot.hidden = true;
+  foot.append(transport, variantsEl, writing, progressBar);
+
   // What the view has to say -- a file saved, full screen refused -- said
   // for a moment, and gone.
   const notice = document.createElement("div");
   notice.className = "magpy-scene-notice";
   notice.setAttribute("role", "status");
 
-  stage.append(
-    tools,
-    editBar,
-    variablesEl,
-    inspectorEl,
-    keyList,
-    transport,
-    variantsEl,
-    notice,
-  );
+  stage.append(tools, editBar, variablesEl, inspectorEl, keyList, foot, notice);
   el.append(stage);
 
   // --- full screen ------------------------------------------------------
@@ -1268,13 +1305,15 @@ function render({ model, el }) {
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
    *  column, which reaches down there in a view under about 520px tall, the
-   *  colour bar beside it, and the transport or a page's variants. Told again whenever either comes or goes, and when the
-   *  view is resized. */
+   *  colour bar beside it, and the foot. Told again whenever either comes
+   *  or goes, and when the view is resized. */
   function keepCorner() {
     placeColorBar(); // beside the column, as it now stands
+    foot.hidden = transport.hidden && variantsEl.hidden && writing.hidden;
+    el.classList.toggle("magpy-footed", !foot.hidden);
     if (!drawing()) return;
     api.keepClear(
-      [editBar, transport, variantsEl, colorBarEl]
+      [editBar, foot, colorBarEl]
         .filter((part) => !part.hidden)
         .map((part) => part.getBoundingClientRect()),
     );
@@ -1571,7 +1610,6 @@ function render({ model, el }) {
     const carried =
       (model.get("variants") || []).length > 0 && model.editor === undefined;
     variantsEl.hidden = !carried;
-    el.classList.toggle("magpy-varied", carried);
     if (carried) {
       variantRow ??= createVariables(variantsEl, {
         // a variant used, the panel's rows say the values it set; one a
@@ -1598,7 +1636,6 @@ function render({ model, el }) {
   function dressTransport() {
     const animated = frames() > 1;
     transport.hidden = !animated;
-    el.classList.toggle("magpy-animated", animated);
     keepCorner();
     scrub.max = String(Math.max(1, frames() - 1));
     scrub.value = String(shown);
@@ -1608,6 +1645,27 @@ function render({ model, el }) {
   /** Where in the run the picture is. */
   function showStep() {
     counter.textContent = `${shown + 1} / ${frames()}`;
+  }
+
+  /** How far a page being written has got, in the foot: `job` the view's
+   *  own export, which the button stops, else one a cell is writing, which
+   *  the busy kernel would not hear stopped. */
+  function showWriting({ text, done, total, job }) {
+    writingText.textContent = text;
+    writingCount.textContent = total ? `${done} / ${total}` : "";
+    stopButton.hidden = job === undefined;
+    progressBar.hidden = !total;
+    progressBar.style.width = total ? `${(100 * done) / total}%` : "0";
+    if (writing.hidden) {
+      writing.hidden = false;
+      keepCorner();
+    }
+  }
+
+  function hideWriting() {
+    writing.hidden = true;
+    progressBar.hidden = true;
+    keepCorner();
   }
 
   let noticeTimer = null;
@@ -1739,7 +1797,32 @@ function render({ model, el }) {
       return;
     }
     if (message.kind === "export") {
+      // only the page this view asked for, and not since stopped
+      if (message.job !== undefined && message.job !== exportJob) return;
+      exportJob = null;
+      hideWriting();
       download(message);
+      return;
+    }
+    if (message.kind === "progress") {
+      // A page being written: the view's own export a piece at a time, the
+      // next asked for here unless it was stopped; or one a cell writes.
+      if (message.job !== undefined && message.job !== exportJob) return;
+      if (message.failed !== undefined) {
+        exportJob = null;
+        hideWriting();
+        notify(`Could not write the file: ${message.failed}`, { stay: true });
+        return;
+      }
+      if (message.job === undefined && message.final) {
+        hideWriting();
+        notify("File written");
+        return;
+      }
+      showWriting(message);
+      if (message.job !== undefined) {
+        model.send({ kind: "export-more", job: message.job });
+      }
       return;
     }
     if (message.kind === "refused") {

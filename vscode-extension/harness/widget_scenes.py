@@ -49,6 +49,9 @@ Writes into OUT:
 * ``collection-trace.html`` -- a collection drawing a trace of its own, editable;
 * ``variants.html`` -- a ring whose variants change how many magnets it has,
   saved with them: a row of them along the foot, and a click draws that one;
+* ``run-variants.html`` -- a magnet on a path whose variants start it 30 mm
+  apart, saved with every variant's run: a click and a scrub draw that
+  variant's own step;
 * ``sealed.html`` -- as many cubes sealed into one body, as a meshed magnet's
   cells are: picked, outlined and hidden whole;
 * ``glyphs.html`` -- a cube, and a magenta dipole beside it: an arrow the
@@ -169,6 +172,25 @@ def ring_with_variants():
         return (held,)
 
     return SceneWidget(ring.build(), editable=True)
+
+
+def run_with_variants():
+    """A magnet on a five-step path, and variants that start it 30 mm apart:
+    a run beside variants, each with its own."""
+
+    from typing import Annotated
+
+    from magpylib_studio import Length, scene
+
+    @scene(variants={"left": {"start": -0.03}, "right": {"start": 0.0}})
+    def slide(start: Annotated[float, Length(-0.05, 0.05)] = -0.03):
+        magnet = magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.006,) * 3, position=(start, 0, 0)
+        )
+        magnet.move(np.linspace((0, 0, 0), (0.03, 0, 0), 5), start=0)
+        return (magnet,)
+
+    return SceneWidget(slide.build(), editable=True)
 
 
 def collection_with_a_trace():
@@ -561,6 +583,7 @@ def main(out):
     SceneWidget(body).write_html(out / "sealed.html")
     collection_with_a_trace().write_html(out / "collection-trace.html")
     ring_with_variants().write_html(out / "variants.html")
+    run_with_variants().write_html(out / "run-variants.html")
     dipole = magpy.misc.Dipole(
         moment=(0, 0, 1), position=(0.014, 0, 0), style_color="#ff00ff"
     )

@@ -580,15 +580,17 @@ def test_an_examples_script_names_nothing_by_hand(example):
     assert "name(" not in session.to_builder_script()
 
 
-@pytest.mark.parametrize("design", ["halbach", "coils"])
-def test_the_gallerys_designs_are_the_notebooks(design):
-    """`designs.py` holds the marimo demo's two functions for the gallery:
-    the cell that defines each, run as marimo would run it, builds the same
+@pytest.mark.parametrize(
+    ("design", "notebook"), [("halbach", "halbach_ring.py"), ("coils", "coil_pair.py")]
+)
+def test_the_gallerys_designs_are_the_notebooks(design, notebook):
+    """`designs.py` holds two marimo examples' functions for the gallery: the
+    cell that defines each, run as marimo would run it, builds the same
     document."""
     import magpylib_studio
     from magpylib_studio import designs
 
-    demo = pathlib.Path(__file__).parents[1] / "examples" / "marimo_demo.py"
+    demo = pathlib.Path(__file__).parents[1] / "examples" / "marimo" / notebook
     cell = next(
         node
         for node in ast.parse(demo.read_text()).body

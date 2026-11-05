@@ -161,8 +161,7 @@
 .magpy-scene-edit,
 .magpy-scene-readout,
 .magpy-scene-keys,
-.magpy-scene-transport,
-.magpy-scene-variants,
+.magpy-scene-foot,
 .magpy-scene-notice {
   position: absolute;
   box-sizing: border-box;
@@ -223,7 +222,7 @@
   padding: 2px;
 }
 
-.magpy-animated .magpy-scene-edit {
+.magpy-footed .magpy-scene-edit {
   bottom: 44px;
 }
 
@@ -243,7 +242,7 @@
 }
 
 /* The readout: the numbers the handles are writing, bottom left -- above the
-   transport when there is one -- as boxes that take a typed value. Everything
+   foot when there is one -- as boxes that take a typed value. Everything
    in it is click-through but the boxes, so the view is still what the
    pointer is for. */
 .magpy-scene-readout {
@@ -254,7 +253,7 @@
   pointer-events: none;
 }
 
-.magpy-animated .magpy-scene-readout {
+.magpy-footed .magpy-scene-readout {
   bottom: 44px;
 }
 
@@ -707,42 +706,48 @@
 /* `display` above would otherwise outrank the `hidden` attribute, and a
    button hidden for good reason -- Export in a saved page -- would show. */
 .magpy-icon[hidden],
-.magpy-scene-transport[hidden],
-.magpy-scene-variants[hidden] {
+.magpy-scene-foot[hidden],
+.magpy-scene-foot > [hidden] {
   display: none;
+}
+
+/* The foot: one line along the middle of the view's foot, of a run's
+   transport, the variants and a page being written, each that there is, a
+   rule between them. The scale bar stands up off it (`keepClear` in
+   scene3d.mjs). A view too narrow for the line wraps it. */
+.magpy-scene-foot {
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  /* its own width, not the half of the view right of its anchor */
+  width: max-content;
+  max-width: calc(100% - 16px);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.magpy-scene-foot > :not([hidden]) ~ :not([hidden]):not(.magpy-scene-progress) {
+  border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 }
 
 /* A run's transport: in sight whenever there is a run, because where in the
    run the picture is belongs to the picture, not to the tools. */
 .magpy-scene-transport {
-  left: 50%;
-  bottom: 8px;
-  transform: translateX(-50%);
-  width: min(26em, calc(100% - 16px));
+  flex: 1 1 20em;
+  min-width: 10em;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 2px 10px 2px 2px;
-  font-size: 11px;
 }
 
-/* A saved page's variants: the variables panel's row of toggles, alone, in
-   the transport's material, centred over the scale bar -- which stands up to
-   49px from the foot (`BAR_UP`, `BAR_ROOM` in scene3d.mjs), and up to 81px
-   over a run's transport, which lifts it (`keepClear`). */
+/* The variants: the variables panel's row of toggles, alone. */
 .magpy-scene-variants {
-  left: 50%;
-  bottom: 52px;
-  transform: translateX(-50%);
-  /* its own width, not the half of the view right of its anchor */
-  width: max-content;
-  max-width: calc(100% - 16px);
+  flex: none;
   padding: 3px 6px;
-  font-size: 11px;
-}
-
-.magpy-animated .magpy-scene-variants {
-  bottom: 84px;
 }
 
 .magpy-scene-variants .magpy-vars-variant {
@@ -779,6 +784,11 @@
 .magpy-vars-slides .magpy-vars-chip.on,
 .magpy-vars-sliding {
   cursor: ew-resize;
+}
+
+/* Any toggle starts a slide, by finger too: the browser is not to take the
+   sideways move for a scroll. */
+.magpy-vars-slides .magpy-vars-chip {
   touch-action: none;
 }
 
@@ -797,7 +807,7 @@
 }
 
 /* A notice -- a file saved, full screen refused -- said for a moment and
-   gone; above the scale bar and what stands at the foot. */
+   gone; above the scale bar and the foot. */
 .magpy-scene-notice {
   left: 50%;
   bottom: 8px;
@@ -810,20 +820,37 @@
   transition: opacity 0.2s;
 }
 
-.magpy-varied .magpy-scene-notice {
-  bottom: 88px;
+.magpy-footed .magpy-scene-notice {
+  bottom: 76px;
 }
 
 .magpy-scene-notice.shown {
   opacity: 1;
 }
 
-.magpy-animated .magpy-scene-notice {
-  bottom: 84px;
+/* A page being written (`_export_more` and `_Progress` in widget.py): what,
+   how far, and a button that stops the view's own; a bar along the foot's
+   lower edge, inside its rounded card. */
+.magpy-scene-writing {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  white-space: nowrap;
 }
 
-.magpy-varied.magpy-animated .magpy-scene-notice {
-  bottom: 120px;
+.magpy-scene-writing .magpy-scene-counter {
+  min-width: 0;
+}
+
+.magpy-scene-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--vscode-focusBorder);
+  transition: width 0.1s linear;
 }
 
 /* ---- legend ---------------------------------------------------------------

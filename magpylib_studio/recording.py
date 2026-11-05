@@ -441,8 +441,14 @@ class SceneFunction:
             _BUILDING.reset(token)
         self._keep_variants(document)
         # The build is where the scene starts, not a run of edits: undone a
-        # step at a time it would come apart, which nobody asked for.
-        document.session.forget_history()
+        # step at a time it would come apart, which nobody asked for. Its
+        # sheets are solved for it there, not as some cell solved them.
+        said = document.session.forget_history()
+        if said:
+            warnings.warn(
+                f"the sheets are not solved for the scene as built: {said}",
+                stacklevel=2,
+            )
         document._built_from = self
         return document
 

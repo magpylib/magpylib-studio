@@ -288,7 +288,10 @@ a replacement that *is* an edit -- the script tab's save, a reset --
 see `_replace`, which keeps the step.
 
 `scene` is a document dict or a path to a JSON file containing one.
-(Script -> document is deferred by design.)
+(Script -> document is deferred by design.) Its sheets are taken as
+solved for it as it stands, not solved again: what they were solved
+for is not saved
+(docs/decisions.md#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date).
 
 ### `session.list_examples()`
 
