@@ -57,6 +57,8 @@ docs = [
   "sphinx_copybutton",
   "sphinx_autodoc_typehints",
   "sphinx_design",
+  # the solved examples' pages solve their parts as they are written
+  "magpylib-material-response>=0.10.0",
 ]
 
 [project.urls]

@@ -341,6 +341,7 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     """magpylib works in SI units, so a scene written in round numbers is a
     magnet a metre on a side. Every shipped example is a bench-top assembly.
 
+    100 mm at most: the U-core's yoke, as material-response's docs size it.
     Asserted on what is *drawn*, not on what is declared, because the two can
     part company: a Sensor's glyph was once pinned absolute, so it kept
     magpylib's default size of 1 and arrived a metre across beside 10 mm
@@ -353,7 +354,7 @@ def test_every_example_is_drawn_at_the_size_of_real_hardware(name):
     for mesh in session.get_scene()["meshes"]:
         corners = np.array(mesh["position"], dtype=float).reshape(-1, 3)
         extent = float(np.max(corners.max(axis=0) - corners.min(axis=0)))
-        assert extent < 0.1, (
+        assert extent <= 0.1, (
             f"{name}: {mesh['object_id']} is drawn {extent * 1000:.0f} mm across"
         )
 

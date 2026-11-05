@@ -14,9 +14,12 @@ also a lesson in writing one::
 
 from __future__ import annotations
 
+import ast
 import dataclasses
+import functools
 import importlib
-import inspect
+import importlib.util
+import pathlib
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,30 +36,40 @@ class Example:
     #: Offered by the gallery. The others stay loadable by name: tests, the
     #: harness and the evals are written against them.
     gallery: bool = True
+    #: The packages it needs beyond the studio's own: a part solved by
+    #: magpylib-material-response, which is not one of them.
+    needs: tuple = ()
+    #: Its marimo notebook in `examples/marimo/`, where it has one: the scene
+    #: imported, and what a notebook adds round it.
+    notebook: str | None = None
 
     @property
-    def _module(self):
-        return importlib.import_module(f"{__name__}.{self.module}")
+    def available(self):
+        """Whether what it `needs` is installed: the gallery offers it only
+        then, and its module solves at import."""
+        return all(importlib.util.find_spec(name) for name in self.needs)
 
     @property
     def scene(self):
-        """The `@scene` function."""
-        return getattr(self._module, self.module)
+        """The `@scene` function. Importing its module builds what it needs
+        first -- for a solved example, the solve."""
+        module = importlib.import_module(f"{__name__}.{self.module}")
+        return getattr(module, self.module)
 
     @property
     def title(self):
         """Its name, as the gallery and its docs page head it."""
-        return self._module.TITLE
+        return _said(self.module)["TITLE"]
 
     @property
     def summary(self):
         """The line the gallery shows under the title."""
-        return self._module.SUMMARY
+        return _said(self.module)["SUMMARY"]
 
     @property
     def text(self):
         """What the docs page says about it: the module's docstring."""
-        return inspect.getdoc(self._module)
+        return _said(self.module)["text"]
 
     def document(self):
         """The scene as a document, as `load_scene` takes it."""
@@ -66,22 +79,58 @@ class Example:
         return session.to_dict()
 
 
+@functools.cache
+def _said(module):
+    """A module's title, gallery line and text, read from its source rather
+    than by importing it: listing the gallery imports no example, so it
+    solves nothing and needs nothing an example does."""
+    tree = ast.parse(
+        (pathlib.Path(__file__).parent / f"{module}.py").read_text("utf-8")
+    )
+    said = {"text": ast.get_docstring(tree)}
+    for node in tree.body:
+        target = node.targets[0] if isinstance(node, ast.Assign) else None
+        if isinstance(target, ast.Name) and target.id in {"TITLE", "SUMMARY"}:
+            said[target.id] = ast.literal_eval(node.value)
+    return said
+
+
+_SOLVED = ("magpylib_material_response",)
+
 #: In the gallery's order: each leans on a different feature.
 EXAMPLES = {
     e.key: e
     for e in (
-        Example("rings", "halbach_ring", field_lines=True),
-        Example("helmholtz", "coil_pair", field_lines=True),
+        Example("rings", "halbach_ring", field_lines=True, notebook="halbach_ring.py"),
+        Example("helmholtz", "coil_pair", field_lines=True, notebook="coil_pair.py"),
         Example("spiral", "helical_winding"),
         Example("pair", "facing_magnets"),
         Example("tolerance", "probe_placement"),
         Example("quiver", "turning_magnet"),
         Example("array", "magnet_array"),
         Example("solid", "superellipsoid"),
-        Example("halbach", "halbach_stack", gallery=False),
+        Example("halbach", "halbach_stack"),
+        Example(
+            "versions", "unit_versions", field_lines=True, notebook="unit_versions.py"
+        ),
+        Example("kinds", "every_kind", notebook="every_kind.py"),
+        Example(
+            "ucore",
+            "ucore_electromagnet",
+            field_lines=True,
+            needs=_SOLVED,
+            notebook="ucore_solved.py",
+        ),
+        Example(
+            "slide",
+            "solved_plate_run",
+            field_lines=True,
+            needs=_SOLVED,
+            notebook="run_with_variants.py",
+        ),
         Example("coil", "solenoid", gallery=False),
     )
 }
 
-#: The ones the gallery offers.
-GALLERY = {key: e for key, e in EXAMPLES.items() if e.gallery}
+#: The ones the gallery offers: those it shows, whose needs are installed.
+GALLERY = {key: e for key, e in EXAMPLES.items() if e.gallery and e.available}

@@ -128,11 +128,21 @@ from magpylib_studio.widget import SceneWidget
 SceneWidget(EXAMPLES["{key}"].scene, editable=True{lines})
 ```
 
-Written as a scene function, with what it imports, it reads:
+{notebook}Written as a scene function, with what it imports, it reads:
 
 ```python
 {code}
 ```
+"""
+
+#: Where an example has a marimo notebook: a link that runs it in molab,
+#: marimo's hosted notebooks, which install what its script header names.
+_NOTEBOOK = """\
+Its marimo notebook, `examples/marimo/{path}`, adds what a notebook shows best
+round it. Run it in molab, marimo's hosted notebooks:
+
+[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/magpylib/magpylib-studio/blob/main/examples/marimo/{path})
+
 """
 
 _INDEX = """\
@@ -186,8 +196,8 @@ _CARD = """\
 """
 
 _OTHERS = """\
-The tests and the evaluations are written against two more, which the gallery
-does not show:
+The tests and the evaluations are written against {count} more, which the
+gallery does not show:
 
 {items}
 """
@@ -255,6 +265,9 @@ def _write_examples(_app=None):
             key=key,
             lines=", field_lines=True" if example.field_lines else "",
             code=_code(example.module),
+            notebook=_NOTEBOOK.format(path=example.notebook)
+            if example.notebook
+            else "",
         )
         view = SceneWidget(example.scene.build(), field_lines=example.field_lines)
         _write(VIEWS_DIR / f"{example.module}.html", view.to_html(title=example.title))
@@ -276,7 +289,16 @@ def _write_examples(_app=None):
         EXAMPLES_DIR / "index.md",
         _INDEX.format(
             cards="\n".join(cards),
-            others=_OTHERS.format(items="\n".join(others)) if others else "",
+            others=(
+                _OTHERS.format(
+                    count=["one", "two", "three"][len(others) - 1]
+                    if len(others) <= 3
+                    else len(others),
+                    items="\n".join(others),
+                )
+                if others
+                else ""
+            ),
             pages="\n".join(pages),
         ),
     )
