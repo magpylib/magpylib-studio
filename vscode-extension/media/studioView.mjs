@@ -97,6 +97,29 @@ function partsIn(tree, into = new Map(), apart = new Set()) {
 let inSidebar = null; // the object the sidebar shows
 
 let previewTaken = null; // settles the pose the host has not yet answered
+
+/** The view's own calls this panel answers: the grid of variants (#127) asks
+ *  each variant's scene and which variant the scene is at, through the host
+ *  to the engine, and uses one through the host, which brings every surface
+ *  along, as the Variables view's choice does. The rest are the panel's
+ *  sidebar's, and are never asked here. */
+const READS = new Set([
+  "variant_scene",
+  "get_variables",
+  "drop_variant_copies",
+]);
+function answerCall({ id, method, params }) {
+  const reply = (answer) => emit("msg:custom", { kind: "rpc", id, ...answer });
+  if (method === "use_variant") {
+    vscodeApi.postMessage({ type: "useVariant", name: params.name });
+    reply({ result: { ok: true } });
+  } else if (READS.has(method)) {
+    rpc(method, params).then(
+      (result) => reply({ result }),
+      (error) => reply({ error: { message: String(error.message || error) } }),
+    );
+  }
+}
 const model = {
   get: (key) => values[key],
   set: (key, value) => {
@@ -108,11 +131,15 @@ const model = {
   off() {},
   send(message) {
     if (message.kind === "frame") serveFrame(message);
+    else if (message.kind === "rpc") answerCall(message);
   },
   // the Scene tree is the studio's legend; the widget's is a button away
   legendStartsClosed: true,
   // Tab walks the scene's objects, as it did in this panel
   tabWalks: true,
+  // the variants' row along the foot, for a click to use one -- through the
+  // host -- and a lift to show one beside the scene (#127)
+  showsVariants: true,
   editor: {
     // the host opens the undo group; the view's own readout says what a drag
     // takes away from a variable, so the host is not asked to say it again
@@ -252,9 +279,10 @@ async function refresh() {
 }
 
 async function drawScene() {
-  const [payload, tree] = await Promise.all([
+  const [payload, tree, panel] = await Promise.all([
     rpc("get_scene", {}),
     rpc("object_tree", {}),
+    rpc("get_variables", {}),
   ]);
   if (charting()) return; // switched while the engine was answering
   const hidden = hiddenIn(tree);
@@ -269,6 +297,11 @@ async function drawScene() {
   // the document's switch, which the engine's scene says (#45)
   told.field_lines = Boolean(payload.field_lines);
   take("tree", tree);
+  // the variants' names, for the grid of them; the Variables view uses them
+  const names = Object.keys(panel?.variants ?? {});
+  if (names.join("\n") !== (values.variants ?? []).join("\n")) {
+    take("variants", names);
+  }
   take("hidden", off);
   take("frames", framesOf(payload));
   take("field_lines", told.field_lines);

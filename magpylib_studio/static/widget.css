@@ -724,7 +724,9 @@
   overflow: hidden;
 }
 
-.magpy-scene-foot > :not([hidden]) ~ :not([hidden]):not(.magpy-scene-progress) {
+.magpy-scene-foot
+  > :not([hidden])
+  ~ :not([hidden]):not(.magpy-scene-progress):not(.magpy-scene-spread) {
   border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 }
 
@@ -763,19 +765,46 @@
   min-width: 10em;
 }
 
-/* The pressed toggle is a handle: a grip on it while the pointer is on the
-   row, and the cursor of a sideways drag. Kept in place, faint, so the row
-   does not move when the grip shows. */
-.magpy-vars-slides .magpy-vars-chip.on::before {
-  content: "⠿ ";
-  opacity: 0;
+/* The spread button, past the chips: a tool, as the toolbar's are, not one
+   more chip -- no outline, a hairline between it and the row, and pressed
+   as a toolbar toggle is. Not while the foot asks what a page keeps, where
+   a chip says that and nothing else. */
+.magpy-icon.magpy-scene-spread {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  margin: 0 3px 0 5px;
 }
 
-.magpy-scene-variants:hover .magpy-vars-slides .magpy-vars-chip.on::before,
-.magpy-vars-sliding .magpy-vars-chip.on::before {
-  opacity: 0.8;
+.magpy-icon.magpy-scene-spread::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 4px;
+  bottom: 4px;
+  border-left: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 
+.magpy-icon.magpy-scene-spread svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* closing every pane: the icon and the words for it */
+.magpy-icon.magpy-scene-spread-worded {
+  display: flex;
+  gap: 5px;
+  width: auto;
+  padding: 0 7px 0 5px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.magpy-choosing .magpy-scene-spread {
+  display: none;
+}
+
+/* The pressed toggle is a handle: the cursor of a sideways drag. */
 .magpy-vars-slides .magpy-vars-chip.on,
 .magpy-vars-sliding {
   cursor: ew-resize;
@@ -1844,6 +1873,13 @@
   opacity: 0.7;
 }
 
+/* A variant selected, for a cell to plot (the widget's `selected_variants`):
+   ringed, apart from the fill that says the scene is at it. */
+.magpy-vars-chip.magpy-selected {
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
 .magpy-vars-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2156,4 +2192,190 @@
 
 .magpy-panel-notice:empty {
   display: none;
+}
+
+/* ---- variants side by side (#127) ---------------------------------------
+   The view in a pane of its own: alone, nothing of it shows. Split, the panes
+   share the view's height, in the room the controls leave (`placePanes`),
+   each named in its corner, a line between each two to drag. */
+.magpy-scene-panes {
+  position: relative;
+  display: flex;
+  box-sizing: border-box;
+}
+.magpy-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.magpy-split-row {
+  flex-direction: row;
+}
+.magpy-split-column {
+  flex-direction: column;
+}
+.magpy-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.magpy-pane-body {
+  width: 100%;
+  height: 100%;
+}
+.magpy-panes-split .magpy-pane-body {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  outline: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.magpy-sash {
+  flex: 0 0 6px;
+  position: relative;
+  z-index: 1;
+}
+.magpy-split-row > .magpy-sash {
+  cursor: col-resize;
+}
+.magpy-split-column > .magpy-sash {
+  cursor: row-resize;
+}
+.magpy-sash:hover,
+.magpy-sash:active {
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, #4b8fe2) 45%,
+    transparent
+  );
+}
+.magpy-pane-tag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-background, #fff) 82%,
+    transparent
+  );
+  outline: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  cursor: grab;
+  user-select: none;
+  max-width: calc(100% - 8px);
+  white-space: nowrap;
+}
+.magpy-pane-tag[hidden] {
+  display: none;
+}
+/* its variant selected: ringed, as its chip in the row is */
+.magpy-pane-tag.magpy-selected {
+  outline: 2px solid var(--vscode-focusBorder);
+}
+.magpy-pane-tag > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.magpy-pane-close {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0 3px;
+  border-radius: 999px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.magpy-pane-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+/* where a chip or a pane carried would land: half of the pane under it */
+.magpy-pane-drop {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 4px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, #4b8fe2) 22%,
+    transparent
+  );
+  outline: 2px solid var(--vscode-focusBorder, #4b8fe2);
+  transition: all 80ms ease-out;
+}
+.magpy-pane-drop[hidden] {
+  display: none;
+}
+.magpy-pane-ghost {
+  position: absolute;
+  z-index: 6;
+  /* its words' width, not what is left of the view right of it */
+  width: max-content;
+  pointer-events: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--vscode-focusBorder, #4b8fe2);
+  color: #fff;
+  white-space: nowrap;
+}
+/* a variant with a pane is there, not in the row as well */
+.magpy-vars-chip.magpy-in-pane {
+  display: none;
+}
+/* every variant in a pane: the row's name goes too, and the spread
+   button, alone in the foot, needs no line before it */
+.magpy-scene-variants.magpy-all-paned {
+  display: none;
+}
+.magpy-scene-transport[hidden]
+  + .magpy-all-paned
+  + .magpy-scene-spread::before {
+  display: none;
+}
+/* a chip carried into the view: out of its row, its place kept empty */
+.magpy-vars-chip.magpy-carried {
+  -webkit-text-fill-color: transparent;
+  background: transparent;
+  border-style: dashed;
+}
+/* landing nowhere: grey, its white words still read, light theme or dark */
+.magpy-pane-refused {
+  background: #767676;
+}
+/* drawn again, one by one after an edit: the pane's edge pulses, as the
+   view's does while python is slow to answer */
+.magpy-pane-busy .magpy-pane-body {
+  outline: 2px solid var(--vscode-focusBorder, #4b8fe2);
+  animation: magpy-pane-busy 0.9s ease-in-out infinite alternate;
+}
+@keyframes magpy-pane-busy {
+  from {
+    outline-color: color-mix(
+      in srgb,
+      var(--vscode-focusBorder, #4b8fe2) 20%,
+      transparent
+    );
+  }
+}
+/* a finger drags these, as a mouse does, rather than scrolling the page */
+.magpy-sash,
+.magpy-pane-tag {
+  touch-action: none;
+}
+/* a variant the scene cannot use now: its pane says why, in its tooltip */
+.magpy-pane-unusable .magpy-pane-body {
+  opacity: 0.4;
+}
+/* full screen, the panes -- the view alone, too -- fill what the stage has */
+.magpy-fullscreen .magpy-scene-panes {
+  height: 100%;
 }

@@ -43,13 +43,34 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   was. In marimo, wrap the view as `mo.ui.anywidget(view)` and read it in
   another cell, which re-runs after each edit. In Jupyter, use
   `view.observe(callback, "revision")`.
+- `view.panes` lists the variants with a pane beside the scene's. Assigned,
+  `view.panes = ["wide"]` opens those and closes the rest; the variant the scene
+  is at, and a name past the twelfth pane, open none, and the trait reads what
+  opened.
+- `view.selected_variants` lists the variants selected: a click on a chip or a
+  pane's tag selects one alone, Ctrl-click or Cmd-click adds or removes one. A
+  chip's click also sets the scene to that variant; a Ctrl-click and a tag's
+  click do not. Assignable, names checked. `session.variant_session(name)` is
+  the copy of the scene at that variant, the one its pane is drawn from: its
+  `get_field` gives a curve per selected variant.
 
 ## A scene, its variants and a run
 
 A `@scene` function shown in the view has its variants as a row along the view's
-foot. With the handles out (`editable=True`, or the pencil), the sliders toggle
-opens a slider per variable, and `open_panel="variables"` opens it at the start.
-An object on a path is a run, which the view plays.
+foot. A chip lifted out of the row and dropped on a side of the view is a pane
+of its own there, the scene at that variant's values beside the scene, as VS
+Code splits its editors: up to 12 panes with the scene's, moved by their tags,
+resized by the line between them, turned together. A variant with a pane has no
+chip in the row until the pane closes; the one the scene is at opens no pane,
+the scene's own shows it, its tag named for it (`✎ Helmholtz` in an editable
+view: the pencil marks the live scene, the other panes are copies), and its chip
+leaves the row too while the view is split. The button at the end of the row
+opens every other variant at once in a grid, up to 11, and closes them all
+again. The scene's own ×, at a variant, moves the scene to the next pane's
+variant (one step to undo) and closes that pane into it. With the handles out
+(`editable=True`, or the pencil), the sliders toggle opens a slider per
+variable, and `open_panel="variables"` opens it at the start. An object on a
+path is a run, which the view plays.
 
 ```python
 from typing import Annotated

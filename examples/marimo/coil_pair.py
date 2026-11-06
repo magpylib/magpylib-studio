@@ -9,8 +9,10 @@
 """A coil pair to flip: `marimo edit examples/marimo/coil_pair.py`.
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs
-them together, anti-Helmholtz against each other, and the numbers under the
-view follow every edit.
+them together, anti-Helmholtz against each other, and the numbers beside the
+view follow every edit. The plot draws a curve for each variant selected at the
+foot of the view, Ctrl-click or Cmd-click for more, and the scene's while none
+is.
 
 Needs the widget extra and marimo:
 
@@ -53,6 +55,9 @@ def _(mo):
     coils on one axis, each current a variable: the **Helmholtz** variant
     runs them together, for a flat field between, and **anti-Helmholtz**
     turns the upper one round, for a field that passes through zero.
+    Ctrl-click or Cmd-click the other variant's chip, at the foot of the
+    view, and the plot draws both, one curve each; drag the chip up
+    into the view, and it has a pane of its own beside the scene.
     """)
     return
 
@@ -60,10 +65,12 @@ def _(mo):
 @app.cell
 def _(inspect, mo):
     # The scene, from the package that the gallery and the docs read too:
-    # its source shown, so the page still says how it is written.
+    # its source a click away, so the page still says how it is written.
     from magpylib_studio.examples.coil_pair import coil_pair as coils
 
-    mo.md(f"```python\n{inspect.getsource(coils)}```")
+    mo.accordion(
+        {"How it is written": mo.md(f"```python\n{inspect.getsource(coils)}```")}
+    )
     return (coils,)
 
 
@@ -71,13 +78,25 @@ def _(inspect, mo):
 def _(SceneWidget, coils, json, mo):
     pair = coils.build()
     pair_session = pair.session
-    # Opened with its variables; the two variants a click each at its foot.
+    # Opened with its variables; the two variants a click each at its foot,
+    # the one the scene is at selected, so a Ctrl-click adds the other
+    _at = pair_session.get_variables()["variant"]
     pair_view3d = SceneWidget(
-        pair, editable=True, height=480, field_lines=True, open_panel="variables"
+        pair,
+        editable=True,
+        height=480,
+        field_lines=True,
+        open_panel="variables",
+        selected_variants=[_at] if _at else [],
     )
     pair_view = mo.ui.anywidget(pair_view3d)
     pair_edited, set_pair_edited = mo.state(0)
     pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
+    # the variants selected at the foot of the view: a curve each, below
+    pair_chosen, set_pair_chosen = mo.state(pair_view3d.selected_variants)
+    pair_view3d.observe(
+        lambda change: set_pair_chosen(change.new), names="selected_variants"
+    )
     # Shown beside the numbers below, made here, once, so the camera stays
     # put; its files written when clicked, so they hold the scene as it is
     # then.
@@ -105,25 +124,46 @@ def _(SceneWidget, coils, json, mo):
             ]
         )
     )
-    return pair_edited, pair_session, pair_shown, pair_view3d
+    return pair_chosen, pair_edited, pair_session, pair_shown, pair_view3d
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, pair_edited, pair_session, pair_shown, pair_view3d):
+def _(go, mo, np, pair_chosen, pair_edited, pair_session, pair_shown, pair_view3d):
     _ = pair_edited()
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
     _radius = pair_view3d.variables["radius"]
     _z = np.linspace(-1.5, 1.5, 121) * _radius
-    _bz = np.asarray(
-        pair_session.get_field(points=[[0, 0, z] for z in _z])["values"], dtype=float
-    )[:, 2]
+
+    def _bz_of(session):
+        _along = session.get_field(points=[[0, 0, z] for z in _z])["values"]
+        return np.asarray(_along, dtype=float)[:, 2]
+
+    _bz = _bz_of(pair_session)
     _middle = len(_z) // 2
     _gradient = np.gradient(_bz, _z)[_middle]
     _probe = np.asarray(
         pair_session.get_field(sensor_id="probe")["values"], dtype=float
     )
     _magnitude = np.linalg.norm(_probe.reshape(-1, 3), axis=1)
-    _figure = go.Figure(go.Scatter(x=_z * 1e3, y=_bz * 1e3))
+    # a curve for each variant selected, from the copy of the scene at it --
+    # the scene's own where it is at that one -- and the scene's alone while
+    # none is
+    _at = pair_session.get_variables()["variant"]
+    _curves = {}
+    for _name in pair_chosen():
+        if _name == _at:
+            _curves[_name] = _bz
+            continue
+        try:
+            _curves[_name] = _bz_of(pair_session.variant_session(_name))
+        except ValueError:
+            continue  # one the scene cannot use as it stands: its chip says why
+    _figure = go.Figure(
+        [
+            go.Scatter(x=_z * 1e3, y=_along * 1e3, name=_name)
+            for _name, _along in (_curves or {_at or "edited": _bz}).items()
+        ]
+    )
     _figure.update_layout(
         template=_template,
         autosize=True,

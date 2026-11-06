@@ -43,6 +43,15 @@
  *   false is the rows without it, for that host's panel. `slide` makes the
  *   pressed toggle a handle: dragged sideways, each variant it passes is
  *   shown, as a slider's values are, and the one let go on is used.
+ *   `onLift(name, event, chip)`, with `slide`: the pressed toggle lifted
+ *   out of the row, up, before any slide -- the host's to carry from there
+ *   (the widget drops it in the view as a pane of its own), and nothing
+ *   used.
+ *   `onSelect(name, add)`: a toggle clicked, for a host that keeps a
+ *   selection of variants apart from the one the values are in -- `add` with
+ *   Ctrl or Cmd held, the scene left as it is, and the toggle in or out of
+ *   the selection; without, after the values are set to it, as a slide's
+ *   release does too.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -149,6 +158,8 @@ export function createVariables(
     variants: withVariants = true,
     fits = asToggles,
     slide = false,
+    onLift = null,
+    onSelect = null,
   } = {},
 ) {
   const withHelp = !compact && !variantsOnly;
@@ -262,12 +273,33 @@ export function createVariables(
         // A press on a toggle that slides is the slide's, a click with no
         // move included; a click from the keyboard is not pressed at all.
         chip.addEventListener("click", (event) => {
+          if (onSelect && adds(event)) {
+            // a Ctrl-click on a Mac is a context menu, taken already
+            if (event.timeStamp - menuAt > 500) onSelect(name, true);
+            return;
+          }
           if (!on && !(slide && event.detail > 0)) useVariant(name);
+          onSelect?.(name, false);
         });
+        if (onSelect) {
+          chip.addEventListener("contextmenu", (event) => {
+            if (!event.ctrlKey) return;
+            event.preventDefault();
+            menuAt = event.timeStamp;
+            onSelect(name, true);
+          });
+        }
+        const up = onLift ? ", or up into the view beside the scene" : "";
         if (slide && !chip.disabled) {
-          chip.title = `${says(name)} -- drag sideways for the others`;
+          chip.title = `${says(name)} -- drag sideways for the others${up}`;
           chip.addEventListener("pointerdown", (event) =>
             slideFrom(event, chips, names, unusable),
+          );
+        } else if (onLift && !chip.disabled) {
+          // no slide here: a press only lifts, and a click still uses it
+          chip.title = `${says(name)} -- drag it up into the view beside the scene`;
+          chip.addEventListener("pointerdown", (event) =>
+            liftFrom(event, chip, name),
           );
         }
         chips.push(chip);
@@ -324,8 +356,52 @@ export function createVariables(
       });
   }
 
+  /** A click that adds to the selection, or takes from it: Ctrl or Cmd held. */
+  const adds = (event) => event.ctrlKey || event.metaKey;
+  let menuAt = -Infinity; // when a Ctrl-click last came as a context menu
+
+  /** The click a carried toggle's release would make on it, taken: a carry
+   *  let go back over its row changes nothing. */
+  function swallowClick(chip) {
+    const swallow = (click) => {
+      click.stopImmediatePropagation();
+      click.preventDefault();
+    };
+    chip.addEventListener("click", swallow, { capture: true, once: true });
+    addEventListener(
+      "pointerup",
+      () => setTimeout(() => chip.removeEventListener("click", swallow, true)),
+      { capture: true, once: true },
+    );
+  }
+
+  /** How far above its row a toggle is lifted, in CSS pixels, to be carried. */
+  const LIFT = 14;
+
+  /** A press on a toggle where nothing slides: lifted up out of the row, it
+   *  is the host's to carry (`onLift`); let go where it was, it is a click. */
+  function liftFrom(event, chip, name) {
+    if (event.button !== 0 || (onSelect && adds(event))) return;
+    const top = chip.getBoundingClientRect().top;
+    const move = (e) => {
+      if (e.clientY >= top - LIFT) return;
+      done();
+      swallowClick(chip); // let go back over it, it is no click on it
+      onLift(name, e, chip);
+    };
+    const done = () => {
+      removeEventListener("pointermove", move, true);
+      removeEventListener("pointerup", done, true);
+      removeEventListener("pointercancel", done, true);
+    };
+    addEventListener("pointermove", move, true);
+    addEventListener("pointerup", done, true);
+    addEventListener("pointercancel", done, true);
+  }
+
   function slideFrom(event, chips, names, unusable) {
     if (event.button !== 0) return; // the main button, a finger or a pen
+    if (onSelect && adds(event)) return; // a selection's click, not a slide
     event.preventDefault(); // no text selected along the way
     const start = chips.findIndex((chip) => chip.classList.contains("on"));
     let at = start;
@@ -335,7 +411,8 @@ export function createVariables(
       let best = at;
       let gap = Infinity;
       chips.forEach((chip, i) => {
-        if (unusable[names[i]]) return;
+        // one out of the row -- its variant in a pane of the host's -- none
+        if (unusable[names[i]] || !chip.getClientRects().length) return;
         const box = chip.getBoundingClientRect();
         const off = Math.abs(box.left + box.width / 2 - x);
         if (off < gap) [best, gap] = [i, off];
@@ -358,6 +435,26 @@ export function createVariables(
     press(nearest(event.clientX));
     const pressedAt = at;
     const move = (e) => {
+      // lifted up out of the row before sliding: the host carries it
+      if (!slid && onLift) {
+        const box = chips[pressedAt].getBoundingClientRect();
+        if (e.clientY < box.top - LIFT) {
+          removeEventListener("pointermove", move, true);
+          removeEventListener("pointerup", release, true);
+          removeEventListener("pointercancel", release, true);
+          press(start);
+          dragging = false;
+          // a refresh held off while the chip was pressed, caught up
+          if (missedRefresh) {
+            missedRefresh = false;
+            load().catch(say);
+          }
+          // let go back over the chip, it is not a click on it as well
+          swallowClick(chips[pressedAt]);
+          onLift(names[pressedAt], e, chips[pressedAt]);
+          return;
+        }
+      }
       const i = nearest(e.clientX);
       if (i === at) return;
       if (!slid) {
@@ -385,6 +482,7 @@ export function createVariables(
         try {
           const res = await rpc("use_variant", { name: names[at] });
           if (res && res.ok === false) say(res.error);
+          else onSelect?.(names[at], false);
         } catch (error) {
           say(error);
         }

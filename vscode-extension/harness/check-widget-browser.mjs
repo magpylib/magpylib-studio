@@ -788,45 +788,292 @@ async function collectionTrace(port, base) {
 
 /** A saved page's variants, along its foot: none pressed while the values are
  *  in neither, and a click draws that variant -- here a ring of eight where
- *  there were five -- with nothing behind the page to ask. */
+ *  there were five -- with nothing behind the page to ask. The one clicked
+ *  is selected alone, and a Cmd-click or a Ctrl-click adds another or takes
+ *  it out, the scene left where it is. */
 async function savedVariants(port, base) {
-  await check("a saved page draws the variant clicked", async () => {
-    const tab = await openTab(port);
-    try {
-      await tab.navigate(`${base}/out/variants.html`);
-      const chips = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]`;
-      const drawn = await tab.until(
-        `return ${VIEW}?.querySelector("canvas") && ${chips}.length === 2`,
-        20_000,
-      );
-      if (!drawn) return "the page never drew its variants";
-      const pressed = () =>
-        tab.evaluate(
-          `return ${chips}.filter((c) => c.classList.contains("on")).map((c) => c.textContent)`,
+  await check(
+    "a saved page draws the variant clicked, and selects",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/variants.html`);
+        const chips = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]`;
+        const drawn = await tab.until(
+          `return ${VIEW}?.querySelector("canvas") && ${chips}.length === 2`,
+          20_000,
         );
-      // the ring's copies are drawn on its magnet's node, one child each
-      const magnets = `window.scene3d.byObjectId.get("magnet").children.length`;
-      const before = {
-        pressed: await pressed(),
-        magnets: await tab.evaluate(`return ${magnets}`),
-      };
-      await tab.evaluate(
-        `${chips}.find((c) => c.textContent === "eight").click()`,
-      );
-      const eight = await tab.until(`return ${magnets} === 8`, 5_000);
-      const after = {
-        pressed: await pressed(),
-        magnets: await tab.evaluate(`return ${magnets}`),
-      };
-      const said = JSON.stringify({ before, after });
-      if (before.pressed.length || before.magnets !== 5)
-        return `at first: ${said}`;
-      if (!eight || after.pressed.join() !== "eight") return `clicked: ${said}`;
-      return thrown(tab);
-    } finally {
-      await tab.close();
-    }
-  });
+        if (!drawn) return "the page never drew its variants";
+        const pressed = () =>
+          tab.evaluate(
+            `return ${chips}.filter((c) => c.classList.contains("on")).map((c) => c.textContent)`,
+          );
+        // the ring's copies are drawn on its magnet's node, one child each
+        const magnets = `window.scene3d.byObjectId.get("magnet").children.length`;
+        const before = {
+          pressed: await pressed(),
+          magnets: await tab.evaluate(`return ${magnets}`),
+        };
+        await tab.evaluate(
+          `${chips}.find((c) => c.textContent === "eight").click()`,
+        );
+        const eight = await tab.until(`return ${magnets} === 8`, 5_000);
+        const after = {
+          pressed: await pressed(),
+          magnets: await tab.evaluate(`return ${magnets}`),
+        };
+        const said = JSON.stringify({ before, after });
+        if (before.pressed.length || before.magnets !== 5)
+          return `at first: ${said}`;
+        if (!eight || after.pressed.join() !== "eight")
+          return `clicked: ${said}`;
+        const selected = () =>
+          tab.evaluate(
+            `return ${chips}.filter((c) => c.classList.contains("magpy-selected")).map((c) => c.textContent)`,
+          );
+        // with Cmd, then Ctrl -- which a Mac sends as a context menu
+        const click = async (name, modifiers) => {
+          const at = await tab.evaluate(`
+          const c = ${chips}.find((c) => c.textContent === "${name}").getBoundingClientRect();
+          return { x: c.x + c.width / 2, y: c.y + c.height / 2 };`);
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...at,
+              modifiers,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 300));
+          return {
+            selected: (await selected()).join(),
+            pressed: (await pressed()).join(),
+          };
+        };
+        const steps = {
+          clicked: (await selected()).join(),
+          cmd: await click("three", 4),
+          ctrl: await click("eight", 2),
+        };
+        if (
+          steps.clicked !== "eight" ||
+          steps.cmd.selected !== "three,eight" ||
+          steps.ctrl.selected !== "three" ||
+          steps.cmd.pressed !== "eight" ||
+          steps.ctrl.pressed !== "eight"
+        )
+          return `selected: ${JSON.stringify(steps)}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** Variants side by side (#127) on a saved page: a chip lifted out of the
+ *  foot and dropped on the right half of the view is a pane of its own there,
+ *  drawn from the scenes the page carries, beside the scene's; closed, the
+ *  view is alone again. */
+async function savedPanes(port, base) {
+  await check(
+    "a chip dropped in the view is a pane beside the scene",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/variants.html`);
+        const chip = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")].find((c) => c.textContent === "eight")`;
+        if (
+          !(await tab.until(
+            `return ${VIEW}?.querySelector("canvas") && ${chip}`,
+            20_000,
+          ))
+        )
+          return "the page never drew its variants";
+        const [from, to] = await tab.evaluate(`
+        const c = ${chip}.getBoundingClientRect();
+        const v = ${VIEW}.getBoundingClientRect();
+        return [{ x: c.x + c.width / 2, y: c.y + c.height / 2 },
+                { x: v.right - v.width / 10, y: v.top + v.height / 2 }];`);
+        const mouse = (type, at) =>
+          tab.send("Input.dispatchMouseEvent", {
+            type,
+            ...at,
+            button: "left",
+            buttons: type === "mouseReleased" ? 0 : 1,
+            clickCount: 1,
+          });
+        await mouse("mousePressed", from);
+        await mouse("mouseMoved", { x: from.x, y: from.y - 40 });
+        await mouse("mouseMoved", to);
+        // carried, the chip is out of its row: its place there kept empty
+        const carried = `${chip}.classList.contains("magpy-carried")`;
+        if (!(await tab.evaluate(`return ${carried}`)))
+          return "carried, the chip still showed in its row";
+        await mouse("mouseReleased", to);
+        if (await tab.evaluate(`return ${carried}`))
+          return "dropped, the chip never came back to its row";
+        const panes = `[...document.querySelectorAll(".magpy-pane")]`;
+        const drawn = await tab.until(
+          `const p = ${panes};
+         return p.length === 2 && !document.querySelector(".magpy-pane-busy") &&
+           p.every((pane) => pane.querySelector("canvas")?.width)`,
+          10_000,
+        );
+        if (!drawn) return "the pane was never drawn";
+        const seen = await tab.evaluate(`
+        const p = ${panes};
+        const [scene, eight] = p.map((pane) => pane.getBoundingClientRect());
+        return {
+          tags: p.map((pane) => pane.querySelector(".magpy-pane-tag span").textContent),
+          beside: eight.left >= scene.right,
+          differ: p[0].querySelector("canvas").toDataURL() !== p[1].querySelector("canvas").toDataURL(),
+          used: document.querySelector(".magpy-vars-chip.on")?.textContent ?? null,
+          twice: ${chip}.getClientRects().length > 0,
+        };`);
+        // its pane shows the variant, the row no more
+        if (
+          seen.tags.join() !== "scene,eight" ||
+          !seen.beside ||
+          !seen.differ ||
+          seen.used ||
+          seen.twice
+        )
+          return `dropped: ${JSON.stringify(seen)}`;
+        // its tag clicked, the variant is selected, and the scene stays
+        const tag = await tab.evaluate(`
+        const t = ${panes}[1].querySelector(".magpy-pane-tag span").getBoundingClientRect();
+        return { x: t.x + t.width / 2, y: t.y + t.height / 2 };`);
+        await mouse("mousePressed", tag);
+        await mouse("mouseReleased", tag);
+        const picked = await tab.until(
+          `return ${panes}[1].querySelector(".magpy-pane-tag").classList.contains("magpy-selected") &&
+            !document.querySelector(".magpy-vars-chip.on")`,
+          3_000,
+        );
+        if (!picked)
+          return "its tag clicked, the variant was not selected alone";
+        await tab.evaluate(
+          `${panes}[1].querySelector(".magpy-pane-close").click()`,
+        );
+        const alone = await tab.until(
+          `return ${panes}.length === 1 && document.querySelector(".magpy-pane-tag").hidden`,
+          5_000,
+        );
+        if (!alone) return "closed, the view was not alone again";
+        if (!(await tab.evaluate(`return ${chip}.getClientRects().length > 0`)))
+          return "closed, its chip never came back to the row";
+        // the button beside the chips: every other variant out at once, the
+        // scene first, and a press more all of them back
+        const spread = `document.querySelector(".magpy-scene-spread")`;
+        const closing = `${spread}.title.startsWith("Close")`;
+        const variants = await tab.evaluate(
+          `return document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip:not(:disabled):not(.on)").length`,
+        );
+        await tab.evaluate(`${spread}.click()`);
+        const filled = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
+           p.every((pane) => pane.querySelector("canvas")?.width) && ${closing}`,
+          15_000,
+        );
+        if (!filled) {
+          return `filled: ${await tab.evaluate(`return ${panes}.length`)} panes for ${variants} variants`;
+        }
+        const first = await tab.evaluate(
+          `return ${panes}[0].querySelector(".magpy-pane-tag span").textContent`,
+        );
+        if (!first.startsWith("scene")) return `filled, ${first} came first`;
+        const twice = await tab.evaluate(`
+        const open = ${panes}.slice(1).map((p) => p.querySelector(".magpy-pane-tag span").textContent);
+        return [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
+          .filter((c) => c.getClientRects().length && open.includes(c.textContent))
+          .map((c) => c.textContent);`);
+        if (twice.length) return `filled, still in the row: ${twice}`;
+        // none left in the row: its name goes too, the button alone
+        const row = await tab.evaluate(`
+        const chips = [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")];
+        return {
+          chips: chips.some((c) => c.getClientRects().length),
+          row: document.querySelector(".magpy-scene-variants").getClientRects().length > 0,
+          button: ${spread}.getClientRects().length > 0,
+        };`);
+        if (row.chips !== row.row || !row.button)
+          return `filled, the row: ${JSON.stringify(row)}`;
+        await tab.evaluate(`${spread}.click()`);
+        const back = await tab.until(
+          `return ${panes}.length === 1 && !${closing}`,
+          5_000,
+        );
+        if (!back) return "pulled back, the view was not alone again";
+        // the variant the scene is at, in the scene's pane already: carried,
+        // it says so, and lands nowhere
+        await tab.evaluate(`${chip}.click()`);
+        if (
+          !(await tab.until(`return ${chip}.classList.contains("on")`, 5_000))
+        )
+          return "a click never pressed eight";
+        const at = await tab.evaluate(`
+        const c = ${chip}.getBoundingClientRect();
+        return { x: c.x + c.width / 2, y: c.y + c.height / 2 };`);
+        await mouse("mousePressed", at);
+        await mouse("mouseMoved", { x: at.x, y: at.y - 40 });
+        await mouse("mouseMoved", to);
+        const ghost = await tab.evaluate(
+          `return document.querySelector(".magpy-pane-ghost")?.textContent ?? null`,
+        );
+        await mouse("mouseReleased", to);
+        await new Promise((done) => setTimeout(done, 500));
+        const opened = await tab.evaluate(`return ${panes}.length`);
+        if (opened !== 1 || !ghost?.includes("shown by the scene"))
+          return `the pressed chip carried as ${JSON.stringify(ghost)}, ${opened} panes`;
+        // split, every other variant out: the scene's own chip leaves the
+        // row too, its tag named for it in its place, and no chip is left
+        await tab.evaluate(`${spread}.click()`);
+        const split = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
+           ${closing} && {
+             tag: p[0].querySelector(".magpy-pane-tag span").textContent === "eight",
+             chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
+               .filter((c) => c.getClientRects().length).map((c) => c.textContent),
+           }`,
+          15_000,
+        );
+        if (!split || !split.tag || split.chips.length) {
+          const seen = await tab.evaluate(`return {
+            tags: ${panes}.map((p) => p.querySelector(".magpy-pane-tag span").textContent),
+            busy: Boolean(document.querySelector(".magpy-pane-busy")),
+            button: ${spread}.title,
+          }`);
+          return `split at eight: ${JSON.stringify({ split, seen })}`;
+        }
+        // the scene's own x: the scene takes the next pane's variant, and
+        // that pane closes into it
+        const next = await tab.evaluate(
+          `return ${panes}[1].querySelector(".magpy-pane-tag span").textContent`,
+        );
+        await tab.evaluate(
+          `${panes}[0].querySelector(".magpy-pane-tag .magpy-pane-close").click()`,
+        );
+        const folded = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants - 1} &&
+           document.querySelector(".magpy-vars-chip.on")?.textContent === ${JSON.stringify(next)} &&
+           p.map((pane) => pane.querySelector(".magpy-pane-tag span").textContent)`,
+          10_000,
+        );
+        if (!folded || folded.slice(1).includes(next))
+          return `the scene's pane closed: ${JSON.stringify({ next, folded })}`;
+        await tab.evaluate(`${spread}.click()`);
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
 }
 
 /** A saved page carries every variant's run: scrubbed to the first step,
@@ -4466,6 +4713,7 @@ try {
   await sealedBody(browser.port, base);
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
+  await savedPanes(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
   await applied(browser.port, base);

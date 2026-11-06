@@ -305,7 +305,10 @@
             return box.left + box.width / 2;
           };
           const slideMark = asked.length;
-          const at = (c) => ({ bubbles: true, clientX: x(c), clientY: 0 });
+          // along the row, as a hand slides: lifted up out of it, a chip is
+          // carried into the view instead (`onLift`)
+          const y = from.getBoundingClientRect().top + from.offsetHeight / 2;
+          const at = (c) => ({ bubbles: true, clientX: x(c), clientY: y });
           from.dispatchEvent(new PointerEvent("pointerdown", at(from)));
           window.dispatchEvent(new PointerEvent("pointermove", at(to)));
           await wait(200);
@@ -330,7 +333,7 @@
           const on = {
             bubbles: true,
             clientX: box.left + box.width / 2,
-            clientY: 0,
+            clientY: box.top + box.height / 2,
           };
           const mark = asked.length;
           off.dispatchEvent(new PointerEvent("pointerdown", on));

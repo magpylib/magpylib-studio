@@ -190,6 +190,12 @@ function answer({ id, method, params }) {
   } else if (variants && method === "use_variant" && variants.scenes[params.name]) {
     use(params.name);
     reply = { result: { ok: true } };
+  } else if (variants && method === "variant_scene" && variants.scenes[params.name]) {
+    // a tile of the grid of variants: the variant's scene, or a step of its run
+    const drawn = variants.scenes[params.name];
+    const step = (drawn.run || [])[params.frame ?? -1];
+    const scene = decoded(step || drawn);
+    reply = { result: { ok: true, scene, tree: drawn.tree, frames: drawn.frames || 1 } };
   } else {
     const message = "a saved page has no python to answer " + method;
     reply = { error: { type: "MethodError", message } };
@@ -756,6 +762,31 @@ class SceneWidget(anywidget.AnyWidget):
     #: carries them (`to_html`). Empty in a view made for looking only, whose
     #: scene a click would edit. Follows the scene; not for assigning.
     variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The variants shown each in a pane beside the scene's, in the order
+    #: they are laid out: a chip dragged up into the view, or the grid
+    #: button at the foot, adds to it, a pane's x takes away. A cell reads it
+    #: to follow what is on screen -- a curve for each, say, from
+    #: ``session.variant_session(name)``, the copy the pane is drawn from.
+    #:
+    #: Assignable: ``view.panes = ["wide"]`` opens those, laid out as the
+    #: grid button lays them, and closes the others; ``[]`` is the scene
+    #: alone. The variant the scene is at is in the scene's own pane, so
+    #: opens none, and twelve panes is the most, the scene's included: the
+    #: trait then reads what the view opened. A name the scene has no
+    #: variant of is refused.
+    panes = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The variants selected, in the order they were: a click on a variant's
+    #: chip at the foot of the view, or on a pane's name, selects it alone,
+    #: Ctrl-click or Cmd-click adds it or takes it out. A click on a chip
+    #: also sets the scene to the variant, a Ctrl-click does not, and a
+    #: pane's name never does: the selection is apart from the variant the
+    #: scene is at. A cell reads it to plot what was picked -- a curve for
+    #: each, from ``session.variant_session(name)``.
+    #:
+    #: Assignable: ``view.selected_variants = ["wide", "narrow"]`` marks
+    #: those; ``[]`` marks none. A name the scene has no variant of is
+    #: refused.
+    selected_variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     #: Its switch in the view is the eye on each sensor's field lines, a row
@@ -787,6 +818,9 @@ class SceneWidget(anywidget.AnyWidget):
             "restore_variable",
             # a variant from the panel's dropdown: its values, as one edit
             "use_variant",
+            # and each variant's scene, for the grid of them (#127)
+            "variant_scene",
+            "drop_variant_copies",
             "quantity",
             "expression_help",
             # the object panel: the selection's parameters and pose
@@ -866,6 +900,12 @@ class SceneWidget(anywidget.AnyWidget):
         editable = traits.pop("editable", False)
         if editable == "never":
             editable = None  # the word for it; the trait holds None
+        # named variants are checked against the scene's, once it is in
+        variant_traits = {
+            key: traits.pop(key)
+            for key in ("panes", "selected_variants")
+            if key in traits
+        }
         super().__init__(**traits)
         #: The captured run, kept only when there is one that motion cannot
         #: play -- see `_adopt`. Every frame holds every trace of the scene
@@ -951,6 +991,8 @@ class SceneWidget(anywidget.AnyWidget):
         if self.field_lines and self._session is None:
             # asked for when the view was made, before there were objects
             self._field_lines_asked_for({"new": True})
+        for key, value in variant_traits.items():
+            setattr(self, key, value)
 
     @classmethod
     def _split(cls, kwargs):
@@ -1226,7 +1268,10 @@ class SceneWidget(anywidget.AnyWidget):
         Raised, what it raised is said in the view, and the edit stays. Edits
         made from code, `set` and `set_variable`, are the code's to answer.
         """
-        self._editing("follow_edits").follower = answer
+        session = self._editing("follow_edits")
+        session.follower = answer
+        # the variants' copies were followed by the one before: made again
+        session.drop_variant_copies()
 
     def save_variant(self, name):
         """Keep the variables as they are now under `name`: a variant of this
@@ -1360,6 +1405,19 @@ class SceneWidget(anywidget.AnyWidget):
             # number as text: the trait says the scene as it is, not what
             # was assigned.
             self.variables = _values_of(self._session)
+
+    @traitlets.validate("panes", "selected_variants")
+    def _variants_named(self, proposal):
+        # Each once, and each a variant the scene has: a pane of none would
+        # draw nothing, and say so only in the view.
+        names = list(dict.fromkeys(proposal["value"]))
+        unknown = [name for name in names if name not in self.variants]
+        if unknown:
+            raise traitlets.TraitError(
+                f"no variant {unknown[0]!r} in the scene: its variants are "
+                f"{', '.join(self.variants) or 'none'}"
+            )
+        return names
 
     @traitlets.validate("axes")
     def _axes_named(self, proposal):
@@ -1508,6 +1566,11 @@ class SceneWidget(anywidget.AnyWidget):
                 if self.editable is not None
                 else []
             )
+            # a variant renamed or taken away takes its pane along
+            self.panes = [name for name in self.panes if name in self.variants]
+            self.selected_variants = [
+                name for name in self.selected_variants if name in self.variants
+            ]
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
             if not first:
@@ -1941,7 +2004,13 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
         said = answer.get("result")
-        if isinstance(said, dict) and said.get("not_followed"):
+        # a pane's copy left unsolved says so on its tag: not again in a
+        # toast for every frame it is drawn
+        if (
+            isinstance(said, dict)
+            and said.get("not_followed")
+            and method != "variant_scene"
+        ):
             self.send(
                 {"kind": "refused", "message": f"Not followed: {said['not_followed']}"}
             )

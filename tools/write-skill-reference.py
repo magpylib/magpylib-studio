@@ -53,6 +53,7 @@ SESSION = (
     "set_variables",
     "get_variables",
     "use_variant",
+    "variant_session",
     "save_variant",
     "load_scene",
     "list_examples",

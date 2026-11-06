@@ -2566,8 +2566,9 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
     """`view.save_variant(name)` keeps the values as they are, formulas left
     out, and hands them back to paste into the mark; the panel lists it at
     once, and its dropdown sets the values back as one settled edit, told to
-    the notebook once and undone in one step. Making, renaming and removing
-    one is code's, not the view's."""
+    the notebook once and undone in one step; the grid of variants draws it
+    aside, with no edit at all. Making, renaming and removing one is code's,
+    not the view's."""
     studio = _studio_of(_design())
     revision = studio.revision
     kept = studio.save_variant("start")
@@ -2580,6 +2581,8 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
 
     studio.set_variable("r", 0.03)
     assert _ask(studio, "get_variables")["result"]["variant"] is None
+    tile = _ask(studio, "variant_scene", name="start")["result"]
+    assert tile["ok"] and tile["scene"]["meshes"] and studio.variables["r"] == 0.03
     assert _ask(studio, "use_variant", name="start")["result"]["ok"]
     assert studio.revision == revision + 3
     assert studio.last_edit == {"by": "use_variant", "variant": "start"}
@@ -2673,6 +2676,45 @@ def test_the_row_offers_the_variants_but_not_to_a_view_for_looking():
     built.session.save_variant("few", {"n": 4})
     assert widget.SceneWidget(built).variants == ["few"]
     assert widget.SceneWidget(built, editable="never").variants == []
+
+
+@pytest.mark.parametrize("trait", ["panes", "selected_variants"])
+def test_panes_and_selection_name_variants_of_the_scene(trait):
+    """`panes`, the variants beside the scene, and `selected_variants`, those
+    picked, are a cell's to set, when the view is made or after: each
+    once, and only a variant the scene has."""
+    built = _design().build()
+    built.session.save_variant("few", {"n": 4})
+    built.session.save_variant("many", {"n": 16})
+    view = widget.SceneWidget(built, **{trait: ["few"]})
+    assert getattr(view, trait) == ["few"], "given when the view is made"
+    setattr(view, trait, ["many", "few", "many"])
+    assert getattr(view, trait) == ["many", "few"]
+    with pytest.raises(traitlets.TraitError, match=r"no variant 'odd'.*few, many"):
+        setattr(view, trait, ["odd"])
+    assert getattr(view, trait) == ["many", "few"]
+    built.session.remove_variant("few")
+    view._show(None)
+    assert getattr(view, trait) == ["many"], "a variant taken away leaves them"
+
+
+def test_a_variant_pane_drawn_unsolved_says_it_once_and_a_new_follower_redraws():
+    """A pane's copy its follower refused is said on the pane's tag, not in a
+    toast for every frame drawn; a new follower makes the copies again."""
+    studio = _studio_of(_design())
+    studio._session.save_variant("few", {"n": 4})
+
+    def diverges(_objects):
+        raise RuntimeError("diverged")
+
+    studio._session.follower = diverges
+    studio._session.set_variable("free", 2.0)
+    drawn = _ask(studio, "variant_scene", name="few")["result"]
+    assert "diverged" in drawn["not_followed"]
+    assert not [m for m in studio.sent if m.get("kind") == "refused"]
+    assert studio._session._variant_copies
+    studio.follow_edits(None)
+    assert not studio._session._variant_copies
 
 
 def test_a_page_carries_the_variants_it_is_asked_for():

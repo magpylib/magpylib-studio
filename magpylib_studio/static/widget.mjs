@@ -22,6 +22,7 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createColorBar } from "./colorbar.mjs";
+import { createGrid, MOST_PANES } from "./grid.mjs";
 import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
 import { HOME, MARK } from "./mark.mjs";
@@ -148,6 +149,17 @@ const ICONS = {
     '<path d="M2.5 11.5c3-1.8 5.5 1.8 10 0" stroke-width="1.4"/>' +
     '<path class="magpy-flow-pulse" style="--at: 18" d="M2.5 11.5c3-1.8 5.5 1.8 10 0" ' +
     'stroke-width="2.6" pathLength="100" stroke-dasharray="16 84"/>',
+  // every variant beside the scene, and back to the scene alone
+  tile:
+    '<rect x="2" y="2" width="5" height="5" rx="1"/>' +
+    '<rect x="9" y="2" width="5" height="5" rx="1"/>' +
+    '<rect x="2" y="9" width="5" height="5" rx="1"/>' +
+    '<rect x="9" y="9" width="5" height="5" rx="1"/>',
+  // the panes stacked back into one, closed: VS Code's "close all" mark
+  untile:
+    '<rect x="4.5" y="4.5" width="9.5" height="9.5" rx="1.2"/>' +
+    '<path d="M2 11.5V3a1 1 0 0 1 1-1h8.5"/>' +
+    '<path d="M7.25 7.25l4 4M11.25 7.25l-4 4"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -393,7 +405,13 @@ function render({ model, el }) {
   // is slow to answer (`watchBusy`): out of sight the rest of the time.
   const busyRing = document.createElement("div");
   busyRing.className = "magpy-scene-busy";
-  stage.append(view, legendEl, busyRing);
+  // The view in a pane of its own, which variants dropped beside it split
+  // (`grid.mjs`): alone, it is the view as it always was.
+  const panesEl = document.createElement("div");
+  panesEl.className = "magpy-scene-panes";
+  stage.append(panesEl, legendEl, busyRing);
+  let gridScenes = []; // each variant pane's { scene, tree }: legend and scale
+  let sharedModule = null; // the renderer's module, once loaded: see `draw`
 
   // --- controls ---------------------------------------------------------
   // Over the view, as Plotly's are, rather than in a bar beneath it: the
@@ -425,7 +443,7 @@ function render({ model, el }) {
     "fit",
     "Frame everything (Home) — F frames the selection; 1, 3, 7 look from " +
       "the front, the right and the top",
-    () => api?.fitView(),
+    () => (grid.split ? grid.fit() : api?.fitView()),
   );
   const projectionButton = iconButton(
     "projection",
@@ -773,6 +791,13 @@ function render({ model, el }) {
   variantsEl.hidden = true;
   let variantRow = null; // made for a scene that has variants, and only then
 
+  // Beside the chips: every variant in a pane of its own at once, laid out
+  // in a grid -- and, every one out, all of them back, the scene alone.
+  const spreadButton = iconButton("tile", "", () => spread());
+  spreadButton.classList.add("magpy-scene-spread");
+  spreadButton.hidden = true;
+  let spreadFull = false; // what a press does: close them all, or open them
+
   // A page being written: how far, and -- the view's own export -- a button
   // that stops it.
   const writing = document.createElement("div");
@@ -868,6 +893,7 @@ function render({ model, el }) {
     counter.hidden = !trim.hidden; // the line says which steps
     choose.hidden = false;
     foot.classList.add("magpy-choosing");
+    dressPaned(); // every variant offered to keep, those with a pane too
     pressed(exportButton, true);
     describeChoice();
     keepCorner();
@@ -949,8 +975,8 @@ function render({ model, el }) {
     true,
   );
   // While the foot asks, a chip says whether its variant is kept: its click
-  // is taken before the chip hears it, so nothing is used or slid.
-  for (const type of ["pointerdown", "click"]) {
+  // is taken before the chip hears it, so nothing is used, slid or selected.
+  for (const type of ["pointerdown", "click", "contextmenu"]) {
     variantsEl.addEventListener(
       type,
       (event) => {
@@ -978,7 +1004,14 @@ function render({ model, el }) {
   const foot = document.createElement("div");
   foot.className = "magpy-scene-foot";
   foot.hidden = true;
-  foot.append(transport, variantsEl, choose, writing, progressBar);
+  foot.append(
+    transport,
+    variantsEl,
+    spreadButton,
+    choose,
+    writing,
+    progressBar,
+  );
   // Escape, from anywhere in the foot, puts the choice away
   foot.addEventListener("keydown", (event) => {
     if (choosing && event.key === "Escape") {
@@ -1096,7 +1129,11 @@ function render({ model, el }) {
   /** The view's height: the cell's while in the cell, and the screen's
    *  otherwise; the renderer watches its element and follows either way. */
   function sizeView() {
-    view.style.height = isFullscreen() ? "" : `${model.get("height")}px`;
+    const height = isFullscreen() ? "" : `${model.get("height")}px`;
+    // split, the panes share the view's height, and the view fills its own
+    view.style.height = grid?.split ? "100%" : height;
+    panesEl.style.height = grid?.split ? height || "100%" : "";
+    if (!grid?.split) panesEl.style.padding = "";
   }
 
   // What selection and visibility *mean* is the widget's: they are traitlets.
@@ -1157,7 +1194,7 @@ function render({ model, el }) {
    *  on screen: a frame is drawn in magpylib's colours for that step,
    *  which no bar says. */
   function dressColorBar() {
-    const payload = model.get("payload") || {};
+    const payload = gridPayload();
     barAside = playing || shown !== drawnStep();
     colorBar.update({
       payload,
@@ -1171,6 +1208,7 @@ function render({ model, el }) {
     if (drawing()) {
       api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
     }
+    if (grid.split) grid.wear();
     keepCorner(); // it beside the column, or alone, and the cube clear of it
   }
   let barAside = false; // see `dressColorBar`
@@ -1206,7 +1244,7 @@ function render({ model, el }) {
    *  is awaited, and for the same reason. */
   function dressLegend() {
     const tree = legendTree();
-    const payload = model.get("payload") || {};
+    const payload = gridPayload();
     const rows = rowsIn(tree);
     legendButton.hidden = rows === 0;
     if (!payload.meshes || rows === 0) {
@@ -1347,7 +1385,9 @@ function render({ model, el }) {
     }
   }
   function retheme() {
-    if (dressTheme() && api) draw();
+    if (!dressTheme() || !api) return;
+    draw();
+    redrawGrid({ edited: true }); // the panes wear the new theme too
   }
   const themeWatch = new MutationObserver(retheme);
   for (const node of [document.documentElement, document.body]) {
@@ -1415,6 +1455,7 @@ function render({ model, el }) {
     foot.hidden =
       transport.hidden && variantsEl.hidden && writing.hidden && choose.hidden;
     el.classList.toggle("magpy-footed", !foot.hidden);
+    if (grid.split) placePanes();
     if (!drawing()) return;
     api.keepClear(
       [editBar, foot, colorBarEl]
@@ -1426,6 +1467,7 @@ function render({ model, el }) {
   /** The renderer answers with the projection now in force. */
   function showProjection(kind) {
     pressed(projectionButton, kind === "parallel");
+    grid.followScene(); // the variants' panes look through it too
   }
 
   /** What the view keys ask of this host -- see `VIEW_KEYS` in scene3d.mjs,
@@ -1434,6 +1476,8 @@ function render({ model, el }) {
    *  nothing to do, so the key is left to the page. */
   const viewActions = {
     projection: showProjection,
+    // Home, as the fit button: every pane framed, once there are some
+    frameAll: () => (grid.split ? grid.fit() : false),
     // Tab walks the objects where the host says so -- the studio panel. In a
     // notebook it moves between cells, and a view that kept it would trap it.
     next: model.tabWalks
@@ -1583,6 +1627,13 @@ function render({ model, el }) {
   function release() {
     shared.views.delete(held);
     if (!api) return;
+    clearTimeout(gridTimer);
+    // the variants' panes let go of theirs too -- a view let go of, not a
+    // choice: the trait keeps them, and drawn again they open again
+    lettingGo = true;
+    grid.hide();
+    lettingGo = false;
+    panesAsked = (model.get("panes") || []).length > 0;
     if (framed) kept = api.cameraState();
     if (playing) setPlaying(false);
     // A frame asked for is asked for again when it is drawn, not waited for.
@@ -1643,7 +1694,8 @@ function render({ model, el }) {
   /** The variants' row, for a scene that has some. */
   function dressVariants() {
     const carried =
-      (model.get("variants") || []).length > 0 && model.editor === undefined;
+      (model.get("variants") || []).length > 0 &&
+      (model.editor === undefined || model.showsVariants === true);
     variantsEl.hidden = !carried;
     if (carried) {
       variantRow ??= createVariables(variantsEl, {
@@ -1658,14 +1710,361 @@ function render({ model, el }) {
           }),
         // a page draws the variant itself, and answers with no scene
         onPreview: (answer) => answer?.scene && redrawFromSession(answer),
-        slide: true,
+        // a host with an editor of its own previews no slide: a click uses
+        // a variant there, through it, and a lift carries it
+        slide: model.editor === undefined,
+        // lifted out of the row, a chip is carried into the view
+        onLift: (name, event, chip) => lift(name, event, chip),
+        // clicked, a chip is selected, or added to the selection
+        onSelect: (name, add) => select(name, add),
         variantsOnly: true,
         // as many as the foot of the view holds, past the panel's four
         fits: (names) => names.length <= 10 && names.join("").length <= 90,
       });
       variantRow.refresh();
     }
+    dressSpread();
     keepCorner();
+  }
+
+  /** The variants a pane can be given: every one the row offers but the
+   *  one the values are in, which the scene's own pane shows -- and one the
+   *  scene cannot use as it stands, shown there and not offered. */
+  function offeredVariants() {
+    const refused = new Set([
+      ...[...variantsEl.querySelectorAll(".magpy-vars-chip:disabled")].map(
+        (chip) => chip.textContent,
+      ),
+      ...[...variantsEl.querySelectorAll("option:disabled")].map(
+        (option) => option.value,
+      ),
+      variantsEl.querySelector(".magpy-vars-chip.on")?.textContent,
+      variantsEl.querySelector("select")?.value,
+    ]);
+    return (model.get("variants") || []).filter((name) => !refused.has(name));
+  }
+
+  /** The spread button: shown with the row, and saying what a press does --
+   *  every variant beside the scene, or, every one out already, or as many
+   *  as there is room for, all of them back. */
+  function dressSpread() {
+    dressPaned();
+    const offered = offeredVariants();
+    const open = grid.names;
+    spreadButton.hidden = variantsEl.hidden || offered.length === 0;
+    const full =
+      grid.split &&
+      (offered.every((name) => open.includes(name)) ||
+        open.length >= MOST_PANES - 1);
+    spreadFull = full;
+    setIcon(spreadButton, full ? "untile" : "tile");
+    // closing, it says so in words: alone in the foot, an icon is a puzzle
+    spreadButton.classList.toggle("magpy-scene-spread-worded", full);
+    if (full) {
+      const words = document.createElement("span");
+      words.textContent = "Close panes";
+      spreadButton.append(words);
+    }
+    // the icon and the label say what a press does
+    name(
+      spreadButton,
+      full
+        ? "Close every variant's pane, back to the scene alone"
+        : offered.length > MOST_PANES - 1
+          ? `Open ${MOST_PANES - 1} of the other variants beside the scene, each in a pane`
+          : "Open every other variant beside the scene, each in a pane",
+    );
+  }
+
+  /** A variant with a pane is there, not in the row as well: its chip, or
+   *  its option of the dropdown, out of the row until the pane closes --
+   *  but not while the foot asks what a page keeps, of every variant. */
+  function dressPaned() {
+    const open = new Set(choosing ? [] : grid.names);
+    // split, the variant the scene is at is the scene's pane's, its tag
+    // named for it (`grid.mark`): out of the row as well
+    const split = grid.split && !choosing;
+    const out = (chip) =>
+      open.has(chip.textContent) || (split && chip.classList.contains("on"));
+    const chips = [...variantsEl.querySelectorAll(".magpy-vars-chip")];
+    for (const chip of chips) chip.classList.toggle("magpy-in-pane", out(chip));
+    // every one in a pane: no row left to name, the spread button alone
+    variantsEl.classList.toggle(
+      "magpy-all-paned",
+      chips.length > 0 && chips.every(out),
+    );
+    for (const option of variantsEl.querySelectorAll("option")) {
+      option.hidden = open.has(option.value) && !option.selected;
+    }
+    dressSelected();
+  }
+
+  // --- the variants selected -----------------------------------------------
+  // Apart from the one the scene is at: a click on a chip or a pane's tag
+  // selects its variant alone, Ctrl or Cmd adds it or takes it out, and the
+  // `selected_variants` trait says which, for a notebook to plot them.
+  let chosen = model.get("selected_variants") || [];
+
+  function select(name, add) {
+    let now = [name];
+    if (add) {
+      now = chosen.includes(name)
+        ? chosen.filter((each) => each !== name)
+        : [...chosen, name];
+    }
+    chosen = now;
+    dressSelected();
+    const told = model.get("selected_variants") || [];
+    if (told.length === now.length && told.every((n, i) => n === now[i])) {
+      return;
+    }
+    model.set("selected_variants", now);
+    model.save_changes();
+  }
+
+  /** The chips and the panes' tags of the variants selected, marked. */
+  function dressSelected() {
+    const marked = new Set(choosing ? [] : chosen);
+    for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
+      chip.classList.toggle("magpy-selected", marked.has(chip.textContent));
+    }
+    grid.choose([...marked]);
+  }
+
+  let panesAsked = (model.get("panes") || []).length > 0; // before a draw
+  let lettingGo = false; // panes closed with the view, not by a hand
+  let showingPanes = false; // laying out what the trait asks: told at the end
+
+  /** The panes the trait asks for: those opened, laid out as the spread
+   *  button lays them, the rest closed -- but the variant the scene is at,
+   *  the scene's pane's already. Asked before the view has drawn, once it
+   *  has. The trait then says what was opened. */
+  async function showPanes() {
+    if (!api || !sharedModule) {
+      panesAsked = true;
+      return;
+    }
+    panesAsked = false;
+    const now = await currentVariant();
+    const asked = (model.get("panes") || []).filter((name) => name !== now);
+    const open = grid.names;
+    if (
+      asked.length === open.length &&
+      asked.every((name, i) => name === open[i])
+    ) {
+      tellPanes(open); // what the scene's own variant would have added
+      return;
+    }
+    showingPanes = true;
+    try {
+      if (!asked.length) grid.hide();
+      else {
+        grid.keep(asked);
+        grid.fill(asked);
+      }
+    } finally {
+      showingPanes = false;
+    }
+    tellPanes(grid.names);
+  }
+
+  /** The trait told which variants have a pane, when they changed. */
+  function tellPanes(names) {
+    const told = model.get("panes") || [];
+    if (told.length === names.length && told.every((n, i) => n === names[i])) {
+      return;
+    }
+    model.set("panes", names);
+    model.save_changes();
+  }
+
+  function spread() {
+    if (!api || !sharedModule) return; // nothing drawn yet to split
+    if (spreadFull) grid.hide();
+    else grid.fill(offeredVariants());
+  }
+
+  // --- variants side by side -----------------------------------------------
+  // A chip lifted out of the row and dropped in the view is a pane of its own
+  // beside the scene's (`grid.mjs`), the controls where they are round them.
+  const grid = createGrid(panesEl, {
+    view,
+    mainApi: () => api,
+    factory: () => sharedModule.createScene3d(),
+    sceneOf: (name, frame) =>
+      call("variant_scene", frame == null ? { name } : { name, frame }, {
+        quiet: true,
+      }),
+    look: () => ({
+      hidden: model.get("hidden") || [],
+      fades: model.get("faded") || {},
+      colouring: colorBar.colouring(model.get("color_range") || {}),
+      selected: model.get("selected") || [],
+      axes: axesChoice(model.get("axes")),
+      flow: model.get("flow") !== false,
+    }),
+    onPick: (detail) =>
+      view.dispatchEvent(new CustomEvent("objectpick", { detail })),
+    onScenes: (drawn) => {
+      gridScenes = drawn;
+      dressLegend();
+      dressColorBar();
+    },
+    stepNow: () => stepShown(),
+    // the scene's pane is the one edited: its tag wears the pencil
+    live: () => editable(),
+    // the scene's pane closed: the scene takes the next pane's variant, one
+    // step to undo, as a click on its chip would
+    foldInto: async (name) => {
+      try {
+        const res = await call("use_variant", { name });
+        if (res && res.ok === false) return false;
+      } catch {
+        return false;
+      }
+      variantRow?.refresh();
+      if (!variablesEl.hidden) variables.refresh();
+      return true;
+    },
+    // a pane's tag clicked selects its variant, as its chip does
+    onSelect: (name, add) => select(name, add),
+    onLayout: (split, names) => {
+      el.classList.toggle("magpy-paned", split);
+      if (split) {
+        currentVariant().then((now) => {
+          knownVariant = now;
+          grid.mark(now);
+          dressSelected(); // the scene's tag names the variant it is at
+        });
+      }
+      // the copies of the variants whose panes closed, let go of in python
+      // -- but those selected, a cell's to read -- and not for a view let
+      // go of, whose panes open again from them when it is drawn again
+      const shrank = paneNames.some((each) => !names.includes(each));
+      paneNames = names;
+      if (sharedModule && shrank && !gone && !lettingGo) {
+        const keep = [...new Set([...names, ...chosen])];
+        call("drop_variant_copies", { keep }, { quiet: true }).catch(() => {});
+      }
+      if (!split) gridScenes = [];
+      if (!showingPanes && !lettingGo) tellPanes(names);
+      dressSpread();
+      sizeView();
+      keepCorner();
+      if (!split) {
+        dressLegend();
+        dressColorBar();
+      }
+    },
+  });
+
+  // the row is made again as it learns which variants the scene can use:
+  // the spread button follows it
+  new MutationObserver(() => dressSpread()).observe(variantsEl, {
+    childList: true,
+    subtree: true,
+  });
+  // the legend opened, closed, or a row of it folded: the panes beside it
+  // take the room it leaves
+  new ResizeObserver(() => grid.split && placePanes()).observe(legendEl);
+
+  let paneNames = []; // the variants with a pane, at the last layout
+
+  /** A chip lifted out of the row: carried, to be dropped in the view. */
+  function lift(name, event, chip) {
+    if (!api || !sharedModule) return; // nothing drawn yet to split
+    // the pressed one, the variant the scene is at, is in its pane already
+    const shown = Boolean(chip?.classList.contains("on"));
+    grid.carry(event, { name, from: chip, shown });
+  }
+
+  /** The variant the scene is at, or null: the row's to say. */
+  const currentVariant = () =>
+    call("get_variables", {}, { quiet: true })
+      .then((panel) => panel?.variant ?? null)
+      .catch(() => null);
+
+  /** The variants' panes again: after an edit, or a step. A step is posed
+   *  or asked for pane by pane (`grid.stepTo`), with no word to python for
+   *  a run that only moves. An edit stops what the panes were asking for at
+   *  once, and draws them again once the edits stop coming for a moment: a
+   *  slider dragged costs one copy of the scene a pane, at the end, and not
+   *  one for every value it passes. Which variant the scene is at is asked
+   *  only then. */
+  let knownVariant = null;
+  let gridTimer = null;
+  const GRID_SETTLE = 300; // ms without an edit before the panes redraw
+  const stepShown = () => (shown === drawnStep() ? null : shown);
+  function redrawGrid({ edited = false } = {}) {
+    if (!grid.split) return;
+    if (!edited) {
+      grid.stepTo(stepShown());
+      return;
+    }
+    grid.stale();
+    clearTimeout(gridTimer);
+    gridTimer = setTimeout(async () => {
+      if (!grid.split || gone) return;
+      knownVariant = await currentVariant();
+      if (!grid.split || gone) return;
+      const at = stepShown();
+      grid.redraw(at === null ? model.get("payload") : null, at, knownVariant);
+    }, GRID_SETTLE);
+  }
+
+  /** The panes in the room the controls leave: the tools above, the legend
+   *  to the left, the colour bar and the edit column to the right, and the
+   *  foot below. */
+  function placePanes() {
+    const room = (part, side) =>
+      part.hidden || !part.offsetParent ? 8 : part[side] + 16;
+    panesEl.style.paddingTop = `${room(tools, "offsetHeight")}px`;
+    panesEl.style.paddingLeft = `${legendOpen ? room(legendEl, "offsetWidth") : 8}px`;
+    const right = Math.max(
+      room(colorBarEl.firstElementChild ?? colorBarEl, "offsetWidth"),
+      room(editBar, "offsetWidth"),
+    );
+    panesEl.style.paddingRight = `${right}px`;
+    panesEl.style.paddingBottom = `${room(foot, "offsetHeight")}px`;
+    grid.corners();
+  }
+
+  /** The tiles' scenes as one, for the legend and the colour bar: what any
+   *  tile draws, and a sensor in several tiles as a sensor read in several
+   *  places, as a pattern's copies are. */
+  function gridPayload() {
+    const payload = model.get("payload") || {};
+    if (!grid.split || !gridScenes.length) return payload;
+    const every = (key) =>
+      [payload, ...gridScenes.map(({ scene }) => scene)].flatMap(
+        (scene) => scene[key] ?? [],
+      );
+    return {
+      ...payload,
+      meshes: every("meshes"),
+      scatters: every("scatters"),
+      pixels: every("pixels"),
+      fieldlines: every("fieldlines"),
+    };
+  }
+
+  /** The objects in any tile, once each: the trees of the tiles laid over
+   *  one another, a node's children the union of its children in each. A
+   *  choice can give a variant objects the scene does not have. */
+  function gridTree(tree) {
+    if (!grid.split || !gridScenes.length) return tree;
+    const merge = (into, nodes) => {
+      for (const node of nodes) {
+        const known = into.find((each) => each.id === node.id);
+        if (known) known.children = merge([...known.children], node.children);
+        else into.push({ ...node, children: merge([], node.children) });
+      }
+      return into;
+    };
+    return gridScenes.reduce(
+      (into, { tree: theirs }) => merge(into, theirs),
+      merge([], tree),
+    );
   }
 
   function dressTransport() {
@@ -1764,7 +2163,9 @@ function render({ model, el }) {
 
   /** The picture is at step `index`: say so, and go on to the next. */
   function reached(index) {
+    const moved = index !== shown;
     shown = index;
+    if (moved) redrawGrid();
     scrub.value = String(index);
     showStep();
     asideColorBar();
@@ -1977,6 +2378,7 @@ function render({ model, el }) {
 
   function dressEditing() {
     editBar.hidden = !editable();
+    grid.relabel(); // the scene's tag wears the pencil, or not
     resetButton.hidden = !editor.reset;
     // The panels go with the handles, on the column that goes with them.
     // Not in the studio panel, whose host shows them in its sidebar.
@@ -2005,7 +2407,7 @@ function render({ model, el }) {
   /** The legend's tree: a sensor's field lines, a row beneath it, listed
    *  where they can be computed, or are drawn -- a saved page keeps them. */
   function legendTree() {
-    const tree = model.get("tree") || [];
+    const tree = gridTree(model.get("tree") || []);
     if (linesComputed() || model.get("payload")?.fieldlines?.length) {
       return tree;
     }
@@ -2070,11 +2472,13 @@ function render({ model, el }) {
   const calls = new Map(); // id -> { timer, asked, settle }
   let dragActive = false; // between a drag's first move and its release
   // `since`: when what the call carries was asked for, if before now -- the
-  // first value a slider or a drag held back while the one before was away
+  // first value a slider or a drag held back while the one before was away.
+  // `quiet`: a read no edit waits on -- a variant's pane, which says itself
+  // that it is waiting -- with no ring, and no word if it is slow.
   function call(
     method,
     params = {},
-    { preview = false, scene = false, since } = {},
+    { preview = false, scene = false, since, quiet = false } = {},
   ) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
@@ -2083,21 +2487,24 @@ function render({ model, el }) {
       // the call when it comes. The ring stays on until then, and a slider
       // or a drag holds its next value back rather than queueing it behind
       // the one python is still working on.
-      const timer = setTimeout(unheard, 4000);
+      const timer = quiet ? null : setTimeout(unheard, 4000);
       const asked = since ?? performance.now();
       calls.set(id, {
         timer,
         asked,
+        quiet,
         settle(message) {
           if (message.error) reject(new Error(message.error.message));
           else resolve(message.result);
         },
       });
       // waited on past BUSY_AFTER, it shows the ring
-      setTimeout(
-        () => calls.has(id) && watchBusy(),
-        Math.max(BUSY_AFTER - (performance.now() - asked), 0),
-      );
+      if (!quiet) {
+        setTimeout(
+          () => calls.has(id) && watchBusy(),
+          Math.max(BUSY_AFTER - (performance.now() - asked), 0),
+        );
+      }
       // `preview` marks a value the pointer is still on: python applies
       // it and says nothing to the notebook, as for a pose mid-drag.
       // `scene` asks for the scene in the same answer, sparing a second
@@ -2121,9 +2528,9 @@ function render({ model, el }) {
    *  the view is behind until it has caught up. */
   function watchBusy() {
     const now = performance.now();
-    let slow = busyRing.classList.contains("on") && calls.size > 0;
-    for (const { asked } of calls.values())
-      slow ||= now - asked >= BUSY_AFTER - 1;
+    const out = [...calls.values()].filter((each) => !each.quiet);
+    let slow = busyRing.classList.contains("on") && out.length > 0;
+    for (const { asked } of out) slow ||= now - asked >= BUSY_AFTER - 1;
     busyRing.classList.toggle("on", slow);
   }
 
@@ -2533,6 +2940,8 @@ function render({ model, el }) {
     "open_panel",
     "revision",
     "variants",
+    "panes",
+    "selected_variants",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2556,8 +2965,15 @@ function render({ model, el }) {
       variables.refresh();
     }
     // which variant the values are in, after any edit of them
-    if (now.has("variants")) dressVariants();
-    else if (
+    if (now.has("panes")) showPanes();
+    if (now.has("selected_variants")) {
+      chosen = model.get("selected_variants") || [];
+      dressSelected();
+    }
+    if (now.has("variants")) {
+      dressVariants();
+      grid.keep(model.get("variants") || []);
+    } else if (
       (now.has("payload") || now.has("revision")) &&
       !variantsEl.hidden
     ) {
@@ -2611,6 +3027,9 @@ function render({ model, el }) {
     ) {
       dressColorBar();
     }
+    if (grid.split && (scene || now.has("revision"))) {
+      redrawGrid({ edited: true });
+    } else if (grid.split) grid.wear();
     if (scene) {
       dressTransport();
       draw(); // which applies the hiding and the selection itself
@@ -2658,6 +3077,7 @@ function render({ model, el }) {
     if (!api) {
       sweep();
       api = module.createScene3d();
+      sharedModule = module;
       shared.views.add(held);
     }
     const payload = model.get("payload") || {};
@@ -2675,7 +3095,10 @@ function render({ model, el }) {
     api.setColorRanges(colorBar.colouring(model.get("color_range") || {}));
     api.setAxes(axesChoice(model.get("axes")));
     api.setFlow(model.get("flow") !== false);
-    api.watchCamera(tellCamera);
+    api.watchCamera(() => {
+      tellCamera();
+      grid.followScene(); // the variants' panes turn with it
+    });
     if (!framed) showProjection("perspective");
     api.render(view, payload, { keepCamera: framed });
     // After the render, which hangs the canvas in this view.
@@ -2687,6 +3110,7 @@ function render({ model, el }) {
     if (saved) showProjection(api.setCamera(saved));
     kept = null;
     framed = true;
+    if (panesAsked) showPanes(); // asked for before there was a view
     // How the handles drag is this view's to say -- chosen, perhaps, before
     // its scene3d was made, or by the one before it (`release`) -- and the
     // step follows the scene, which may have just changed size.
@@ -2779,6 +3203,10 @@ function render({ model, el }) {
     for (const pending of calls.values()) clearTimeout(pending.timer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     gone = true;
+    clearTimeout(gridTimer);
+    lettingGo = true;
+    grid.hide();
+    lettingGo = false;
     release();
   };
 }
