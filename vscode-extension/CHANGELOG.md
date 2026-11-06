@@ -111,6 +111,18 @@ its script header, and its example's docs page runs it in molab (#144).
 
 </details>
 
+### Fixed
+
+<details>
+<summary>A view resized no longer flashes blank</summary>
+
+Since one renderer draws every view
+([#146](https://github.com/magpylib/magpylib-studio/pull/146)), a resized view
+was drawn a frame late, so dragging the window, the panel or a sash between
+panes flashed it blank at every step. It is drawn in the frame it is resized in.
+
+</details>
+
 ## [0.14.1]
 
 ### Added

@@ -324,7 +324,7 @@ export function createScene3d() {
     // the listeners are on the canvas, which moves with the renderer.
     if (host !== canvasEl) {
       host = canvasEl;
-      sizing ??= new ResizeObserver(() => resize(host));
+      sizing ??= new ResizeObserver(() => resize(host, { now: true }));
       sizing.disconnect();
       sizing.observe(canvasEl);
       sighting ??= new IntersectionObserver((entries) => {
@@ -2642,7 +2642,9 @@ export function createScene3d() {
     return undefined;
   }
 
-  function resize(canvasEl) {
+  /** The canvas sized to its element. `now`, for a resize the page saw: the
+   *  view drawn again at once; a render sizing it first draws after. */
+  function resize(canvasEl, { now = false } = {}) {
     if (!renderer) return;
     const { clientWidth: w, clientHeight: h } = canvasEl;
     if (!w || !h) return;
@@ -2654,7 +2656,15 @@ export function createScene3d() {
     for (const material of wideMaterials) material.resolution.set(w, h);
     flowResolution.set(w, h);
     applyProjection();
-    redraw(); // a canvas resized is a canvas cleared
+    // A canvas resized is a canvas cleared: drawn again now, in the frame it
+    // was resized in -- a resize is seen before the frame is painted -- not
+    // at the next, which shows it blank in between, a flash at every step of
+    // a drag of the window or a sash. Not mid-render, the scene half built.
+    if (now && camera && !disposed) {
+      sizeGrips();
+      still();
+    }
+    redraw();
   }
 
   /** A magpylib colorscale table as a texture the shader indexes by intensity. */

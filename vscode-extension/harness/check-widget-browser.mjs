@@ -873,6 +873,51 @@ async function savedVariants(port, base) {
   );
 }
 
+/** A view resized is drawn in the frame it was resized in: the canvas a
+ *  resize clears is never painted blank, which flashed at every step of a
+ *  drag of the window or of a sash between panes. */
+async function resizedDrawsAtOnce(port, base) {
+  await check("a view resized is never painted blank", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/small.html`);
+      if (!(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000)))
+        return "the page never drew";
+      await new Promise((done) => setTimeout(done, 500));
+      const inked = await tab.evaluate(`
+        const scene = document.querySelector(".magpy-scene");
+        const canvas = ${VIEW}.querySelector("canvas");
+        const ink = () => {
+          const t = document.createElement("canvas");
+          t.width = canvas.width;
+          t.height = canvas.height;
+          const c = t.getContext("2d");
+          c.drawImage(canvas, 0, 0);
+          const d = c.getImageData(0, 0, t.width, t.height).data;
+          let n = 0;
+          for (let i = 0; i < d.length; i += 4 * 97) {
+            if (d[i + 3] > 0 && (d[i] < 250 || d[i + 1] < 250 || d[i + 2] < 250)) n++;
+          }
+          return n;
+        };
+        const seen = [];
+        for (let k = 0; k < 4; k++) {
+          // resized in one frame, looked at in the next: what was painted
+          await new Promise((done) => requestAnimationFrame(() => {
+            scene.style.width = (k % 2 ? 640 : 760) + "px";
+            requestAnimationFrame(() => { seen.push(ink()); done(); });
+          }));
+        }
+        return seen;`);
+      if (inked.some((n) => n === 0))
+        return `the frames after a resize, inked: ${inked}`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** Variants side by side (#127) on a saved page: a chip lifted out of the
  *  foot and dropped on the right half of the view is a pane of its own there,
  *  drawn from the scenes the page carries, beside the scene's; closed, the
@@ -4731,6 +4776,7 @@ try {
   await sealedBody(browser.port, base);
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
+  await resizedDrawsAtOnce(browser.port, base);
   await savedPanes(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
