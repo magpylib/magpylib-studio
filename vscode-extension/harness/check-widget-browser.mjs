@@ -956,7 +956,7 @@ async function savedPanes(port, base) {
         if (!picked)
           return "its tag clicked, the variant was not selected alone";
         await tab.evaluate(
-          `document.querySelector(".magpy-pane-close").click()`,
+          `${panes}[1].querySelector(".magpy-pane-close").click()`,
         );
         const alone = await tab.until(
           `return ${panes}.length === 1 && document.querySelector(".magpy-pane-tag").hidden`,
@@ -966,9 +966,9 @@ async function savedPanes(port, base) {
         if (!(await tab.evaluate(`return ${chip}.getClientRects().length > 0`)))
           return "closed, its chip never came back to the row";
         // the button beside the chips: every other variant out at once, the
-        // scene first; the scene's tag then closes them all
+        // scene first, and a press more all of them back
         const spread = `document.querySelector(".magpy-scene-spread")`;
-        const closeAll = `document.querySelector(".magpy-pane-tag .magpy-pane-close-all")`;
+        const closing = `${spread}.title.startsWith("Close")`;
         const variants = await tab.evaluate(
           `return document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip:not(:disabled):not(.on)").length`,
         );
@@ -976,7 +976,7 @@ async function savedPanes(port, base) {
         const filled = await tab.until(
           `const p = ${panes};
          return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
-           p.every((pane) => pane.querySelector("canvas")?.width)`,
+           p.every((pane) => pane.querySelector("canvas")?.width) && ${closing}`,
           15_000,
         );
         if (!filled) {
@@ -992,27 +992,19 @@ async function savedPanes(port, base) {
           .filter((c) => c.getClientRects().length && open.includes(c.textContent))
           .map((c) => c.textContent);`);
         if (twice.length) return `filled, still in the row: ${twice}`;
-        // none left in the row, nor to open: its name goes too, the button
-        // and the foot with them, and the scene's tag holds the way back
+        // none left in the row: its name goes too, the button alone
         const row = await tab.evaluate(`
         const chips = [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")];
         return {
           chips: chips.some((c) => c.getClientRects().length),
           row: document.querySelector(".magpy-scene-variants").getClientRects().length > 0,
           button: ${spread}.getClientRects().length > 0,
-          foot: document.querySelector(".magpy-scene-foot").getClientRects().length > 0,
-          closeAll: ${closeAll}?.getClientRects().length > 0,
         };`);
-        if (
-          row.chips !== row.row ||
-          row.button ||
-          row.foot !== row.chips ||
-          !row.closeAll
-        )
+        if (row.chips !== row.row || !row.button)
           return `filled, the row: ${JSON.stringify(row)}`;
-        await tab.evaluate(`${closeAll}.click()`);
+        await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
-          `return ${panes}.length === 1 && ${spread}.getClientRects().length > 0`,
+          `return ${panes}.length === 1 && !${closing}`,
           5_000,
         );
         if (!back) return "pulled back, the view was not alone again";
@@ -1038,21 +1030,44 @@ async function savedPanes(port, base) {
         if (opened !== 1 || !ghost?.includes("shown by the scene"))
           return `the pressed chip carried as ${JSON.stringify(ghost)}, ${opened} panes`;
         // split, every other variant out: the scene's own chip leaves the
-        // row too, its tag named for it in its place, and no row is left
+        // row too, its tag named for it in its place, and no chip is left
         await tab.evaluate(`${spread}.click()`);
         const split = await tab.until(
           `const p = ${panes};
          return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
-           {
+           ${closing} && {
              tag: p[0].querySelector(".magpy-pane-tag span").textContent === "scene · eight",
              chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
                .filter((c) => c.getClientRects().length).map((c) => c.textContent),
            }`,
           15_000,
         );
-        if (!split || !split.tag || split.chips.length)
-          return `split at eight: ${JSON.stringify(split)}`;
-        await tab.evaluate(`${closeAll}.click()`);
+        if (!split || !split.tag || split.chips.length) {
+          const seen = await tab.evaluate(`return {
+            tags: ${panes}.map((p) => p.querySelector(".magpy-pane-tag span").textContent),
+            busy: Boolean(document.querySelector(".magpy-pane-busy")),
+            button: ${spread}.title,
+          }`);
+          return `split at eight: ${JSON.stringify({ split, seen })}`;
+        }
+        // the scene's own x: the scene takes the next pane's variant, and
+        // that pane closes into it
+        const next = await tab.evaluate(
+          `return ${panes}[1].querySelector(".magpy-pane-tag span").textContent`,
+        );
+        await tab.evaluate(
+          `${panes}[0].querySelector(".magpy-pane-tag .magpy-pane-close").click()`,
+        );
+        const folded = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants - 1} &&
+           document.querySelector(".magpy-vars-chip.on")?.textContent === ${JSON.stringify(next)} &&
+           p.map((pane) => pane.querySelector(".magpy-pane-tag span").textContent)`,
+          10_000,
+        );
+        if (!folded || folded.slice(1).includes(next))
+          return `the scene's pane closed: ${JSON.stringify({ next, folded })}`;
+        await tab.evaluate(`${spread}.click()`);
         return thrown(tab);
       } finally {
         await tab.close();

@@ -790,6 +790,16 @@
   height: 14px;
 }
 
+/* closing every pane: the icon and the words for it */
+.magpy-icon.magpy-scene-spread-worded {
+  display: flex;
+  gap: 5px;
+  width: auto;
+  padding: 0 7px 0 5px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .magpy-choosing .magpy-scene-spread {
   display: none;
 }
@@ -2282,16 +2292,6 @@
   border-radius: 999px;
   opacity: 0.6;
   cursor: pointer;
-}
-/* the scene's: every pane closed, an icon where the others have an x */
-.magpy-pane-close-all {
-  display: grid;
-  place-items: center;
-  padding: 1px 2px;
-}
-.magpy-pane-close-all svg {
-  width: 12px;
-  height: 12px;
 }
 .magpy-pane-close:hover {
   opacity: 1;

@@ -55,8 +55,9 @@ function sideOf(box, x, y) {
  * - `onLayout(split, names)`: the panes laid out again; `split`, whether
  *   there is more than the view, and `names` the variants with a pane.
  * - `stepNow()`: the step of the run the view shows, or null for its own.
- * - `closeAll`: a button for the scene's pane's tag, where the others have
- *   their x: every variant's pane closed at once.
+ * - `foldInto(name)`: the scene's pane's x pressed -- the scene to take the
+ *   variant `name`, the next pane's, which then closes into it: a promise
+ *   of whether it did.
  * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
  *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
@@ -71,7 +72,7 @@ export function createGrid(el, options) {
     onScenes,
     onLayout,
     stepNow,
-    closeAll,
+    foldInto,
     onSelect,
   } = options;
   el.classList.add("magpy-panes");
@@ -80,7 +81,16 @@ export function createGrid(el, options) {
   scenePane.body.append(view);
   // alone, as the view always was: laid out, and the host told, at a split
   scenePane.tag.hidden = true;
-  if (closeAll) scenePane.tag.append(closeAll);
+  // The scene's own x: it is the scene, not a copy, so closed it takes the
+  // next pane's variant, and that pane closes into it. At no variant -- its
+  // values edited -- there is none to close.
+  const sceneClose = document.createElement("button");
+  sceneClose.type = "button";
+  sceneClose.className = "magpy-pane-close";
+  sceneClose.textContent = "×";
+  sceneClose.hidden = true;
+  sceneClose.addEventListener("click", () => foldNext());
+  scenePane.tag.append(sceneClose);
   el.append(scenePane.el);
   /** The layout: a pane, or `{ dir, children, sizes }` -- `dir` "row" or
    *  "column", `sizes` the share of each child, summing to 1. */
@@ -230,6 +240,19 @@ export function createGrid(el, options) {
     dispose(pane);
     layout();
     drawn();
+  }
+
+  /** The scene's pane closed: the scene at the variant of the pane after it
+   *  in the layout -- or before it, last -- and that pane gone into it. */
+  async function foldNext() {
+    if (sceneClose.hidden) return; // at no variant: none to close
+    const order = panes();
+    const at = order.indexOf(scenePane);
+    const next = order[at + 1] ?? order[at - 1];
+    if (!next || next === scenePane) return;
+    if (await foldInto(next.name)) {
+      if (panes().includes(next)) remove(next);
+    }
   }
 
   /** The variant `name` dropped on `side` of `target`: a pane for it. */
@@ -650,6 +673,12 @@ export function createGrid(el, options) {
   function mark(now) {
     current = now;
     scenePane.label.textContent = now ? `scene · ${now}` : "scene";
+    sceneClose.hidden = !now || !foldInto;
+    if (now) {
+      const what = `Close ${now}: the scene takes the next pane's variant`;
+      sceneClose.title = what;
+      sceneClose.setAttribute("aria-label", what);
+    }
     choose(chosenNames); // the scene's tag is another variant's now
   }
 
