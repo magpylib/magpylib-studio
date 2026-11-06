@@ -43,9 +43,10 @@
  *   false is the rows without it, for that host's panel. `slide` makes the
  *   pressed toggle a handle: dragged sideways, each variant it passes is
  *   shown, as a slider's values are, and the one let go on is used.
- *   `onLift(name, event)`, with `slide`: the pressed toggle lifted out of
- *   the row, up, before any slide -- the host's to carry from there (the
- *   widget drops it in the view as a pane of its own), and nothing used.
+ *   `onLift(name, event, chip)`, with `slide`: the pressed toggle lifted
+ *   out of the row, up, before any slide -- the host's to carry from there
+ *   (the widget drops it in the view as a pane of its own), and nothing
+ *   used.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -358,7 +359,7 @@ export function createVariables(
           setTimeout(() => chip.removeEventListener("click", swallow, true)),
         { capture: true, once: true },
       );
-      onLift(name, e);
+      onLift(name, e, chip);
     };
     const done = () => {
       removeEventListener("pointermove", move, true);
@@ -381,7 +382,8 @@ export function createVariables(
       let best = at;
       let gap = Infinity;
       chips.forEach((chip, i) => {
-        if (unusable[names[i]]) return;
+        // one out of the row -- its variant in a pane of the host's -- none
+        if (unusable[names[i]] || !chip.getClientRects().length) return;
         const box = chip.getBoundingClientRect();
         const off = Math.abs(box.left + box.width / 2 - x);
         if (off < gap) [best, gap] = [i, off];
@@ -418,7 +420,7 @@ export function createVariables(
             missedRefresh = false;
             load().catch(say);
           }
-          onLift(names[pressedAt], e);
+          onLift(names[pressedAt], e, chips[pressedAt]);
           return;
         }
       }

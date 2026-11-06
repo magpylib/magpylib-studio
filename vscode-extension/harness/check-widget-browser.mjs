@@ -864,7 +864,13 @@ async function savedPanes(port, base) {
         await mouse("mousePressed", from);
         await mouse("mouseMoved", { x: from.x, y: from.y - 40 });
         await mouse("mouseMoved", to);
+        // carried, the chip is out of its row: its place there kept empty
+        const carried = `${chip}.classList.contains("magpy-carried")`;
+        if (!(await tab.evaluate(`return ${carried}`)))
+          return "carried, the chip still showed in its row";
         await mouse("mouseReleased", to);
+        if (await tab.evaluate(`return ${carried}`))
+          return "dropped, the chip never came back to its row";
         const panes = `[...document.querySelectorAll(".magpy-pane")]`;
         const drawn = await tab.until(
           `const p = ${panes};
@@ -881,12 +887,15 @@ async function savedPanes(port, base) {
           beside: eight.left >= scene.right,
           differ: p[0].querySelector("canvas").toDataURL() !== p[1].querySelector("canvas").toDataURL(),
           used: document.querySelector(".magpy-vars-chip.on")?.textContent ?? null,
+          twice: ${chip}.getClientRects().length > 0,
         };`);
+        // its pane shows the variant, the row no more
         if (
           seen.tags.join() !== "scene,eight" ||
           !seen.beside ||
           !seen.differ ||
-          seen.used
+          seen.used ||
+          seen.twice
         )
           return `dropped: ${JSON.stringify(seen)}`;
         await tab.evaluate(
@@ -897,6 +906,8 @@ async function savedPanes(port, base) {
           5_000,
         );
         if (!alone) return "closed, the view was not alone again";
+        if (!(await tab.evaluate(`return ${chip}.getClientRects().length > 0`)))
+          return "closed, its chip never came back to the row";
         // the button beside the chips: every other variant out at once, the
         // scene first, and a press more all of them back
         const spread = `document.querySelector(".magpy-scene-spread")`;
@@ -918,6 +929,12 @@ async function savedPanes(port, base) {
           `return ${panes}[0].querySelector(".magpy-pane-tag span").textContent`,
         );
         if (!first.startsWith("scene")) return `filled, ${first} came first`;
+        const twice = await tab.evaluate(`
+        const open = ${panes}.slice(1).map((p) => p.querySelector(".magpy-pane-tag span").textContent);
+        return [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
+          .filter((c) => c.getClientRects().length && open.includes(c.textContent))
+          .map((c) => c.textContent);`);
+        if (twice.length) return `filled, still in the row: ${twice}`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
           `return ${panes}.length === 1 && !${spread}.classList.contains("on")`,

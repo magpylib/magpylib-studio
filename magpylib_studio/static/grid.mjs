@@ -314,10 +314,11 @@ export function createGrid(el, options) {
   }
 
   // --- carrying a chip or a pane -------------------------------------------
-  /** Carry `what` -- `{ name }`, a variant's chip, or `{ pane, name }`, a
-   *  pane by its tag -- from `event`, showing where it would land: half of
+  /** Carry `what` -- `{ name, from }`, a variant's chip, or `{ pane, name }`,
+   *  a pane by its tag -- from `event`, showing where it would land: half of
    *  the pane under the pointer, on the side the pointer is nearest. Let go,
-   *  it lands there; Escape, or let go elsewhere, and nothing changes. */
+   *  it lands there; Escape, or let go elsewhere, and nothing changes. The
+   *  chip `from` is out of its row meanwhile, its place kept empty. */
   function carry(event, what) {
     event.preventDefault();
     // a variant out already is moved, not opened twice
@@ -329,6 +330,7 @@ export function createGrid(el, options) {
     const mark = document.createElement("div");
     mark.className = "magpy-pane-drop";
     el.append(ghost, mark);
+    what.from?.classList.add("magpy-carried");
     let target = null;
     let side = null;
     const place = (e) => {
@@ -371,6 +373,7 @@ export function createGrid(el, options) {
       removeEventListener("keydown", escape, true);
       ghost.remove();
       mark.remove();
+      what.from?.classList.remove("magpy-carried");
     };
     const drop = () => {
       done();

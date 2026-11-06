@@ -724,7 +724,9 @@
   overflow: hidden;
 }
 
-.magpy-scene-foot > :not([hidden]) ~ :not([hidden]):not(.magpy-scene-progress) {
+.magpy-scene-foot
+  > :not([hidden])
+  ~ :not([hidden]):not(.magpy-scene-progress):not(.magpy-scene-spread) {
   border-left: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 }
 
@@ -763,25 +765,29 @@
   min-width: 10em;
 }
 
-/* The spread button, at the end of the chips: a chip's height and outline,
-   its pressed look the pressed chip's. Not while the foot asks what a page
-   keeps, where a chip says that and nothing else. */
+/* The spread button, past the chips: a tool, as the toolbar's are, not one
+   more chip -- no outline, a hairline between it and the row, and pressed
+   as a toolbar toggle is. Not while the foot asks what a page keeps, where
+   a chip says that and nothing else. */
 .magpy-icon.magpy-scene-spread {
-  width: auto;
-  height: 18px;
-  padding: 0 7px;
-  margin-left: -2px;
-  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 10px;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  margin: 0 3px 0 5px;
+}
+
+.magpy-icon.magpy-scene-spread::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 4px;
+  bottom: 4px;
+  border-left: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 }
 
 .magpy-icon.magpy-scene-spread svg {
-  width: 12px;
-  height: 12px;
-}
-
-.magpy-icon.magpy-scene-spread.on {
-  border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+  width: 14px;
+  height: 14px;
 }
 
 .magpy-choosing .magpy-scene-spread {
@@ -2309,6 +2315,16 @@
   background: var(--vscode-focusBorder, #4b8fe2);
   color: #fff;
   white-space: nowrap;
+}
+/* a variant with a pane is there, not in the row as well */
+.magpy-vars-chip.magpy-in-pane {
+  display: none;
+}
+/* a chip carried into the view: out of its row, its place kept empty */
+.magpy-vars-chip.magpy-carried {
+  -webkit-text-fill-color: transparent;
+  background: transparent;
+  border-style: dashed;
 }
 .magpy-pane-refused {
   background: color-mix(in srgb, currentColor 40%, transparent);

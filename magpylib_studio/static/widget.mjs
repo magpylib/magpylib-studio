@@ -891,6 +891,7 @@ function render({ model, el }) {
     counter.hidden = !trim.hidden; // the line says which steps
     choose.hidden = false;
     foot.classList.add("magpy-choosing");
+    dressPaned(); // every variant offered to keep, those with a pane too
     pressed(exportButton, true);
     describeChoice();
     keepCorner();
@@ -1706,7 +1707,7 @@ function render({ model, el }) {
         // a variant there, through it, and a lift carries it
         slide: model.editor === undefined,
         // lifted out of the row, a chip is carried into the view
-        onLift: (name, event) => lift(name, event),
+        onLift: (name, event, chip) => lift(name, event, chip),
         variantsOnly: true,
         // as many as the foot of the view holds, past the panel's four
         fits: (names) => names.length <= 10 && names.join("").length <= 90,
@@ -1738,6 +1739,7 @@ function render({ model, el }) {
    *  every variant beside the scene, or, every one out already, or as many
    *  as there is room for, all of them back. */
   function dressSpread() {
+    dressPaned();
     const offered = offeredVariants();
     const open = grid.names;
     spreadButton.hidden = variantsEl.hidden || offered.length === 0;
@@ -1757,6 +1759,19 @@ function render({ model, el }) {
           : "Open every other variant beside the scene, each in a pane",
     );
     spreadButton.classList.toggle("on", full);
+  }
+
+  /** A variant with a pane is there, not in the row as well: its chip, or
+   *  its option of the dropdown, out of the row until the pane closes --
+   *  but not while the foot asks what a page keeps, of every variant. */
+  function dressPaned() {
+    const open = new Set(choosing ? [] : grid.names);
+    for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
+      chip.classList.toggle("magpy-in-pane", open.has(chip.textContent));
+    }
+    for (const option of variantsEl.querySelectorAll("option")) {
+      option.hidden = open.has(option.value) && !option.selected;
+    }
   }
 
   function spread() {
@@ -1833,9 +1848,9 @@ function render({ model, el }) {
   let paneNames = []; // the variants with a pane, at the last layout
 
   /** A chip lifted out of the row: carried, to be dropped in the view. */
-  function lift(name, event) {
+  function lift(name, event, chip) {
     if (!api || !sharedModule) return; // nothing drawn yet to split
-    grid.carry(event, { name });
+    grid.carry(event, { name, from: chip });
   }
 
   /** The variant the scene is at, or null: the row's to say. */

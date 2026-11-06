@@ -109,23 +109,24 @@ any and drag sideways to slide through them, one step to undo. A chip lifted out
 of the row and dropped on a side of the view is a pane of its own there, as VS
 Code splits its editors: the scene at that variant's values beside the scene
 itself, up to twelve panes with the scene's, each moved by its tag, resized by
-the line between it and the next, and closed by its ×. A chip whose variant has
-a pane moves that pane. The button at the end of the row lays every other
-variant out at once, in a grid, as many as there is room for, and once they are
-out, closes them all. A variant that cannot be solved for is drawn unsolved, and
-its tag says so. They turn together, with one legend, one colour scale and one
-transport for all, the cube and the scale bar where they stand in one view. A
-slider moves the variables no variant names in every pane; a pane keeps the
-values its variant names. Its page carries them: the same row, and a click draws
-that one, field lines and solved parts included, each drawn ahead when the page
-was written, from the scene as it was then. `write_html(path, variants=False)`
-leaves them out, and a list of names keeps those. Beside a run, each variant
-carries its own: every step solved and drawn ahead, so the page plays any
-variant's run. `run=False` leaves the runs out, the page holding the step the
-scene is drawn at, and `steps=(first, last)`, counted from 0, keeps that stretch
-of them. For a scene with a run or variants, **Export** asks in the view's foot
-first: two markers on the run's slider keep a stretch of steps, a click on a
-variant leaves it out, and **Save** writes what is kept, everything to start.
+the line between it and the next, and closed by its ×. A variant with a pane has
+no chip in the row until the pane closes. The button at the end of the row lays
+every other variant out at once, in a grid, as many as there is room for, and
+once they are out, closes them all. A variant that cannot be solved for is drawn
+unsolved, and its tag says so. They turn together, with one legend, one colour
+scale and one transport for all, the cube and the scale bar where they stand in
+one view. A slider moves the variables no variant names in every pane; a pane
+keeps the values its variant names. Its page carries them: the same row, and a
+click draws that one, field lines and solved parts included, each drawn ahead
+when the page was written, from the scene as it was then.
+`write_html(path, variants=False)` leaves them out, and a list of names keeps
+those. Beside a run, each variant carries its own: every step solved and drawn
+ahead, so the page plays any variant's run. `run=False` leaves the runs out, the
+page holding the step the scene is drawn at, and `steps=(first, last)`, counted
+from 0, keeps that stretch of them. For a scene with a run or variants,
+**Export** asks in the view's foot first: two markers on the run's slider keep a
+stretch of steps, a click on a variant leaves it out, and **Save** writes what
+is kept, everything to start.
 
 Which is
 [direction.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/direction.md)
