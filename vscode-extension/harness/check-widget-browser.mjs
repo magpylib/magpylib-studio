@@ -966,8 +966,9 @@ async function savedPanes(port, base) {
         if (!(await tab.evaluate(`return ${chip}.getClientRects().length > 0`)))
           return "closed, its chip never came back to the row";
         // the button beside the chips: every other variant out at once, the
-        // scene first, and a press more all of them back
+        // scene first; the scene's tag then closes them all
         const spread = `document.querySelector(".magpy-scene-spread")`;
+        const closeAll = `document.querySelector(".magpy-pane-tag .magpy-pane-close-all")`;
         const variants = await tab.evaluate(
           `return document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip:not(:disabled):not(.on)").length`,
         );
@@ -975,8 +976,7 @@ async function savedPanes(port, base) {
         const filled = await tab.until(
           `const p = ${panes};
          return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
-           p.every((pane) => pane.querySelector("canvas")?.width) &&
-           ${spread}.title.startsWith("Close")`,
+           p.every((pane) => pane.querySelector("canvas")?.width)`,
           15_000,
         );
         if (!filled) {
@@ -992,19 +992,27 @@ async function savedPanes(port, base) {
           .filter((c) => c.getClientRects().length && open.includes(c.textContent))
           .map((c) => c.textContent);`);
         if (twice.length) return `filled, still in the row: ${twice}`;
-        // none left in the row: its name goes too, the button alone
+        // none left in the row, nor to open: its name goes too, the button
+        // and the foot with them, and the scene's tag holds the way back
         const row = await tab.evaluate(`
         const chips = [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")];
         return {
           chips: chips.some((c) => c.getClientRects().length),
           row: document.querySelector(".magpy-scene-variants").getClientRects().length > 0,
           button: ${spread}.getClientRects().length > 0,
+          foot: document.querySelector(".magpy-scene-foot").getClientRects().length > 0,
+          closeAll: ${closeAll}?.getClientRects().length > 0,
         };`);
-        if (row.chips !== row.row || !row.button)
+        if (
+          row.chips !== row.row ||
+          row.button ||
+          row.foot !== row.chips ||
+          !row.closeAll
+        )
           return `filled, the row: ${JSON.stringify(row)}`;
-        await tab.evaluate(`${spread}.click()`);
+        await tab.evaluate(`${closeAll}.click()`);
         const back = await tab.until(
-          `return ${panes}.length === 1 && !${spread}.title.startsWith("Close")`,
+          `return ${panes}.length === 1 && ${spread}.getClientRects().length > 0`,
           5_000,
         );
         if (!back) return "pulled back, the view was not alone again";
@@ -1030,13 +1038,13 @@ async function savedPanes(port, base) {
         if (opened !== 1 || !ghost?.includes("shown by the scene"))
           return `the pressed chip carried as ${JSON.stringify(ghost)}, ${opened} panes`;
         // split, every other variant out: the scene's own chip leaves the
-        // row too, its tag pressed in its place, and the row is the button
+        // row too, its tag named for it in its place, and no row is left
         await tab.evaluate(`${spread}.click()`);
         const split = await tab.until(
           `const p = ${panes};
          return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
-           ${spread}.title.startsWith("Close") && {
-             tag: p[0].querySelector(".magpy-pane-tag").classList.contains("on"),
+           {
+             tag: p[0].querySelector(".magpy-pane-tag span").textContent === "scene · eight",
              chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
                .filter((c) => c.getClientRects().length).map((c) => c.textContent),
            }`,
@@ -1044,7 +1052,7 @@ async function savedPanes(port, base) {
         );
         if (!split || !split.tag || split.chips.length)
           return `split at eight: ${JSON.stringify(split)}`;
-        await tab.evaluate(`${spread}.click()`);
+        await tab.evaluate(`${closeAll}.click()`);
         return thrown(tab);
       } finally {
         await tab.close();

@@ -796,7 +796,14 @@ function render({ model, el }) {
   const spreadButton = iconButton("tile", "", () => spread());
   spreadButton.classList.add("magpy-scene-spread");
   spreadButton.hidden = true;
-  let spreadFull = false; // what a press does: close them all, or open them
+  // On the scene's pane's tag, where the others have their x: every
+  // variant's pane closed at once, the view alone again.
+  const closeAllButton = iconButton(
+    "untile",
+    "Close every variant's pane, back to the scene alone",
+    () => grid.hide(),
+  );
+  closeAllButton.className = "magpy-pane-close magpy-pane-close-all";
 
   // A page being written: how far, and -- the view's own export -- a button
   // that stops it.
@@ -1445,6 +1452,17 @@ function render({ model, el }) {
     if (drawing()) api.setAxes(choice);
   }
 
+  /** Nothing in the foot: no run, no page being written, and no row --
+   *  or a row whose every variant has a pane, and nothing left to open. */
+  function footGone() {
+    const row =
+      !variantsEl.hidden &&
+      !(
+        variantsEl.classList.contains("magpy-all-paned") && spreadButton.hidden
+      );
+    return transport.hidden && !row && writing.hidden && choose.hidden;
+  }
+
   /** What floats over the view's bottom-right corner, where it is now, for
    *  the renderer's view cube and scale bar to stand clear of: the editing
    *  column, which reaches down there in a view under about 520px tall, the
@@ -1452,8 +1470,7 @@ function render({ model, el }) {
    *  or goes, and when the view is resized. */
   function keepCorner() {
     placeColorBar(); // beside the column, as it now stands
-    foot.hidden =
-      transport.hidden && variantsEl.hidden && writing.hidden && choose.hidden;
+    foot.hidden = footGone();
     el.classList.toggle("magpy-footed", !foot.hidden);
     if (grid.split) placePanes();
     if (!drawing()) return;
@@ -1739,29 +1756,26 @@ function render({ model, el }) {
     return (model.get("variants") || []).filter((name) => !refused.has(name));
   }
 
-  /** The spread button: shown with the row, and saying what a press does --
-   *  every variant beside the scene, or, every one out already, or as many
-   *  as there is room for, all of them back. */
+  /** The spread button: shown with the row while there is a variant left to
+   *  open -- every other one beside the scene, or as many as there is room
+   *  for. With none left it goes, and the scene's tag closes them all; with
+   *  no chip left either, the foot goes too. */
   function dressSpread() {
     dressPaned();
     const offered = offeredVariants();
     const open = grid.names;
-    spreadButton.hidden = variantsEl.hidden || offered.length === 0;
     const full =
       grid.split &&
       (offered.every((name) => open.includes(name)) ||
         open.length >= MOST_PANES - 1);
-    spreadFull = full;
-    setIcon(spreadButton, full ? "untile" : "tile");
-    // the icon and the label say what a press does
+    spreadButton.hidden = variantsEl.hidden || offered.length === 0 || full;
     name(
       spreadButton,
-      full
-        ? "Close every variant's pane, back to the scene alone"
-        : offered.length > MOST_PANES - 1
-          ? `Open ${MOST_PANES - 1} of the other variants beside the scene, each in a pane`
-          : "Open every other variant beside the scene, each in a pane",
+      offered.length > MOST_PANES - 1
+        ? `Open ${MOST_PANES - 1} of the other variants beside the scene, each in a pane`
+        : "Open every other variant beside the scene, each in a pane",
     );
+    if (foot.hidden !== footGone()) keepCorner();
   }
 
   /** A variant with a pane is there, not in the row as well: its chip, or
@@ -1770,7 +1784,7 @@ function render({ model, el }) {
   function dressPaned() {
     const open = new Set(choosing ? [] : grid.names);
     // split, the variant the scene is at is the scene's pane's, its tag
-    // pressed (`grid.mark`): out of the row as well
+    // named for it (`grid.mark`): out of the row as well
     const split = grid.split && !choosing;
     const out = (chip) =>
       open.has(chip.textContent) || (split && chip.classList.contains("on"));
@@ -1867,8 +1881,7 @@ function render({ model, el }) {
 
   function spread() {
     if (!api || !sharedModule) return; // nothing drawn yet to split
-    if (spreadFull) grid.hide();
-    else grid.fill(offeredVariants());
+    grid.fill(offeredVariants());
   }
 
   // --- variants side by side -----------------------------------------------
@@ -1898,6 +1911,7 @@ function render({ model, el }) {
       dressColorBar();
     },
     stepNow: () => stepShown(),
+    closeAll: closeAllButton,
     // a pane's tag clicked selects its variant, as its chip does
     onSelect: (name, add) => select(name, add),
     onLayout: (split, names) => {

@@ -2265,17 +2265,6 @@
 .magpy-pane-tag[hidden] {
   display: none;
 }
-/* the scene's tag, its pane at a variant: pressed, as its chip in the row
-   would be -- out of the row while the view is split */
-.magpy-pane-tag.on {
-  color: var(--vscode-focusBorder);
-  background: color-mix(
-    in srgb,
-    var(--vscode-focusBorder) 18%,
-    var(--vscode-editor-background, #fff)
-  );
-  outline-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
-}
 /* its variant selected: ringed, as its chip in the row is */
 .magpy-pane-tag.magpy-selected {
   outline: 2px solid var(--vscode-focusBorder);
@@ -2293,6 +2282,16 @@
   border-radius: 999px;
   opacity: 0.6;
   cursor: pointer;
+}
+/* the scene's: every pane closed, an icon where the others have an x */
+.magpy-pane-close-all {
+  display: grid;
+  place-items: center;
+  padding: 1px 2px;
+}
+.magpy-pane-close-all svg {
+  width: 12px;
+  height: 12px;
 }
 .magpy-pane-close:hover {
   opacity: 1;

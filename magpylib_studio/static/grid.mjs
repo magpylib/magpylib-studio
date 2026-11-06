@@ -55,6 +55,8 @@ function sideOf(box, x, y) {
  * - `onLayout(split, names)`: the panes laid out again; `split`, whether
  *   there is more than the view, and `names` the variants with a pane.
  * - `stepNow()`: the step of the run the view shows, or null for its own.
+ * - `closeAll`: a button for the scene's pane's tag, where the others have
+ *   their x: every variant's pane closed at once.
  * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
  *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
@@ -69,6 +71,7 @@ export function createGrid(el, options) {
     onScenes,
     onLayout,
     stepNow,
+    closeAll,
     onSelect,
   } = options;
   el.classList.add("magpy-panes");
@@ -77,6 +80,7 @@ export function createGrid(el, options) {
   scenePane.body.append(view);
   // alone, as the view always was: laid out, and the host told, at a split
   scenePane.tag.hidden = true;
+  if (closeAll) scenePane.tag.append(closeAll);
   el.append(scenePane.el);
   /** The layout: a pane, or `{ dir, children, sizes }` -- `dir` "row" or
    *  "column", `sizes` the share of each child, summing to 1. */
@@ -646,8 +650,6 @@ export function createGrid(el, options) {
   function mark(now) {
     current = now;
     scenePane.label.textContent = now ? `scene · ${now}` : "scene";
-    // the variant's chip is out of the row while split: pressed here instead
-    scenePane.tag.classList.toggle("on", Boolean(now));
     choose(chosenNames); // the scene's tag is another variant's now
   }
 

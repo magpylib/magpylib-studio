@@ -62,9 +62,10 @@ of its own there, the scene at that variant's values beside the scene, as VS
 Code splits its editors: up to 12 panes with the scene's, moved by their tags,
 resized by the line between them, turned together. A variant with a pane has no
 chip in the row until the pane closes; the one the scene is at opens no pane,
-the scene's own shows it, its tag pressed, and its chip leaves the row too while
-the view is split. The button at the end of the row opens every other variant at
-once in a grid, up to 11, and closes them all again. With the handles out
+the scene's own shows it, its tag named for it, and its chip leaves the row too
+while the view is split. The button at the end of the row opens every other
+variant at once in a grid, up to 11; the scene's tag has the button that closes
+them all, where the other tags have their ×. With the handles out
 (`editable=True`, or the pencil), the sliders toggle opens a slider per
 variable, and `open_panel="variables"` opens it at the start. An object on a
 path is a run, which the view plays.
