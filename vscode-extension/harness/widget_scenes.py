@@ -625,6 +625,36 @@ def main(out):
         ),
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
+    # one of each kind of corner, for the ruler (#125): a round surface and a
+    # loop have none, a bent wire its ends and its bend
+    shapes = [
+        magpy.magnet.Sphere(
+            polarization=(0, 0, 1), diameter=0.01, position=(-0.03, 0, 0)
+        ),
+        magpy.magnet.Cylinder(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01), position=(-0.015, 0, 0)
+        ),
+        magpy.current.Circle(current=1, diameter=0.01, position=(0, 0, 0)),
+        magpy.current.Polyline(
+            current=1,
+            vertices=[(0, 0, 0), (0.01, 0, 0), (0.01, 0.01, 0)],
+            position=(0.015, 0, 0),
+        ),
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.02, 0)
+        ),
+        magpy.magnet.CylinderSegment(
+            polarization=(0, 0, 1),
+            dimension=(0.005, 0.01, 0.01, 0, 90),
+            position=(0.02, 0.02, 0),
+        ),
+        magpy.magnet.Tetrahedron(
+            polarization=(0, 0, 1),
+            vertices=[(0, 0, 0), (0.01, 0, 0), (0, 0.01, 0), (0, 0, 0.01)],
+            position=(-0.03, 0.02, 0),
+        ),
+    ]
+    SceneWidget(*shapes).write_html(out / "shapes.html")
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
     soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top
     SceneWidget(soft).write_html(out / "applied.html")

@@ -4,8 +4,9 @@
 [#125](https://github.com/magpylib/magpylib-studio/issues/125). Decided with
 Alex that day, on the issue's open questions:
 
-- several measurements at once, each cleared by its own ×, all of them by M or
-  Esc;
+- several measurements at once, each cleared by its own ×, all of them by Esc
+  with the ruler on; the ruler off, they stay and follow, so an object is
+  selected and dragged by its handles while they show (Alex, the same day);
 - with the view split into panes, a measurement is mirrored into every pane, at
   that pane's variant;
 - the PNG keeps the measurements; a saved page does not, and has a ruler of its
@@ -47,28 +48,37 @@ What the two picks are decides what is measured, with no mode to choose:
 
 | 1st pick | 2nd pick | Shows                                             |
 | -------- | -------- | ------------------------------------------------- |
-| vertex   | vertex   | the distance                                      |
-| vertex   | face     | the distance to the face's plane, at right angles |
+| corner   | corner   | the distance                                      |
+| corner   | face     | the distance to the face's plane, at right angles |
 | face     | face     | the gap, if they are parallel; else the angle     |
 | edge     | edge     | the shortest distance between them                |
 
-The pairs the other way round are the same. An edge with a vertex or a face is
-the distance from the vertex to the edge's line, or the edge's nearest point to
+The pairs the other way round are the same. An edge with a corner or a face is
+the distance from the corner to the edge's line, or the edge's nearest point to
 the face's plane.
 
-- **Hovering shows the pick first**: a dot on a vertex, the edge drawn bright,
-  or the face tinted, within `SNAP_PIXELS`. A vertex beats an edge, an edge a
+- **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
+  or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
   face.
 - **One dimension line, one label**, said by `sayLength`, or in degrees. Its
   tooltip gives Δx, Δy and Δz, and says when an end is on a curved surface's
   facets.
+- **M or the button** says only whether a click picks a corner: off, the
+  measurements stay, follow what they measure, and a label's × still takes one
+  away, while a click selects again and the handles drag.
 - **Esc** clears the pick half made, then the measurements, then -- the ruler
   off -- what it always did: a pane carried takes it first, as it does today.
 
 ## 3. What a measurement holds
 
+A corner is where a shape's sharp edges meet -- faces at more than `EDGE_ANGLE`,
+as its outline is found -- or a wire's end or bend: not a facet's vertex on a
+round surface, so a sphere, a cylinder's side and rims, and a loop have none,
+and a wire's corners come from the line its flow runs along, not from its
+arrows.
+
 Each end is a **feature**, not a point: the object's id, which drawn part of it
-(the mesh's place among the node's children), and which vertex, edge or face of
+(the mesh's place among the node's children), and which corner, edge or face of
 that part's geometry. A face is the triangles round the one hit that share its
 plane, found on that part alone; an edge is one of its `EdgesGeometry` pairs.
 Both are worked out once a part, when the pointer first comes over it.
@@ -82,7 +92,7 @@ Both are worked out once a part, when the pointer first comes over it.
 - **It is the view's**, not the document's: no undo step, nothing in the script,
   the saved scene or a saved page.
 
-Snapping keeps whose vertex each target is, to anchor a vertex pick: an owner
+Snapping keeps whose corner each target is, to anchor a corner pick: an owner
 and an index beside each world position, in the same cells.
 
 ## 4. In the grid
@@ -117,7 +127,7 @@ stands aside from the lines' ends.
 
 ## 7. The order
 
-1. **The ruler in one view**: vertex to vertex, the button and M, Esc, the ×,
+1. **The ruler in one view**: corner to corner, the button and M, Esc, the ×,
    following a drag. The keys table and the tooltips list M.
 2. **The other pairs**: faces and edges, the angle.
 3. **The grid**: the list told to every pane.

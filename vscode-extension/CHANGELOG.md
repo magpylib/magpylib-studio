@@ -8,6 +8,22 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A ruler in the view</summary>
+
+The ruler among the view's tools, or M, measures what is drawn: a click on a
+corner, then on another, and a line between them with its length, in the scene's
+unit, its Δx, Δy and Δz in its tooltip. It follows the objects as they move,
+holds several at once, each taken away by its label's ×, and stays when the
+ruler is turned off, so an object can be selected and dragged while they show;
+Esc with the ruler on takes back the corner picked, then the measurements, then
+the ruler. It works wherever the view does, a saved page and the VS Code panel
+included, edits nothing, and the PNG keeps the measurements
+([#125](https://github.com/magpylib/magpylib-studio/issues/125)); faces, edges
+and the split view follow.
+
+</details>
+
+<details>
 <summary>Variants side by side</summary>
 
 A variant's chip, lifted out of the view's foot and dropped on a side of the

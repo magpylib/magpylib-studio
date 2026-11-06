@@ -413,15 +413,20 @@ export function createScene3d() {
   /** The scene, and the marks over it: everything but the corner. */
   function drawPicture(now = performance.now()) {
     if (sizeGlyphs()) placeGlyphMarks();
+    placeRuler();
     keepBatches();
     const cues = cuesAt(now);
     lookOfOverlaps(cues);
     // The handles go over the marks, which would otherwise be laid over them
     // where they cross a selection's outline: drawn last, on their own. They
     // are drawn through everything anyway (`HANDLE_LOOK`).
-    const handles = [gizmo?.getHelper(), grips, dots, snapMark].filter(
-      (root) => root?.visible,
-    );
+    const handles = [
+      gizmo?.getHelper(),
+      grips,
+      dots,
+      snapMark,
+      rulerRoot,
+    ].filter((root) => root?.visible);
     for (const root of handles) root.visible = false;
     try {
       renderer.render(scene, camera);
@@ -1282,7 +1287,7 @@ export function createScene3d() {
     guide.renderOrder = 999;
     guide.frustumCulled = false;
     grips.add(guide);
-    scene.add(grips, dots, pointProxy, snapMark);
+    scene.add(grips, dots, pointProxy, snapMark, rulerRoot);
   }
 
   /** The grips the shape shown has, without the guide. Raycasting reaches
@@ -2518,7 +2523,11 @@ export function createScene3d() {
         requestAnimationFrame(() => {
           const event = looking;
           looking = null;
-          if (event) hover(onHandle() ? null : pick(event));
+          // a measurement's label is over the scene, the ruler on or off
+          const onLabel =
+            event && (ruler.on || ruler.list.length) && rulerHover(event);
+          if (event && !ruler.on)
+            hover(onHandle() || onLabel ? null : pick(event));
         });
       }
       looking = event;
@@ -2536,6 +2545,7 @@ export function createScene3d() {
       markCube(null);
       looking = null;
       hover(null);
+      if (ruler.on || ruler.list.length) rulerHover(null);
     });
     element.addEventListener("pointerup", (event) => {
       const fromCube = letGo();
@@ -2558,6 +2568,13 @@ export function createScene3d() {
       // a handle under the pointer was the target of the press, not the object
       // behind it -- otherwise letting go of a gizmo selects whatever it covers
       if (gizmo?.axis || gripPressed) return;
+      // the ruler on, a click is an end of a measurement, not a selection;
+      // on or off, a click on a label is the label's
+      if (ruler.on || (ruler.list.length && labelAt(event))) {
+        rulerClick(event);
+        redraw();
+        return;
+      }
       const objectId = pick(event);
       if (objectId) {
         host.dispatchEvent(
@@ -5826,6 +5843,7 @@ export function createScene3d() {
     made.addEventListener("start", stopTurning); // a drag or a wheel takes over
     made.addEventListener("change", () => {
       fitClipping();
+      rulerMoved();
       redraw();
       cameraMoved?.();
     });
@@ -7409,6 +7427,7 @@ void main() {
     h: "hide", // shift: show only the selection, or everything again
     c: "parent", // the collection the selection is in; again, the one round it
     Escape: "deselect", // but a drag in progress first: that is taken back
+    m: "ruler", // measure: on, or off, the measurements kept
     Delete: "deletePoints", // the points held, out of a wire
     Backspace: "deletePoints",
   };
@@ -7453,7 +7472,10 @@ void main() {
       case "parent":
         return selectedIds.length > 0 && ask(host.parent, selectedIds[0]);
       case "deselect":
-        return cancelDrag() || ask(host.deselect);
+        return cancelDrag() || rulerEscape() || ask(host.deselect);
+      case "ruler":
+        setRuler(!ruler.on);
+        return true;
       case "deletePoints":
         return deletePoints();
       default: // play
@@ -7483,6 +7505,8 @@ void main() {
    */
   function render(canvasEl, payload, { keepCamera = true, keep = [] } = {}) {
     glyphsMoved = true;
+    partsCache.clear(); // the parts a measurement's ends count in, made again
+    rulerMoved();
     const held = new Set([].concat(keep ?? []));
     // What a dragged collection carries is held with it: rebuilt, it would be
     // drawn twice, once on the collection's node and once from the payload.
@@ -7620,6 +7644,486 @@ void main() {
     drawHints();
   }
 
+  // --- the ruler (#125, docs/plans/ruler.md) -------------------------------
+  // A view setting, not an edit: two picks, a corner each, and the distance
+  // between them, drawn over the scene with the handles, so a picture has it.
+  // An end is a feature -- an object, which drawn part of it, which of its
+  // corners -- found again every frame, so a measurement follows a drag and
+  // a run.
+  const RULER_INK = "#ff7a00";
+  const RULER_LABEL_PX = 11; // the label's text, in CSS pixels
+  const ruler = {
+    on: false,
+    first: null, // the end picked, waiting for the second
+    hovered: null, // the vertex under the pointer, as a pick would take it
+    over: null, // the measurement whose label is under the pointer
+    list: [], // { a, b, label }
+    targets: null, // the vertices as snapping keeps them, with their owners
+    stale: true, // the camera or the scene moved since `targets`
+    movedAt: 0,
+  };
+  const rulerRoot = new THREE.Group();
+  rulerRoot.renderOrder = 1002;
+  const rulerDots = new THREE.Points(
+    new THREE.BufferGeometry(),
+    new THREE.PointsMaterial({
+      ...HANDLE_LOOK,
+      color: RULER_INK,
+      size: 9,
+      sizeAttenuation: false,
+      map: roundDot(),
+      alphaTest: 0.5,
+    }),
+  );
+  rulerDots.frustumCulled = false;
+  rulerRoot.add(rulerDots);
+  const partsCache = new Map(); // a node -> its own drawn parts, until a render
+  const vertexCache = new WeakMap(); // a geometry -> its corners, flat
+
+  /** A round dot's picture, for the ruler's points to wear. */
+  function roundDot() {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 32;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(16, 16, 13, 0, 2 * Math.PI);
+    ctx.fill();
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  /** The parts drawn for `objectId` itself, not for an object inside it, in
+   *  the order a node holds them: what an end's `part` counts in. */
+  function rulerParts(objectId) {
+    const node = byObjectId.get(objectId);
+    if (!node) return [];
+    let parts = partsCache.get(node);
+    if (parts) return parts;
+    parts = [];
+    // what is drawn for the object but is not it: its path, its current's
+    // arrows, a field's lines, a sensor's mark sized by the zoom, a
+    // selection's outline hung on it and taken off again
+    const apart = (part) => {
+      for (let at = part; at && at !== node.parent; at = at.parent) {
+        const was = at.userData;
+        if (was.path || was.arrows || was.field || was.glyph) return true;
+        if (was.outline || was.mark) return true;
+      }
+      return false;
+    };
+    node.traverse((part) => {
+      if (ownerOf(part) !== objectId || apart(part)) return;
+      // a shape's faces, or a wire's run as its flow follows it: the line
+      // the pulses run along, which the arrows break into pieces
+      const shape =
+        part.isMesh && !part.isInstancedMesh && !part.isLineSegments2;
+      const wire = part.isLineSegments2 && part.userData.flow;
+      if (shape || wire) parts.push(part);
+    });
+    partsCache.set(node, parts);
+    return parts;
+  }
+
+  /** A part's corners, flat, in its own frame: where its sharp edges meet,
+   *  not a facet's vertex on a round surface -- a sphere has none, a
+   *  cylinder's rims none -- or, of a wire, its ends and the points it turns
+   *  at, a loop's none. Kept while its geometry is. */
+  function rulerCorners(part) {
+    let flat = vertexCache.get(part.geometry);
+    if (!flat) {
+      flat = cornersOf(
+        part.isLineSegments2
+          ? linePairs(part.geometry)
+          : regionEdges(part.geometry),
+      );
+      vertexCache.set(part.geometry, flat);
+    }
+    return flat;
+  }
+
+  /** A wide line's segments, flat, as `regionEdges` gives a shape's edges. */
+  function linePairs(geometry) {
+    const from = geometry.attributes.instanceStart;
+    const to = geometry.attributes.instanceEnd;
+    const pairs = [];
+    for (let i = 0; i < (from?.count ?? 0); i++) {
+      pairs.push(from.getX(i), from.getY(i), from.getZ(i));
+      pairs.push(to.getX(i), to.getY(i), to.getZ(i));
+    }
+    return pairs;
+  }
+
+  /** Where segments -- `pairs`, flat -- meet at a corner: a point they end at
+   *  but do not run straight through, turning by more than `EDGE_ANGLE`, as
+   *  faces meet at an edge. */
+  function cornersOf(pairs) {
+    let reach = 0;
+    for (const v of pairs)
+      if (Number.isFinite(v)) reach = Math.max(reach, Math.abs(v));
+    const grain = (reach || 1) * 1e-9; // what one point is, for rounding
+    const points = new Map(); // a point -> { at, ways }
+    const meet = (x, y, z, way) => {
+      const key = `${Math.round(x / grain)},${Math.round(y / grain)},${Math.round(z / grain)}`;
+      if (!points.has(key)) points.set(key, { at: [x, y, z], ways: [] });
+      points.get(key).ways.push(way);
+    };
+    for (let i = 0; i + 5 < pairs.length; i += 6) {
+      const [x0, y0, z0, x1, y1, z1] = pairs.slice(i, i + 6);
+      const way = [x1 - x0, y1 - y0, z1 - z0];
+      const length = Math.hypot(...way);
+      if (!(length > 0)) continue; // a pen lift, a NaN, or a point
+      const unit = way.map((d) => d / length);
+      meet(x0, y0, z0, unit);
+      meet(
+        x1,
+        y1,
+        z1,
+        unit.map((d) => -d),
+      );
+    }
+    const straight = Math.cos(THREE.MathUtils.degToRad(EDGE_ANGLE));
+    const flat = [];
+    for (const { at, ways } of points.values()) {
+      const through =
+        ways.length === 2 &&
+        -(
+          ways[0][0] * ways[1][0] +
+          ways[0][1] * ways[1][1] +
+          ways[0][2] * ways[1][2]
+        ) >= straight;
+      if (!through) flat.push(...at);
+    }
+    return flat;
+  }
+
+  /** Where the end `end` is now, in the world, or null where its object, its
+   *  part or its vertex is not drawn. */
+  function rulerPoint(end) {
+    const node = byObjectId.get(end.objectId);
+    if (!node?.visible) return null;
+    const part = rulerParts(end.objectId)[end.part];
+    if (!part) return null;
+    const flat = rulerCorners(part);
+    if (3 * end.index + 2 >= flat.length) return null;
+    part.updateWorldMatrix(true, false);
+    return new THREE.Vector3(
+      flat[3 * end.index],
+      flat[3 * end.index + 1],
+      flat[3 * end.index + 2],
+    ).applyMatrix4(part.matrixWorld);
+  }
+
+  /** The vertices drawn, each with its owner, in cells of `SNAP_PIXELS` on
+   *  the page, as `snapTargets` keeps them for a drag. */
+  function rulerTargets() {
+    const seen = new Set();
+    const cells = new Map();
+    const at = new THREE.Vector3();
+    for (const [objectId, node] of byObjectId) {
+      if (!node.visible) continue;
+      node.updateMatrixWorld(true);
+      rulerParts(objectId).forEach((part, p) => {
+        if (!part.visible && !part.userData.flow) return;
+        const flat = rulerCorners(part);
+        for (let i = 0; 3 * i + 2 < flat.length; i++) {
+          at.set(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]);
+          at.applyMatrix4(part.matrixWorld);
+          const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const page = onScreen(at);
+          if (!page) continue;
+          const cell = cellOf(page);
+          if (!cells.has(cell)) cells.set(cell, []);
+          cells
+            .get(cell)
+            .push({ point: at.clone(), page, objectId, part: p, index: i });
+        }
+      });
+    }
+    return cells;
+  }
+
+  /** The vertex a pick at `event` would take, or null; the targets made again
+   *  once the camera has stood still a moment. */
+  function rulerTarget(event) {
+    if (ruler.stale && performance.now() - ruler.movedAt > 120) {
+      ruler.targets = rulerTargets();
+      ruler.stale = false;
+    }
+    if (!ruler.targets || !event) return null;
+    const rect = renderer.domElement.getBoundingClientRect();
+    return nearestTarget(ruler.targets, [
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+    ]);
+  }
+
+  /** The scene or the camera moved: the targets are made again before the
+   *  next look. */
+  function rulerMoved() {
+    ruler.stale = true;
+    ruler.movedAt = performance.now();
+  }
+
+  /** The ruler on or off: whether a click picks a corner. Off, its
+   *  measurements stay, following what they measure, till their x or Esc
+   *  with the ruler on takes them away. Tells the host. */
+  function setRuler(on) {
+    const now = Boolean(on);
+    if (now === ruler.on) return now;
+    ruler.on = now;
+    ruler.first = null;
+    ruler.hovered = null;
+    rulerMoved();
+    if (renderer) renderer.domElement.style.cursor = now ? "crosshair" : "";
+    host?.dispatchEvent(
+      new CustomEvent("rulerchange", { detail: { on: now } }),
+    );
+    return now;
+  }
+
+  /** Esc, with the ruler on: the pick half made, then the measurements,
+   *  then the ruler. Whether it took the key. */
+  function rulerEscape() {
+    if (!ruler.on) return false;
+    if (ruler.first) ruler.first = null;
+    else if (ruler.list.length) {
+      for (const each of ruler.list) dropLabel(each);
+      ruler.list = [];
+      ruler.over = null;
+    } else setRuler(false);
+    return true;
+  }
+
+  /** The pointer moved over the view, or left it (`event` null): with the
+   *  ruler on, the corner a click would pick; on, or off, the label under it.
+   *  Whether a label is under it. */
+  function rulerHover(event) {
+    const over = event ? labelAt(event) : null;
+    // on a label, no corner is picked through it
+    ruler.hovered = over || !ruler.on ? null : rulerTarget(event);
+    if (over !== ruler.over) {
+      ruler.over = over;
+      renderer.domElement.title = over ? deltas(over) : "";
+    }
+    // the x is a button: a hand on it, the arrow on the rest of the label,
+    // the crosshair where a click picks a corner
+    let cursor = ruler.on ? "crosshair" : "";
+    if (over) cursor = onCross(over, event) ? "pointer" : "default";
+    // the ruler off and no label under it, the cursor is the handles' to say
+    if (ruler.on || over || wasOverLabel)
+      renderer.domElement.style.cursor = cursor;
+    wasOverLabel = Boolean(over);
+    redraw();
+    return Boolean(over);
+  }
+  let wasOverLabel = false;
+
+  /** A click, with the ruler on: a label's x takes its measurement away; a
+   *  vertex is an end, the first or the second. */
+  function rulerClick(event) {
+    const over = labelAt(event);
+    if (over) {
+      if (onCross(over, event)) {
+        dropLabel(over);
+        ruler.list = ruler.list.filter((each) => each !== over);
+        ruler.over = null;
+        renderer.domElement.title = "";
+      }
+      return;
+    }
+    const target = rulerTarget(event);
+    if (!target) return;
+    const end = {
+      objectId: target.objectId,
+      part: target.part,
+      index: target.index,
+    };
+    if (!ruler.first) {
+      ruler.first = end;
+      return;
+    }
+    if (!sameEnd(ruler.first, end)) ruler.list.push({ a: ruler.first, b: end });
+    ruler.first = null;
+  }
+
+  const sameEnd = (a, b) =>
+    a.objectId === b.objectId && a.part === b.part && a.index === b.index;
+
+  /** Δx, Δy and Δz of a measurement, for its label's tooltip. */
+  function deltas(measured) {
+    const a = rulerPoint(measured.a);
+    const b = rulerPoint(measured.b);
+    if (!a || !b) return "";
+    const d = b.clone().sub(a);
+    return ["x", "y", "z"]
+      .map((axis) => {
+        const along = Math.abs(d[axis]);
+        // as nothing, not the least unit there is: a nanometre of rounding
+        return `Δ${axis} ${along < 1e-9 * a.distanceTo(b) || !along ? "0" : sayLength(along)}`;
+      })
+      .join(", ");
+  }
+
+  /** Where each measurement's label stands on the page, from the last frame
+   *  drawn: the one under `event`, or null. */
+  function labelAt(event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    return (
+      ruler.list.find((each) => {
+        const box = each.label?.box;
+        return box && x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3];
+      }) ?? null
+    );
+  }
+
+  /** Whether `event` is on the x a hovered label shows, at its right end. */
+  function onCross(measured, event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    return event.clientX - rect.left >= measured.label.box[2] - 16;
+  }
+
+  /** A measurement's label, let go of. */
+  function dropLabel(measured) {
+    if (!measured.label) return;
+    rulerRoot.remove(measured.label.sprite, measured.label.line);
+    measured.label.sprite.material.map.dispose();
+    measured.label.sprite.material.dispose();
+    measured.label.line.geometry.dispose();
+    measured.label.line.material.dispose();
+    wideMaterials.delete(measured.label.line.material);
+    measured.label = null;
+  }
+
+  /** Paint `text` on a label's canvas, with an x after it while hovered. */
+  function paintLabel(label, text, crossed) {
+    const ratio = renderer.getPixelRatio();
+    const font = `${RULER_LABEL_PX * ratio}px ${getComputedStyle(host || document.body).fontFamily || "sans-serif"}`;
+    const shown = crossed ? `${text}  ×` : text;
+    const ctx = label.canvas.getContext("2d");
+    ctx.font = font;
+    const w = Math.ceil(ctx.measureText(shown).width + 12 * ratio);
+    // its width without the x, for where it stands: a hover that widens it
+    // must not move it out from under the pointer
+    label.plain = Math.ceil(ctx.measureText(text).width + 12 * ratio) / ratio;
+    const h = Math.ceil((RULER_LABEL_PX + 8) * ratio);
+    if (label.canvas.width !== w || label.canvas.height !== h) {
+      label.canvas.width = w;
+      label.canvas.height = h;
+      label.sprite.material.map.dispose();
+      label.sprite.material.map = new THREE.CanvasTexture(label.canvas);
+      label.sprite.material.map.colorSpace = THREE.SRGBColorSpace;
+    }
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = RULER_INK;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, h / 2);
+    ctx.fill();
+    ctx.font = font;
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(shown, 6 * ratio, h / 2 + 0.5 * ratio);
+    label.sprite.material.map.needsUpdate = true;
+    label.text = shown;
+    label.size = [w / ratio, h / ratio];
+  }
+
+  /** A label and its line, made for a measurement the first time it is drawn. */
+  function makeLabel() {
+    const canvas = document.createElement("canvas");
+    const map = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ ...HANDLE_LOOK, map }),
+    );
+    sprite.renderOrder = 1003;
+    const line = wideSegments([0, 0, 0, 0, 0, 0], 2, 1, false, RULER_INK);
+    line.material.depthTest = false;
+    line.renderOrder = 1002;
+    line.frustumCulled = false;
+    rulerRoot.add(line, sprite);
+    return { canvas, sprite, line, text: null, size: [0, 0], box: null };
+  }
+
+  /** Put the ruler's marks where their features are now: called before each
+   *  frame is drawn. */
+  function placeRuler() {
+    rulerRoot.visible = (ruler.on || ruler.list.length > 0) && Boolean(camera);
+    if (!rulerRoot.visible) return;
+    const dots = [];
+    const pending = ruler.first && rulerPoint(ruler.first);
+    if (pending) dots.push(pending);
+    if (ruler.hovered) dots.push(ruler.hovered.point);
+    const perPixel = scenePerPixel(renderer.domElement.clientHeight || 1);
+    for (const measured of ruler.list) {
+      const a = rulerPoint(measured.a);
+      const b = rulerPoint(measured.b);
+      measured.label ??= makeLabel();
+      const { sprite, line } = measured.label;
+      sprite.visible = line.visible = Boolean(a && b);
+      if (!a || !b) {
+        measured.label.box = null;
+        continue;
+      }
+      dots.push(a, b);
+      line.geometry.setPositions([a.x, a.y, a.z, b.x, b.y, b.z]);
+      const text = sayLength(a.distanceTo(b));
+      const crossed = measured === ruler.over;
+      if (measured.label.text !== (crossed ? `${text}  ×` : text)) {
+        paintLabel(measured.label, text, crossed);
+      }
+      const middle = a.clone().add(b).multiplyScalar(0.5);
+      const [w, h] = measured.label.size;
+      // a line shorter on screen than its label: the label stands above it
+      const ends = [onScreen(a), onScreen(b)];
+      const across =
+        ends[0] && ends[1]
+          ? Math.hypot(ends[1][0] - ends[0][0], ends[1][1] - ends[0][1])
+          : 0;
+      if (across < (measured.label.plain ?? w) + 40) {
+        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(
+          camera.quaternion,
+        );
+        middle.addScaledVector(up, (h / 2 + 8) * perPixel);
+      }
+      sprite.position.copy(middle);
+      sprite.scale.set(w * perPixel, h * perPixel, 1);
+      const page = onScreen(middle);
+      measured.label.box = page && [
+        page[0] - w / 2,
+        page[1] - h / 2,
+        page[0] + w / 2,
+        page[1] + h / 2,
+      ];
+    }
+    rulerDots.geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(
+        dots.flatMap((p) => [p.x, p.y, p.z]),
+        3,
+      ),
+    );
+  }
+
+  /** The measurements made, each end's feature and its length now: for a
+   *  host's checks and, later, a notebook (plans/ruler.md §10). */
+  function measurements() {
+    return ruler.list.map(({ a, b, label }) => {
+      const p = rulerPoint(a);
+      const q = rulerPoint(b);
+      return {
+        a: { ...a },
+        b: { ...b },
+        from: p?.toArray() ?? null, // where its ends are, in the world
+        to: q?.toArray() ?? null,
+        length: p && q ? p.distanceTo(q) : null,
+        label: label?.box ? [...label.box] : null, // on the page, as drawn
+      };
+    });
+  }
+
   /** `api`, each of whose functions asks for a frame once it has run.
    *
    * Done here, once, rather than in each: what a host calls is what changes the
@@ -7684,6 +8188,15 @@ void main() {
     heldPoint,
     pointEdit,
     setPointsMode,
+    setRuler,
+    rulerOn: () => ruler.on,
+    measurements,
+    /** Where an end's vertex is on the page, in CSS pixels from the canvas's
+     *  corner, or null: for a host's checks to point at one. */
+    endOnPage: (end) => {
+      const point = rulerPoint(end);
+      return point && onScreen(point);
+    },
     byObjectId,
     dispose,
   });

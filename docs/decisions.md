@@ -2800,8 +2800,9 @@ side (#147), the same gap read in each variant is what a split view is for.
 - **One tool, in the renderer**: a ruler, the key M, whose two picks decide what
   is measured. A view setting, not an edit: nothing in the document, the undo
   history, the script or a saved page.
-- **Several measurements at once**, each cleared by its ×, all of them by M or
-  Esc.
+- **Several measurements at once**, each cleared by its ×, all of them by Esc
+  with the ruler on. The ruler off, a click selects again and they stay,
+  following a drag of what they measure.
 - **An end is a feature, not a point**: an object's id, which drawn part of it,
   and which vertex, edge or face. It follows a drag and a run's steps, and names
   the same corner in a pane drawn at another variant.

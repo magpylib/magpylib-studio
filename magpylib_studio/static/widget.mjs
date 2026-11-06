@@ -160,6 +160,10 @@ const ICONS = {
     '<rect x="4.5" y="4.5" width="9.5" height="9.5" rx="1.2"/>' +
     '<path d="M2 11.5V3a1 1 0 0 1 1-1h8.5"/>' +
     '<path d="M7.25 7.25l4 4M11.25 7.25l-4 4"/>',
+  // a ruler laid across, its marks along one edge (#125)
+  ruler:
+    '<path d="M2 11 11 2l3 3-9 9z"/>' +
+    '<path d="M5 8l1.5 1.5M7 6l1 1M9 4l1.5 1.5"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -301,7 +305,11 @@ const KEY_LIST = {
     ["5", "perspective or parallel"],
     ["H", "hide the selection — ⇧H: show only it"],
     ["⌥ / Alt on an eye", "click: show only that row — slide: fade the rest"],
-    ["Esc", "select nothing"],
+    [
+      "M",
+      "measure: a corner, then another — again: select, the measurements kept",
+    ],
+    ["Esc", "select nothing — measuring: the pick, then the measurements"],
     ["space", "play the path"],
     ["⌘ / Ctrl click", "add to the selection"],
   ],
@@ -759,8 +767,19 @@ function render({ model, el }) {
   markImage.src = MARK;
   markImage.alt = "";
   mark.append(markImage);
+  // The ruler: a view setting, so in every view, a saved page's too; the
+  // renderer says when it turns on or off, a key or Esc included.
+  const rulerButton = iconButton(
+    "ruler",
+    "Measure: click a vertex, then another (M)",
+    () => api?.setRuler(!api.rulerOn()),
+  );
+  pressed(rulerButton, false);
+  view.addEventListener("rulerchange", (event) =>
+    pressed(rulerButton, event.detail.on),
+  );
   tools.append(
-    group(fitButton, projectionButton),
+    group(fitButton, projectionButton, rulerButton),
     group(legendButton, axesButton, flowButton, themeButton),
     group(editButton),
     group(pictureButton, exportButton),

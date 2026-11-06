@@ -91,6 +91,15 @@ only it, **Esc** lets go, **space** plays. On a view that offers the pencil,
 mode. They come from one table in `scene3d.mjs` that both hosts use. Tab is the
 one the widget does not take: in a notebook it moves between cells.
 
+**The ruler**, or M, measures what is drawn: a click on a corner, then on
+another, and a line between them says how far apart they are, its Δx, Δy and Δz
+in its tooltip. It follows the objects as they move, several at once, each taken
+away by the × its label shows under the pointer. Turned off, a click selects
+again and the measurements stay, so drag an object by its handles and read the
+gap as it changes; Esc with the ruler on takes back the corner picked, then the
+measurements, then the ruler. It is the view's, not the scene's: nothing to
+undo, and the PNG has the measurements, a saved page not.
+
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.
 Split into panes, the PNG holds every pane in its place, each with its tag. The
