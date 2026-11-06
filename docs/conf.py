@@ -138,9 +138,13 @@ Written as a scene function, with what it imports, it reads:
 """
 
 #: Where an example has a marimo notebook: a link that runs it in molab,
-#: marimo's hosted notebooks, which install what its script header names.
+#: marimo's hosted notebooks, which install what its script header names,
+#: and the command that opens it from a clone.
 _NOTEBOOK = """\
-[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/magpylib/magpylib-studio/blob/main/examples/marimo/{path})
+[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/magpylib/magpylib-studio/blob/main/docs/notebooks/{path})
+
+Its notebook adds plots and numbers round the view. From a clone, with the
+widget extra and marimo installed: `marimo edit docs/notebooks/{path}`.
 
 """
 

@@ -6,7 +6,7 @@
 #     "plotly",
 # ]
 # ///
-"""A Halbach ring to tune: `marimo edit examples/marimo/halbach_ring.py`.
+"""A Halbach ring to tune: `marimo edit docs/notebooks/halbach_ring.py`.
 
 The view edits the document; the field map, the axis, a sweep, the magnets
 and the code tab read it; a search tries sixteen rings for the flattest bore;
@@ -14,7 +14,7 @@ the sidebar saves the scene as a document and as a script.
 
 Needs the widget extra and marimo:
 
-    uv pip install -e ".[widget]" marimo
+    pip install "magpylib-studio[widget]" marimo
 """
 
 import marimo

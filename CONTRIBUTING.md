@@ -110,7 +110,7 @@ folder.
 
 **The README's screenshot**, after a change that shows in it:
 `npm run screenshot` (macOS, after `npm run compile`) opens the Halbach ring of
-`examples/marimo/halbach_ring.py` in a VS Code of its own, with its field lines,
+`docs/notebooks/halbach_ring.py` in a VS Code of its own, with its field lines,
 and takes one period of the lines' flow in the dark theme and then the light. It
 writes the two cut along a diagonal: `docs/halbach.gif`, which both READMEs
 show, and its first frame as `docs/halbach.png`. VS Code renders its own window,
@@ -124,7 +124,7 @@ file, so commit what it changed. A new example without a picture shows as a card
 without one.
 
 **By hand, on a slow machine**, after a change to what a drag or a slider does:
-`npm run slow-machine -- examples/marimo/halbach_ring.py` (the Halbach ring by
+`npm run slow-machine -- docs/notebooks/halbach_ring.py` (the Halbach ring by
 default; `--edit` for `marimo edit`, or any server after `--` with its page as
 `--url`) opens the notebook in a Chrome window of its own, with sliders for the
 browser's speed and the kernel's, as a share of this machine's, the latency

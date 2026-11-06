@@ -6,7 +6,7 @@
 #     "plotly",
 # ]
 # ///
-"""A coil pair to flip: `marimo edit examples/marimo/coil_pair.py`.
+"""A coil pair to flip: `marimo edit docs/notebooks/coil_pair.py`.
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs
 them together, anti-Helmholtz against each other, and the numbers beside the
@@ -16,7 +16,7 @@ is.
 
 Needs the widget extra and marimo:
 
-    uv pip install -e ".[widget]" marimo
+    pip install "magpylib-studio[widget]" marimo
 """
 
 import marimo

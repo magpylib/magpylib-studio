@@ -6,14 +6,14 @@
 # ]
 # ///
 """Two versions of a unit that differ in structure:
-`marimo edit examples/marimo/unit_versions.py`.
+`marimo edit docs/notebooks/unit_versions.py`.
 
 `choose(version)` picks what the scene is made of; one document holds both
 versions, and the variants mix the choice with the other variables.
 
 Needs the widget extra and marimo:
 
-    uv pip install -e ".[widget]" marimo
+    pip install "magpylib-studio[widget]" marimo
 """
 
 import marimo

@@ -34,7 +34,7 @@ def test_every_notebook_names_what_it_needs():
     import pathlib
     import re
 
-    notebooks = pathlib.Path(__file__).parents[1] / "examples" / "marimo"
+    notebooks = pathlib.Path(__file__).parents[1] / "docs" / "notebooks"
     for path in sorted(notebooks.glob("*.py")):
         head = re.match(r"# /// script\n(.*?)# ///\n", path.read_text("utf-8"), re.S)
         assert head, f"{path.name} has no script header"

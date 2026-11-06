@@ -6,11 +6,11 @@
 # ]
 # ///
 """Every kind of magpylib object in one view, and the view's keys and tools:
-`marimo edit examples/marimo/every_kind.py`.
+`marimo edit docs/notebooks/every_kind.py`.
 
 Needs the widget extra and marimo:
 
-    uv pip install -e ".[widget]" marimo
+    pip install "magpylib-studio[widget]" marimo
 """
 
 import marimo

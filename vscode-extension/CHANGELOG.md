@@ -64,6 +64,18 @@ its scene function's source (#143).
 ### Changed
 
 <details>
+<summary>The example notebooks are with the docs</summary>
+
+The six marimo notebooks moved from the repository's `examples/` folder to
+`docs/notebooks/`, beside the docs pages of the scenes they import, as
+magpylib's and magpylib-material-response's examples live in their docs:
+`marimo edit docs/notebooks/coil_pair.py` from a clone, and each page's molab
+link follows. The `examples/` folder is gone, with the Jupyter demo and
+`scene_demo.py`, whose scenes the gallery's examples show.
+
+</details>
+
+<details>
 <summary>Every 3D view on a page draws</summary>
 
 A notebook's 3D views each had a WebGL renderer of their own, and a page holds
