@@ -50,12 +50,12 @@ A `@scene` function shown in the view has its variants as a row along the view's
 foot. A chip lifted out of the row and dropped on a side of the view is a pane
 of its own there, the scene at that variant's values beside the scene, as VS
 Code splits its editors: up to 12 panes with the scene's, moved by their tags,
-resized by the line between them, turned together, its chip out of the row until
-its pane closes. The button at the end of the row opens every other variant at
-once in a grid, up to 11, and closes them all again. With the handles out
-(`editable=True`, or the pencil), the sliders toggle opens a slider per
-variable, and `open_panel="variables"` opens it at the start. An object on a
-path is a run, which the view plays.
+resized by the line between them, turned together. A variant with a pane has no
+chip in the row until the pane closes. The button at the end of the row opens
+every other variant at once in a grid, up to 11, and closes them all again. With
+the handles out (`editable=True`, or the pencil), the sliders toggle opens a
+slider per variable, and `open_panel="variables"` opens it at the start. An
+object on a path is a run, which the view plays.
 
 ```python
 from typing import Annotated
