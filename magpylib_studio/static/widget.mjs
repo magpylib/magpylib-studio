@@ -309,7 +309,10 @@ const KEY_LIST = {
       "M",
       "measure: a corner, an edge or a face, then another — again: select, the measurements kept",
     ],
-    ["Esc", "select nothing — measuring: the pick, then the measurements"],
+    [
+      "Esc",
+      "select nothing — then the measurements; measuring: the pick first",
+    ],
     ["space", "play the path"],
     ["⌘ / Ctrl click", "add to the selection"],
   ],

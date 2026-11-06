@@ -658,6 +658,14 @@ def main(out):
             position=(-0.03, 0.02, 0),
         ),
     ]
+    # what has no size, a point each: a dipole, and a sensor of 2 x 2 pixels
+    shapes += [
+        magpy.misc.Dipole(moment=(0, 0, 1), position=(0.03, -0.02, 0)),
+        magpy.Sensor(
+            pixel=[[[x, y, 0] for x in (-0.002, 0.002)] for y in (-0.002, 0.002)],
+            position=(0.03, 0.04, 0),
+        ),
+    ]
     SceneWidget(*shapes).write_html(out / "shapes.html")
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
     soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top

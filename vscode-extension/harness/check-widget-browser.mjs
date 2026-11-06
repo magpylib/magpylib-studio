@@ -1094,7 +1094,9 @@ async function savedRuler(port, base) {
           return "the ruler off, its button stayed pressed";
         // features, not a facet's: a sphere offers none, a cylinder its two
         // flat ends, a loop none, a bent wire its ends, its bend and its two
-        // runs; a cube, a cylinder's segment and a tetrahedron theirs
+        // runs; a cube, a cylinder's segment and a tetrahedron theirs; what
+        // has no size a point each -- a dipole one, a sensor of 2 x 2 pixels
+        // its own and its pixels' middles, not the boxes they are drawn as
         await tab.navigate(`${base}/out/shapes.html`);
         if (
           !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
@@ -1108,8 +1110,10 @@ async function savedRuler(port, base) {
           "0 0 0",
           "0 0 0",
           "0 0 2",
+          "1 0 0",
           "3 2 0",
           "4 6 4",
+          "5 0 0",
           "8 12 6",
           "8 12 6",
           "8 8 4",
@@ -1150,7 +1154,16 @@ async function savedRuler(port, base) {
         const e1 = edges.find((end) => end !== e0 && parallel(way(e0), way(end)));
         const corner = [...Array(8).keys()].map((i) => feature("corner", low, i))
           .find((end) => atTheTop(s.featureOf(end)));
-        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1 };`);
+        // a top edge meeting e0 at a corner, and the upright edge nearest
+        // the camera, which meets the top
+        const e2 = edges.find((end) => !parallel(way(e0), way(end)));
+        const upright = [...Array(12).keys()].map((i) => feature("edge", low, i))
+          .filter((end) => Math.abs(way(end)[2]) > 1e-9)
+          .sort((a, b) => {
+            const off = (end) => Math.hypot(...s.featureOf(end).point.map((x, k) => x - cam[k]));
+            return off(a) - off(b);
+          })[0];
+        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright };`);
         const centre = await tab.evaluate(
           `return window.scene3d.endOnPage(${JSON.stringify(picks.lowTop)})`,
         );
@@ -1195,6 +1208,14 @@ async function savedRuler(port, base) {
           ["two edges", picks.e0, picks.e1, { length: 10 }],
           ["an edge and a face", picks.e0, picks.highTop, { length: 3 }],
           ["a corner and an edge", picks.corner, picks.e1, { length: 10 }],
+          // touching: the angle, the distance being none
+          ["two edges meeting at a corner", picks.e0, picks.e2, { angle: 90 }],
+          [
+            "an edge meeting a face",
+            picks.upright,
+            picks.lowTop,
+            { angle: 90 },
+          ],
         ];
         for (const [named, a, b, expect] of pairs) {
           await pick(a);
@@ -1216,6 +1237,43 @@ async function savedRuler(port, base) {
             `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
           );
         }
+        // two of the sensor's pixels, 4 mm apart, from their middles
+        const pixels = await tab.evaluate(`const s = window.scene3d;
+          const id = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).corner === 5);
+          const ends = [];
+          for (let part = 0; part < 4; part++) {
+            for (let index = 0; index < 5; index++) {
+              const end = { kind: "corner", objectId: id, part, index };
+              const f = s.featureOf(end);
+              if (f) ends.push({ end, at: f.point });
+            }
+          }
+          const apart = (e, o) => Math.hypot(...o.at.map((x, k) => x - e.at[k]));
+          const a = ends.find((e) => ends.some((o) => o !== e && Math.abs(apart(e, o) - 4) < 1e-9));
+          const b = a && ends.find((o) => o !== a && Math.abs(apart(a, o) - 4) < 1e-9);
+          return a && b ? [a.end, b.end] : null;`);
+        if (!pixels)
+          return "the sensor's pixels offer no two points 4 mm apart";
+        await pick(pixels[0]);
+        await pick(pixels[1]);
+        const across = await tab.evaluate(
+          `return window.scene3d.measurements()`,
+        );
+        if (across.length !== 1 || Math.abs(across[0].length - 4) > 1e-9)
+          return `two pixels: ${JSON.stringify(across)}`;
+        await tab.evaluate(
+          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        );
+        // the ruler off, nothing selected: Esc takes the measurements too
+        await pick(picks.lowTop);
+        await pick(picks.highTop);
+        const cleared = await tab.evaluate(`const s = window.scene3d;
+          const made = s.measurements().length;
+          s.setRuler(false);
+          s.viewKey(new KeyboardEvent("keydown", { key: "Escape" }));
+          return [made, s.measurements().length];`);
+        if (cleared.join() !== "1,0")
+          return `Esc, the ruler off and nothing selected: ${cleared}`;
         return thrown(tab);
       } finally {
         await tab.close();

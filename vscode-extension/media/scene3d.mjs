@@ -4654,6 +4654,8 @@ export function createScene3d() {
     const group = new THREE.Group();
     group.name = item.name;
     group.userData.trace = true;
+    // where each pixel is, in the group's frame: what the ruler picks
+    group.userData.origins = item.origins;
     const count = item.sizes.length;
     const material = new THREE.MeshLambertMaterial({
       transparent: item.opacity < 1,
@@ -7478,7 +7480,10 @@ void main() {
       case "parent":
         return selectedIds.length > 0 && ask(host.parent, selectedIds[0]);
       case "deselect":
-        return cancelDrag() || rulerEscape() || ask(host.deselect);
+        // a drag first, the ruler's own, the selection, then what it measured
+        return (
+          cancelDrag() || rulerEscape() || ask(host.deselect) || clearRuler()
+        );
       case "ruler":
         setRuler(!ruler.on);
         return true;
@@ -7729,20 +7734,35 @@ void main() {
     const apart = (part) => {
       for (let at = part; at && at !== node.parent; at = at.parent) {
         const was = at.userData;
-        if (was.path || was.arrows || was.field || was.glyph) return true;
+        if (was.path || was.arrows || was.field) return true;
         if (was.outline || was.mark) return true;
+        // what a mark sized by the zoom draws: its anchor is the point
+        if (was.glyph && at !== part) return true;
       }
       return false;
     };
     node.traverse((part) => {
       if (ownerOf(part) !== objectId || apart(part)) return;
       // a shape's faces, or a wire's run as its flow follows it: the line
-      // the pulses run along, which the arrows break into pieces
+      // the pulses run along, which the arrows break into pieces; or what
+      // has no size, a point to pick -- a dipole's or a sensor's mark, at
+      // its anchor, and a sensor's pixels, at their middles
       const shape =
-        part.isMesh && !part.isInstancedMesh && !part.isLineSegments2;
+        part.isMesh &&
+        !part.isInstancedMesh &&
+        !part.isLineSegments2 &&
+        !part.userData.glyph;
       const wire = part.isLineSegments2 && part.userData.flow;
-      if (shape || wire) parts.push(part);
+      const point = Boolean(part.userData.glyph || part.userData.origins);
+      if (shape || wire || point) parts.push(part);
     });
+    // an object with no size -- a dipole, a sensor -- is its points alone,
+    // not the boxes its pixels or its body are drawn as
+    if (parts.some((part) => part.userData.glyph || part.userData.origins)) {
+      parts = parts.filter(
+        (part) => part.userData.glyph || part.userData.origins,
+      );
+    }
     partsCache.set(node, parts);
     return parts;
   }
@@ -7753,7 +7773,16 @@ void main() {
    *  a cylinder its two flat ends alone -- and of a wire, its ends, the
    *  points it turns at and the straight runs between, a loop's none. */
   function rulerFeatures(part) {
-    let found = featureCache.get(part.geometry);
+    const key = part.geometry ?? part; // a group of pixels has none
+    let found = featureCache.get(key);
+    if (!found && (part.userData.glyph || part.userData.origins)) {
+      // no size: a point, and nothing else to pick
+      const corner = part.userData.glyph
+        ? part.userData.glyph.anchor.toArray()
+        : [...part.userData.origins];
+      found = { corner, edge: [], face: [], faceOf: new Map() };
+      featureCache.set(key, found);
+    }
     if (!found) {
       const wire = part.isLineSegments2;
       const graph = graphOf(
@@ -7764,7 +7793,7 @@ void main() {
         edge: straightEdges(graph),
         ...(wire ? { face: [], faceOf: new Map() } : flatFaces(part.geometry)),
       };
-      featureCache.set(part.geometry, found);
+      featureCache.set(key, found);
     }
     return found;
   }
@@ -7981,9 +8010,10 @@ void main() {
   }
 
   /** What is between two features: `from` and `to`, the nearest points of
-   *  the two, and their `length`; or, for two faces that are not parallel,
-   *  the `angle` between their planes, in degrees, `from` and `to` their
-   *  middles. */
+   *  the two, and their `length`. Two that have a direction -- edges and
+   *  faces -- touching or crossing, their `angle` in degrees instead, `from`
+   *  and `to` their middles; parallel, their distance; neither, their
+   *  distance, and the angle they are at kept as `tilt`. */
   function between(p, q) {
     if (p.kind > q.kind) [p, q] = [q, p]; // corner, edge, face: in that order
     const closestOnEdge = (point, edge) => {
@@ -8010,33 +8040,49 @@ void main() {
     }
     if (p.kind === "corner" && q.kind === "face")
       return apart(p.point, footOn(p.point, q));
+    // two with a direction: how far apart, and at what angle
+    const degrees = (sine) =>
+      THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(sine, 0, 1)));
+    const flat = Math.sin(THREE.MathUtils.degToRad(0.5)); // parallel, near enough
+    let near;
+    let tilt; // the angle between them, 0 to 90°
     if (p.kind === "edge" && q.kind === "edge") {
-      const segment = new THREE.Line3(p.a, p.b);
-      const [from, to] = closestBetween(segment, new THREE.Line3(q.a, q.b));
-      return apart(from, to);
-    }
-    if (p.kind === "edge" && q.kind === "face") {
+      const [from, to] = closestBetween(
+        new THREE.Line3(p.a, p.b),
+        new THREE.Line3(q.a, q.b),
+      );
+      near = apart(from, to);
+      const u = p.b.clone().sub(p.a).normalize();
+      const v = q.b.clone().sub(q.a).normalize();
+      tilt = degrees(u.clone().cross(v).length());
+    } else if (p.kind === "edge") {
       // the end of the edge nearer the face's plane; none, where it crosses
       const [da, db] = [p.a, p.b].map((end) =>
         q.normal.dot(end.clone().sub(q.point)),
       );
-      if (da * db < 0) {
-        const at = p.a.clone().lerp(p.b, da / (da - db));
-        return apart(at, at);
+      if (da * db <= 0) {
+        const at = p.a.clone().lerp(p.b, da === db ? 0 : da / (da - db));
+        near = apart(at, at);
+      } else {
+        const end = Math.abs(da) <= Math.abs(db) ? p.a : p.b;
+        near = apart(end, footOn(end, q));
       }
-      const near = Math.abs(da) <= Math.abs(db) ? p.a : p.b;
-      return apart(near, footOn(near, q));
+      const u = p.b.clone().sub(p.a).normalize();
+      tilt = degrees(Math.abs(u.dot(q.normal)));
+    } else {
+      // two faces: parallel, the gap; else their planes meet somewhere
+      const cosine = Math.min(Math.abs(p.normal.dot(q.normal)), 1);
+      tilt = THREE.MathUtils.radToDeg(Math.acos(cosine));
+      near = tilt < 0.5 ? apart(p.point, footOn(p.point, q)) : null;
     }
-    // two faces: their gap, if they are parallel; else their angle
-    const cosine = Math.abs(p.normal.dot(q.normal));
-    if (cosine > Math.cos(THREE.MathUtils.degToRad(0.5))) {
-      return apart(p.point, footOn(p.point, q));
+    const parallel = Math.sin(THREE.MathUtils.degToRad(tilt)) < flat;
+    if (parallel) return near;
+    // touching or crossing: the distance is none, the angle is the measure
+    const reach = p.point.distanceTo(q.point) || 1;
+    if (!near || near.length < reach * 1e-9) {
+      return { from: p.point, to: q.point, angle: tilt };
     }
-    return {
-      from: p.point,
-      to: q.point,
-      angle: THREE.MathUtils.radToDeg(Math.acos(Math.min(cosine, 1))),
-    };
+    return { ...near, tilt };
   }
 
   /** The nearest points of two segments, `[on the first, on the second]`. */
@@ -8083,7 +8129,10 @@ void main() {
       node.updateMatrixWorld(true);
       rulerParts(objectId).forEach((part, p) => {
         if (!part.visible && !part.userData.flow) return;
-        meshes.push({ part, objectId, p });
+        // a ray is cast at what has faces or a run, not at a point's mark
+        if (!part.userData.glyph && !part.userData.origins) {
+          meshes.push({ part, objectId, p });
+        }
         const flat = rulerFeatures(part).corner;
         for (let i = 0; 3 * i + 2 < flat.length; i++) {
           at.set(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]);
@@ -8239,6 +8288,16 @@ void main() {
     return true;
   }
 
+  /** Every measurement taken away, the ruler off and nothing selected: Esc's
+   *  last say. Whether there was any. */
+  function clearRuler() {
+    if (!ruler.list.length) return false;
+    for (const each of ruler.list) dropLabel(each);
+    ruler.list = [];
+    ruler.over = null;
+    return true;
+  }
+
   /** The pointer moved over the view, or left it (`event` null): with the
    *  ruler on, the feature a click would pick; on, or off, the label under
    *  it. Whether a label is under it. */
@@ -8304,7 +8363,8 @@ void main() {
   function tooltipOf(measured) {
     const now = measuredNow(measured);
     if (!now) return "";
-    if (now.angle !== undefined) return "The angle between the faces' planes";
+    if (now.angle !== undefined)
+      return "The angle between them, where they meet";
     const d = now.to.clone().sub(now.from);
     return ["x", "y", "z"]
       .map((axis) => {
@@ -8312,7 +8372,12 @@ void main() {
         // as nothing, not the least unit there is: a nanometre of rounding
         return `Δ${axis} ${along < 1e-9 * now.length || !along ? "0" : sayLength(along)}`;
       })
-      .join(", ");
+      .join(", ")
+      .concat(
+        now.tilt !== undefined
+          ? `, at ${Number(now.tilt.toPrecision(3))}° to each other`
+          : "",
+      );
   }
 
   /** Where each measurement's label stands on the page, from the last frame
@@ -8504,6 +8569,7 @@ void main() {
         to: now?.to.toArray() ?? null,
         length: now?.length ?? null,
         angle: now?.angle ?? null,
+        tilt: now?.tilt ?? null, // a distance's: the angle the two are at
         label: measured.label?.box ? [...measured.label.box] : null,
       };
     });

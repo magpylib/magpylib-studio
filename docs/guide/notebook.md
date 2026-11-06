@@ -93,15 +93,18 @@ one the widget does not take: in a notebook it moves between cells.
 
 **The ruler**, or M, measures what is drawn: a click on a corner, a straight
 edge or a flat face, then on another, and a line between their nearest points
-says how far apart they are, its Δx, Δy and Δz in its tooltip -- or, for two
-faces that are not parallel, the angle between them. What is under the pointer
-is what a click takes, shown before it: a corner within a few pixels, else an
-edge, else the face; a round surface has none of them, and a corner or an edge
-behind a shape is not offered through it. It follows the objects as they move,
-several at once, each taken away by the × its label shows under the pointer.
-Turned off, a click selects again and the measurements stay, so drag an object
-by its handles and read the gap as it changes; Esc with the ruler on takes back
-the corner picked, then the measurements, then the ruler. It is the view's, not
+says how far apart they are, its Δx, Δy and Δz in its tooltip. Two edges, an
+edge and a face, or two faces that touch or cross are at an angle, and the label
+says that; parallel, how far apart; neither, how far, the angle in the tooltip.
+What is under the pointer is what a click takes, shown before it: a corner
+within a few pixels, else an edge, else the face; a round surface has none of
+them, and a corner or an edge behind a shape is not offered through it. What has
+no size is a point: a dipole, a sensor and each of its pixels. It follows the
+objects as they move, several at once, each taken away by the × its label shows
+under the pointer. Turned off, a click selects again and the measurements stay,
+so drag an object by its handles and read the gap as it changes. Esc with the
+ruler on takes back the corner picked, then the measurements, then the ruler;
+with it off, once nothing is selected, the measurements. It is the view's, not
 the scene's: nothing to undo, and the PNG has the measurements, a saved page
 not.
 

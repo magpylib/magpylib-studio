@@ -53,9 +53,14 @@ What the two picks are decides what is measured, with no mode to choose:
 | face     | face     | the gap, if they are parallel; else the angle     |
 | edge     | edge     | the shortest distance between them                |
 
-The pairs the other way round are the same. An edge with a corner or a face is
-the distance from the corner to the edge's line, or the edge's nearest point to
-the face's plane.
+Two features with a direction -- edges and faces -- that touch or cross are
+measured by their angle, the distance between them being none; parallel, by
+their distance; neither, by their distance, the angle in the label's tooltip.
+What has no size is a point: a dipole, a sensor at its position and each of its
+pixels at its middle, not the boxes they are drawn as (Alex, 2026-11-07). The
+pairs the other way round are the same. An edge with a corner or a face is the
+distance from the corner to the edge's line, or the edge's nearest point to the
+face's plane.
 
 - **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
   or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
@@ -72,6 +77,7 @@ the face's plane.
 - **M or the button** says only whether a click picks a corner: off, the
   measurements stay, follow what they measure, and a label's × still takes one
   away, while a click selects again and the handles drag.
+- **Esc**, the ruler off and nothing selected, clears the measurements.
 - **Esc** clears the pick half made, then the measurements, then -- the ruler
   off -- what it always did: a pane carried takes it first, as it does today.
 
