@@ -775,6 +775,18 @@ class SceneWidget(anywidget.AnyWidget):
     #: trait then reads what the view opened. A name the scene has no
     #: variant of is refused.
     panes = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The variants selected, in the order they were: a click on a variant's
+    #: chip at the foot of the view, or on a pane's name, selects it alone,
+    #: Ctrl-click or Cmd-click adds it or takes it out. A click on a chip
+    #: also sets the scene to the variant, a Ctrl-click does not, and a
+    #: pane's name never does: the selection is apart from the variant the
+    #: scene is at. A cell reads it to plot what was picked -- a curve for
+    #: each, from ``session.variant_session(name)``.
+    #:
+    #: Assignable: ``view.selected_variants = ["wide", "narrow"]`` marks
+    #: those; ``[]`` marks none. A name the scene has no variant of is
+    #: refused.
+    selected_variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     #: Its switch in the view is the eye on each sensor's field lines, a row
@@ -1383,8 +1395,8 @@ class SceneWidget(anywidget.AnyWidget):
             # was assigned.
             self.variables = _values_of(self._session)
 
-    @traitlets.validate("panes")
-    def _panes_named(self, proposal):
+    @traitlets.validate("panes", "selected_variants")
+    def _variants_named(self, proposal):
         # Each once, and each a variant the scene has: a pane of none would
         # draw nothing, and say so only in the view.
         names = list(dict.fromkeys(proposal["value"]))
@@ -1545,6 +1557,9 @@ class SceneWidget(anywidget.AnyWidget):
             )
             # a variant renamed or taken away takes its pane along
             self.panes = [name for name in self.panes if name in self.variants]
+            self.selected_variants = [
+                name for name in self.selected_variants if name in self.variants
+            ]
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
             if not first:

@@ -975,8 +975,8 @@ function render({ model, el }) {
     true,
   );
   // While the foot asks, a chip says whether its variant is kept: its click
-  // is taken before the chip hears it, so nothing is used or slid.
-  for (const type of ["pointerdown", "click"]) {
+  // is taken before the chip hears it, so nothing is used, slid or selected.
+  for (const type of ["pointerdown", "click", "contextmenu"]) {
     variantsEl.addEventListener(
       type,
       (event) => {
@@ -1710,6 +1710,8 @@ function render({ model, el }) {
         slide: model.editor === undefined,
         // lifted out of the row, a chip is carried into the view
         onLift: (name, event, chip) => lift(name, event, chip),
+        // clicked, a chip is selected, or added to the selection
+        onSelect: (name, add) => select(name, add),
         variantsOnly: true,
         // as many as the foot of the view holds, past the panel's four
         fits: (names) => names.length <= 10 && names.join("").length <= 90,
@@ -1782,6 +1784,39 @@ function render({ model, el }) {
     for (const option of variantsEl.querySelectorAll("option")) {
       option.hidden = open.has(option.value) && !option.selected;
     }
+    dressSelected();
+  }
+
+  // --- the variants selected -----------------------------------------------
+  // Apart from the one the scene is at: a click on a chip or a pane's tag
+  // selects its variant alone, Ctrl or Cmd adds it or takes it out, and the
+  // `selected_variants` trait says which, for a notebook to plot them.
+  let chosen = model.get("selected_variants") || [];
+
+  function select(name, add) {
+    let now = [name];
+    if (add) {
+      now = chosen.includes(name)
+        ? chosen.filter((each) => each !== name)
+        : [...chosen, name];
+    }
+    chosen = now;
+    dressSelected();
+    const told = model.get("selected_variants") || [];
+    if (told.length === now.length && told.every((n, i) => n === now[i])) {
+      return;
+    }
+    model.set("selected_variants", now);
+    model.save_changes();
+  }
+
+  /** The chips and the panes' tags of the variants selected, marked. */
+  function dressSelected() {
+    const marked = new Set(choosing ? [] : chosen);
+    for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
+      chip.classList.toggle("magpy-selected", marked.has(chip.textContent));
+    }
+    grid.choose([...marked]);
   }
 
   let panesAsked = (model.get("panes") || []).length > 0; // before a draw
@@ -1863,12 +1898,15 @@ function render({ model, el }) {
       dressColorBar();
     },
     stepNow: () => stepShown(),
+    // a pane's tag clicked selects its variant, as its chip does
+    onSelect: (name, add) => select(name, add),
     onLayout: (split, names) => {
       el.classList.toggle("magpy-paned", split);
       if (split) {
         currentVariant().then((now) => {
           knownVariant = now;
           grid.mark(now);
+          dressSelected(); // the scene's tag names the variant it is at
         });
       }
       // the copies of the variants whose panes closed, let go of in python
@@ -2874,6 +2912,7 @@ function render({ model, el }) {
     "revision",
     "variants",
     "panes",
+    "selected_variants",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2898,6 +2937,10 @@ function render({ model, el }) {
     }
     // which variant the values are in, after any edit of them
     if (now.has("panes")) showPanes();
+    if (now.has("selected_variants")) {
+      chosen = model.get("selected_variants") || [];
+      dressSelected();
+    }
     if (now.has("variants")) {
       dressVariants();
       grid.keep(model.get("variants") || []);

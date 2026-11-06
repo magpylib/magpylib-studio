@@ -10,8 +10,8 @@
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs
 them together, anti-Helmholtz against each other, and the numbers beside the
-view follow every edit. A variant dragged up into the view is a pane of its
-own, and a curve of its own in the plot.
+view follow every edit. A variant Ctrl-clicked or Cmd-clicked at the foot of
+the view is selected, and a curve of its own in the plot.
 
 Needs the widget extra and marimo:
 
@@ -54,9 +54,9 @@ def _(mo):
     coils on one axis, each current a variable: the **Helmholtz** variant
     runs them together, for a flat field between, and **anti-Helmholtz**
     turns the upper one round, for a field that passes through zero.
-    Drag a variant's chip up into the view, or press the grid button at
-    its foot, and the variant has a pane beside the scene, and a curve
-    beside the scene's in the plot.
+    Ctrl-click or Cmd-click the other variant's chip, at the foot of the
+    view, and its curve joins the scene's in the plot; drag the chip up
+    into the view, and it has a pane of its own beside the scene.
     """)
     return
 
@@ -82,9 +82,11 @@ def _(SceneWidget, coils, json, mo):
     pair_view = mo.ui.anywidget(pair_view3d)
     pair_edited, set_pair_edited = mo.state(0)
     pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
-    # the variants with a pane beside the scene's: a curve each, below
-    pair_panes, set_pair_panes = mo.state([])
-    pair_view3d.observe(lambda change: set_pair_panes(change.new), names="panes")
+    # the variants selected at the foot of the view: a curve each, below
+    pair_chosen, set_pair_chosen = mo.state([])
+    pair_view3d.observe(
+        lambda change: set_pair_chosen(change.new), names="selected_variants"
+    )
     # Shown beside the numbers below, made here, once, so the camera stays
     # put; its files written when clicked, so they hold the scene as it is
     # then.
@@ -112,11 +114,11 @@ def _(SceneWidget, coils, json, mo):
             ]
         )
     )
-    return pair_edited, pair_panes, pair_session, pair_shown, pair_view3d
+    return pair_chosen, pair_edited, pair_session, pair_shown, pair_view3d
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, pair_edited, pair_panes, pair_session, pair_shown, pair_view3d):
+def _(go, mo, np, pair_chosen, pair_edited, pair_session, pair_shown, pair_view3d):
     _ = pair_edited()
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
     _radius = pair_view3d.variables["radius"]
@@ -133,17 +135,19 @@ def _(go, mo, np, pair_edited, pair_panes, pair_session, pair_shown, pair_view3d
         pair_session.get_field(sensor_id="probe")["values"], dtype=float
     )
     _magnitude = np.linalg.norm(_probe.reshape(-1, 3), axis=1)
-    # the scene's curve, and one for each variant in a pane beside it, from
-    # the copy of the scene that pane is drawn from
+    # the scene's curve, and one for each other variant selected, from the
+    # copy of the scene at that variant
     _at = pair_session.get_variables()["variant"]
     _figure = go.Figure(
         go.Scatter(x=_z * 1e3, y=_bz * 1e3, name=f"scene · {_at}" if _at else "scene")
     )
-    for _name in pair_panes():
+    for _name in pair_chosen():
+        if _name == _at:
+            continue  # the scene's curve is that one
         try:
             _variant = pair_session.variant_session(_name)
         except ValueError:
-            continue  # one the scene cannot use as it stands: its pane says why
+            continue  # one the scene cannot use as it stands: its chip says why
         _figure.add_trace(go.Scatter(x=_z * 1e3, y=_bz_of(_variant) * 1e3, name=_name))
     _figure.update_layout(
         template=_template,

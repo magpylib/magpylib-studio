@@ -16,18 +16,20 @@ splits its editors: up to twelve panes, moved by their tags, resized by the line
 between them and closed by their ×, a variant's chip out of the row while it has
 a pane, and the variant the scene is at shown by the scene's own, its tag
 pressed. In a notebook, `view.panes` lists the variants with a pane, and
-assigned opens them; `session.variant_session(name)` is the copy each is drawn
-from, to read its field, as the coil pair's plot does for a curve per pane. The
-button at the end of the row opens every other variant at once, in a grid, as
-many as there is room for, and closes them all again. Each draws the scene at
-its variant's values, field lines and solved parts included, and they turn
-together. The legend lists what any of them has, one colour scale covers them
-all, the transport steps them together, and the cube and the scale bar stand
-where they do in one view. After an edit, once the edits stop coming, the panes
-are drawn again one by one, each from a copy of the session; a step of a run
-that only moves is posed in every pane with no word to Python. A pane keeps the
-values its variant names, and follows the sliders of those it does not. In a
-notebook, on a saved page and in the studio's panel (#127).
+assigned opens them; a click on a chip or a pane's tag selects its variant,
+Ctrl-click or Cmd-click adds one, and `view.selected_variants` lists them;
+`session.variant_session(name)` is the copy of the scene at each, to read its
+field, as the coil pair's plot does for a curve per selected variant. The button
+at the end of the row opens every other variant at once, in a grid, as many as
+there is room for, and closes them all again. Each draws the scene at its
+variant's values, field lines and solved parts included, and they turn together.
+The legend lists what any of them has, one colour scale covers them all, the
+transport steps them together, and the cube and the scale bar stand where they
+do in one view. After an edit, once the edits stop coming, the panes are drawn
+again one by one, each from a copy of the session; a step of a run that only
+moves is posed in every pane with no word to Python. A pane keeps the values its
+variant names, and follows the sliders of those it does not. In a notebook, on a
+saved page and in the studio's panel (#127).
 
 </details>
 

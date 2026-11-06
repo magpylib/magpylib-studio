@@ -2678,18 +2678,20 @@ def test_the_row_offers_the_variants_but_not_to_a_view_for_looking():
     assert widget.SceneWidget(built, editable="never").variants == []
 
 
-def test_panes_name_variants_of_the_scene():
-    """`panes`, the variants beside the scene, is a cell's to set: each
-    once, and only a variant the scene has."""
+@pytest.mark.parametrize("trait", ["panes", "selected_variants"])
+def test_panes_and_selection_name_variants_of_the_scene(trait):
+    """`panes`, the variants beside the scene, and `selected_variants`, those
+    picked, are a cell's to set: each once, and only a variant the scene
+    has."""
     built = _design().build()
     built.session.save_variant("few", {"n": 4})
     built.session.save_variant("many", {"n": 16})
     view = widget.SceneWidget(built)
-    view.panes = ["many", "few", "many"]
-    assert view.panes == ["many", "few"]
+    setattr(view, trait, ["many", "few", "many"])
+    assert getattr(view, trait) == ["many", "few"]
     with pytest.raises(traitlets.TraitError, match=r"no variant 'odd'.*few, many"):
-        view.panes = ["odd"]
-    assert view.panes == ["many", "few"]
+        setattr(view, trait, ["odd"])
+    assert getattr(view, trait) == ["many", "few"]
 
 
 def test_a_page_carries_the_variants_it_is_asked_for():

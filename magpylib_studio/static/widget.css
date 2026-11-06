@@ -1863,6 +1863,13 @@
   opacity: 0.7;
 }
 
+/* A variant selected, for a cell to plot (the widget's `selected_variants`):
+   ringed, apart from the fill that says the scene is at it. */
+.magpy-vars-chip.magpy-selected {
+  border-color: var(--vscode-focusBorder);
+  box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
 .magpy-vars-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2268,6 +2275,10 @@
     var(--vscode-editor-background, #fff)
   );
   outline-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+}
+/* its variant selected: ringed, as its chip in the row is */
+.magpy-pane-tag.magpy-selected {
+  outline: 2px solid var(--vscode-focusBorder);
 }
 .magpy-pane-tag > span {
   overflow: hidden;

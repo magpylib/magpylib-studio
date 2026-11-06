@@ -55,6 +55,8 @@ function sideOf(box, x, y) {
  * - `onLayout(split, names)`: the panes laid out again; `split`, whether
  *   there is more than the view, and `names` the variants with a pane.
  * - `stepNow()`: the step of the run the view shows, or null for its own.
+ * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
+ *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
 export function createGrid(el, options) {
   const {
@@ -67,6 +69,7 @@ export function createGrid(el, options) {
     onScenes,
     onLayout,
     stepNow,
+    onSelect,
   } = options;
   el.classList.add("magpy-panes");
   /** The scene's own pane. */
@@ -119,12 +122,34 @@ export function createGrid(el, options) {
       made.api.watchCamera(() => follow(made));
       body.addEventListener("objectpick", (event) => onPick(event.detail));
     }
-    tag.title = "Drag to move it beside another";
+    tag.title =
+      "Click to select its variant, Ctrl or Cmd to add it; drag to move it beside another";
+    let downAt = null; // where a press on the tag began: moved off, no click
     tag.addEventListener("pointerdown", (event) => {
       if (event.button !== 0 || event.target.closest(".magpy-pane-close"))
         return;
-      if (panes().length > 1)
+      downAt = [event.clientX, event.clientY];
+      if (panes().length > 1 && !(event.ctrlKey || event.metaKey))
         carry(event, { pane: made, name: name ?? label.textContent });
+    });
+    const pick = (event, add) => {
+      const variant = name ?? current;
+      if (!onSelect || !variant || event.target.closest(".magpy-pane-close"))
+        return;
+      const [x, y] = downAt ?? [event.clientX, event.clientY];
+      if (Math.hypot(event.clientX - x, event.clientY - y) > 4) return;
+      onSelect(variant, add);
+    };
+    let menuAt = -Infinity; // a Ctrl-click on a Mac comes as a context menu
+    tag.addEventListener("click", (event) => {
+      const add = event.ctrlKey || event.metaKey;
+      if (!add || event.timeStamp - menuAt > 500) pick(event, add);
+    });
+    tag.addEventListener("contextmenu", (event) => {
+      if (!event.ctrlKey || !onSelect) return;
+      event.preventDefault();
+      menuAt = event.timeStamp;
+      pick(event, true);
     });
     return made;
   }
@@ -623,6 +648,19 @@ export function createGrid(el, options) {
     scenePane.label.textContent = now ? `scene · ${now}` : "scene";
     // the variant's chip is out of the row while split: pressed here instead
     scenePane.tag.classList.toggle("on", Boolean(now));
+    choose(chosenNames); // the scene's tag is another variant's now
+  }
+
+  /** The variants selected: their panes' tags marked, the scene's by the
+   *  variant it is at. */
+  let chosenNames = []; // the variants selected, marked again on a change
+  function choose(names) {
+    chosenNames = names;
+    const chosen = new Set(names);
+    for (const pane of panes()) {
+      const variant = pane.name ?? current;
+      pane.tag.classList.toggle("magpy-selected", chosen.has(variant));
+    }
   }
 
   /** Back to the view alone: every variant's pane closed. */
@@ -715,6 +753,7 @@ export function createGrid(el, options) {
 
   return {
     carry,
+    choose,
     fit,
     mark,
     redraw,

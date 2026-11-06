@@ -47,6 +47,11 @@
  *   out of the row, up, before any slide -- the host's to carry from there
  *   (the widget drops it in the view as a pane of its own), and nothing
  *   used.
+ *   `onSelect(name, add)`: a toggle clicked, for a host that keeps a
+ *   selection of variants apart from the one the values are in -- `add` with
+ *   Ctrl or Cmd held, the scene left as it is, and the toggle in or out of
+ *   the selection; without, after the values are set to it, as a slide's
+ *   release does too.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -154,6 +159,7 @@ export function createVariables(
     fits = asToggles,
     slide = false,
     onLift = null,
+    onSelect = null,
   } = {},
 ) {
   const withHelp = !compact && !variantsOnly;
@@ -267,8 +273,22 @@ export function createVariables(
         // A press on a toggle that slides is the slide's, a click with no
         // move included; a click from the keyboard is not pressed at all.
         chip.addEventListener("click", (event) => {
+          if (onSelect && adds(event)) {
+            // a Ctrl-click on a Mac is a context menu, taken already
+            if (event.timeStamp - menuAt > 500) onSelect(name, true);
+            return;
+          }
           if (!on && !(slide && event.detail > 0)) useVariant(name);
+          onSelect?.(name, false);
         });
+        if (onSelect) {
+          chip.addEventListener("contextmenu", (event) => {
+            if (!event.ctrlKey) return;
+            event.preventDefault();
+            menuAt = event.timeStamp;
+            onSelect(name, true);
+          });
+        }
         const up = onLift ? ", or up into the view beside the scene" : "";
         if (slide && !chip.disabled) {
           chip.title = `${says(name)} -- drag sideways for the others${up}`;
@@ -336,13 +356,17 @@ export function createVariables(
       });
   }
 
+  /** A click that adds to the selection, or takes from it: Ctrl or Cmd held. */
+  const adds = (event) => event.ctrlKey || event.metaKey;
+  let menuAt = -Infinity; // when a Ctrl-click last came as a context menu
+
   /** How far above its row a toggle is lifted, in CSS pixels, to be carried. */
   const LIFT = 14;
 
   /** A press on a toggle where nothing slides: lifted up out of the row, it
    *  is the host's to carry (`onLift`); let go where it was, it is a click. */
   function liftFrom(event, chip, name) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || (onSelect && adds(event))) return;
     const top = chip.getBoundingClientRect().top;
     const move = (e) => {
       if (e.clientY >= top - LIFT) return;
@@ -373,6 +397,7 @@ export function createVariables(
 
   function slideFrom(event, chips, names, unusable) {
     if (event.button !== 0) return; // the main button, a finger or a pen
+    if (onSelect && adds(event)) return; // a selection's click, not a slide
     event.preventDefault(); // no text selected along the way
     const start = chips.findIndex((chip) => chip.classList.contains("on"));
     let at = start;
@@ -451,6 +476,7 @@ export function createVariables(
         try {
           const res = await rpc("use_variant", { name: names[at] });
           if (res && res.ok === false) say(res.error);
+          else onSelect?.(names[at], false);
         } catch (error) {
           say(error);
         }

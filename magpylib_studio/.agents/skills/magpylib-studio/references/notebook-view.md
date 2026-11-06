@@ -46,8 +46,13 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
 - `view.panes` lists the variants with a pane beside the scene's. Assigned,
   `view.panes = ["wide"]` opens those and closes the rest; the variant the scene
   is at, and a name past the twelfth pane, open none, and the trait reads what
-  opened. `session.variant_session(name)` is the copy of the scene that pane is
-  drawn from: its `get_field` is the field the pane shows.
+  opened.
+- `view.selected_variants` lists the variants selected: a click on a chip or a
+  pane's tag selects one alone, Ctrl-click or Cmd-click adds or removes one. A
+  chip's click also sets the scene to that variant; a Ctrl-click and a tag's
+  click do not. Assignable, names checked. `session.variant_session(name)` is
+  the copy of the scene at that variant, the one its pane is drawn from: its
+  `get_field` gives a curve per selected variant.
 
 ## A scene, its variants and a run
 
