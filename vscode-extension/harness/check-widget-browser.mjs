@@ -2773,6 +2773,27 @@ async function panel(port, base, expected) {
   });
 }
 
+/** A render of the scene, the view the same size -- each step of a drag the
+ *  engine answers, a resize by its grips most of all -- leaves the picture
+ *  where it was until the next frame draws over it: a canvas given its size
+ *  again, unchanged, is cleared, and flashed the whole view blank at every
+ *  step. */
+async function renderKeepsThePicture(port, base) {
+  await check("a drag's step never leaves the view blank", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/redraw.html`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "never finished";
+      if (result.steps.some((n) => n === 0))
+        return `drawn after each step, of 256 sampled: ${result.steps}`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** The panel's renderer, mid-drag: a held sensor that draws its own reading
  *  is redrawn from the scene on the node the handles are on, and any other
  *  held object is left exactly as the drag carried it. */
@@ -5062,6 +5083,7 @@ try {
   await textFocus(browser.port, base);
   await panel(browser.port, base, expected);
   await heldReadings(browser.port, base);
+  await renderKeepsThePicture(browser.port, base);
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
   await pencil(browser.port, base);

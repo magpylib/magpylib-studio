@@ -79,8 +79,14 @@ function viewRenderer(redraw) {
     setPixelRatio() {}, // the page's, set once for every view
     setSize(width, height) {
       size.set(width, height);
-      canvas.width = Math.floor(width * pixels());
-      canvas.height = Math.floor(height * pixels());
+      // only where it changes: a canvas given its width again, the same, is
+      // cleared all the same, and a render sizes the view every time -- at
+      // each step of a drag that sends the scene back, a resize by its grips
+      // most of all, which flashed the whole view blank till the next frame
+      const across = Math.floor(width * pixels());
+      const down = Math.floor(height * pixels());
+      if (canvas.width !== across) canvas.width = across;
+      if (canvas.height !== down) canvas.height = down;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       if (shared.size.x < width || shared.size.y < height) {
