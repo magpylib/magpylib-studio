@@ -13,14 +13,15 @@ Python package it runs on. Open an entry for its details.
 A variant's chip, lifted out of the view's foot and dropped on a side of the
 view, splits it and shows that variant there, beside the scene, as VS Code
 splits its editors: up to twelve panes, moved by their tags, resized by the line
-between them and closed by their ×. Each draws the scene at its variant's
-values, field lines and solved parts included, and they turn together. The
-legend lists what any of them has, one colour scale covers them all, the
-transport steps them together, and the cube and the scale bar stand where they
-do in one view. After an edit the panes are drawn again one by one, each from a
-copy of the session; a pane keeps the values its variant names, and follows the
-sliders of those it does not. In a notebook, on a saved page and in the studio's
-panel (#127).
+between them and closed by their ×. The button at the end of the row opens every
+other variant at once, in a grid, and closes them all again. Each draws the
+scene at its variant's values, field lines and solved parts included, and they
+turn together. The legend lists what any of them has, one colour scale covers
+them all, the transport steps them together, and the cube and the scale bar
+stand where they do in one view. After an edit the panes are drawn again one by
+one, each from a copy of the session; a pane keeps the values its variant names,
+and follows the sliders of those it does not. In a notebook, on a saved page and
+in the studio's panel (#127).
 
 </details>
 

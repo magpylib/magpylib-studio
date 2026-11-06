@@ -542,6 +542,66 @@ export function createGrid(el, options) {
     layout();
   }
 
+  /** Every variant of `names` beside the scene, laid out afresh as rows of
+   *  panes near the view's shape: the scene first, then the variants in
+   *  their order, as many as there is room for. A pane open already keeps
+   *  its canvas and what it drew; only the new ones are drawn. */
+  function fill(names) {
+    const open = new Map(variantPanes().map((pane) => [pane.name, pane]));
+    const wanted = [...names, ...open.keys()]
+      .filter((name, i, all) => all.indexOf(name) === i)
+      .slice(0, MOST_PANES - 1);
+    for (const [name, pane] of open) {
+      if (wanted.includes(name)) continue;
+      pane.api.watchCamera(null);
+      pane.api.dispose();
+      pane.el.remove();
+    }
+    const made = [];
+    const all = [
+      scenePane,
+      ...wanted.map((name) => {
+        if (open.has(name)) return open.get(name);
+        const pane = makePane(name);
+        made.push(pane);
+        return pane;
+      }),
+    ];
+    const { cols } = shape(all.length);
+    const rows = [];
+    for (let i = 0; i < all.length; i += cols) {
+      rows.push(all.slice(i, i + cols));
+    }
+    const line = (children, dir) =>
+      children.length === 1
+        ? children[0]
+        : { dir, children, sizes: children.map(() => 1 / children.length) };
+    tree = line(
+      rows.map((row) => line(row, "row")),
+      "column",
+    );
+    refit ||= made.length > 0;
+    layout();
+    step = stepNow();
+    if (made.length) redrawPanes(made);
+    else drawn();
+  }
+
+  /** The columns and rows `n` panes are laid out in: each pane as near the
+   *  view's own shape as can be, few cells left empty in the last row. */
+  function shape(n) {
+    const { width, height } = el.getBoundingClientRect();
+    const aspect = width > 0 && height > 0 ? width / height : 16 / 9;
+    let best = { cols: n, rows: 1, cost: Infinity };
+    for (let cols = 1; cols <= n; cols += 1) {
+      const rows = Math.ceil(n / cols);
+      const cost =
+        Math.abs(Math.log((aspect * rows) / cols)) + 0.3 * (rows * cols - n);
+      if (cost < best.cost) best = { cols, rows, cost };
+    }
+    return best;
+  }
+
   /** Close the panes of variants the scene no longer has. */
   function keep(names) {
     const known = new Set(names);
@@ -569,10 +629,15 @@ export function createGrid(el, options) {
     wear,
     hide,
     keep,
+    fill,
     corners,
     followScene,
     get split() {
       return !isPane(tree);
+    },
+    /** The variants with a pane, in the layout's order. */
+    get names() {
+      return variantPanes().map((pane) => pane.name);
     },
   };
 }

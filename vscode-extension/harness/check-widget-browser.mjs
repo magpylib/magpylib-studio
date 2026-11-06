@@ -897,6 +897,33 @@ async function savedPanes(port, base) {
           5_000,
         );
         if (!alone) return "closed, the view was not alone again";
+        // the button beside the chips: every other variant out at once, the
+        // scene first, and a press more all of them back
+        const spread = `document.querySelector(".magpy-scene-spread")`;
+        const variants = await tab.evaluate(
+          `return document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip:not(:disabled):not(.on)").length`,
+        );
+        await tab.evaluate(`${spread}.click()`);
+        const filled = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
+           p.every((pane) => pane.querySelector("canvas")?.width) &&
+           ${spread}.getAttribute("aria-pressed") === "true"`,
+          15_000,
+        );
+        if (!filled) {
+          return `filled: ${await tab.evaluate(`return ${panes}.length`)} panes for ${variants} variants`;
+        }
+        const first = await tab.evaluate(
+          `return ${panes}[0].querySelector(".magpy-pane-tag span").textContent`,
+        );
+        if (!first.startsWith("scene")) return `filled, ${first} came first`;
+        await tab.evaluate(`${spread}.click()`);
+        const back = await tab.until(
+          `return ${panes}.length === 1 && ${spread}.getAttribute("aria-pressed") === "false"`,
+          5_000,
+        );
+        if (!back) return "pulled back, the view was not alone again";
         return thrown(tab);
       } finally {
         await tab.close();

@@ -22,7 +22,7 @@
 import rendererSource from "../../build/renderer.txt";
 import { watchDrags } from "./drag.mjs";
 import { createColorBar } from "./colorbar.mjs";
-import { createGrid } from "./grid.mjs";
+import { createGrid, MOST_PANES } from "./grid.mjs";
 import { createLegend, drawnIn, partsIn } from "./legend.mjs";
 import { createInspector } from "./inspector.mjs";
 import { HOME, MARK } from "./mark.mjs";
@@ -149,6 +149,15 @@ const ICONS = {
     '<path d="M2.5 11.5c3-1.8 5.5 1.8 10 0" stroke-width="1.4"/>' +
     '<path class="magpy-flow-pulse" style="--at: 18" d="M2.5 11.5c3-1.8 5.5 1.8 10 0" ' +
     'stroke-width="2.6" pathLength="100" stroke-dasharray="16 84"/>',
+  // every variant beside the scene, and back to the scene alone
+  tile:
+    '<rect x="2" y="2" width="5" height="5" rx="1"/>' +
+    '<rect x="9" y="2" width="5" height="5" rx="1"/>' +
+    '<rect x="2" y="9" width="5" height="5" rx="1"/>' +
+    '<rect x="9" y="9" width="5" height="5" rx="1"/>',
+  untile:
+    '<rect x="2" y="2" width="12" height="12" rx="1.5"/>' +
+    '<path d="M5.5 5.5 8 8M10.5 5.5 8 8M5.5 10.5 8 8M10.5 10.5 8 8"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -780,6 +789,12 @@ function render({ model, el }) {
   variantsEl.hidden = true;
   let variantRow = null; // made for a scene that has variants, and only then
 
+  // Beside the chips: every variant in a pane of its own at once, laid out
+  // in a grid -- and, every one out, all of them back, the scene alone.
+  const spreadButton = iconButton("tile", "", () => spread());
+  spreadButton.classList.add("magpy-scene-spread");
+  spreadButton.hidden = true;
+
   // A page being written: how far, and -- the view's own export -- a button
   // that stops it.
   const writing = document.createElement("div");
@@ -985,7 +1000,14 @@ function render({ model, el }) {
   const foot = document.createElement("div");
   foot.className = "magpy-scene-foot";
   foot.hidden = true;
-  foot.append(transport, variantsEl, choose, writing, progressBar);
+  foot.append(
+    transport,
+    variantsEl,
+    spreadButton,
+    choose,
+    writing,
+    progressBar,
+  );
   // Escape, from anywhere in the foot, puts the choice away
   foot.addEventListener("keydown", (event) => {
     if (choosing && event.key === "Escape") {
@@ -1687,7 +1709,53 @@ function render({ model, el }) {
       });
       variantRow.refresh();
     }
+    dressSpread();
     keepCorner();
+  }
+
+  /** The variants a pane can be given: every one the row offers but the
+   *  one the values are in, which the scene's own pane shows -- and one the
+   *  scene cannot use as it stands, shown there and not offered. */
+  function offeredVariants() {
+    const refused = new Set([
+      ...[...variantsEl.querySelectorAll(".magpy-vars-chip:disabled")].map(
+        (chip) => chip.textContent,
+      ),
+      ...[...variantsEl.querySelectorAll("option:disabled")].map(
+        (option) => option.value,
+      ),
+      variantsEl.querySelector(".magpy-vars-chip.on")?.textContent,
+      variantsEl.querySelector("select")?.value,
+    ]);
+    return (model.get("variants") || []).filter((name) => !refused.has(name));
+  }
+
+  /** The spread button: shown with the row, and saying what a press does --
+   *  every variant beside the scene, or, every one out already, or as many
+   *  as there is room for, all of them back. */
+  function dressSpread() {
+    const offered = offeredVariants();
+    const open = grid.names;
+    spreadButton.hidden = variantsEl.hidden || offered.length === 0;
+    const full =
+      grid.split &&
+      (offered.every((name) => open.includes(name)) ||
+        open.length >= MOST_PANES - 1);
+    setIcon(spreadButton, full ? "untile" : "tile");
+    name(
+      spreadButton,
+      full
+        ? "Back to the scene alone: every variant's pane closed"
+        : "Every other variant beside the scene, each in a pane",
+    );
+    spreadButton.classList.toggle("on", full);
+    spreadButton.setAttribute("aria-pressed", String(full));
+  }
+
+  function spread() {
+    if (!api || !sharedModule) return; // nothing drawn yet to split
+    if (spreadButton.getAttribute("aria-pressed") === "true") grid.hide();
+    else grid.fill(offeredVariants());
   }
 
   // --- variants side by side -----------------------------------------------
@@ -1728,6 +1796,7 @@ function render({ model, el }) {
         call("drop_variant_copies", { keep: names }).catch(() => {});
       }
       if (!split) gridScenes = [];
+      dressSpread();
       sizeView();
       keepCorner();
       if (!split) {
@@ -1735,6 +1804,13 @@ function render({ model, el }) {
         dressColorBar();
       }
     },
+  });
+
+  // the row is made again as it learns which variants the scene can use:
+  // the spread button follows it
+  new MutationObserver(() => dressSpread()).observe(variantsEl, {
+    childList: true,
+    subtree: true,
   });
 
   /** A chip lifted out of the row: carried, to be dropped in the view. */
