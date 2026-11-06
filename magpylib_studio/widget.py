@@ -1015,7 +1015,7 @@ class SceneWidget(anywidget.AnyWidget):
         Returns nothing, deliberately. This is the last line of a cell, and a
         cell's value is its last expression: returning `self` -- which is a
         widget, and renders -- draws a *second* live view of the same scene
-        under the one being updated, with its own WebGL context.
+        under the one being updated.
         """
         self._repoint(objects, _names_above(), animation, kwargs)
 

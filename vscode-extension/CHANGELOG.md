@@ -37,6 +37,20 @@ its scene function's source (#143).
 ### Changed
 
 <details>
+<summary>Every 3D view on a page draws</summary>
+
+A notebook's 3D views each had a WebGL renderer of their own, and a page holds
+about sixteen: past eight, the views least looked at rested as a picture until
+pointed at. They share one renderer now, which draws each view onto a canvas of
+its own, so twenty views on a page draw, with one WebGL context, and the shaders
+are compiled once for all of them. A view that a marimo cell run again takes off
+the page lets go of what it held; one that JupyterLab puts back draws again,
+looking where it was (#25,
+[#146](https://github.com/magpylib/magpylib-studio/pull/146)).
+
+</details>
+
+<details>
 <summary>The examples written once, as scene functions</summary>
 
 The gallery's scenes are scene functions in `magpylib_studio.examples`, one

@@ -1,0 +1,186 @@
+<!doctype html>
+<!--
+  How notebooks hand the widget its element, and what the views sharing one
+  renderer have to survive. `?case=` names one; `window.result` is what
+  happened.
+
+  detached: Jupyter renders a widget before attaching it. Two rendered
+    together must be two views.
+  released: marimo re-running a cell takes a drawn view off the page without
+    tearing it down. The next view draws, and the one gone lets go of what
+    it held on the shared renderer.
+  back: and a view let go of that comes back to the page -- JupyterLab puts
+    cells far out of sight back as they are scrolled to -- draws again.
+  idle: a view nobody touches draws nothing -- it is drawn when it changes,
+    not sixty times a second.
+  many: more views than a page has WebGL contexts for. Every one draws, with
+    one context between them.
+  boxed: and drawn before they are on the page, which is how a box of them
+    arrives. Each shows its scene, dressed for the white page rather than
+    the dark system the check sets.
+  rerun: a cell run again, with the renderer loaded already, for a view not
+    yet on the page. Nothing is drawn until it is on the page: drawn before,
+    it was dark for a frame, and built again in the page's colours.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+    <script>
+      // Every frame starts by clearing, so this counts the frames drawn; and
+      // every WebGL context made on the page.
+      window.clears = 0;
+      window.contexts = 0;
+      for (const context of [WebGLRenderingContext, WebGL2RenderingContext]) {
+        const clear = context.prototype.clear;
+        context.prototype.clear = function (...args) {
+          window.clears += 1;
+          return clear.apply(this, args);
+        };
+      }
+      const getContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+        const made = getContext.call(this, kind, ...rest);
+        if (/webgl/.test(kind) && made && !this.counted) {
+          this.counted = true;
+          window.contexts += 1;
+        }
+        return made;
+      };
+    </script>
+  </head>
+  <!-- White, in a system the check sets dark: a view that dresses from the
+       system and not from the page shows up. -->
+  <body style="margin: 12px; background: #fff">
+    <div id="page"></div>
+    <script type="module">
+      import { widget, localModel, wait } from "./host.mjs";
+
+      const page = document.getElementById("page");
+      const view = () => document.createElement("div");
+      const canvasOf = (el) => el.querySelector(".magpy-scene-view > canvas");
+      const drawn = (el) => Boolean(canvasOf(el));
+      /** Whether the view's canvas shows something: its middle is painted,
+       *  in the scene's background at least. */
+      const painted = (el) => {
+        const canvas = canvasOf(el);
+        if (!canvas?.width) return false;
+        const [, , , alpha] = canvas
+          .getContext("2d")
+          .getImageData(canvas.width >> 1, canvas.height >> 1, 1, 1).data;
+        return alpha > 0;
+      };
+      const held = () =>
+        Object.getOwnPropertySymbols(globalThis)
+          .filter((key) => key.description.startsWith("magpylib-studio"))
+          .map((key) => globalThis[key].views)[0];
+      const until = async (holds, ms = 15000) => {
+        for (let waited = 0; waited < ms && !holds(); waited += 250) {
+          await wait(250);
+        }
+        return holds();
+      };
+
+      const CASES = {
+        async detached() {
+          const [a, b] = [view(), view()];
+          widget.render({ model: localModel(), el: a });
+          widget.render({ model: localModel(), el: b });
+          await wait(0);
+          page.append(a, b);
+          await wait(1500);
+          return { first: drawn(a), second: drawn(b) };
+        },
+        async released() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          a.remove(); // and never torn down
+          const b = view();
+          page.append(b);
+          widget.render({ model: localModel(), el: b });
+          await wait(1500);
+          return { next: painted(b), held: held().size, gone: drawn(a) };
+        },
+        async back() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          a.remove();
+          const b = view();
+          page.append(b);
+          widget.render({ model: localModel(), el: b });
+          await wait(1500);
+          const let_go = !drawn(a);
+          page.prepend(a);
+          await wait(1500);
+          return { let_go, again: painted(a), held: held().size };
+        },
+        async idle() {
+          const a = view();
+          page.append(a);
+          widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          const drawn = window.clears;
+          await wait(1000);
+          return { drawn, idle: window.clears - drawn };
+        },
+        async many() {
+          const views = Array.from({ length: 20 }, view);
+          page.append(...views);
+          for (const each of views) {
+            widget.render({ model: localModel(), el: each });
+          }
+          const every = await until(() => views.every(painted));
+          return {
+            painted: views.filter(painted).length,
+            every,
+            contexts: window.contexts,
+          };
+        },
+        async boxed() {
+          // A box of views, all drawn before any is on the page.
+          const views = Array.from({ length: 11 }, view);
+          for (const each of views) {
+            widget.render({ model: localModel(), el: each });
+          }
+          await wait(0);
+          page.append(...views);
+          // The first frames on the page, before the renderer has loaded:
+          // dressed for the page already, not for the system and then the
+          // page as each one draws.
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          const light = views.every((v) => !v.classList.contains("magpy-dark"));
+          const shown = await until(() => views.every(painted));
+          return { shown, light };
+        },
+        async rerun() {
+          const a = view();
+          page.append(a);
+          const teardown = widget.render({ model: localModel(), el: a });
+          await wait(1500);
+          teardown();
+          a.remove();
+          const b = view();
+          widget.render({ model: localModel(), el: b });
+          await wait(300);
+          const before = drawn(b);
+          page.append(b);
+          await wait(1500);
+          return {
+            before,
+            canvases: b.querySelectorAll(".magpy-scene-view > canvas").length,
+            painted: painted(b),
+            held: held().size,
+          };
+        },
+      };
+
+      const name = new URLSearchParams(location.search).get("case");
+      window.result = await CASES[name]();
+    </script>
+  </body>
+</html>

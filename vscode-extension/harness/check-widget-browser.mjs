@@ -12,8 +12,8 @@
  *
  * - the theme, in each notebook and docs theme the widget has to follow,
  *   simulated as that host dresses itself (`widget-pages/hosts.html`);
- * - the renderer pool, as Jupyter and marimo hand the widget its element
- *   (`widget-pages/pool.html`);
+ * - the views sharing one renderer, as Jupyter and marimo hand the widget its
+ *   element (`widget-pages/views.html`);
  * - the variables panel, against a fake kernel: offered with the handles,
  *   a slider drag asking the session in the panel's order and redrawing
  *   between, a dropdown committing once, a scene's variants a toggle each
@@ -3942,52 +3942,38 @@ async function collection(port, base) {
   });
 }
 
-async function pool(port, base) {
+async function views(port, base) {
   const cases = {
     detached: [
       "two views rendered before they are on the page are two views",
       (r) => r.first && r.second,
     ],
-    reused: [
-      "a view taken off the page untorn leaves a renderer for the next",
-      (r) => r.next,
+    released: [
+      "a view taken off the page untorn lets go of the shared renderer",
+      (r) => r.next && r.held === 1 && !r.gone,
     ],
-    stale: [
-      "a view taken off the page does not steer the renderer it gave up",
-      (r) => r.visible,
-    ],
-    projection: [
-      "a renderer handed on starts the next view in perspective",
-      (r) =>
-        r.was === "parallel" &&
-        r.now === "perspective" &&
-        r.pressed === "false",
+    back: [
+      "a view let go of draws again when it is back on the page",
+      (r) => r.let_go && r.again && r.held === 2,
     ],
     idle: [
       "a view left alone draws nothing",
       (r) => r.drawn > 0 && r.idle === 0,
     ],
-    cap: [
-      "past eight views the least wanted rest, and wake when reached for",
-      (r) =>
-        r.renderers === 8 &&
-        r.canvases === 8 &&
-        r.inSightLive &&
-        r.woke &&
-        r.after === 8 &&
-        r.pictures >= 1,
-      (r) => r.backAs === "perspective",
+    many: [
+      "twenty views draw, with one WebGL context between them",
+      (r) => r.every && r.contexts === 1,
     ],
     boxed: [
-      "a box of views drawn off the page keeps to eight renderers",
-      (r) => r.renderers === 8 && r.canvases === 8 && r.shown,
-      // on a white page in a dark system: the views waiting for a renderer
-      // are dressed for the page too, not left on the system's guess
+      "a box of views drawn off the page shows every scene",
+      (r) => r.shown,
+      // on a white page in a dark system: the views not yet drawn are
+      // dressed for the page too, not left on the system's guess
       (r) => r.light,
     ],
     rerun: [
       "a cell run again draws its scene once, on the page",
-      (r) => r.renders.length === 1 && r.renders[0],
+      (r) => !r.before && r.canvases === 1 && r.painted && r.held === 1,
     ],
   };
   for (const [name, [label, ...holds]] of Object.entries(cases)) {
@@ -3997,7 +3983,7 @@ async function pool(port, base) {
         await tab.send("Emulation.setEmulatedMedia", {
           features: [{ name: "prefers-color-scheme", value: "dark" }],
         });
-        await tab.navigate(`${base}/pages/pool.html?case=${name}`);
+        await tab.navigate(`${base}/pages/views.html?case=${name}`);
         const result = await tab.until("return window.result");
         if (!result) return "never finished";
         if (!holds.every((hold) => hold(result))) {
@@ -4449,7 +4435,7 @@ setTimeout(() => {
 try {
   await themes(browser.port, base);
   await lateCompany(browser.port, base);
-  await pool(browser.port, base);
+  await views(browser.port, base);
   await room(browser.port, base, expected);
   await blocked(browser.port, base);
   await themeMidRun(browser.port, base);

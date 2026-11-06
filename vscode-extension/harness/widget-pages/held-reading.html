@@ -30,7 +30,8 @@
     <div id="view"></div>
     <script type="module">
       import * as THREE from "three";
-      import { scene3d } from "/media/scene3d.mjs";
+      import { createScene3d } from "/media/scene3d.mjs";
+      const scene3d = createScene3d();
 
       const [before, after, whole, later] = await (
         await fetch("/out/readings.json")
