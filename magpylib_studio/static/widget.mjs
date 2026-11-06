@@ -1628,7 +1628,12 @@ function render({ model, el }) {
     shared.views.delete(held);
     if (!api) return;
     clearTimeout(gridTimer);
-    grid.hide(); // the variants' panes let go of theirs too
+    // the variants' panes let go of theirs too -- a view let go of, not a
+    // choice: the trait keeps them, and drawn again they open again
+    lettingGo = true;
+    grid.hide();
+    lettingGo = false;
+    panesAsked = (model.get("panes") || []).length > 0;
     if (framed) kept = api.cameraState();
     if (playing) setPlaying(false);
     // A frame asked for is asked for again when it is drawn, not waited for.
@@ -1827,6 +1832,7 @@ function render({ model, el }) {
   }
 
   let panesAsked = (model.get("panes") || []).length > 0; // before a draw
+  let lettingGo = false; // panes closed with the view, not by a hand
   let showingPanes = false; // laying out what the trait asks: told at the end
 
   /** The panes the trait asks for: those opened, laid out as the spread
@@ -1932,16 +1938,16 @@ function render({ model, el }) {
         });
       }
       // the copies of the variants whose panes closed, let go of in python
-      // -- not for a view torn down, whose session lets go of them all
+      // -- but those selected, a cell's to read -- and not for a view let
+      // go of, whose panes open again from them when it is drawn again
       const shrank = paneNames.some((each) => !names.includes(each));
       paneNames = names;
-      if (sharedModule && shrank && !gone) {
-        call("drop_variant_copies", { keep: names }, { quiet: true }).catch(
-          () => {},
-        );
+      if (sharedModule && shrank && !gone && !lettingGo) {
+        const keep = [...new Set([...names, ...chosen])];
+        call("drop_variant_copies", { keep }, { quiet: true }).catch(() => {});
       }
       if (!split) gridScenes = [];
-      if (!showingPanes) tellPanes(names);
+      if (!showingPanes && !lettingGo) tellPanes(names);
       dressSpread();
       sizeView();
       keepCorner();
@@ -2372,6 +2378,7 @@ function render({ model, el }) {
 
   function dressEditing() {
     editBar.hidden = !editable();
+    grid.relabel(); // the scene's tag wears the pencil, or not
     resetButton.hidden = !editor.reset;
     // The panels go with the handles, on the column that goes with them.
     // Not in the studio panel, whose host shows them in its sidebar.
@@ -3197,7 +3204,9 @@ function render({ model, el }) {
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     gone = true;
     clearTimeout(gridTimer);
+    lettingGo = true;
     grid.hide();
+    lettingGo = false;
     release();
   };
 }

@@ -360,6 +360,21 @@ export function createVariables(
   const adds = (event) => event.ctrlKey || event.metaKey;
   let menuAt = -Infinity; // when a Ctrl-click last came as a context menu
 
+  /** The click a carried toggle's release would make on it, taken: a carry
+   *  let go back over its row changes nothing. */
+  function swallowClick(chip) {
+    const swallow = (click) => {
+      click.stopImmediatePropagation();
+      click.preventDefault();
+    };
+    chip.addEventListener("click", swallow, { capture: true, once: true });
+    addEventListener(
+      "pointerup",
+      () => setTimeout(() => chip.removeEventListener("click", swallow, true)),
+      { capture: true, once: true },
+    );
+  }
+
   /** How far above its row a toggle is lifted, in CSS pixels, to be carried. */
   const LIFT = 14;
 
@@ -371,18 +386,7 @@ export function createVariables(
     const move = (e) => {
       if (e.clientY >= top - LIFT) return;
       done();
-      // let go back over the chip, it is not a click on it as well
-      const swallow = (click) => {
-        click.stopImmediatePropagation();
-        click.preventDefault();
-      };
-      chip.addEventListener("click", swallow, { capture: true, once: true });
-      addEventListener(
-        "pointerup",
-        () =>
-          setTimeout(() => chip.removeEventListener("click", swallow, true)),
-        { capture: true, once: true },
-      );
+      swallowClick(chip); // let go back over it, it is no click on it
       onLift(name, e, chip);
     };
     const done = () => {
@@ -445,6 +449,8 @@ export function createVariables(
             missedRefresh = false;
             load().catch(say);
           }
+          // let go back over the chip, it is not a click on it as well
+          swallowClick(chips[pressedAt]);
           onLift(names[pressedAt], e, chips[pressedAt]);
           return;
         }

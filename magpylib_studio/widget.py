@@ -900,6 +900,12 @@ class SceneWidget(anywidget.AnyWidget):
         editable = traits.pop("editable", False)
         if editable == "never":
             editable = None  # the word for it; the trait holds None
+        # named variants are checked against the scene's, once it is in
+        variant_traits = {
+            key: traits.pop(key)
+            for key in ("panes", "selected_variants")
+            if key in traits
+        }
         super().__init__(**traits)
         #: The captured run, kept only when there is one that motion cannot
         #: play -- see `_adopt`. Every frame holds every trace of the scene
@@ -985,6 +991,8 @@ class SceneWidget(anywidget.AnyWidget):
         if self.field_lines and self._session is None:
             # asked for when the view was made, before there were objects
             self._field_lines_asked_for({"new": True})
+        for key, value in variant_traits.items():
+            setattr(self, key, value)
 
     @classmethod
     def _split(cls, kwargs):
@@ -1260,7 +1268,10 @@ class SceneWidget(anywidget.AnyWidget):
         Raised, what it raised is said in the view, and the edit stays. Edits
         made from code, `set` and `set_variable`, are the code's to answer.
         """
-        self._editing("follow_edits").follower = answer
+        session = self._editing("follow_edits")
+        session.follower = answer
+        # the variants' copies were followed by the one before: made again
+        session.drop_variant_copies()
 
     def save_variant(self, name):
         """Keep the variables as they are now under `name`: a variant of this
@@ -1993,7 +2004,13 @@ class SceneWidget(anywidget.AnyWidget):
             edit = {"by": "set", "objects": [target], "changed": {target: changed}}
         answer = rpc.handle(self._session, content)
         said = answer.get("result")
-        if isinstance(said, dict) and said.get("not_followed"):
+        # a pane's copy left unsolved says so on its tag: not again in a
+        # toast for every frame it is drawn
+        if (
+            isinstance(said, dict)
+            and said.get("not_followed")
+            and method != "variant_scene"
+        ):
             self.send(
                 {"kind": "refused", "message": f"Not followed: {said['not_followed']}"}
             )

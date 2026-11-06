@@ -270,8 +270,10 @@ The scene at variant `name`, as a session of its own: a copy of
 this one with the variant used, the one a view's pane of the
 variant is drawn from -- its field, `get_field`, is the field that
 pane shows. Kept while the scene stays as it is, so asked again it
-costs nothing; an edit of the scene makes a new one. To read, not to
-edit: an edit of it reaches neither the scene nor the pane.
+costs nothing; an edit of the scene makes a new one, and so does a
+view that closes a pane of a variant it has not selected. To read,
+not to edit: it is that pane's own, so an edit of it shows there,
+and in what the next caller is handed, though never in the scene.
 
 Raises ValueError for a variant the scene cannot use as it stands,
 and while the history is rolled back (`set_rollback`).

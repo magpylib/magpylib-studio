@@ -58,8 +58,8 @@ function sideOf(box, x, y) {
  * - `live()`: whether the scene's pane is one to edit -- its tag then wears
  *   a pencil, as the view's own pencil does, apart from the copies.
  * - `foldInto(name)`: the scene's pane's x pressed -- the scene to take the
- *   variant `name`, the next pane's, which then closes into it: a promise
- *   of whether it did.
+ *   variant `name`, the next pane's, which closes into it once the scene is
+ *   redrawn there.
  * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
  *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
@@ -253,9 +253,9 @@ export function createGrid(el, options) {
     const at = order.indexOf(scenePane);
     const next = order[at + 1] ?? order[at - 1];
     if (!next || next === scenePane) return;
-    if (await foldInto(next.name)) {
-      if (panes().includes(next)) remove(next);
-    }
+    // that pane goes once the scene is drawn at its variant (`redraw`):
+    // refused, as a host may say only later, it stays
+    await foldInto(next.name);
   }
 
   /** The variant `name` dropped on `side` of `target`: a pane for it. */
@@ -489,6 +489,14 @@ export function createGrid(el, options) {
   function redraw(own, at, now) {
     step = at;
     mark(now);
+    // the scene at a variant that has a pane -- its own x pressed, an undo,
+    // a variant used from code: the scene's pane shows it, and that one goes
+    const twin = variantPanes().find((pane) => pane.name === now);
+    if (twin) {
+      detach(twin);
+      dispose(twin);
+      layout();
+    }
     round += 1;
     return redrawPanes(variantPanes(), own);
   }
@@ -794,6 +802,7 @@ export function createGrid(el, options) {
   return {
     carry,
     choose,
+    relabel: () => mark(current),
     fit,
     mark,
     redraw,

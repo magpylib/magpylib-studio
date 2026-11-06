@@ -78,15 +78,22 @@ def _(inspect, mo):
 def _(SceneWidget, coils, json, mo):
     pair = coils.build()
     pair_session = pair.session
-    # Opened with its variables; the two variants a click each at its foot.
+    # Opened with its variables; the two variants a click each at its foot,
+    # the one the scene is at selected, so a Ctrl-click adds the other
+    _at = pair_session.get_variables()["variant"]
     pair_view3d = SceneWidget(
-        pair, editable=True, height=480, field_lines=True, open_panel="variables"
+        pair,
+        editable=True,
+        height=480,
+        field_lines=True,
+        open_panel="variables",
+        selected_variants=[_at] if _at else [],
     )
     pair_view = mo.ui.anywidget(pair_view3d)
     pair_edited, set_pair_edited = mo.state(0)
     pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
     # the variants selected at the foot of the view: a curve each, below
-    pair_chosen, set_pair_chosen = mo.state([])
+    pair_chosen, set_pair_chosen = mo.state(pair_view3d.selected_variants)
     pair_view3d.observe(
         lambda change: set_pair_chosen(change.new), names="selected_variants"
     )
