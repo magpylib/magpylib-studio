@@ -15,7 +15,7 @@ Alex that day, on the issue's open questions:
 - curved surfaces are measured on their drawn facets, said in the label's
   tooltip; exact values from python come later, if at all.
 
-Built: §7 steps 1 and 2, the ruler in one view, every pair of picks.
+Built: all of §7, 2026-11-07.
 
 ---
 

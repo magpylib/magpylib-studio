@@ -23,8 +23,8 @@ so an object can be selected and dragged while they show; Esc takes back the
 corner picked, then the measurements, the ruler on or, once nothing is selected,
 off. It works wherever the view does, a saved page and the VS Code panel
 included, edits nothing, and the PNG keeps the measurements
-([#125](https://github.com/magpylib/magpylib-studio/issues/125)); the split view
-follows.
+([#125](https://github.com/magpylib/magpylib-studio/issues/125)). Split into
+panes, a measurement made in any is in every pane, at that pane's variant.
 
 </details>
 

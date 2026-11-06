@@ -873,6 +873,128 @@ async function savedVariants(port, base) {
   );
 }
 
+/** The ruler split into panes (#125): a measurement made in the scene's
+ *  pane is in every variant's, each its own length -- the distance between
+ *  its own corners there -- one made in a variant's pane is in the scene's,
+ *  the picture of the panes has them, and Esc takes them away from all. */
+async function rulerInPanes(port, base) {
+  await check(
+    "a measurement is in every pane, at its own variant",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/variants.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the page never drew";
+        await tab.evaluate(
+          `document.querySelector('button[title^="Measure"]').click()`,
+        );
+        // of a view, the corner of the magnet's copy `part` nearest its camera
+        const nearest = (view, part) => `(() => {
+        const s = ${view};
+        const cam = s.cameraState().position;
+        let best = null, least = Infinity;
+        for (let index = 0; index < 8; index++) {
+          const end = { kind: "corner", objectId: "magnet", part: ${part}, index };
+          const f = s.featureOf(end);
+          if (!f) continue;
+          const d = Math.hypot(...f.point.map((x, k) => x - cam[k]));
+          if (d < least) [least, best] = [d, end];
+        }
+        return best;
+      })()`;
+        // two corners of the scene's first two copies, clicked
+        const scene = "window.scene3d";
+        const clickInView = async (view, end) => {
+          const at = await tab.evaluate(`const s = ${view};
+          const p = s.endOnPage(${JSON.stringify(end)});
+          const canvas = s.canvasOf();
+          const r = canvas.getBoundingClientRect();
+          return p && { x: r.left + p[0], y: r.top + p[1] };`);
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...at,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...at,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+        };
+        for (const part of [0, 1]) {
+          await clickInView(
+            scene,
+            await tab.evaluate(`return ${nearest(scene, part)}`),
+          );
+        }
+        await tab.evaluate(
+          `document.querySelector(".magpy-scene-spread").click()`,
+        );
+        const panes = await tab.until(
+          `return [...document.querySelectorAll(".magpy-pane")].length === 3 &&
+          !document.querySelector(".magpy-pane-busy") && [...window.scene3ds].length === 3`,
+          15_000,
+        );
+        if (!panes) return "the panes never opened";
+        // each view's measurement: there, and the distance between its own ends
+        const each =
+          await tab.evaluate(`return [...window.scene3ds].map((s) => {
+        const [m] = s.measurements();
+        if (!m || m.length === null) return null;
+        const a = s.featureOf(m.a).point, b = s.featureOf(m.b).point;
+        return { length: m.length, apart: Math.hypot(...a.map((x, k) => x - b[k])) };
+      });`);
+        if (each.some((m) => !m || Math.abs(m.length - m.apart) > 1e-9))
+          return `a view's measurement: ${JSON.stringify(each)}`;
+        if (new Set(each.map((m) => m.length.toFixed(6))).size !== 3)
+          return `the variants measure alike: ${JSON.stringify(each)}`;
+        // the picture of the panes has them
+        const shot = `const r = await new Promise((done) => {
+          window.magpySave = (url) => done(url);
+          document.querySelector('button[title^="Save the view as a PNG"]').click();
+        });
+        delete window.magpySave;
+        return r;`;
+        const measured = await tab.evaluate(shot);
+        // one made in a variant's pane: in the scene's, and the other's, too
+        const pane = "[...window.scene3ds].at(-1)";
+        for (const part of [0, 2]) {
+          await clickInView(
+            pane,
+            await tab.evaluate(`return ${nearest(pane, part)}`),
+          );
+        }
+        const counts = await tab.evaluate(
+          `return [...window.scene3ds].map((s) => s.measurements().length)`,
+        );
+        if (counts.join() !== "2,2,2")
+          return `measured in a pane, each view's: ${counts}`;
+        // Esc: gone from all, and from the picture
+        await tab.evaluate(
+          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        );
+        const left = await tab.evaluate(
+          `return [...window.scene3ds].map((s) => s.measurements().length)`,
+        );
+        if (left.join() !== "0,0,0") return `after Esc, each view's: ${left}`;
+        if ((await tab.evaluate(shot)) === measured)
+          return "the picture of the panes is the same with its measurements or without";
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A view resized is drawn in the frame it was resized in: the canvas a
  *  resize clears is never painted blank, which flashed at every step of a
  *  drag of the window or of a sash between panes. */
@@ -5163,6 +5285,7 @@ try {
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
   await savedRuler(browser.port, base);
+  await rulerInPanes(browser.port, base);
   await resizedDrawsAtOnce(browser.port, base);
   await savedPanes(browser.port, base);
   await glyphs(browser.port, base);

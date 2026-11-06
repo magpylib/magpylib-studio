@@ -778,9 +778,25 @@ function render({ model, el }) {
     () => api?.setRuler(!api.rulerOn()),
   );
   pressed(rulerButton, false);
-  view.addEventListener("rulerchange", (event) =>
-    pressed(rulerButton, event.detail.on),
+  view.addEventListener("rulerchange", (event) => {
+    pressed(rulerButton, event.detail.on);
+    mirrorRuler(event.detail.on, api);
+  });
+  view.addEventListener("measurechange", (event) =>
+    mirrorMeasurements(event.detail.list, api),
   );
+  // Split into panes, one ruler and one list of measurements for them all,
+  // each pane's at its own variant (#125): a view that changed them, by a
+  // key, a click or a label's x, has them handed on to the others.
+  const rulerViews = () => [api, ...grid.apis].filter(Boolean);
+  function mirrorRuler(on, from) {
+    for (const each of rulerViews()) if (each !== from) each.setRuler(on);
+  }
+  function mirrorMeasurements(list, from) {
+    for (const each of rulerViews()) {
+      if (each !== from) each.setMeasurements(list);
+    }
+  }
   tools.append(
     group(fitButton, projectionButton, rulerButton),
     group(legendButton, axesButton, flowButton, themeButton),
@@ -1915,7 +1931,15 @@ function render({ model, el }) {
   const grid = createGrid(panesEl, {
     view,
     mainApi: () => api,
-    factory: () => sharedModule.createScene3d(),
+    // a pane opened measures as the view does, its ruler on or off with it
+    factory: () => {
+      const made = sharedModule.createScene3d();
+      made.setRuler(api?.rulerOn() ?? false);
+      made.setMeasurements(api?.rulerPairs() ?? []);
+      return made;
+    },
+    onRuler: (on, from) => mirrorRuler(on, from),
+    onMeasure: (list, from) => mirrorMeasurements(list, from),
     sceneOf: (name, frame) =>
       call("variant_scene", frame == null ? { name } : { name, frame }, {
         quiet: true,

@@ -60,6 +60,9 @@ function sideOf(box, x, y) {
  * - `foldInto(name)`: the scene's pane's x pressed -- the scene to take the
  *   variant `name`, the next pane's, which closes into it once the scene is
  *   redrawn there.
+ * - `onRuler(on, api)`, `onMeasure(list, api)`: the ruler turned on or off,
+ *   its measurements changed by a hand, in the pane `api` draws: for the
+ *   host to hand the other views (`apis`).
  * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
  *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
@@ -86,6 +89,8 @@ export function createGrid(el, options) {
     stepNow,
     live,
     foldInto,
+    onRuler,
+    onMeasure,
     onSelect,
   } = options;
   el.classList.add("magpy-panes");
@@ -148,6 +153,13 @@ export function createGrid(el, options) {
       made.api = factory();
       made.api.watchCamera(() => follow(made));
       body.addEventListener("objectpick", (event) => onPick(event.detail));
+      // the ruler, turned or used in this pane: the others are told
+      body.addEventListener("rulerchange", (event) =>
+        onRuler?.(event.detail.on, made.api),
+      );
+      body.addEventListener("measurechange", (event) =>
+        onMeasure?.(event.detail.list, made.api),
+      );
     }
     tag.title =
       "Click to select its variant, Ctrl or Cmd to add it; drag to move it beside another";
@@ -909,6 +921,12 @@ export function createGrid(el, options) {
     /** The variants with a pane, in the layout's order. */
     get names() {
       return variantPanes().map((pane) => pane.name);
+    },
+    /** The variants' panes' renderers, made already. */
+    get apis() {
+      return variantPanes()
+        .map((pane) => pane.api)
+        .filter(Boolean);
     },
   };
 }

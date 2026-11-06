@@ -5959,6 +5959,7 @@ export function createScene3d() {
     renderer?.domElement.remove();
     renderer?.dispose();
     if (window.scene3d === api) window.scene3d = undefined; // the next made
+    window.scene3ds?.delete(api);
   }
 
   /** Tell `listener` whenever the camera moves: a drag, a zoom, a key, a fit.
@@ -8284,6 +8285,7 @@ void main() {
       for (const each of ruler.list) dropLabel(each);
       ruler.list = [];
       ruler.over = null;
+      rulerTold();
     } else setRuler(false);
     return true;
   }
@@ -8295,6 +8297,7 @@ void main() {
     for (const each of ruler.list) dropLabel(each);
     ruler.list = [];
     ruler.over = null;
+    rulerTold();
     return true;
   }
 
@@ -8333,6 +8336,7 @@ void main() {
         ruler.list = ruler.list.filter((each) => each !== over);
         ruler.over = null;
         renderer.domElement.title = "";
+        rulerTold();
       }
       return;
     }
@@ -8342,8 +8346,39 @@ void main() {
       ruler.first = end;
       return;
     }
-    if (!sameEnd(ruler.first, end)) ruler.list.push({ a: ruler.first, b: end });
+    if (!sameEnd(ruler.first, end)) {
+      ruler.list.push({ a: ruler.first, b: end });
+      rulerTold();
+    }
     ruler.first = null;
+  }
+
+  /** The measurements as their ends alone, each pair a measurement: what a
+   *  host keeps, or hands another view. */
+  const rulerPairs = () =>
+    ruler.list.map(({ a, b }) => ({ a: { ...a }, b: { ...b } }));
+
+  /** Tell the host the measurements changed by a hand -- made, or taken
+   *  away -- for it to hand the other views showing the scene. */
+  function rulerTold() {
+    host?.dispatchEvent(
+      new CustomEvent("measurechange", { detail: { list: rulerPairs() } }),
+    );
+  }
+
+  /** The measurements another view has, `pairs` of ends, in place of these:
+   *  one kept as it is where its ends are the same, its label with it.
+   *  Told to nobody: it is the host's own word. */
+  function setMeasurements(pairs) {
+    const next = pairs.map(({ a, b }) => {
+      const kept = ruler.list.find(
+        (each) => sameEnd(each.a, a) && sameEnd(each.b, b),
+      );
+      return kept ?? { a: { ...a }, b: { ...b } };
+    });
+    for (const each of ruler.list) if (!next.includes(each)) dropLabel(each);
+    if (ruler.over && !next.includes(ruler.over)) ruler.over = null;
+    ruler.list = next;
   }
 
   const sameEnd = (a, b) =>
@@ -8674,13 +8709,20 @@ void main() {
     setPointsMode,
     setRuler,
     rulerOn: () => ruler.on,
+    rulerPairs,
+    setMeasurements,
     measurements,
     endOnPage,
+    /** The view's own canvas, which pages are measured on: for a host's
+     *  checks. */
+    canvasOf: () => renderer?.domElement ?? null,
     featureOf,
     featuresOf,
     byObjectId,
     dispose,
   });
   window.scene3d ??= api;
+  // every view on the page, a split view's panes too: for a host's checks
+  (window.scene3ds ??= new Set()).add(api);
   return api;
 }
