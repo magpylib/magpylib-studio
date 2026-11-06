@@ -10,8 +10,9 @@
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs
 them together, anti-Helmholtz against each other, and the numbers beside the
-view follow every edit. A variant Ctrl-clicked or Cmd-clicked at the foot of
-the view is selected, and a curve of its own in the plot.
+view follow every edit. The plot draws a curve for each variant selected at the
+foot of the view, Ctrl-click or Cmd-click for more, and the scene's while none
+is.
 
 Needs the widget extra and marimo:
 
@@ -55,7 +56,7 @@ def _(mo):
     runs them together, for a flat field between, and **anti-Helmholtz**
     turns the upper one round, for a field that passes through zero.
     Ctrl-click or Cmd-click the other variant's chip, at the foot of the
-    view, and its curve joins the scene's in the plot; drag the chip up
+    view, and the plot draws both, one curve each; drag the chip up
     into the view, and it has a pane of its own beside the scene.
     """)
     return
@@ -64,10 +65,12 @@ def _(mo):
 @app.cell
 def _(inspect, mo):
     # The scene, from the package that the gallery and the docs read too:
-    # its source shown, so the page still says how it is written.
+    # its source a click away, so the page still says how it is written.
     from magpylib_studio.examples.coil_pair import coil_pair as coils
 
-    mo.md(f"```python\n{inspect.getsource(coils)}```")
+    mo.accordion(
+        {"How it is written": mo.md(f"```python\n{inspect.getsource(coils)}```")}
+    )
     return (coils,)
 
 
@@ -135,20 +138,25 @@ def _(go, mo, np, pair_chosen, pair_edited, pair_session, pair_shown, pair_view3
         pair_session.get_field(sensor_id="probe")["values"], dtype=float
     )
     _magnitude = np.linalg.norm(_probe.reshape(-1, 3), axis=1)
-    # the scene's curve, and one for each other variant selected, from the
-    # copy of the scene at that variant
+    # a curve for each variant selected, from the copy of the scene at it --
+    # the scene's own where it is at that one -- and the scene's alone while
+    # none is
     _at = pair_session.get_variables()["variant"]
-    _figure = go.Figure(
-        go.Scatter(x=_z * 1e3, y=_bz * 1e3, name=f"scene · {_at}" if _at else "scene")
-    )
+    _curves = {}
     for _name in pair_chosen():
         if _name == _at:
-            continue  # the scene's curve is that one
+            _curves[_name] = _bz
+            continue
         try:
-            _variant = pair_session.variant_session(_name)
+            _curves[_name] = _bz_of(pair_session.variant_session(_name))
         except ValueError:
             continue  # one the scene cannot use as it stands: its chip says why
-        _figure.add_trace(go.Scatter(x=_z * 1e3, y=_bz_of(_variant) * 1e3, name=_name))
+    _figure = go.Figure(
+        [
+            go.Scatter(x=_z * 1e3, y=_along * 1e3, name=_name)
+            for _name, _along in (_curves or {_at or "edited": _bz}).items()
+        ]
+    )
     _figure.update_layout(
         template=_template,
         autosize=True,

@@ -57,10 +57,12 @@ def _(mo):
 @app.cell
 def _(inspect, mo):
     # The scene, from the package that the gallery and the docs read too:
-    # its source shown, so the page still says how it is written.
+    # its source a click away, so the page still says how it is written.
     from magpylib_studio.examples.unit_versions import unit_versions as mtu
 
-    mo.md(f"```python\n{inspect.getsource(mtu)}```")
+    mo.accordion(
+        {"How it is written": mo.md(f"```python\n{inspect.getsource(mtu)}```")}
+    )
     return (mtu,)
 
 

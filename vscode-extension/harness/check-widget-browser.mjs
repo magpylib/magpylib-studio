@@ -1036,7 +1036,7 @@ async function savedPanes(port, base) {
           `const p = ${panes};
          return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
            ${closing} && {
-             tag: p[0].querySelector(".magpy-pane-tag span").textContent === "scene · eight",
+             tag: p[0].querySelector(".magpy-pane-tag span").textContent === "eight",
              chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
                .filter((c) => c.getClientRects().length).map((c) => c.textContent),
            }`,

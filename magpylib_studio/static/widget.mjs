@@ -1905,6 +1905,8 @@ function render({ model, el }) {
       dressColorBar();
     },
     stepNow: () => stepShown(),
+    // the scene's pane is the one edited: its tag wears the pencil
+    live: () => editable(),
     // the scene's pane closed: the scene takes the next pane's variant, one
     // step to undo, as a click on its chip would
     foldInto: async (name) => {

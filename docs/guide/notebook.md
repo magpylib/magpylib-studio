@@ -112,7 +112,9 @@ itself, up to twelve panes with the scene's, each moved by its tag, resized by
 the line between it and the next, and closed by its ×. A variant with a pane has
 no chip in the row until the pane closes, and the one the scene is at stays in
 the scene's own pane: its chip, carried, opens nothing, and while the view is
-split it leaves the row too, the scene's tag named for it in its place. The
+split it leaves the row too, the scene's tag named for it in its place -- a
+pencil before the name where the view is edited, as the scene is the one edited,
+the others its copies, and `✎ edited` once its values are in no variant. The
 button at the end of the row lays every other variant out at once, in a grid, as
 many as there is room for, and once they are out, closes them all. The scene's
 own tag has a × too, at a variant: the scene is the one edited, not a copy, so

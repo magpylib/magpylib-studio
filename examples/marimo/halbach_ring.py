@@ -63,10 +63,12 @@ def _(mo):
 @app.cell
 def _(inspect, mo):
     # The scene, from the package that the gallery and the docs read too:
-    # its source shown, so the page still says how it is written.
+    # its source a click away, so the page still says how it is written.
     from magpylib_studio.examples.halbach_ring import halbach_ring as halbach
 
-    mo.md(f"```python\n{inspect.getsource(halbach)}```")
+    mo.accordion(
+        {"How it is written": mo.md(f"```python\n{inspect.getsource(halbach)}```")}
+    )
     return (halbach,)
 
 

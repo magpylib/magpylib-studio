@@ -55,6 +55,8 @@ function sideOf(box, x, y) {
  * - `onLayout(split, names)`: the panes laid out again; `split`, whether
  *   there is more than the view, and `names` the variants with a pane.
  * - `stepNow()`: the step of the run the view shows, or null for its own.
+ * - `live()`: whether the scene's pane is one to edit -- its tag then wears
+ *   a pencil, as the view's own pencil does, apart from the copies.
  * - `foldInto(name)`: the scene's pane's x pressed -- the scene to take the
  *   variant `name`, the next pane's, which then closes into it: a promise
  *   of whether it did.
@@ -72,6 +74,7 @@ export function createGrid(el, options) {
     onScenes,
     onLayout,
     stepNow,
+    live,
     foldInto,
     onSelect,
   } = options;
@@ -672,7 +675,13 @@ export function createGrid(el, options) {
   /** The variant the scene is at, said on the scene's own tag. */
   function mark(now) {
     current = now;
-    scenePane.label.textContent = now ? `scene · ${now}` : "scene";
+    // named by its variant, as the copies are; at none, its values its own
+    const pencil = live?.() ? "✎ " : "";
+    scenePane.label.textContent = now
+      ? `${pencil}${now}`
+      : pencil
+        ? `${pencil}edited`
+        : "scene";
     sceneClose.hidden = !now || !foldInto;
     if (now) {
       const what = `Close ${now}: the scene takes the next pane's variant`;
