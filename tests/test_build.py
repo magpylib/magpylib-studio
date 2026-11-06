@@ -4,7 +4,6 @@
 import io
 import json
 import math
-import pathlib
 import re
 import sys
 import warnings
@@ -788,18 +787,6 @@ def test_a_script_that_makes_a_widget_opens_in_the_studio(tmp_path):
     studio = MagpylibStudioSession()
     assert studio.load_script(str(path))["ok"] is True
     assert list(studio._objs) == ["m"]
-
-
-def test_the_demo_opens_in_the_studio():
-    """What the demo's first line promises, kept true: no notebook, no
-    browser, nothing a kernel-less engine cannot run."""
-    demo = pathlib.Path(__file__).parent.parent / "examples" / "scene_demo.py"
-    studio = MagpylibStudioSession()
-    assert studio.load_script(str(demo))["ok"] is True
-    variables = studio.to_dict()["variables"]
-    assert {"n", "radius", "gap", "stagger", "density"} <= set(variables)
-    # the arrows, built from their formula: density 7, so a 7 × 7 grid
-    assert np.asarray(studio._objs["bore"].pixel).reshape(-1, 3).shape[0] == 49
 
 
 # --- the script tab: a scene function, applied on save (B3) --------------------

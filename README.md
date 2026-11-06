@@ -9,7 +9,7 @@ exactly in milliseconds.
 
 ![The Halbach ring of the marimo example in VS Code, half in the light theme and half in the dark: the objects and the steps that built them, the variables with their sliders, the 3D view with the field lines flowing through the bore, and the scene as code in the script tab.](https://raw.githubusercontent.com/magpylib/magpylib-studio/main/docs/halbach.gif)
 
-_The Halbach ring from `examples/marimo/halbach_ring.py`: twelve magnets, one
+_The Halbach ring from `docs/notebooks/halbach_ring.py`: twelve magnets, one
 magnet and one pattern, and the field's lines flowing through the bore. Drag `n`
 and the ring rebuilds._
 
@@ -102,8 +102,11 @@ SceneWidget(ring, editable=True)  # the scene in a notebook, a slider per parame
 Called, it is magpylib. Built, it is the studio's document, every parameter a
 slider. More in
 [the guide](https://github.com/magpylib/magpylib-studio/blob/main/magpylib_studio/.agents/skills/magpylib-studio/SKILL.md),
-and a complete example in
-[examples/scene_demo.py](https://github.com/magpylib/magpylib-studio/blob/main/examples/scene_demo.py).
+and fourteen complete ones in
+[magpylib_studio/examples](https://github.com/magpylib/magpylib-studio/tree/main/magpylib_studio/examples),
+six of them with a marimo notebook in
+[docs/notebooks](https://github.com/magpylib/magpylib-studio/tree/main/docs/notebooks):
+`marimo edit docs/notebooks/coil_pair.py` from a clone.
 
 ## Let a coding agent write it
 

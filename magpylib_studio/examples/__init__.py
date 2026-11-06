@@ -11,6 +11,9 @@ lesson in writing one::
 
     ring = EXAMPLES["rings"]
     ring.scene.build().save("ring.magpy.json")
+
+Six have a marimo notebook too, in the repository's `docs/notebooks/`, which
+imports the scene and adds plots and numbers round the view.
 """
 
 from __future__ import annotations
@@ -41,7 +44,8 @@ class Example:
     #: The packages it needs beyond the studio's own: a part solved by
     #: magpylib-material-response, which is not one of them.
     needs: tuple = ()
-    #: Its marimo notebook in `examples/marimo/`, where it has one: the scene
+    #: Its marimo notebook in the repository's `docs/notebooks/`, where it
+    #: has one: the scene
     #: imported, and what a notebook adds round it.
     notebook: str | None = None
 

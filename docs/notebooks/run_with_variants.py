@@ -7,12 +7,12 @@
 # ]
 # ///
 """A run beside variants, solved and drawn with field lines, every combination
-exportable: `marimo edit examples/marimo/run_with_variants.py`.
+exportable: `marimo edit docs/notebooks/run_with_variants.py`.
 
 Needs the widget extra, marimo and magpylib-material-response 0.9.2, and says
 so without it:
 
-    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.2"
+    pip install "magpylib-studio[widget]" marimo "magpylib-material-response>=0.10.0"
 """
 
 import marimo

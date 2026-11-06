@@ -55,8 +55,7 @@ element, controls rebuilt from nothing, and the camera back at its opening
 framing — you lose the zoom you were working in. `update()` replaces the drawn
 objects and leaves the view alone, which is what makes a slider smooth. Such a
 view is made with `editable="never"`: no pencil, since an edit would be lost at
-the next move of a slider; `examples/jupyter_demo.ipynb` does that for its
-sliders.
+the next move of a slider.
 
 **The legend** floats over the view: the objects as they are nested, with a
 caret to fold a collection, an eye to hide it and everything in it — shown on
@@ -145,9 +144,8 @@ Which is
 [direction.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/direction.md)
 §5.3 — _a viewer with parameter binding_ — with the notebook's own reactivity in
 place of a protocol: a slider rebuilds the objects, the view redraws them, and a
-click is an input to the next cell. `examples/marimo/halbach_ring.py` is that
-loop, and `examples/jupyter_demo.ipynb` the same scene in Jupyter, with
-`ipywidgets` sliders in place of marimo's reactivity.
+click is an input to the next cell. The Halbach ring's notebook is that loop:
+`marimo edit docs/notebooks/halbach_ring.py`, from a clone.
 
 ## Editing a scene in the notebook
 
@@ -195,10 +193,9 @@ studio.set("probe", position=(0, 0, 0.02))  # an edit from code, as a drag makes
 ```
 
 `set` and `observe(..., "revision")` keep a notebook control and the view in
-step both ways — `examples/jupyter_demo.ipynb` does it with a slider. A value
-the object already has is no edit, so neither side echoes the other. `revision`
-counts each settled edit — a drag's end, an undo, a redo, a `set` — once, and
-`last_edit` says what it was
+step both ways. A value the object already has is no edit, so neither side
+echoes the other. `revision` counts each settled edit — a drag's end, an undo, a
+redo, a `set` — once, and `last_edit` says what it was
 (`{"by": "drag", "objects": ["probe"], "changed": {...}}`, or the step an undo
 took back); the same example logs them under the view, with what was selected
 and hidden. A drag of several objects, or a `set` of several values, is one
@@ -207,13 +204,13 @@ edit: refused in part, none of it is made.
 A part solved by `solve_face_charge` follows on its own: with
 magpylib-material-response 0.9.1, each sheet keeps the part it was solved from,
 so dragging a magnet or sliding a current solves it again, in the same step to
-undo (`examples/marimo/ucore_solved.py`). `last_edit["solves"]` says what those
+undo (`docs/notebooks/ucore_solved.py`). `last_edit["solves"]` says what those
 solves took. `follow_edits(answer)` replaces that with your own:
 `answer(objects)` runs at every step of a drag or a slider, and what it returns,
 `{id: {parameter: value}}`, joins that edit's step.
 
 Beside a solved part, the solve is the least of a step: 12 ms for the plate of
-`examples/marimo/run_with_variants.py` on an M4 Pro. Without a matrix, its field
+`docs/notebooks/run_with_variants.py` on an M4 Pro. Without a matrix, its field
 at the points the field lines are traced from is most of it, about 50 ms. From
 magpylib-material-response 0.10.0 that field is kept as a matrix: the second
 step of a drag on the same mesh builds it, in about one and a half steps without
@@ -231,7 +228,7 @@ twice may differ in the last digits of its lines.
 Solve outside a scene function. Inside, `mesh_all`, the solvers and `sheet.part`
 make magpylib objects of their own, which the scene cannot tell from yours, so
 it refuses them with the call's name; make what they returned inside, from its
-numbers, as `examples/marimo/ucore_solved.py` does. `from_json` inside is fine.
+numbers, as `docs/notebooks/ucore_solved.py` does. `from_json` inside is fine.
 
 A `UniformField` from magpylib-material-response is an object like a coil: pass
 it to the view with the rest, any number of them. It has no place or body, so
@@ -267,7 +264,7 @@ numbers. `call` and `view3d` are the widgets themselves, not the
 re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one
 that should follow edits alone reads a `mo.state` fed by
-`view3d.observe(..., names="revision")`, as `examples/marimo/halbach_ring.py`'s
+`view3d.observe(..., names="revision")`, as `docs/notebooks/halbach_ring.py`'s
 field map does. A sensor or a dipole keeps its size on screen as the view zooms,
 7 % of the view per unit of `style_size=`, unless `style_sizemode="absolute"`
 makes that metres. Beside the sliders, the **object** toggle opens the

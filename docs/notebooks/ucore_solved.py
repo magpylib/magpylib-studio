@@ -7,12 +7,12 @@
 # ]
 # ///
 """A U-core solved by face charge while you drag:
-`marimo edit examples/marimo/ucore_solved.py`.
+`marimo edit docs/notebooks/ucore_solved.py`.
 
 Needs the widget extra, marimo and magpylib-material-response 0.9.2, and
 says so without it:
 
-    uv pip install -e ".[widget]" marimo "magpylib-material-response>=0.9.2"
+    pip install "magpylib-studio[widget]" marimo "magpylib-material-response>=0.10.0"
 """
 
 import marimo

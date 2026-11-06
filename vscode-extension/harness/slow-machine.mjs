@@ -130,7 +130,7 @@ if (command?.length) {
   if (!python) fail("no python here can import magpylib_studio");
   const notebook = named
     ? path.resolve(caller, named)
-    : path.join(REPO, "examples/marimo/halbach_ring.py");
+    : path.join(REPO, "docs/notebooks/halbach_ring.py");
   const port = Number(option("--port", 0)) || (await freePort());
   const mode = args.includes("--edit") ? "edit" : "run";
   server = spawn(
