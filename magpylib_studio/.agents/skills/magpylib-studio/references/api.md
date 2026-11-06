@@ -264,6 +264,18 @@ and the answer lists them as `untouched`. An entry naming no variable
 that holds a value -- renamed by an older studio, or a formula now --
 is left out, and listed as `ignored`.
 
+### `session.variant_session(name)`
+
+The scene at variant `name`, as a session of its own: a copy of
+this one with the variant used, the one a view's pane of the
+variant is drawn from -- its field, `get_field`, is the field that
+pane shows. Kept while the scene stays as it is, so asked again it
+costs nothing; an edit of the scene makes a new one. To read, not to
+edit: an edit of it reaches neither the scene nor the pane.
+
+Raises ValueError for a variant the scene cannot use as it stands,
+and while the history is rolled back (`set_rollback`).
+
 ### `session.save_variant(name, values=None)`
 
 Keep values for the scene's variables under a name: a variant, set

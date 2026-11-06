@@ -972,6 +972,22 @@ async function savedPanes(port, base) {
         const opened = await tab.evaluate(`return ${panes}.length`);
         if (opened !== 1 || !ghost?.includes("shown by the scene"))
           return `the pressed chip carried as ${JSON.stringify(ghost)}, ${opened} panes`;
+        // split, every other variant out: the scene's own chip leaves the
+        // row too, its tag pressed in its place, and the row is the button
+        await tab.evaluate(`${spread}.click()`);
+        const split = await tab.until(
+          `const p = ${panes};
+         return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
+           ${spread}.classList.contains("on") && {
+             tag: p[0].querySelector(".magpy-pane-tag").classList.contains("on"),
+             chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
+               .filter((c) => c.getClientRects().length).map((c) => c.textContent),
+           }`,
+          15_000,
+        );
+        if (!split || !split.tag || split.chips.length)
+          return `split at eight: ${JSON.stringify(split)}`;
+        await tab.evaluate(`${spread}.click()`);
         return thrown(tab);
       } finally {
         await tab.close();

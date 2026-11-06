@@ -2258,6 +2258,17 @@
 .magpy-pane-tag[hidden] {
   display: none;
 }
+/* the scene's tag, its pane at a variant: pressed, as its chip in the row
+   would be -- out of the row while the view is split */
+.magpy-pane-tag.on {
+  color: var(--vscode-focusBorder);
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder) 18%,
+    var(--vscode-editor-background, #fff)
+  );
+  outline-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
+}
 .magpy-pane-tag > span {
   overflow: hidden;
   text-overflow: ellipsis;

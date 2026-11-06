@@ -1766,18 +1766,67 @@ function render({ model, el }) {
    *  but not while the foot asks what a page keeps, of every variant. */
   function dressPaned() {
     const open = new Set(choosing ? [] : grid.names);
+    // split, the variant the scene is at is the scene's pane's, its tag
+    // pressed (`grid.mark`): out of the row as well
+    const split = grid.split && !choosing;
+    const out = (chip) =>
+      open.has(chip.textContent) || (split && chip.classList.contains("on"));
     const chips = [...variantsEl.querySelectorAll(".magpy-vars-chip")];
-    for (const chip of chips) {
-      chip.classList.toggle("magpy-in-pane", open.has(chip.textContent));
-    }
+    for (const chip of chips) chip.classList.toggle("magpy-in-pane", out(chip));
     // every one in a pane: no row left to name, the spread button alone
     variantsEl.classList.toggle(
       "magpy-all-paned",
-      chips.length > 0 && chips.every((chip) => open.has(chip.textContent)),
+      chips.length > 0 && chips.every(out),
     );
     for (const option of variantsEl.querySelectorAll("option")) {
       option.hidden = open.has(option.value) && !option.selected;
     }
+  }
+
+  let panesAsked = (model.get("panes") || []).length > 0; // before a draw
+  let showingPanes = false; // laying out what the trait asks: told at the end
+
+  /** The panes the trait asks for: those opened, laid out as the spread
+   *  button lays them, the rest closed -- but the variant the scene is at,
+   *  the scene's pane's already. Asked before the view has drawn, once it
+   *  has. The trait then says what was opened. */
+  async function showPanes() {
+    if (!api || !sharedModule) {
+      panesAsked = true;
+      return;
+    }
+    panesAsked = false;
+    const now = await currentVariant();
+    const asked = (model.get("panes") || []).filter((name) => name !== now);
+    const open = grid.names;
+    if (
+      asked.length === open.length &&
+      asked.every((name, i) => name === open[i])
+    ) {
+      tellPanes(open); // what the scene's own variant would have added
+      return;
+    }
+    showingPanes = true;
+    try {
+      if (!asked.length) grid.hide();
+      else {
+        grid.keep(asked);
+        grid.fill(asked);
+      }
+    } finally {
+      showingPanes = false;
+    }
+    tellPanes(grid.names);
+  }
+
+  /** The trait told which variants have a pane, when they changed. */
+  function tellPanes(names) {
+    const told = model.get("panes") || [];
+    if (told.length === names.length && told.every((n, i) => n === names[i])) {
+      return;
+    }
+    model.set("panes", names);
+    model.save_changes();
   }
 
   function spread() {
@@ -1831,6 +1880,7 @@ function render({ model, el }) {
         );
       }
       if (!split) gridScenes = [];
+      if (!showingPanes) tellPanes(names);
       dressSpread();
       sizeView();
       keepCorner();
@@ -2822,6 +2872,7 @@ function render({ model, el }) {
     "open_panel",
     "revision",
     "variants",
+    "panes",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2845,6 +2896,7 @@ function render({ model, el }) {
       variables.refresh();
     }
     // which variant the values are in, after any edit of them
+    if (now.has("panes")) showPanes();
     if (now.has("variants")) {
       dressVariants();
       grid.keep(model.get("variants") || []);
@@ -2985,6 +3037,7 @@ function render({ model, el }) {
     if (saved) showProjection(api.setCamera(saved));
     kept = null;
     framed = true;
+    if (panesAsked) showPanes(); // asked for before there was a view
     // How the handles drag is this view's to say -- chosen, perhaps, before
     // its scene3d was made, or by the one before it (`release`) -- and the
     // step follows the scene, which may have just changed size.

@@ -5621,13 +5621,17 @@ def test_a_variant_is_drawn_for_the_grid_and_the_scene_left_as_it_is():
     here = s.get_scene()["meshes"][0]["name"]
     assert here == "Sphere (D=10mm)", "the scene is as it was"
     assert len(s.get_history()["entries"]) == entries
-    kept = s._variant_copies["wide"][1]
+    # the pane's copy is a notebook's to read too: the same one, kept
+    kept = s.variant_session("wide")
+    assert kept.get_scene()["meshes"][0]["name"] == "Sphere (D=17.5mm)"
     s.variant_scene("wide")
-    assert s._variant_copies["wide"][1] is kept, "drawn once while nothing moves"
+    assert s.variant_session("wide") is kept, "drawn once while nothing moves"
     s.set_variable("axis", "x")
     s.variant_scene("wide")
-    assert s._variant_copies["wide"][1] is not kept
+    assert s.variant_session("wide") is not kept
     assert s.variant_scene("narrow") == {"ok": False, "error": "no variant 'narrow'"}
+    with pytest.raises(ValueError, match="no variant 'narrow'"):
+        s.variant_session("narrow")
     s.drop_variant_copies(keep=["wide"])
     assert list(s._variant_copies) == ["wide"], "the panes still open keep theirs"
 
@@ -5643,6 +5647,8 @@ def test_a_variant_is_drawn_for_the_grid_and_the_scene_left_as_it_is():
     s.follower = None
     assert s.set_rollback(0)["ok"]
     assert "stepped back" in s.variant_scene("wide")["error"]
+    with pytest.raises(ValueError, match="stepped back"):
+        s.variant_session("wide")
 
 
 def test_a_variant_holds_values_its_variables_can_take():

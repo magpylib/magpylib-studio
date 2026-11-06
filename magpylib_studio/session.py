@@ -8541,32 +8541,9 @@ class MagpylibStudioSession:
 
         While the history is rolled back (`set_rollback`) the scene is not
         the document the variants are of, and none is drawn."""
-        if self._rollback is not None:
-            return {
-                "ok": False,
-                "error": "the history is stepped back: variants are drawn at its end",
-            }
-        doc = json.dumps(self.to_dict())
-        kept = self._variant_copies.get(name)
-        if kept is None or kept[0] != doc:
-            copied = self._copied(doc)
-            result = copied.followed(lambda: copied.use_variant(name))
-            # a refusal is kept too: asked again, it is not copied again
-            kept = (
-                doc,
-                copied if result.get("ok") else result,
-                result.get("not_followed"),
-            )
-            # what was drawn from another scene than this is of no more use
-            self._variant_copies = {
-                other: was
-                for other, was in self._variant_copies.items()
-                if was[0] == doc
-            }
-            self._variant_copies[name] = kept
-        _, copied, unsolved = kept
+        copied, unsolved = self._variant_copy(name)
         if not isinstance(copied, MagpylibStudioSession):
-            return {"ok": False, "error": copied.get("error", "")}
+            return {"ok": False, "error": copied}
         answer = {
             "ok": True,
             "scene": copied.get_scene(frame=frame),
@@ -8576,6 +8553,47 @@ class MagpylibStudioSession:
         if unsolved:
             answer["not_followed"] = unsolved
         return answer
+
+    def variant_session(self, name):
+        """The scene at variant `name`, as a session of its own: a copy of
+        this one with the variant used, the one a view's pane of the
+        variant is drawn from -- its field, `get_field`, is the field that
+        pane shows. Kept while the scene stays as it is, so asked again it
+        costs nothing; an edit of the scene makes a new one. To read, not to
+        edit: an edit of it reaches neither the scene nor the pane.
+
+        Raises ValueError for a variant the scene cannot use as it stands,
+        and while the history is rolled back (`set_rollback`)."""
+        copied, _ = self._variant_copy(name)
+        if not isinstance(copied, MagpylibStudioSession):
+            raise ValueError(f"variant {name!r}: {copied}")
+        return copied
+
+    def _variant_copy(self, name):
+        """The copy of this session at variant `name`, kept while the scene
+        stays as it is, and why its solve refused it, if it did -- or, for a
+        variant that cannot be used, why, in place of the copy."""
+        if self._rollback is not None:
+            return "the history is stepped back: variants are drawn at its end", None
+        doc = json.dumps(self.to_dict())
+        kept = self._variant_copies.get(name)
+        if kept is None or kept[0] != doc:
+            copied = self._copied(doc)
+            result = copied.followed(lambda: copied.use_variant(name))
+            # a refusal is kept too: asked again, it is not copied again
+            kept = (
+                doc,
+                copied if result.get("ok") else result.get("error", ""),
+                result.get("not_followed"),
+            )
+            # what was drawn from another scene than this is of no more use
+            self._variant_copies = {
+                other: was
+                for other, was in self._variant_copies.items()
+                if was[0] == doc
+            }
+            self._variant_copies[name] = kept
+        return kept[1], kept[2]
 
     def drop_variant_copies(self, keep=()):
         """Let go of the copies `variant_scene` keeps, but for the variants

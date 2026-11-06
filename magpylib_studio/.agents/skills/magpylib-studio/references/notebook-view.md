@@ -43,6 +43,11 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   was. In marimo, wrap the view as `mo.ui.anywidget(view)` and read it in
   another cell, which re-runs after each edit. In Jupyter, use
   `view.observe(callback, "revision")`.
+- `view.panes` lists the variants with a pane beside the scene's. Assigned,
+  `view.panes = ["wide"]` opens those and closes the rest; the variant the scene
+  is at, and a name past the twelfth pane, open none, and the trait reads what
+  opened. `session.variant_session(name)` is the copy of the scene that pane is
+  drawn from: its `get_field` is the field the pane shows.
 
 ## A scene, its variants and a run
 
@@ -52,9 +57,10 @@ of its own there, the scene at that variant's values beside the scene, as VS
 Code splits its editors: up to 12 panes with the scene's, moved by their tags,
 resized by the line between them, turned together. A variant with a pane has no
 chip in the row until the pane closes; the one the scene is at opens no pane,
-the scene's own shows it. The button at the end of the row opens every other
-variant at once in a grid, up to 11, and closes them all again. With the handles
-out (`editable=True`, or the pencil), the sliders toggle opens a slider per
+the scene's own shows it, its tag pressed, and its chip leaves the row too while
+the view is split. The button at the end of the row opens every other variant at
+once in a grid, up to 11, and closes them all again. With the handles out
+(`editable=True`, or the pencil), the sliders toggle opens a slider per
 variable, and `open_panel="variables"` opens it at the start. An object on a
 path is a run, which the view plays.
 

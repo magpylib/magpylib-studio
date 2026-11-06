@@ -9,8 +9,9 @@
 """A coil pair to flip: `marimo edit examples/marimo/coil_pair.py`.
 
 Two coils on one axis, their currents variables: the Helmholtz variant runs
-them together, anti-Helmholtz against each other, and the numbers under the
-view follow every edit.
+them together, anti-Helmholtz against each other, and the numbers beside the
+view follow every edit. A variant dragged up into the view is a pane of its
+own, and a curve of its own in the plot.
 
 Needs the widget extra and marimo:
 
@@ -53,6 +54,9 @@ def _(mo):
     coils on one axis, each current a variable: the **Helmholtz** variant
     runs them together, for a flat field between, and **anti-Helmholtz**
     turns the upper one round, for a field that passes through zero.
+    Drag a variant's chip up into the view, or press the grid button at
+    its foot, and the variant has a pane beside the scene, and a curve
+    beside the scene's in the plot.
     """)
     return
 
@@ -78,6 +82,9 @@ def _(SceneWidget, coils, json, mo):
     pair_view = mo.ui.anywidget(pair_view3d)
     pair_edited, set_pair_edited = mo.state(0)
     pair_view3d.observe(lambda change: set_pair_edited(change.new), names="revision")
+    # the variants with a pane beside the scene's: a curve each, below
+    pair_panes, set_pair_panes = mo.state([])
+    pair_view3d.observe(lambda change: set_pair_panes(change.new), names="panes")
     # Shown beside the numbers below, made here, once, so the camera stays
     # put; its files written when clicked, so they hold the scene as it is
     # then.
@@ -105,25 +112,39 @@ def _(SceneWidget, coils, json, mo):
             ]
         )
     )
-    return pair_edited, pair_session, pair_shown, pair_view3d
+    return pair_edited, pair_panes, pair_session, pair_shown, pair_view3d
 
 
 @app.cell(hide_code=True)
-def _(go, mo, np, pair_edited, pair_session, pair_shown, pair_view3d):
+def _(go, mo, np, pair_edited, pair_panes, pair_session, pair_shown, pair_view3d):
     _ = pair_edited()
     _template = "plotly_dark" if mo.app_meta().theme == "dark" else "plotly_white"
     _radius = pair_view3d.variables["radius"]
     _z = np.linspace(-1.5, 1.5, 121) * _radius
-    _bz = np.asarray(
-        pair_session.get_field(points=[[0, 0, z] for z in _z])["values"], dtype=float
-    )[:, 2]
+
+    def _bz_of(session):
+        _along = session.get_field(points=[[0, 0, z] for z in _z])["values"]
+        return np.asarray(_along, dtype=float)[:, 2]
+
+    _bz = _bz_of(pair_session)
     _middle = len(_z) // 2
     _gradient = np.gradient(_bz, _z)[_middle]
     _probe = np.asarray(
         pair_session.get_field(sensor_id="probe")["values"], dtype=float
     )
     _magnitude = np.linalg.norm(_probe.reshape(-1, 3), axis=1)
-    _figure = go.Figure(go.Scatter(x=_z * 1e3, y=_bz * 1e3))
+    # the scene's curve, and one for each variant in a pane beside it, from
+    # the copy of the scene that pane is drawn from
+    _at = pair_session.get_variables()["variant"]
+    _figure = go.Figure(
+        go.Scatter(x=_z * 1e3, y=_bz * 1e3, name=f"scene · {_at}" if _at else "scene")
+    )
+    for _name in pair_panes():
+        try:
+            _variant = pair_session.variant_session(_name)
+        except ValueError:
+            continue  # one the scene cannot use as it stands: its pane says why
+        _figure.add_trace(go.Scatter(x=_z * 1e3, y=_bz_of(_variant) * 1e3, name=_name))
     _figure.update_layout(
         template=_template,
         autosize=True,

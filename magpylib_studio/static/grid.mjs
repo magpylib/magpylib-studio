@@ -621,6 +621,8 @@ export function createGrid(el, options) {
   function mark(now) {
     current = now;
     scenePane.label.textContent = now ? `scene · ${now}` : "scene";
+    // the variant's chip is out of the row while split: pressed here instead
+    scenePane.tag.classList.toggle("on", Boolean(now));
   }
 
   /** Back to the view alone: every variant's pane closed. */
