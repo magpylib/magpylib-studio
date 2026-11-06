@@ -346,6 +346,18 @@ export function createVariables(
     const move = (e) => {
       if (e.clientY >= top - LIFT) return;
       done();
+      // let go back over the chip, it is not a click on it as well
+      const swallow = (click) => {
+        click.stopImmediatePropagation();
+        click.preventDefault();
+      };
+      chip.addEventListener("click", swallow, { capture: true, once: true });
+      addEventListener(
+        "pointerup",
+        () =>
+          setTimeout(() => chip.removeEventListener("click", swallow, true)),
+        { capture: true, once: true },
+      );
       onLift(name, e);
     };
     const done = () => {
@@ -401,6 +413,11 @@ export function createVariables(
           removeEventListener("pointercancel", release, true);
           press(start);
           dragging = false;
+          // a refresh held off while the chip was pressed, caught up
+          if (missedRefresh) {
+            missedRefresh = false;
+            load().catch(say);
+          }
           onLift(names[pressedAt], e);
           return;
         }

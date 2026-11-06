@@ -8536,14 +8536,27 @@ class MagpylibStudioSession:
         run cost a draw each, not a copy and a solve again; an edit makes a
         new one at the next call. The answer carries `scene`, the variant's
         `tree` and its run's `frames`, or `ok` False and why the variant
-        cannot be used."""
+        cannot be used. A variant its solve refused is drawn as it stands,
+        unsolved, and the answer says why in `not_followed`.
+
+        While the history is rolled back (`set_rollback`) the scene is not
+        the document the variants are of, and none is drawn."""
+        if self._rollback is not None:
+            return {
+                "ok": False,
+                "error": "the history is stepped back: variants are drawn at its end",
+            }
         doc = json.dumps(self.to_dict())
         kept = self._variant_copies.get(name)
         if kept is None or kept[0] != doc:
             copied = self._copied(doc)
             result = copied.followed(lambda: copied.use_variant(name))
             # a refusal is kept too: asked again, it is not copied again
-            kept = (doc, copied if result.get("ok") else result)
+            kept = (
+                doc,
+                copied if result.get("ok") else result,
+                result.get("not_followed"),
+            )
             # what was drawn from another scene than this is of no more use
             self._variant_copies = {
                 other: was
@@ -8551,15 +8564,18 @@ class MagpylibStudioSession:
                 if was[0] == doc
             }
             self._variant_copies[name] = kept
-        copied = kept[1]
+        _, copied, unsolved = kept
         if not isinstance(copied, MagpylibStudioSession):
             return {"ok": False, "error": copied.get("error", "")}
-        return {
+        answer = {
             "ok": True,
             "scene": copied.get_scene(frame=frame),
             "tree": copied.object_tree(),
             "frames": copied.path_steps(),
         }
+        if unsolved:
+            answer["not_followed"] = unsolved
+        return answer
 
     def drop_variant_copies(self, keep=()):
         """Let go of the copies `variant_scene` keeps, but for the variants

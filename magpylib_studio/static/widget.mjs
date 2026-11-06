@@ -794,6 +794,7 @@ function render({ model, el }) {
   const spreadButton = iconButton("tile", "", () => spread());
   spreadButton.classList.add("magpy-scene-spread");
   spreadButton.hidden = true;
+  let spreadFull = false; // what a press does: close them all, or open them
 
   // A page being written: how far, and -- the view's own export -- a button
   // that stops it.
@@ -1472,6 +1473,8 @@ function render({ model, el }) {
    *  nothing to do, so the key is left to the page. */
   const viewActions = {
     projection: showProjection,
+    // Home, as the fit button: every pane framed, once there are some
+    frameAll: () => (grid.split ? grid.fit() : false),
     // Tab walks the objects where the host says so -- the studio panel. In a
     // notebook it moves between cells, and a view that kept it would trap it.
     next: model.tabWalks
@@ -1621,6 +1624,7 @@ function render({ model, el }) {
   function release() {
     shared.views.delete(held);
     if (!api) return;
+    clearTimeout(gridTimer);
     grid.hide(); // the variants' panes let go of theirs too
     if (framed) kept = api.cameraState();
     if (playing) setPlaying(false);
@@ -1741,20 +1745,23 @@ function render({ model, el }) {
       grid.split &&
       (offered.every((name) => open.includes(name)) ||
         open.length >= MOST_PANES - 1);
+    spreadFull = full;
     setIcon(spreadButton, full ? "untile" : "tile");
+    // the label says what a press does; the look, that they are all out
     name(
       spreadButton,
       full
-        ? "Back to the scene alone: every variant's pane closed"
-        : "Every other variant beside the scene, each in a pane",
+        ? "Close every variant's pane, back to the scene alone"
+        : offered.length > MOST_PANES - 1
+          ? `Open ${MOST_PANES - 1} of the other variants beside the scene, each in a pane`
+          : "Open every other variant beside the scene, each in a pane",
     );
     spreadButton.classList.toggle("on", full);
-    spreadButton.setAttribute("aria-pressed", String(full));
   }
 
   function spread() {
     if (!api || !sharedModule) return; // nothing drawn yet to split
-    if (spreadButton.getAttribute("aria-pressed") === "true") grid.hide();
+    if (spreadFull) grid.hide();
     else grid.fill(offeredVariants());
   }
 
@@ -1766,7 +1773,9 @@ function render({ model, el }) {
     mainApi: () => api,
     factory: () => sharedModule.createScene3d(),
     sceneOf: (name, frame) =>
-      call("variant_scene", frame == null ? { name } : { name, frame }),
+      call("variant_scene", frame == null ? { name } : { name, frame }, {
+        quiet: true,
+      }),
     look: () => ({
       hidden: model.get("hidden") || [],
       fades: model.get("faded") || {},
@@ -1782,7 +1791,7 @@ function render({ model, el }) {
       dressLegend();
       dressColorBar();
     },
-    stepNow: () => (shown === drawnStep() ? null : shown),
+    stepNow: () => stepShown(),
     onLayout: (split, names) => {
       el.classList.toggle("magpy-paned", split);
       if (split) {
@@ -1792,8 +1801,13 @@ function render({ model, el }) {
         });
       }
       // the copies of the variants whose panes closed, let go of in python
-      if (sharedModule) {
-        call("drop_variant_copies", { keep: names }).catch(() => {});
+      // -- not for a view torn down, whose session lets go of them all
+      const shrank = paneNames.some((each) => !names.includes(each));
+      paneNames = names;
+      if (sharedModule && shrank && !gone) {
+        call("drop_variant_copies", { keep: names }, { quiet: true }).catch(
+          () => {},
+        );
       }
       if (!split) gridScenes = [];
       dressSpread();
@@ -1812,6 +1826,11 @@ function render({ model, el }) {
     childList: true,
     subtree: true,
   });
+  // the legend opened, closed, or a row of it folded: the panes beside it
+  // take the room it leaves
+  new ResizeObserver(() => grid.split && placePanes()).observe(legendEl);
+
+  let paneNames = []; // the variants with a pane, at the last layout
 
   /** A chip lifted out of the row: carried, to be dropped in the view. */
   function lift(name, event) {
@@ -1821,19 +1840,36 @@ function render({ model, el }) {
 
   /** The variant the scene is at, or null: the row's to say. */
   const currentVariant = () =>
-    call("get_variables")
+    call("get_variables", {}, { quiet: true })
       .then((panel) => panel?.variant ?? null)
       .catch(() => null);
 
-  /** The variants' panes again: after an edit, or a step. Which variant
-   *  the scene is at is asked only after an edit: a step changes none, and
-   *  a run that only moves plays with no python at all. */
+  /** The variants' panes again: after an edit, or a step. A step is posed
+   *  or asked for pane by pane (`grid.stepTo`), with no word to python for
+   *  a run that only moves. An edit stops what the panes were asking for at
+   *  once, and draws them again once the edits stop coming for a moment: a
+   *  slider dragged costs one copy of the scene a pane, at the end, and not
+   *  one for every value it passes. Which variant the scene is at is asked
+   *  only then. */
   let knownVariant = null;
-  async function redrawGrid({ edited = false } = {}) {
+  let gridTimer = null;
+  const GRID_SETTLE = 300; // ms without an edit before the panes redraw
+  const stepShown = () => (shown === drawnStep() ? null : shown);
+  function redrawGrid({ edited = false } = {}) {
     if (!grid.split) return;
-    if (edited) knownVariant = await currentVariant();
-    const own = shown === drawnStep() ? model.get("payload") : null;
-    grid.redraw(own, shown === drawnStep() ? null : shown, knownVariant);
+    if (!edited) {
+      grid.stepTo(stepShown());
+      return;
+    }
+    grid.stale();
+    clearTimeout(gridTimer);
+    gridTimer = setTimeout(async () => {
+      if (!grid.split || gone) return;
+      knownVariant = await currentVariant();
+      if (!grid.split || gone) return;
+      const at = stepShown();
+      grid.redraw(at === null ? model.get("payload") : null, at, knownVariant);
+    }, GRID_SETTLE);
   }
 
   /** The panes in the room the controls leave: the tools above, the legend
@@ -2295,11 +2331,13 @@ function render({ model, el }) {
   const calls = new Map(); // id -> { timer, asked, settle }
   let dragActive = false; // between a drag's first move and its release
   // `since`: when what the call carries was asked for, if before now -- the
-  // first value a slider or a drag held back while the one before was away
+  // first value a slider or a drag held back while the one before was away.
+  // `quiet`: a read no edit waits on -- a variant's pane, which says itself
+  // that it is waiting -- with no ring, and no word if it is slow.
   function call(
     method,
     params = {},
-    { preview = false, scene = false, since } = {},
+    { preview = false, scene = false, since, quiet = false } = {},
   ) {
     return new Promise((resolve, reject) => {
       const id = `${caller}:${++nextCall}`;
@@ -2308,21 +2346,24 @@ function render({ model, el }) {
       // the call when it comes. The ring stays on until then, and a slider
       // or a drag holds its next value back rather than queueing it behind
       // the one python is still working on.
-      const timer = setTimeout(unheard, 4000);
+      const timer = quiet ? null : setTimeout(unheard, 4000);
       const asked = since ?? performance.now();
       calls.set(id, {
         timer,
         asked,
+        quiet,
         settle(message) {
           if (message.error) reject(new Error(message.error.message));
           else resolve(message.result);
         },
       });
       // waited on past BUSY_AFTER, it shows the ring
-      setTimeout(
-        () => calls.has(id) && watchBusy(),
-        Math.max(BUSY_AFTER - (performance.now() - asked), 0),
-      );
+      if (!quiet) {
+        setTimeout(
+          () => calls.has(id) && watchBusy(),
+          Math.max(BUSY_AFTER - (performance.now() - asked), 0),
+        );
+      }
       // `preview` marks a value the pointer is still on: python applies
       // it and says nothing to the notebook, as for a pose mid-drag.
       // `scene` asks for the scene in the same answer, sparing a second
@@ -2346,9 +2387,9 @@ function render({ model, el }) {
    *  the view is behind until it has caught up. */
   function watchBusy() {
     const now = performance.now();
-    let slow = busyRing.classList.contains("on") && calls.size > 0;
-    for (const { asked } of calls.values())
-      slow ||= now - asked >= BUSY_AFTER - 1;
+    const out = [...calls.values()].filter((each) => !each.quiet);
+    let slow = busyRing.classList.contains("on") && out.length > 0;
+    for (const { asked } of out) slow ||= now - asked >= BUSY_AFTER - 1;
     busyRing.classList.toggle("on", slow);
   }
 
@@ -3013,6 +3054,7 @@ function render({ model, el }) {
     for (const pending of calls.values()) clearTimeout(pending.timer);
     document.removeEventListener("fullscreenchange", onFullscreenChange);
     gone = true;
+    clearTimeout(gridTimer);
     grid.hide();
     release();
   };

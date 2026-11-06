@@ -2412,19 +2412,25 @@ async function setFieldLinesFromPanel(
   broadcastMutation();
 }
 
-/** A tile's name clicked in the grid of variants (#127): that variant used,
- *  as the Variables view uses one, and every surface brought along. */
+/** A variant's chip clicked in the view's foot row: that variant used, as
+ *  the Variables view uses one, and every surface brought along. One that
+ *  sets nothing new changes nothing, and leaves the file as it was. */
 async function useVariantFromPanel(
   context: vscode.ExtensionContext,
   name: string,
 ): Promise<void> {
   try {
     const engine = await getEngine(context);
-    const result = await engine.request<{ ok: boolean; error?: string }>('use_variant', { name });
+    const result = await engine.request<{
+      ok: boolean;
+      error?: string;
+      unchanged?: boolean;
+    }>('use_variant', { name });
     if (!result.ok) {
       vscode.window.setStatusBarMessage(`Magpylib Studio: ${result.error}`, 5000);
       return;
     }
+    if (result.unchanged) return;
   } catch (err) {
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,

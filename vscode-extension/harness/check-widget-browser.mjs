@@ -908,7 +908,7 @@ async function savedPanes(port, base) {
           `const p = ${panes};
          return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
            p.every((pane) => pane.querySelector("canvas")?.width) &&
-           ${spread}.getAttribute("aria-pressed") === "true"`,
+           ${spread}.classList.contains("on")`,
           15_000,
         );
         if (!filled) {
@@ -920,7 +920,7 @@ async function savedPanes(port, base) {
         if (!first.startsWith("scene")) return `filled, ${first} came first`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
-          `return ${panes}.length === 1 && ${spread}.getAttribute("aria-pressed") === "false"`,
+          `return ${panes}.length === 1 && !${spread}.classList.contains("on")`,
           5_000,
         );
         if (!back) return "pulled back, the view was not alone again";

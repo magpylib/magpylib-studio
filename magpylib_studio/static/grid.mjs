@@ -15,7 +15,9 @@
  * the pane under the middle of the bottom edge.
  *
  * After an edit the variants' panes are drawn again one by one. A newer edit
- * stops the round, and starts the next.
+ * stops the round, and starts the next. A step of the run is no edit: a
+ * pane whose run only moves is posed, and the others ask for the step, each
+ * at its own pace.
  */
 
 /** Past this many panes, a chip dropped in the view is refused. */
@@ -36,12 +38,6 @@ function sideOf(box, x, y) {
     ["bottom", 1 - down],
   ];
   return sides.reduce((a, b) => (b[1] < a[1] ? b : a))[0];
-}
-
-/** Whether the point `x`, `y` is in `el`'s box. */
-function inside(el, x, y) {
-  const at = el.getBoundingClientRect();
-  return x >= at.left && x <= at.right && y >= at.top && y <= at.bottom;
 }
 
 /**
@@ -99,13 +95,24 @@ export function createGrid(el, options) {
     label.textContent = name ?? "scene";
     tag.append(label);
     pane.append(body, tag);
-    const made = { name, el: pane, body, tag, label, api: null, drawn: false };
+    const made = {
+      name,
+      el: pane,
+      body,
+      tag,
+      label,
+      api: null,
+      drawn: false,
+      wanted: null, // the step of the run to ask for next, if any
+      asking: false, // a step asked for, not answered yet
+    };
     if (name !== null) {
       const close = document.createElement("button");
       close.type = "button";
       close.className = "magpy-pane-close";
       close.textContent = "×";
       close.title = `Close ${name}`;
+      close.setAttribute("aria-label", `Close ${name}`);
       close.addEventListener("click", () => remove(made));
       tag.append(close);
       made.api = factory();
@@ -117,7 +124,7 @@ export function createGrid(el, options) {
       if (event.button !== 0 || event.target.closest(".magpy-pane-close"))
         return;
       if (panes().length > 1)
-        carry(event, { pane: made, name: label.textContent });
+        carry(event, { pane: made, name: name ?? label.textContent });
     });
     return made;
   }
@@ -181,12 +188,17 @@ export function createGrid(el, options) {
     }
   }
 
-  /** A variant's pane closed: it lets go of what it held on the renderer. */
-  function remove(pane) {
-    detach(pane);
+  /** A pane let go of: what it held on the renderer, and its element. */
+  function dispose(pane) {
     pane.api.watchCamera(null);
     pane.api.dispose();
     pane.el.remove();
+  }
+
+  /** A variant's pane closed. */
+  function remove(pane) {
+    detach(pane);
+    dispose(pane);
     layout();
     drawn();
   }
@@ -222,6 +234,7 @@ export function createGrid(el, options) {
     root.style.flex = "1 1 0";
     el.replaceChildren(root);
     const split = !isPane(tree);
+    if (!split) refit = false; // alone again: nothing to frame together
     el.classList.toggle("magpy-panes-split", split);
     for (const pane of panes()) pane.tag.hidden = !split;
     onLayout(
@@ -245,7 +258,8 @@ export function createGrid(el, options) {
       const length = row ? box.width : box.height;
       const total = split.sizes[i - 1] + split.sizes[i];
       const before = split.sizes.slice(0, i - 1).reduce((a, b) => a + b, 0);
-      const least = NARROWEST / length;
+      // two too small for it between them share what they have
+      const least = Math.min(NARROWEST / length, total / 2);
       const parts = [...line.parentElement.children].filter(
         (child) => !child.classList.contains("magpy-sash"),
       );
@@ -306,6 +320,9 @@ export function createGrid(el, options) {
    *  it lands there; Escape, or let go elsewhere, and nothing changes. */
   function carry(event, what) {
     event.preventDefault();
+    // a variant out already is moved, not opened twice
+    const moving =
+      what.pane ?? variantPanes().find((pane) => pane.name === what.name);
     const ghost = document.createElement("div");
     ghost.className = "magpy-pane-ghost";
     ghost.textContent = what.name;
@@ -318,11 +335,18 @@ export function createGrid(el, options) {
       const home = el.getBoundingClientRect();
       ghost.style.left = `${e.clientX - home.left + 12}px`;
       ghost.style.top = `${e.clientY - home.top + 12}px`;
-      const full = !what.pane && panes().length >= MOST_PANES;
-      const over = panes().find((pane) =>
-        inside(pane.el, e.clientX, e.clientY),
+      const full = !moving && panes().length >= MOST_PANES;
+      // the pane the pointer is on, and not a control over it -- the foot
+      // the chip came from, the legend, the tools: let go there, nothing
+      // asked of the panes' own root: in a shadow root -- marimo's -- the
+      // document sees only its host
+      const root = el.getRootNode();
+      const hit = (root.elementFromPoint ? root : document).elementFromPoint(
+        e.clientX,
+        e.clientY,
       );
-      target = over && over !== what.pane && !full ? over : null;
+      const over = panes().find((pane) => pane.el.contains(hit));
+      target = over && over !== moving && !full ? over : null;
       mark.hidden = !target;
       ghost.classList.toggle("magpy-pane-refused", full);
       if (!target) return;
@@ -350,15 +374,22 @@ export function createGrid(el, options) {
     };
     const drop = () => {
       done();
-      if (!target) return;
-      if (what.pane) {
-        detach(what.pane);
-        insert(what.pane, target, side);
+      // the pane aimed at, or the one carried, closed on the way: nothing
+      const open = panes();
+      if (!target || !open.includes(target)) return;
+      if (moving) {
+        if (!open.includes(moving)) return;
+        detach(moving);
+        insert(moving, target, side);
         layout();
       } else add(what.name, target, side);
     };
     const escape = (e) => {
-      if (e.key === "Escape") done();
+      if (e.key !== "Escape") return;
+      // the carry's alone: not a deselection in the view as well
+      e.preventDefault();
+      e.stopPropagation();
+      done();
     };
     place(event);
     addEventListener("pointermove", place, true);
@@ -386,9 +417,10 @@ export function createGrid(el, options) {
     }
   }
 
-  /** Every variant's pane drawn again, one by one: the scene changed, or
-   *  the step. `own`, the scene's payload, stands in for the variant the
-   *  scene is at, which needs no asking. */
+  /** Every variant's pane drawn again, one by one: the scene changed.
+   *  `own`, the scene's payload, stands in for the variant the scene is at,
+   *  which needs no asking; `at`, the step of the run on screen, or null
+   *  for the scene's own. */
   function redraw(own, at, now) {
     step = at;
     mark(now);
@@ -396,53 +428,104 @@ export function createGrid(el, options) {
     return redrawPanes(variantPanes(), own);
   }
 
+  /** An edit on its way: what the panes are asked for stops, to be asked
+   *  again once it is in (`redraw`), and they say they are behind. */
+  function stale() {
+    round += 1;
+    for (const pane of variantPanes()) pane.el.classList.add("magpy-pane-busy");
+  }
+
+  const isOpen = (pane) => panes().includes(pane);
+  const isBusy = (pane) => pane.el.classList.contains("magpy-pane-busy");
+
   async function redrawPanes(which, own = null) {
     const mine = round;
     for (const pane of which) pane.el.classList.add("magpy-pane-busy");
     for (const pane of which) {
       if (mine !== round) return;
-      if (step !== null && pane.drawn && pane.api.posed()) {
-        pane.api.poseFrame(step); // a run that only moves, played here
-        pane.el.classList.remove("magpy-pane-busy");
-        continue;
-      }
-      let scene = own && pane.name === current ? own : null;
-      // drawn from the scene's own payload: the scene's tree is the legend's
-      if (scene) pane.tree = null;
-      else {
-        try {
-          // a step is drawn over the scene: a pane new to the run draws
-          // the variant's own first, which the legend and the bar read too
-          if (step !== null && !pane.drawn) {
-            const first = await sceneOf(pane.name, null);
-            if (mine !== round) return;
-            if (first?.ok && pane.el.isConnected) {
-              pane.tree = first.tree;
-              draw(pane, first.scene);
-            }
-          }
-          const answer = await sceneOf(pane.name, step);
-          if (mine !== round) return;
-          scene = answer?.ok ? answer.scene : null;
-          if (scene) pane.tree = answer.tree;
-          // one the scene cannot use, now, says why, and counts for nothing
-          pane.el.classList.toggle("magpy-pane-unusable", !answer?.ok);
-          pane.el.title = answer?.ok ? "" : (answer?.error ?? "");
-          if (!answer?.ok) pane.scene = pane.tree = null;
-        } catch (error) {
-          if (mine !== round) return;
-          pane.el.title = error.message;
-        }
-      }
+      // closed while the round went on: nothing more asked for it
+      if (!isOpen(pane)) continue;
       try {
-        if (scene && pane.el.isConnected) draw(pane, scene);
+        await drawPane(pane, own, mine);
+      } catch (error) {
+        if (mine === round) pane.el.title = error.message;
       } finally {
         pane.el.classList.remove("magpy-pane-busy");
       }
     }
     if (mine !== round) return;
-    if (refit) fit();
+    // framed together once none is still on its way -- another round, a
+    // spread's, may be drawing the rest
+    if (refit && !variantPanes().some(isBusy)) fit();
     drawn();
+  }
+
+  /** `pane`'s variant as it is drawn, then the step on screen: posed, for a
+   *  run that only moves, or asked for. */
+  async function drawPane(pane, own, mine) {
+    let scene = own && pane.name === current ? own : null;
+    let theirs = null; // the scene's own tree is the legend's, for `own`
+    let unsolved = null;
+    if (!scene) {
+      const answer = await sceneOf(pane.name, null);
+      if (mine !== round || !isOpen(pane)) return;
+      // one the scene cannot use, now, says why, and counts for nothing
+      pane.el.classList.toggle("magpy-pane-unusable", !answer?.ok);
+      if (!answer?.ok) {
+        pane.el.title = answer?.error ?? "";
+        pane.scene = pane.tree = null;
+        return;
+      }
+      scene = answer.scene;
+      theirs = answer.tree;
+      unsolved = answer.not_followed ?? null;
+    }
+    pane.el.classList.remove("magpy-pane-unusable");
+    // drawn, and said not to be solved for its values: the solve refused
+    pane.label.textContent = unsolved ? `${pane.name} · not solved` : pane.name;
+    pane.el.title = unsolved ? `Not solved for ${pane.name}: ${unsolved}` : "";
+    pane.tree = theirs;
+    draw(pane, scene);
+    if (step === null) return;
+    if (pane.api.posed()) pane.api.poseFrame(step);
+    else askStep(pane, step);
+  }
+
+  /** The panes at step `at` of the run, or at the scene's own (null), as the
+   *  view steps through it: one whose run only moves is posed here; at the
+   *  scene's own step, one is drawn again from what it holds; and the others
+   *  ask python for the step -- each one at a time, and the newest step
+   *  asked for once the last is in, so that every pane keeps up as best it
+   *  can. A pane still drawing for an edit draws the step when it is done. */
+  function stepTo(at) {
+    step = at;
+    for (const pane of variantPanes()) {
+      if (!pane.drawn || isBusy(pane)) continue;
+      if (pane.api.posed()) pane.api.poseFrame(at ?? pane.scene?.step ?? 0);
+      else if (at === null) {
+        if (pane.scene) draw(pane, pane.scene);
+      } else askStep(pane, at);
+    }
+  }
+
+  async function askStep(pane, at) {
+    pane.wanted = at;
+    if (pane.asking) return;
+    pane.asking = true;
+    const mine = round;
+    try {
+      while (pane.wanted !== null) {
+        const asked = pane.wanted;
+        pane.wanted = null;
+        const answer = await sceneOf(pane.name, asked).catch(() => null);
+        // an edit since, or back at the scene's own step: not this frame
+        if (mine !== round || !isOpen(pane) || step === null) return;
+        if (answer?.ok) draw(pane, answer.scene);
+      }
+    } finally {
+      pane.asking = false;
+      pane.wanted = null;
+    }
   }
 
   /** Every pane framed alike: from where the one that needs it most stands,
@@ -533,11 +616,7 @@ export function createGrid(el, options) {
   /** Back to the view alone: every variant's pane closed. */
   function hide() {
     round += 1;
-    for (const pane of variantPanes()) {
-      pane.api.watchCamera(null);
-      pane.api.dispose();
-      pane.el.remove();
-    }
+    for (const pane of variantPanes()) dispose(pane);
     tree = scenePane;
     layout();
   }
@@ -547,15 +626,18 @@ export function createGrid(el, options) {
    *  their order, as many as there is room for. A pane open already keeps
    *  its canvas and what it drew; only the new ones are drawn. */
   function fill(names) {
-    const open = new Map(variantPanes().map((pane) => [pane.name, pane]));
+    const open = new Map();
+    for (const pane of variantPanes()) {
+      if (!open.has(pane.name)) open.set(pane.name, pane);
+    }
     const wanted = [...names, ...open.keys()]
       .filter((name, i, all) => all.indexOf(name) === i)
       .slice(0, MOST_PANES - 1);
-    for (const [name, pane] of open) {
-      if (wanted.includes(name)) continue;
-      pane.api.watchCamera(null);
-      pane.api.dispose();
-      pane.el.remove();
+    // every pane not laid out again let go of, a second of one name too
+    for (const pane of variantPanes()) {
+      if (open.get(pane.name) !== pane || !wanted.includes(pane.name)) {
+        dispose(pane);
+      }
     }
     const made = [];
     const all = [
@@ -608,9 +690,7 @@ export function createGrid(el, options) {
     const gone = variantPanes().filter((pane) => !known.has(pane.name));
     for (const pane of gone) {
       detach(pane);
-      pane.api.watchCamera(null);
-      pane.api.dispose();
-      pane.el.remove();
+      dispose(pane);
     }
     if (gone.length) {
       layout();
@@ -630,6 +710,8 @@ export function createGrid(el, options) {
     hide,
     keep,
     fill,
+    stepTo,
+    stale,
     corners,
     followScene,
     get split() {

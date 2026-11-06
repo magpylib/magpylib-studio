@@ -5631,6 +5631,19 @@ def test_a_variant_is_drawn_for_the_grid_and_the_scene_left_as_it_is():
     s.drop_variant_copies(keep=["wide"])
     assert list(s._variant_copies) == ["wide"], "the panes still open keep theirs"
 
+    # a solve that fails is said, and the variant still drawn as it stands
+    def diverges(_objects):
+        raise RuntimeError("diverged")
+
+    s.follower = diverges
+    s.set_variable("axis", "y")
+    unsolved = s.variant_scene("wide")
+    assert unsolved["ok"] and "diverged" in unsolved["not_followed"]
+    # stepped back in the history, the scene is not the variants' document
+    s.follower = None
+    assert s.set_rollback(0)["ok"]
+    assert "stepped back" in s.variant_scene("wide")["error"]
+
 
 def test_a_variant_holds_values_its_variables_can_take():
     """A formula is what a variable is, so no variant holds one; a value past

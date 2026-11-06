@@ -6844,8 +6844,13 @@ void main() {
    *  stand in one (the widget's panes, #127). */
   let cornerParts = { cube: true, bar: true };
   function setCorner({ cube = true, bar = true } = {}) {
+    if (cube === cornerParts.cube && bar === cornerParts.bar) return;
     cornerParts = { cube, bar };
-    if (!cube) markCube(null);
+    // drawn afresh, and nothing on it under the pointer until it moves
+    cornerHot = false;
+    cornerPointer = null;
+    markCube(null);
+    redraw();
   }
 
   function drawCorner(withCube) {
@@ -7415,7 +7420,8 @@ void main() {
         fitView(selectedIds);
         return true;
       case "frameAll":
-        fitView();
+        // a host showing more than this view frames them all, its way
+        if (!ask(host.frameAll)) fitView();
         return true;
       case "front":
       case "right":
