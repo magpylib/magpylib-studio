@@ -5866,14 +5866,16 @@ export function createScene3d() {
 
   /** The view as a PNG data URL, as it is on screen but for the cube, which
    *  is a control: drawn again for it without one. The view alone -- nothing
-   *  a host floats over it, legend or controls, is in the picture. */
-  function snapshot() {
+   *  a host floats over it, legend or controls, is in the picture.
+   *  `asShown`, for a picture of several views laid together: the scale bar
+   *  only where the host has this one draw it (`setCorner`). */
+  function snapshot({ asShown = false } = {}) {
     if (!renderer) return null;
     drawPicture();
     // the scale bar is part of the picture, the cube a control; the bar is
-    // in it even where a host has another view draw it (`setCorner`)
+    // in it even where a host has another view draw it, but for `asShown`
     const parts = cornerParts;
-    cornerParts = { cube: true, bar: true };
+    cornerParts = { cube: true, bar: asShown ? parts.bar : true };
     try {
       drawCorner(false);
     } finally {

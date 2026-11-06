@@ -63,6 +63,16 @@ function sideOf(box, x, y) {
  * - `onSelect(name, add)`: a pane's tag clicked, with no drag: its variant,
  *   the scene's pane's the one the scene is at; `add` with Ctrl or Cmd held.
  */
+/** What `node` is drawn on: its background, or the nearest one round it
+ *  that is not see-through, white at the last. */
+function paperOf(node) {
+  for (let at = node; at instanceof Element; at = at.parentElement) {
+    const paper = getComputedStyle(at).backgroundColor;
+    if (paper && !/^(transparent|rgba\(.*,\s*0\))$/.test(paper)) return paper;
+  }
+  return "#ffffff";
+}
+
 export function createGrid(el, options) {
   const {
     view,
@@ -270,6 +280,84 @@ export function createGrid(el, options) {
   }
 
   // --- the layout ----------------------------------------------------------
+  /** The panes as one picture, as they stand on screen: each pane's view at
+   *  its place, outlined, with its tag's name over it -- not its x, which is
+   *  a control -- and the scale bar where the view draws it. Gives back
+   *  `{ picture, width }`, a PNG data URL and its width in CSS pixels, or
+   *  null while a pane has nothing drawn. */
+  async function picture() {
+    const all = panes();
+    const boxes = all.map((pane) => pane.body.getBoundingClientRect());
+    const left = Math.min(...boxes.map((box) => box.left));
+    const top = Math.min(...boxes.map((box) => box.top));
+    const width = Math.max(...boxes.map((box) => box.right)) - left;
+    const height = Math.max(...boxes.map((box) => box.bottom)) - top;
+    const shots = [];
+    for (const pane of all) {
+      const api = pane === scenePane ? mainApi() : pane.api;
+      const shot = api?.snapshot({ asShown: true });
+      if (!shot) return null;
+      const image = new Image();
+      image.src = shot;
+      await image.decode();
+      shots.push(image);
+    }
+    const k = shots[0].width / Math.max(boxes[0].width, 1); // device pixels
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * k);
+    canvas.height = Math.round(height * k);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = paperOf(el);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    all.forEach((pane, i) => {
+      const box = boxes[i];
+      const at = [(box.left - left) * k, (box.top - top) * k];
+      const size = [box.width * k, box.height * k];
+      const look = getComputedStyle(pane.body);
+      const round = (parseFloat(look.borderTopLeftRadius) || 0) * k;
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(...at, ...size, round);
+      ctx.clip();
+      ctx.drawImage(shots[i], ...at, ...size);
+      ctx.restore();
+      ctx.strokeStyle = look.outlineColor;
+      ctx.lineWidth = (parseFloat(look.outlineWidth) || 1) * k;
+      ctx.beginPath();
+      ctx.roundRect(...at, ...size, round);
+      ctx.stroke();
+      if (!pane.tag.hidden) drawTag(ctx, pane, left, top, k);
+    });
+    return { picture: canvas.toDataURL("image/png"), width };
+  }
+
+  /** A pane's tag on the picture: its pill and its name, as on screen. */
+  function drawTag(ctx, pane, left, top, k) {
+    const tag = pane.tag.getBoundingClientRect();
+    const name = pane.label.getBoundingClientRect();
+    const look = getComputedStyle(pane.tag);
+    const x = (tag.left - left) * k;
+    const y = (tag.top - top) * k;
+    const w = (name.right - tag.left + 7) * k;
+    const h = tag.height * k;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, h / 2);
+    ctx.fillStyle = look.backgroundColor;
+    ctx.fill();
+    ctx.strokeStyle = look.outlineColor;
+    ctx.lineWidth = (parseFloat(look.outlineWidth) || 1) * k;
+    ctx.stroke();
+    ctx.fillStyle = look.color;
+    ctx.font = `${look.fontWeight} ${parseFloat(look.fontSize) * k}px ${look.fontFamily}`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      pane.label.textContent,
+      (name.left - left) * k,
+      y + h / 2,
+      name.width * k,
+    );
+  }
+
   /** The tree as nested boxes, each pane's element moved -- never made
    *  again, so a pane keeps its canvas -- and a line between each two. */
   function layout() {
@@ -802,6 +890,7 @@ export function createGrid(el, options) {
   return {
     carry,
     choose,
+    picture,
     relabel: () => mark(current),
     fit,
     mark,

@@ -93,7 +93,8 @@ one the widget does not take: in a notebook it moves between cells.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.
-The magpylib mark at the end of the tools opens magpylib's page on GitHub.
+Split into panes, the PNG holds every pane in its place, each with its tag. The
+magpylib mark at the end of the tools opens magpylib's page on GitHub.
 **Export** saves it as one HTML file that opens anywhere with no notebook behind
 it — the widget itself, not a picture: orbit, legend, keys, and a captured run
 that still plays, because its motion — or, for a run that changes shape, its
