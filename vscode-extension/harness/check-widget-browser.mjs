@@ -1002,6 +1002,24 @@ async function savedPanes(port, base) {
         };`);
         if (row.chips !== row.row || !row.button)
           return `filled, the row: ${JSON.stringify(row)}`;
+        // the picture, split: the panes together, each at its place (#149)
+        const shot = await tab.evaluate(`
+        const href = await new Promise((done) => {
+          window.magpySave = (url) => done(url);
+          document.querySelector('button[title^="Save the view as a PNG"]').click();
+        });
+        delete window.magpySave;
+        const image = new Image();
+        image.src = href;
+        await image.decode();
+        const boxes = ${panes}.map((p) => p.querySelector(".magpy-pane-body").getBoundingClientRect());
+        const wide = Math.max(...boxes.map((b) => b.right)) - Math.min(...boxes.map((b) => b.left));
+        const scene = new Image();
+        scene.src = window.scene3d.snapshot();
+        await scene.decode();
+        return { width: image.width, wide: Math.round(wide * devicePixelRatio), scene: scene.width };`);
+        if (Math.abs(shot.width - shot.wide) > 2 || shot.width <= shot.scene)
+          return `the picture, split: ${JSON.stringify(shot)}`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
           `return ${panes}.length === 1 && !${closing}`,

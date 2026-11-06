@@ -30,7 +30,9 @@ where they do in one view. After an edit, once the edits stop coming, the panes
 are drawn again one by one, each from a copy of the session; a step of a run
 that only moves is posed in every pane with no word to Python. A pane keeps the
 values its variant names, and follows the sliders of those it does not. In a
-notebook, on a saved page and in the studio's panel (#127).
+notebook, on a saved page and in the studio's panel (#127). The camera's picture
+holds every pane in its place, each with its tag
+([#149](https://github.com/magpylib/magpylib-studio/issues/149)).
 
 </details>
 

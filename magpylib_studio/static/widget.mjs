@@ -620,14 +620,17 @@ function render({ model, el }) {
   const pictureButton = iconButton(
     "picture",
     "Save the view as a PNG picture",
-    () => {
-      const picture = api?.snapshot();
-      if (!picture) return;
+    async () => {
+      // split, every pane as it stands, with its tag (#149)
+      const shot = grid.split
+        ? await grid.picture()
+        : api && { picture: api.snapshot(), width: view.clientWidth };
+      if (!shot?.picture) return;
       // with the colour bar on it, as the scale bar is: see `drawOn`
-      colorBar
-        .drawOn(picture, view.clientWidth)
-        .catch(() => picture)
-        .then((drawn) => save(drawn, PICTURE_NAME));
+      const drawn = await colorBar
+        .drawOn(shot.picture, shot.width)
+        .catch(() => shot.picture);
+      save(drawn, PICTURE_NAME);
     },
   );
   // A round rather than a toggle: auto, then light, then dark. The icon is
