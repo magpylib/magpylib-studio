@@ -794,19 +794,7 @@
   display: none;
 }
 
-/* The pressed toggle is a handle: a grip on it while the pointer is on the
-   row, and the cursor of a sideways drag. Kept in place, faint, so the row
-   does not move when the grip shows. */
-.magpy-vars-slides .magpy-vars-chip.on::before {
-  content: "⠿ ";
-  opacity: 0;
-}
-
-.magpy-scene-variants:hover .magpy-vars-slides .magpy-vars-chip.on::before,
-.magpy-vars-sliding .magpy-vars-chip.on::before {
-  opacity: 0.8;
-}
-
+/* The pressed toggle is a handle: the cursor of a sideways drag. */
 .magpy-vars-slides .magpy-vars-chip.on,
 .magpy-vars-sliding {
   cursor: ew-resize;
@@ -2308,6 +2296,8 @@
 .magpy-pane-ghost {
   position: absolute;
   z-index: 6;
+  /* its words' width, not what is left of the view right of it */
+  width: max-content;
   pointer-events: none;
   padding: 1px 8px;
   border-radius: 999px;
@@ -2320,14 +2310,25 @@
 .magpy-vars-chip.magpy-in-pane {
   display: none;
 }
+/* every variant in a pane: the row's name goes too, and the spread
+   button, alone in the foot, needs no line before it */
+.magpy-scene-variants.magpy-all-paned {
+  display: none;
+}
+.magpy-scene-transport[hidden]
+  + .magpy-all-paned
+  + .magpy-scene-spread::before {
+  display: none;
+}
 /* a chip carried into the view: out of its row, its place kept empty */
 .magpy-vars-chip.magpy-carried {
   -webkit-text-fill-color: transparent;
   background: transparent;
   border-style: dashed;
 }
+/* landing nowhere: grey, its white words still read, light theme or dark */
 .magpy-pane-refused {
-  background: color-mix(in srgb, currentColor 40%, transparent);
+  background: #767676;
 }
 /* drawn again, one by one after an edit: the pane's edge pulses, as the
    view's does while python is slow to answer */

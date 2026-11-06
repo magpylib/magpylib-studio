@@ -314,11 +314,13 @@ export function createGrid(el, options) {
   }
 
   // --- carrying a chip or a pane -------------------------------------------
-  /** Carry `what` -- `{ name, from }`, a variant's chip, or `{ pane, name }`,
-   *  a pane by its tag -- from `event`, showing where it would land: half of
-   *  the pane under the pointer, on the side the pointer is nearest. Let go,
-   *  it lands there; Escape, or let go elsewhere, and nothing changes. The
-   *  chip `from` is out of its row meanwhile, its place kept empty. */
+  /** Carry `what` -- `{ name, from, shown }`, a variant's chip, or
+   *  `{ pane, name }`, a pane by its tag -- from `event`, showing where it
+   *  would land: half of the pane under the pointer, on the side the pointer
+   *  is nearest. Let go, it lands there; Escape, or let go elsewhere, and
+   *  nothing changes. The chip `from` is out of its row meanwhile, its place
+   *  kept empty. A variant `shown` -- the scene is at its values -- lands
+   *  nowhere: the scene's own pane shows it already. */
   function carry(event, what) {
     event.preventDefault();
     // a variant out already is moved, not opened twice
@@ -326,7 +328,9 @@ export function createGrid(el, options) {
       what.pane ?? variantPanes().find((pane) => pane.name === what.name);
     const ghost = document.createElement("div");
     ghost.className = "magpy-pane-ghost";
-    ghost.textContent = what.name;
+    ghost.textContent = what.shown
+      ? `${what.name} · shown by the scene`
+      : what.name;
     const mark = document.createElement("div");
     mark.className = "magpy-pane-drop";
     el.append(ghost, mark);
@@ -335,9 +339,12 @@ export function createGrid(el, options) {
     let side = null;
     const place = (e) => {
       const home = el.getBoundingClientRect();
-      ghost.style.left = `${e.clientX - home.left + 12}px`;
+      // right of the pointer, or left of it where the view ends first
+      const x = e.clientX - home.left;
+      const wide = ghost.offsetWidth;
+      ghost.style.left = `${x + 12 + wide > home.width ? x - 12 - wide : x + 12}px`;
       ghost.style.top = `${e.clientY - home.top + 12}px`;
-      const full = !moving && panes().length >= MOST_PANES;
+      const full = what.shown || (!moving && panes().length >= MOST_PANES);
       // the pane the pointer is on, and not a control over it -- the foot
       // the chip came from, the legend, the tools: let go there, nothing
       // asked of the panes' own root: in a shadow root -- marimo's -- the

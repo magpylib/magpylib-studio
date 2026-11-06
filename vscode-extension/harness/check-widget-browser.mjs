@@ -935,12 +935,43 @@ async function savedPanes(port, base) {
           .filter((c) => c.getClientRects().length && open.includes(c.textContent))
           .map((c) => c.textContent);`);
         if (twice.length) return `filled, still in the row: ${twice}`;
+        // none left in the row: its name goes too, the button alone
+        const row = await tab.evaluate(`
+        const chips = [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")];
+        return {
+          chips: chips.some((c) => c.getClientRects().length),
+          row: document.querySelector(".magpy-scene-variants").getClientRects().length > 0,
+          button: ${spread}.getClientRects().length > 0,
+        };`);
+        if (row.chips !== row.row || !row.button)
+          return `filled, the row: ${JSON.stringify(row)}`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
           `return ${panes}.length === 1 && !${spread}.classList.contains("on")`,
           5_000,
         );
         if (!back) return "pulled back, the view was not alone again";
+        // the variant the scene is at, in the scene's pane already: carried,
+        // it says so, and lands nowhere
+        await tab.evaluate(`${chip}.click()`);
+        if (
+          !(await tab.until(`return ${chip}.classList.contains("on")`, 5_000))
+        )
+          return "a click never pressed eight";
+        const at = await tab.evaluate(`
+        const c = ${chip}.getBoundingClientRect();
+        return { x: c.x + c.width / 2, y: c.y + c.height / 2 };`);
+        await mouse("mousePressed", at);
+        await mouse("mouseMoved", { x: at.x, y: at.y - 40 });
+        await mouse("mouseMoved", to);
+        const ghost = await tab.evaluate(
+          `return document.querySelector(".magpy-pane-ghost")?.textContent ?? null`,
+        );
+        await mouse("mouseReleased", to);
+        await new Promise((done) => setTimeout(done, 500));
+        const opened = await tab.evaluate(`return ${panes}.length`);
+        if (opened !== 1 || !ghost?.includes("shown by the scene"))
+          return `the pressed chip carried as ${JSON.stringify(ghost)}, ${opened} panes`;
         return thrown(tab);
       } finally {
         await tab.close();

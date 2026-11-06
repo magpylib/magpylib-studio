@@ -1766,9 +1766,15 @@ function render({ model, el }) {
    *  but not while the foot asks what a page keeps, of every variant. */
   function dressPaned() {
     const open = new Set(choosing ? [] : grid.names);
-    for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
+    const chips = [...variantsEl.querySelectorAll(".magpy-vars-chip")];
+    for (const chip of chips) {
       chip.classList.toggle("magpy-in-pane", open.has(chip.textContent));
     }
+    // every one in a pane: no row left to name, the spread button alone
+    variantsEl.classList.toggle(
+      "magpy-all-paned",
+      chips.length > 0 && chips.every((chip) => open.has(chip.textContent)),
+    );
     for (const option of variantsEl.querySelectorAll("option")) {
       option.hidden = open.has(option.value) && !option.selected;
     }
@@ -1850,7 +1856,9 @@ function render({ model, el }) {
   /** A chip lifted out of the row: carried, to be dropped in the view. */
   function lift(name, event, chip) {
     if (!api || !sharedModule) return; // nothing drawn yet to split
-    grid.carry(event, { name, from: chip });
+    // the pressed one, the variant the scene is at, is in its pane already
+    const shown = Boolean(chip?.classList.contains("on"));
+    grid.carry(event, { name, from: chip, shown });
   }
 
   /** The variant the scene is at, or null: the row's to say. */
