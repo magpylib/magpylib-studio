@@ -155,9 +155,11 @@ const ICONS = {
     '<rect x="9" y="2" width="5" height="5" rx="1"/>' +
     '<rect x="2" y="9" width="5" height="5" rx="1"/>' +
     '<rect x="9" y="9" width="5" height="5" rx="1"/>',
+  // the panes stacked back into one, closed: VS Code's "close all" mark
   untile:
-    '<rect x="2" y="2" width="12" height="12" rx="1.5"/>' +
-    '<path d="M5.5 5.5 8 8M10.5 5.5 8 8M5.5 10.5 8 8M10.5 10.5 8 8"/>',
+    '<rect x="4.5" y="4.5" width="9.5" height="9.5" rx="1.2"/>' +
+    '<path d="M2 11.5V3a1 1 0 0 1 1-1h8.5"/>' +
+    '<path d="M7.25 7.25l4 4M11.25 7.25l-4 4"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -1749,7 +1751,7 @@ function render({ model, el }) {
         open.length >= MOST_PANES - 1);
     spreadFull = full;
     setIcon(spreadButton, full ? "untile" : "tile");
-    // the label says what a press does; the look, that they are all out
+    // the icon and the label say what a press does
     name(
       spreadButton,
       full
@@ -1758,7 +1760,6 @@ function render({ model, el }) {
           ? `Open ${MOST_PANES - 1} of the other variants beside the scene, each in a pane`
           : "Open every other variant beside the scene, each in a pane",
     );
-    spreadButton.classList.toggle("on", full);
   }
 
   /** A variant with a pane is there, not in the row as well: its chip, or

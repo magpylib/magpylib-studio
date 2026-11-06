@@ -919,7 +919,7 @@ async function savedPanes(port, base) {
           `const p = ${panes};
          return p.length === ${variants + 1} && !document.querySelector(".magpy-pane-busy") &&
            p.every((pane) => pane.querySelector("canvas")?.width) &&
-           ${spread}.classList.contains("on")`,
+           ${spread}.title.startsWith("Close")`,
           15_000,
         );
         if (!filled) {
@@ -947,7 +947,7 @@ async function savedPanes(port, base) {
           return `filled, the row: ${JSON.stringify(row)}`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
-          `return ${panes}.length === 1 && !${spread}.classList.contains("on")`,
+          `return ${panes}.length === 1 && !${spread}.title.startsWith("Close")`,
           5_000,
         );
         if (!back) return "pulled back, the view was not alone again";
@@ -978,7 +978,7 @@ async function savedPanes(port, base) {
         const split = await tab.until(
           `const p = ${panes};
          return p.length === ${variants} && !document.querySelector(".magpy-pane-busy") &&
-           ${spread}.classList.contains("on") && {
+           ${spread}.title.startsWith("Close") && {
              tag: p[0].querySelector(".magpy-pane-tag").classList.contains("on"),
              chips: [...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")]
                .filter((c) => c.getClientRects().length).map((c) => c.textContent),
