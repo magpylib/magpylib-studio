@@ -15,7 +15,7 @@ Alex that day, on the issue's open questions:
 - curved surfaces are measured on their drawn facets, said in the label's
   tooltip; exact values from python come later, if at all.
 
-Nothing is built.
+Built: §7 steps 1 and 2, the ruler in one view, every pair of picks.
 
 ---
 
@@ -59,7 +59,13 @@ the face's plane.
 
 - **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
   or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
-  face.
+  face. Only what is in sight: a corner or an edge counts where the first
+  surface a ray from the camera meets on the way to it is not nearer than itself
+  -- an edge a few pixels off the surface under the pointer is still on it, one
+  behind the shape a shape's depth further.
+- **A straight edge** runs from a corner to a corner without bending; **a flat
+  face** is a plane's triangles where every one round them meets them at an
+  edge, not smoothly as a sphere's or a cylinder's side's facets do.
 - **One dimension line, one label**, said by `sayLength`, or in degrees. Its
   tooltip gives Δx, Δy and Δz, and says when an end is on a curved surface's
   facets.

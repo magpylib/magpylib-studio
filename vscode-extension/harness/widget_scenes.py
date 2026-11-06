@@ -643,6 +643,10 @@ def main(out):
         magpy.magnet.Cuboid(
             polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.02, 0)
         ),
+        # the same, 3 mm higher: two faces parallel and in sight, to measure
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.04, 0.003)
+        ),
         magpy.magnet.CylinderSegment(
             polarization=(0, 0, 1),
             dimension=(0.005, 0.01, 0.01, 0, 90),
