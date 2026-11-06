@@ -105,17 +105,24 @@ an edit meanwhile between pieces. `write_html(path)` does the same from a cell,
 in one go, which only an interrupt stops. Either way the page opens where the
 view was looking. A scene with variants has them in a row along the foot of the
 view, beside a run's transport and under the scale bar, a click each, or press
-any and drag sideways to slide through them, one step to undo; and its page
-carries them: the same row, and a click draws that one, field lines and solved
-parts included, each drawn ahead when the page was written, from the scene as it
-was then. `write_html(path, variants=False)` leaves them out, and a list of
-names keeps those. Beside a run, each variant carries its own: every step solved
-and drawn ahead, so the page plays any variant's run. `run=False` leaves the
-runs out, the page holding the step the scene is drawn at, and
-`steps=(first, last)`, counted from 0, keeps that stretch of them. For a scene
-with a run or variants, **Export** asks in the view's foot first: two markers on
-the run's slider keep a stretch of steps, a click on a variant leaves it out,
-and **Save** writes what is kept, everything to start.
+any and drag sideways to slide through them, one step to undo. A chip lifted out
+of the row and dropped on a side of the view is a pane of its own there, as VS
+Code splits its editors: the scene at that variant's values beside the scene
+itself, up to twelve, each moved by its tag, resized by the line between it and
+the next, and closed by its ×. They turn together, with one legend, one colour
+scale and one transport for all, the cube and the scale bar where they stand in
+one view. A slider moves the variables no variant names in every pane; a pane
+keeps the values its variant names. Its page carries them: the same row, and a
+click draws that one, field lines and solved parts included, each drawn ahead
+when the page was written, from the scene as it was then.
+`write_html(path, variants=False)` leaves them out, and a list of names keeps
+those. Beside a run, each variant carries its own: every step solved and drawn
+ahead, so the page plays any variant's run. `run=False` leaves the runs out, the
+page holding the step the scene is drawn at, and `steps=(first, last)`, counted
+from 0, keeps that stretch of them. For a scene with a run or variants,
+**Export** asks in the view's foot first: two markers on the run's slider keep a
+stretch of steps, a click on a variant leaves it out, and **Save** writes what
+is kept, everything to start.
 
 Which is
 [direction.md](https://github.com/magpylib/magpylib-studio/blob/main/docs/direction.md)

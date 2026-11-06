@@ -829,6 +829,82 @@ async function savedVariants(port, base) {
   });
 }
 
+/** Variants side by side (#127) on a saved page: a chip lifted out of the
+ *  foot and dropped on the right half of the view is a pane of its own there,
+ *  drawn from the scenes the page carries, beside the scene's; closed, the
+ *  view is alone again. */
+async function savedPanes(port, base) {
+  await check(
+    "a chip dropped in the view is a pane beside the scene",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/variants.html`);
+        const chip = `[...document.querySelectorAll(".magpy-scene-variants .magpy-vars-chip")].find((c) => c.textContent === "eight")`;
+        if (
+          !(await tab.until(
+            `return ${VIEW}?.querySelector("canvas") && ${chip}`,
+            20_000,
+          ))
+        )
+          return "the page never drew its variants";
+        const [from, to] = await tab.evaluate(`
+        const c = ${chip}.getBoundingClientRect();
+        const v = ${VIEW}.getBoundingClientRect();
+        return [{ x: c.x + c.width / 2, y: c.y + c.height / 2 },
+                { x: v.right - v.width / 10, y: v.top + v.height / 2 }];`);
+        const mouse = (type, at) =>
+          tab.send("Input.dispatchMouseEvent", {
+            type,
+            ...at,
+            button: "left",
+            buttons: type === "mouseReleased" ? 0 : 1,
+            clickCount: 1,
+          });
+        await mouse("mousePressed", from);
+        await mouse("mouseMoved", { x: from.x, y: from.y - 40 });
+        await mouse("mouseMoved", to);
+        await mouse("mouseReleased", to);
+        const panes = `[...document.querySelectorAll(".magpy-pane")]`;
+        const drawn = await tab.until(
+          `const p = ${panes};
+         return p.length === 2 && !document.querySelector(".magpy-pane-busy") &&
+           p.every((pane) => pane.querySelector("canvas")?.width)`,
+          10_000,
+        );
+        if (!drawn) return "the pane was never drawn";
+        const seen = await tab.evaluate(`
+        const p = ${panes};
+        const [scene, eight] = p.map((pane) => pane.getBoundingClientRect());
+        return {
+          tags: p.map((pane) => pane.querySelector(".magpy-pane-tag span").textContent),
+          beside: eight.left >= scene.right,
+          differ: p[0].querySelector("canvas").toDataURL() !== p[1].querySelector("canvas").toDataURL(),
+          used: document.querySelector(".magpy-vars-chip.on")?.textContent ?? null,
+        };`);
+        if (
+          seen.tags.join() !== "scene,eight" ||
+          !seen.beside ||
+          !seen.differ ||
+          seen.used
+        )
+          return `dropped: ${JSON.stringify(seen)}`;
+        await tab.evaluate(
+          `document.querySelector(".magpy-pane-close").click()`,
+        );
+        const alone = await tab.until(
+          `return ${panes}.length === 1 && document.querySelector(".magpy-pane-tag").hidden`,
+          5_000,
+        );
+        if (!alone) return "closed, the view was not alone again";
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A saved page carries every variant's run: scrubbed to the first step,
  *  each variant draws its own -- the magnet where that variant starts it. */
 async function savedRunVariants(port, base) {
@@ -4466,6 +4542,7 @@ try {
   await sealedBody(browser.port, base);
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
+  await savedPanes(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);
   await applied(browser.port, base);

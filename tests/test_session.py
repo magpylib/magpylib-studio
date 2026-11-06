@@ -5607,6 +5607,31 @@ def test_a_variant_sets_the_values_it_holds_as_one_step():
     assert s.get_variables()["variant"] == "wide"
 
 
+def test_a_variant_is_drawn_for_the_grid_and_the_scene_left_as_it_is():
+    """The grid of variants (#127) draws each on a copy: the scene keeps its
+    values and its history, the copy is drawn again only once the scene has
+    changed, and a variant there is none of says so."""
+    s = _variant_scene()
+    s.save_variant("nominal")
+    s.save_variant("wide", {"radius": 0.035, "n": 16})
+    entries = len(s.get_history()["entries"])
+    wide = s.variant_scene("wide")
+    assert wide["ok"] and wide["frames"] == 1
+    assert wide["scene"]["meshes"][0]["name"] == "Sphere (D=17.5mm)"
+    here = s.get_scene()["meshes"][0]["name"]
+    assert here == "Sphere (D=10mm)", "the scene is as it was"
+    assert len(s.get_history()["entries"]) == entries
+    kept = s._variant_copies["wide"][1]
+    s.variant_scene("wide")
+    assert s._variant_copies["wide"][1] is kept, "drawn once while nothing moves"
+    s.set_variable("axis", "x")
+    s.variant_scene("wide")
+    assert s._variant_copies["wide"][1] is not kept
+    assert s.variant_scene("narrow") == {"ok": False, "error": "no variant 'narrow'"}
+    s.drop_variant_copies(keep=["wide"])
+    assert list(s._variant_copies) == ["wide"], "the panes still open keep theirs"
+
+
 def test_a_variant_holds_values_its_variables_can_take():
     """A formula is what a variable is, so no variant holds one; a value past
     a variable's limits is refused when the variant is saved, not later when

@@ -2269,6 +2269,9 @@ class MagpylibStudioSession:
         #: Answers what a host's edit does to what follows it, or None for a
         #: solve of the sheets that keep their parts: `followed`.
         self.follower = None
+        #: Variant -> (the document it was drawn from, a copy of this session
+        #: with the variant used): `variant_scene`.
+        self._variant_copies: dict = {}
         #: The last solve, whose factorization the next may reuse.
         self._kept_solve = None
         self._solves: list = []
@@ -8522,6 +8525,62 @@ class MagpylibStudioSession:
         if not result["ok"]:
             return {"ok": False, "error": f"{name}: {result['error']}"}
         return {**result, **report}
+
+    def variant_scene(self, name, frame=None):
+        """The scene as variant `name` draws it, for a view showing every
+        variant at once (#127): drawn on a copy of this session with the
+        variant used -- solved again as an edit would solve it -- so that
+        this one is left as it is. A step of its run, with `frame`.
+
+        The copy is kept while the scene stays as it is, so the steps of a
+        run cost a draw each, not a copy and a solve again; an edit makes a
+        new one at the next call. The answer carries `scene`, the variant's
+        `tree` and its run's `frames`, or `ok` False and why the variant
+        cannot be used."""
+        doc = json.dumps(self.to_dict())
+        kept = self._variant_copies.get(name)
+        if kept is None or kept[0] != doc:
+            copied = self._copied(doc)
+            result = copied.followed(lambda: copied.use_variant(name))
+            # a refusal is kept too: asked again, it is not copied again
+            kept = (doc, copied if result.get("ok") else result)
+            # what was drawn from another scene than this is of no more use
+            self._variant_copies = {
+                other: was
+                for other, was in self._variant_copies.items()
+                if was[0] == doc
+            }
+            self._variant_copies[name] = kept
+        copied = kept[1]
+        if not isinstance(copied, MagpylibStudioSession):
+            return {"ok": False, "error": copied.get("error", "")}
+        return {
+            "ok": True,
+            "scene": copied.get_scene(frame=frame),
+            "tree": copied.object_tree(),
+            "frames": copied.path_steps(),
+        }
+
+    def drop_variant_copies(self, keep=()):
+        """Let go of the copies `variant_scene` keeps, but for the variants
+        `keep` names: a view that closed their panes will not ask again."""
+        keep = set(keep)
+        self._variant_copies = {
+            name: was for name, was in self._variant_copies.items() if name in keep
+        }
+        return {"ok": True}
+
+    def _copied(self, doc):
+        """A session of `doc`, this one's document as JSON, drawn and solved
+        as this one is: the same follower, sheets solved for the same."""
+        made = MagpylibStudioSession(mesh_cache=self._mesh_cache)
+        made.load_scene(json.loads(doc), self._base_dir)
+        made.follower = self.follower
+        made._solved_for = {
+            key: dict(seen) for key, seen in getattr(self, "_solved_for", {}).items()
+        }
+        made._stale = None
+        return made
 
     def save_variant(self, name, values=None):
         """Keep values for the scene's variables under a name: a variant, set

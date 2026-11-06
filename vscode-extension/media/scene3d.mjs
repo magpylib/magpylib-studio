@@ -5870,7 +5870,15 @@ export function createScene3d() {
   function snapshot() {
     if (!renderer) return null;
     drawPicture();
-    drawCorner(false); // the scale bar is part of the picture; the cube, a control
+    // the scale bar is part of the picture, the cube a control; the bar is
+    // in it even where a host has another view draw it (`setCorner`)
+    const parts = cornerParts;
+    cornerParts = { cube: true, bar: true };
+    try {
+      drawCorner(false);
+    } finally {
+      cornerParts = parts;
+    }
     renderer.present();
     return renderer.domElement.toDataURL("image/png");
   }
@@ -6700,7 +6708,7 @@ void main() {
    *  pointer over the view would be a measurement, for the few over the
    *  corner. */
   function onCorner(event) {
-    if (axesMode !== "cube" || !renderer) return null;
+    if (axesMode !== "cube" || !renderer || !cornerParts.cube) return null;
     const size = renderer.getSize(new THREE.Vector2());
     const [left, top] = cornerAt(size);
     const side = cornerSide();
@@ -6830,13 +6838,23 @@ void main() {
    *  scale is said that way. `withCube` false leaves the corner out: a picture
    *  of the view keeps the bar, which is part of what it shows, and not the
    *  control. */
+  /** Which of the corner's two this view draws: the cube -- with the axes and
+   *  the applied field's arrows round it -- and the scale bar. Both, alone;
+   *  a host laying views side by side gives each to the view where it would
+   *  stand in one (the widget's panes, #127). */
+  let cornerParts = { cube: true, bar: true };
+  function setCorner({ cube = true, bar = true } = {}) {
+    cornerParts = { cube, bar };
+    if (!cube) markCube(null);
+  }
+
   function drawCorner(withCube) {
     if (axesMode !== "cube" || !renderer) return;
     const size = renderer.getSize(new THREE.Vector2());
     if (!corner) dressCorner();
     renderer.autoClear = false;
     renderer.clearDepth(); // the scene's depths are nothing to the corner
-    if (withCube) {
+    if (withCube && cornerParts.cube) {
       aimCorner();
       const side = cornerSide();
       const [left, top] = cornerAt(size, side);
@@ -6844,7 +6862,11 @@ void main() {
       renderer.render(corner.scene, corner.camera);
       renderer.setViewport(0, 0, size.x, size.y);
     }
-    drawApplied(size, withCube);
+    if (cornerParts.cube) drawApplied(size, withCube);
+    if (!cornerParts.bar) {
+      renderer.autoClear = true;
+      return;
+    }
     // Across the foot, low beside the axes at rest -- and left of them, in a
     // view too narrow for both -- above what floats under it (`keepClear`).
     // Nothing floats over a picture, so there it stands at the foot whatever
@@ -7609,6 +7631,7 @@ void main() {
     highlight,
     hint,
     setAxes,
+    setCorner,
     setFlow,
     setColorRanges,
     keepClear,

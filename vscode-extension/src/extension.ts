@@ -2054,6 +2054,7 @@ const ACTS = new Set([
   'redo',
   'dragStart',
   'cancelDrag',
+  'useVariant',
 ]);
 
 /** Fill in a scene's tab: the studio's view, drawn for that scene. */
@@ -2088,6 +2089,8 @@ function adoptScenePanel(
       void setVisibleFromPanel(context, message.hide, message.show);
     } else if (message.type === 'setFieldLines') {
       void setFieldLinesFromPanel(context, message.on === true);
+    } else if (message.type === 'useVariant') {
+      void useVariantFromPanel(context, String(message.name));
     } else if (message.type === 'undo' || message.type === 'redo') {
       // the view's buttons: the same commands the keys and the tree run
       void vscode.commands.executeCommand(`magpylib-studio.${message.type}`);
@@ -2405,6 +2408,28 @@ async function setFieldLinesFromPanel(
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
     );
+  }
+  broadcastMutation();
+}
+
+/** A tile's name clicked in the grid of variants (#127): that variant used,
+ *  as the Variables view uses one, and every surface brought along. */
+async function useVariantFromPanel(
+  context: vscode.ExtensionContext,
+  name: string,
+): Promise<void> {
+  try {
+    const engine = await getEngine(context);
+    const result = await engine.request<{ ok: boolean; error?: string }>('use_variant', { name });
+    if (!result.ok) {
+      vscode.window.setStatusBarMessage(`Magpylib Studio: ${result.error}`, 5000);
+      return;
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Magpylib Studio: ${err instanceof Error ? err.message : err}`,
+    );
+    return;
   }
   broadcastMutation();
 }

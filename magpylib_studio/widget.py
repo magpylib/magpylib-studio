@@ -190,6 +190,12 @@ function answer({ id, method, params }) {
   } else if (variants && method === "use_variant" && variants.scenes[params.name]) {
     use(params.name);
     reply = { result: { ok: true } };
+  } else if (variants && method === "variant_scene" && variants.scenes[params.name]) {
+    // a tile of the grid of variants: the variant's scene, or a step of its run
+    const drawn = variants.scenes[params.name];
+    const step = (drawn.run || [])[params.frame ?? -1];
+    const scene = decoded(step || drawn);
+    reply = { result: { ok: true, scene, tree: drawn.tree, frames: drawn.frames || 1 } };
   } else {
     const message = "a saved page has no python to answer " + method;
     reply = { error: { type: "MethodError", message } };
@@ -787,6 +793,9 @@ class SceneWidget(anywidget.AnyWidget):
             "restore_variable",
             # a variant from the panel's dropdown: its values, as one edit
             "use_variant",
+            # and each variant's scene, for the grid of them (#127)
+            "variant_scene",
+            "drop_variant_copies",
             "quantity",
             "expression_help",
             # the object panel: the selection's parameters and pose

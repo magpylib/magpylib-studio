@@ -2566,8 +2566,9 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
     """`view.save_variant(name)` keeps the values as they are, formulas left
     out, and hands them back to paste into the mark; the panel lists it at
     once, and its dropdown sets the values back as one settled edit, told to
-    the notebook once and undone in one step. Making, renaming and removing
-    one is code's, not the view's."""
+    the notebook once and undone in one step; the grid of variants draws it
+    aside, with no edit at all. Making, renaming and removing one is code's,
+    not the view's."""
     studio = _studio_of(_design())
     revision = studio.revision
     kept = studio.save_variant("start")
@@ -2580,6 +2581,8 @@ def test_a_variant_is_saved_from_a_cell_and_used_from_the_panel():
 
     studio.set_variable("r", 0.03)
     assert _ask(studio, "get_variables")["result"]["variant"] is None
+    tile = _ask(studio, "variant_scene", name="start")["result"]
+    assert tile["ok"] and tile["scene"]["meshes"] and studio.variables["r"] == 0.03
     assert _ask(studio, "use_variant", name="start")["result"]["ok"]
     assert studio.revision == revision + 3
     assert studio.last_edit == {"by": "use_variant", "variant": "start"}

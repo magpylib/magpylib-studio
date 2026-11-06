@@ -47,9 +47,13 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
 ## A scene, its variants and a run
 
 A `@scene` function shown in the view has its variants as a row along the view's
-foot. With the handles out (`editable=True`, or the pencil), the sliders toggle
-opens a slider per variable, and `open_panel="variables"` opens it at the start.
-An object on a path is a run, which the view plays.
+foot. A chip lifted out of the row and dropped on a side of the view is a pane
+of its own there, the scene at that variant's values beside the scene, as VS
+Code splits its editors: up to 12, moved by their tags, resized by the line
+between them, turned together. With the handles out (`editable=True`, or the
+pencil), the sliders toggle opens a slider per variable, and
+`open_panel="variables"` opens it at the start. An object on a path is a run,
+which the view plays.
 
 ```python
 from typing import Annotated

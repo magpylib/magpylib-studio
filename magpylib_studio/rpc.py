@@ -39,6 +39,8 @@ _PUBLIC = {
     "get_values",
     "get_figure",
     "get_scene",
+    "variant_scene",
+    "drop_variant_copies",
     "get_overlaps",
     "set_overlap_intended",
     "get_gap",

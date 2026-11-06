@@ -43,6 +43,9 @@
  *   false is the rows without it, for that host's panel. `slide` makes the
  *   pressed toggle a handle: dragged sideways, each variant it passes is
  *   shown, as a slider's values are, and the one let go on is used.
+ *   `onLift(name, event)`, with `slide`: the pressed toggle lifted out of
+ *   the row, up, before any slide -- the host's to carry from there (the
+ *   widget drops it in the view as a pane of its own), and nothing used.
  *
  * And gives back `{ refresh(), help(), dragging() }`: read the rows again
  * (skipped while a thumb is held, and caught up at the release), load the
@@ -149,6 +152,7 @@ export function createVariables(
     variants: withVariants = true,
     fits = asToggles,
     slide = false,
+    onLift = null,
   } = {},
 ) {
   const withHelp = !compact && !variantsOnly;
@@ -264,10 +268,17 @@ export function createVariables(
         chip.addEventListener("click", (event) => {
           if (!on && !(slide && event.detail > 0)) useVariant(name);
         });
+        const up = onLift ? ", or up into the view beside the scene" : "";
         if (slide && !chip.disabled) {
-          chip.title = `${says(name)} -- drag sideways for the others`;
+          chip.title = `${says(name)} -- drag sideways for the others${up}`;
           chip.addEventListener("pointerdown", (event) =>
             slideFrom(event, chips, names, unusable),
+          );
+        } else if (onLift && !chip.disabled) {
+          // no slide here: a press only lifts, and a click still uses it
+          chip.title = `${says(name)} -- drag it up into the view beside the scene`;
+          chip.addEventListener("pointerdown", (event) =>
+            liftFrom(event, chip, name),
           );
         }
         chips.push(chip);
@@ -324,6 +335,29 @@ export function createVariables(
       });
   }
 
+  /** How far above its row a toggle is lifted, in CSS pixels, to be carried. */
+  const LIFT = 14;
+
+  /** A press on a toggle where nothing slides: lifted up out of the row, it
+   *  is the host's to carry (`onLift`); let go where it was, it is a click. */
+  function liftFrom(event, chip, name) {
+    if (event.button !== 0) return;
+    const top = chip.getBoundingClientRect().top;
+    const move = (e) => {
+      if (e.clientY >= top - LIFT) return;
+      done();
+      onLift(name, e);
+    };
+    const done = () => {
+      removeEventListener("pointermove", move, true);
+      removeEventListener("pointerup", done, true);
+      removeEventListener("pointercancel", done, true);
+    };
+    addEventListener("pointermove", move, true);
+    addEventListener("pointerup", done, true);
+    addEventListener("pointercancel", done, true);
+  }
+
   function slideFrom(event, chips, names, unusable) {
     if (event.button !== 0) return; // the main button, a finger or a pen
     event.preventDefault(); // no text selected along the way
@@ -358,6 +392,19 @@ export function createVariables(
     press(nearest(event.clientX));
     const pressedAt = at;
     const move = (e) => {
+      // lifted up out of the row before sliding: the host carries it
+      if (!slid && onLift) {
+        const box = chips[pressedAt].getBoundingClientRect();
+        if (e.clientY < box.top - LIFT) {
+          removeEventListener("pointermove", move, true);
+          removeEventListener("pointerup", release, true);
+          removeEventListener("pointercancel", release, true);
+          press(start);
+          dragging = false;
+          onLift(names[pressedAt], e);
+          return;
+        }
+      }
       const i = nearest(e.clientX);
       if (i === at) return;
       if (!slid) {
