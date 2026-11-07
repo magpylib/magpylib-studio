@@ -578,6 +578,12 @@ def _cut(saved, first, last):
         state["duration"] = state["duration"] * (kept - 1) / (whole - 1)
     if state.get("payload") is not None:
         state["payload"] = _cut_drawn(state["payload"], first, last, whole)
+    if state.get("step") is not None and not (state.get("payload") or {}).get(
+        "path_indices"
+    ):
+        # counted from the first kept, as the frames are; a run that names
+        # its steps (`path_indices`) keeps their names
+        state["step"] = min(max(state["step"] - first, 0), kept - 1)
     saved["run"] = _cut_run(saved["run"], first, last, kept, whole)
     variants = saved.get("variants")
     if not variants:
@@ -649,7 +655,18 @@ def _cut_drawn(payload, first, last, whole):
     # a session's payload draws its last step, a captured run's its first
     drawn = payload.get("step") or 0
     payload["step"] = drawn - first if first <= drawn <= last else -1
+    if payload.get("path_indices"):
+        payload["path_indices"] = payload["path_indices"][first : last + 1]
     return payload
+
+
+def _drawn_step(payload):
+    """The step of the path `payload` draws, as `SceneWidget.step` counts:
+    a captured run's first, a session's last -- in a run magpylib kept fewer
+    frames of, the path's step that frame is."""
+    drawn = max(payload.get("step") or 0, 0)
+    steps = payload.get("path_indices")
+    return steps[min(drawn, len(steps) - 1)] if steps else drawn
 
 
 def _positions(tree, at=""):
@@ -739,6 +756,17 @@ class SceneWidget(anywidget.AnyWidget):
     frames = traitlets.Int(1).tag(sync=True)
     duration = traitlets.Float(5.0).tag(sync=True)
     repeat = traitlets.Bool(False).tag(sync=True)
+    #: The step of the path the view shows: the row of ``sensor.getB(...)``
+    #: for that moment of the run, which a plot beside the view follows with
+    #: ``view.observe(..., "step")``. The view says it when the run stops on
+    #: one -- paused, at its end, scrubbed to, a few times a second while the
+    #: thumb moves -- and not at each frame it plays. Set from code, the view
+    #: stops there. In a run magpylib kept fewer frames of
+    #: (``animation_maxframes``) it is the nearest step kept, and the counter
+    #: under the view counts the path's steps too. A new scene starts at the
+    #: step it is drawn at -- a capture's first, a session's last -- or at one
+    #: given to the constructor, and a page saved opens on it.
+    step = traitlets.Int(0).tag(sync=True)
     #: Whether the view's handles are out. Out, its objects are a studio
     #: session's, which keeps what a drag does to them -- see `objects`:
     #: ``SceneWidget(..., editable=True)`` from the start, or the pencil among
@@ -934,10 +962,11 @@ class SceneWidget(anywidget.AnyWidget):
         editable = traits.pop("editable", False)
         if editable == "never":
             editable = None  # the word for it; the trait holds None
-        # named variants are checked against the scene's, once it is in
-        variant_traits = {
+        # named variants are checked against the scene's, once it is in, and
+        # a step against its run, which a new scene sets
+        later = {
             key: traits.pop(key)
-            for key in ("panes", "selected_variants")
+            for key in ("panes", "selected_variants", "step")
             if key in traits
         }
         super().__init__(**traits)
@@ -1025,7 +1054,7 @@ class SceneWidget(anywidget.AnyWidget):
         if self.field_lines and self._session is None:
             # asked for when the view was made, before there were objects
             self._field_lines_asked_for({"new": True})
-        for key, value in variant_traits.items():
+        for key, value in later.items():
             setattr(self, key, value)
 
     @classmethod
@@ -1057,7 +1086,7 @@ class SceneWidget(anywidget.AnyWidget):
     def _adopt(self, scene):
         """Draw `scene`, in one update.
 
-        `hold_sync` because these are four traits and the view reads them
+        `hold_sync` because these are five traits and the view reads them
         together: sent one at a time, a payload can arrive at a browser that
         still believes the last scene's frame count, and the playback controls
         are drawn from it.
@@ -1073,6 +1102,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.duration = float(scene.animation.time)
             self.repeat = bool(scene.animation.repeat)
             self.payload = payload
+            self.step = _drawn_step(payload)
 
     def update(self, *objects, animation=False, **kwargs):
         """Point this view at `objects`.
@@ -1539,6 +1569,17 @@ class SceneWidget(anywidget.AnyWidget):
             )
         return proposal["value"]
 
+    @traitlets.validate("step")
+    def _valid_step(self, proposal):
+        """A step the view can show: from 0 to the path's last, and in a run
+        magpylib kept fewer frames of, the nearest it kept -- the earlier of
+        two as near, as the view picks -- so the trait and the picture agree."""
+        value = int(proposal["value"])
+        steps = (self.payload or {}).get("path_indices")
+        if steps:
+            return min(steps, key=lambda kept: abs(kept - value))
+        return min(max(value, 0), max(self.frames - 1, 0))
+
     @traitlets.observe("editable")
     def _editing_asked_for(self, change):
         """The handles asked for after the view was made -- the pencil among
@@ -1649,6 +1690,7 @@ class SceneWidget(anywidget.AnyWidget):
             self.payload = payload
             # a scene with paths plays them, a step served at a time
             self.frames = self._session.path_steps()
+            self.step = _drawn_step(payload)
             self.tree = tree
             self.selected = [key for key in self.selected if key in ids]
             self.hidden = [key for key in self.hidden if key in ids]
@@ -1795,6 +1837,7 @@ class SceneWidget(anywidget.AnyWidget):
             camera=self._camera,
             measurements=self.measurements,
         )
+        state["step"] = self.step  # where the page opens
         if not run:
             state["frames"] = 1  # the step drawn, still
         pieces = self._steps(state, frames, step, names, copy, limit, page, keep)

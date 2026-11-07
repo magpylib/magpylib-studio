@@ -2458,6 +2458,11 @@ def run_payload(scene):
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
     payload = played or view_payload(scene, index=0)
+    # the path's step each frame is, where magpylib kept fewer frames than
+    # the path has steps: what the view counts its `step` in
+    steps = [int(i) for i in scene.animation.path_indices] if animated else []
+    if steps and steps != list(range(len(steps))):
+        payload = {**payload, "path_indices": steps}
     return payload, (scene if animated and played is None else None)
 
 

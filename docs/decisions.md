@@ -63,6 +63,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
 | [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
 | [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
+| [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
 
 ---
 
@@ -2885,3 +2886,46 @@ engine can search what a person or an agent guesses at.
 - Two crossings closer together than the samples can both be missed; `samples`
   raises the density.
 - A scene with a solve pays it at each value read, `evaluations` of them.
+
+## 0055. A plot follows the run by its step
+
+**Status:** accepted 2026-11-07, on Alex's word ("ok go"), the way magpylib's
+own `show()` links its 2D plots to a run, without plots in the widget.
+
+### Context
+
+magpylib's `show()` draws a run in 3D beside subplots of what a sensor reads
+along it, a marker on each at the step shown. The widget plays and scrubs a run,
+but the step on screen lived in the browser alone: a notebook could plot the
+field over the run and not say where the view was, nor move it.
+
+### Decision
+
+- **One trait, `step`, both ways.** The view says which step of the path it
+  shows; a cell sets it and the run stops there. The plot is the host's, drawn
+  with whatever the notebook uses, and the widget gains no panel
+  ([0022](#0022-what-the-widget-is-and-is-not)).
+- **Counted in the path's steps,** the rows of a field read along it, not in
+  frames: a run magpylib kept fewer frames of (`animation_maxframes`) carries
+  which step each frame is, a step set between two kept ones is the nearest
+  kept, and the transport's counter counts the same steps.
+- **Said when the run stops on one**: a pause, its end, a drag, the view let go
+  of, a scrub -- at most every 100 ms while the thumb moves, its last place
+  always, and a frame still on its way where it lands -- and never at each frame
+  played, so a plot following it is not drawn again sixty times a second.
+- **Set from code, said back once**, in the message that says `revision` back
+  when an edit set both: marimo re-runs the cells that read a widget when the
+  view says it changed, not when python does. While the run plays the trait
+  holds where it started, so setting that same step does nothing.
+- **A new scene opens where its step says**: python sets it with the scene, a
+  capture's first step, a session's last; a step given to the constructor, or
+  set before the view is drawn, is where it opens, and a saved page opens on it.
+
+### Rejected
+
+- Subplots in the widget, as `show()` draws them: an analysis surface, which
+  0022 keeps out, and a second plotting library to keep.
+- Telling every frame played: the kernel would hear sixty messages a second, and
+  a plot redrawn each time would fall behind the run it follows.
+- Counting in frames: the index would mean a row of `getB` only when magpylib
+  kept every step.

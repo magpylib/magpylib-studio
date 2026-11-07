@@ -305,6 +305,25 @@ def test_a_trait_given_to_the_constructor_outlives_the_scene(swept):
     assert (view.repeat, view.duration) == (True, 2.5)
 
 
+def test_step_counts_the_steps_of_the_path(swept):
+    """`step` is the row of a field read along the path: a capture starts at
+    its first, a session at its last, either at one given to the constructor;
+    past either end it is that end, in a run magpylib kept fewer frames of the
+    nearest step kept; and a page opens on it, counted from its first step."""
+    view = widget.SceneWidget(*swept, animation=True)
+    assert (view.frames, view.step) == (12, 0)
+    thinned = widget.SceneWidget(*swept, animation=True, animation_maxframes=4)
+    assert thinned.payload["path_indices"] == [0, 4, 11]
+    for asked, kept in ((99, 11), (-2, 0), (3, 4), (2, 0)):
+        thinned.step = asked
+        assert thinned.step == kept
+    assert widget.SceneWidget(*swept, editable=True).step == 11
+    assert widget.SceneWidget(*swept, editable=True, step=5).step == 5
+    view.step = 7
+    assert view._saved()["state"]["step"] == 7
+    assert view._saved(steps=(3, 9))["state"]["step"] == 4
+
+
 def test_the_capture_is_no_backend_to_choose(scene_objects):
     """Studio's internal capture stays out of magpylib's registry, and what
     magpylib warns about during one is said in the widget's name."""

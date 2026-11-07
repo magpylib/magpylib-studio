@@ -26,6 +26,22 @@ along the foot of the view plays and scrubs them: in the browser, from the
 motion, when every step is the first one moved — and a frame at a time from
 python when the run changes shape as it goes.
 
+`view.step` is the step on screen, the row of a field read along the path, so a
+plot of what a sensor reads can mark where the run is. The view says it when the
+run pauses, ends or is scrubbed, not at each frame it plays; set from a cell,
+the view goes there:
+
+```python
+view = SceneWidget(magnet, sensor, animation=True)
+B = sensor.getB(magnet)  # a row per step of the path
+
+view.observe(lambda change: marker.set_xdata([change.new]), "step")
+view.step = 20  # the view stops at step 20
+```
+
+In marimo, feed a `mo.state` from that observer and read it in the plot's cell;
+the turning magnet's notebook does that.
+
 The axes button goes round three ways to show the scale: a view cube with a
 scale bar, which is the default, the graduated box, and none; `axes="cube"`,
 `"box"` or `"none"` chooses one from code. At rest the corner shows only small

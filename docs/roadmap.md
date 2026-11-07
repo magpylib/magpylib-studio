@@ -282,6 +282,12 @@ maintainer's yes.
 Ask each one as a plain question with a recommended answer; the R3 four went
 unanswered for two days because nobody asked them.
 
-None open. Decided 2026-10-24, on Alex's go-ahead: R7's open solver is
-material-response's `[fem]` extra, before the Maxwell emitter (0037); R5's
-pointing comes before the view in the chat.
+- **A plot of the studio's own beside the view**
+  ([#158](https://github.com/magpylib/magpylib-studio/issues/158)): magpylib's
+  subplots in the widget backend, a plot against a variable with goal seek on
+  it, a probe line's profile, or none. Recommended: magpylib's subplots, scoped
+  by its own `show()` spec; it supersedes 0055's rejection of subplots.
+
+Decided 2026-10-24, on Alex's go-ahead: R7's open solver is material-response's
+`[fem]` extra, before the Maxwell emitter (0037); R5's pointing comes before the
+view in the chat.

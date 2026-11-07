@@ -1,0 +1,120 @@
+<!doctype html>
+<!--
+  The step a notebook reads (`step`): a scrub tells it a few times a second
+  and its last place always, a step set from python moves the run there, and
+  a pause tells where it stopped. `window.result` says what was told.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body style="margin: 12px">
+    <div id="widget"></div>
+    <div id="served"></div>
+    <script type="module">
+      import { widget, wait } from "./host.mjs";
+
+      const run = await (await fetch("/out/run.json")).json();
+      const values = structuredClone(run.state);
+      const listeners = {};
+      const told = []; // each step the view saved
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          for (const listener of listeners[`change:${key}`] || []) {
+            listener(value);
+          }
+        },
+        save_changes() {
+          if (told.at(-1) !== values.step) told.push(values.step);
+        },
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send() {},
+      };
+      const el = document.getElementById("widget");
+      widget.render({ model, el });
+      await wait(1500);
+
+      const input = el.querySelector(".magpy-scene-scrub");
+      const counter = () =>
+        el.querySelector(".magpy-scene-counter").textContent;
+      // the thumb dragged over twenty steps in 200 ms
+      for (let step = 1; step <= 20; step++) {
+        input.value = String(step);
+        input.dispatchEvent(new Event("input"));
+        await wait(10);
+      }
+      await wait(300);
+      const scrubbed = [...told];
+
+      // set from python, as `view.step = 7` is
+      model.set("step", 7);
+      await wait(300);
+      const fromPython = { counter: counter(), thumb: input.value };
+      const toldAfterPython = told.length;
+
+      // played, then paused: the step it stopped on
+      const play = el.querySelector(".magpy-scene-transport button");
+      play.click();
+      await wait(500);
+      play.click();
+      await wait(50);
+      const paused = { step: values.step, counter: counter() };
+
+      // A run served a frame at a time, 300 ms each, whose steps are every
+      // other step of its path (`path_indices`): paused with a frame on its
+      // way, the step told is where that frame lands, counted in path steps.
+      const morph = await (await fetch("/out/served.json")).json();
+      const kept = morph.state.payload;
+      const served = structuredClone(morph.state);
+      served.payload = {
+        ...kept,
+        path_indices: Array.from({ length: served.frames }, (_, i) => 2 * i),
+      };
+      const heard = {};
+      const servedTold = [];
+      const second = {
+        get: (key) => served[key],
+        set(key, value) {
+          served[key] = value;
+          for (const listener of heard[`change:${key}`] || []) listener(value);
+        },
+        save_changes() {
+          if (servedTold.at(-1) !== served.step) servedTold.push(served.step);
+        },
+        on: (event, listener) => (heard[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "frame") return;
+          const at = Math.min(message.index, morph.run.length - 1);
+          setTimeout(() => {
+            for (const listener of heard["msg:custom"] || []) {
+              listener({
+                kind: "frame",
+                ...morph.run[at],
+                runId: message.runId,
+              });
+            }
+          }, 300);
+        },
+      };
+      const box = document.getElementById("served");
+      widget.render({ model: second, el: box });
+      await wait(1500);
+      box.querySelector(".magpy-scene-transport button").click();
+      await wait(1000);
+      box.querySelector(".magpy-scene-transport button").click(); // in flight
+      await wait(800); // landed
+      const landed = {
+        step: served.step,
+        counter: box.querySelector(".magpy-scene-counter").textContent,
+        told: servedTold,
+      };
+
+      window.result = { scrubbed, fromPython, toldAfterPython, paused, landed };
+    </script>
+  </body>
+</html>

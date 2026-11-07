@@ -8,6 +8,20 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A plot that follows the run: `view.step`</summary>
+
+The notebook view says which step of the run it shows as `view.step`, the row of
+a field read along the path, when the run pauses, ends or is scrubbed, a few
+times a second while the thumb moves, so a plot of what a sensor reads can mark
+where the run is; `view.step = 12` sends the run there. A run magpylib kept
+fewer frames of counts in the path's steps all the same. The turning magnet's
+notebook plots the field above the magnet beside the view, its marker following
+the run, and a click on a curve sends the view to that step
+([#157](https://github.com/magpylib/magpylib-studio/pull/157)).
+
+</details>
+
+<details>
 <summary>Goal seek: the value of a variable for a field you want</summary>
 
 `session.goal_seek("gap", 0.05)` finds every value of `gap` at which the sensor
