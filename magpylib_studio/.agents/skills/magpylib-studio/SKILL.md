@@ -222,9 +222,10 @@ print(
   variable's limits or `within=(low, high)`, and sets the one nearest the
   current value as one step (`apply=False` only looks). The reading must be one
   number: `component="magnitude"` (the default) or `"x"`, `"y"`, `"z"`, at one
-  point; a sensor with pixels or a path needs `at=` to pick one. With no
-  solution it is refused, saying what the field reads over the range and the
-  `closest` value.
+  point; a sensor with pixels or a path needs `at=` to pick one. Each value is
+  tried as the slider would set it, solved parts solved again. With no solution
+  it is refused, saying what the field reads over the range and the `closest`
+  value.
 
 ```python
 found = s.session.goal_seek("radius", 0.1, points=[(0, 0, 0)])

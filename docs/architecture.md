@@ -441,8 +441,9 @@ with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D
 rendering along the sensors), `get_field_map` (a heatmap on a plane or off a
 sensor's pixel grid, sized from the scene's extent), `get_sweep_figure` (the
 field against a variable), `goal_seek` (the values of a variable where one
-reading meets a target: a scan, each crossing refined by Brent's method, the
-nearest set as one step;
+reading meets a target: a scan, each crossing refined by Brent's method, each
+value tried on a copy of the session as a slider sets it, so its follower
+answers and its solved parts are solved again; the nearest set as one step;
 [0054](decisions.md#0054-a-goal-seek-moves-one-variable-to-a-reading)).
 
 **Scripts draw in the window they were run from**

@@ -4718,6 +4718,21 @@ def test_goal_seek_takes_the_closer_whole_number_of_a_count():
     found = s.goal_seek("n", target)
     assert found["solutions"] == [{"value": 5, "reading": five}]
     assert found["applied"] == 5 and found["evaluations"] == 20
+    # sampled more sparsely than every whole number, halved to the same pair
+    sparse = s.goal_seek("n", target, samples=4, apply=False)
+    assert sparse["solutions"] == found["solutions"]
+    assert sparse["evaluations"] < found["evaluations"]
+
+
+def test_goal_seek_reads_a_solved_scene_solved_at_each_value():
+    """The U-core's current drives its solved core: read with the charges of
+    100 A, the field at 151 A would be off by half, and 5 mT out of reach."""
+    s = MagpylibStudioSession()
+    assert s.load_example("ucore")["ok"]
+    found = s.goal_seek("current", 0.005, at=[7], within=(100, 200), samples=4)
+    assert np.isclose(found["applied"], 151.4, atol=0.1)
+    assert np.isclose(s.get_field()["magnitude"][7], 0.005, rtol=1e-5)
+    assert s.stale_solves() == []
 
 
 def test_goal_seek_finds_nothing_where_coils_cancel():
@@ -4734,13 +4749,25 @@ def test_goal_seek_finds_nothing_where_coils_cancel():
 
 
 def test_goal_seek_leaves_out_values_the_scene_refuses_and_jumps():
+    # a width of 0 or less refuses the cube; the other magnet still gives a
+    # field there, which is no reading of the scene
     s = _cube_and_sensor(z=0.01)
     s.set_variable("w", 0.01)
     s.set_variable_bounds("w", min=-0.01, max=0.02)
     assert s.set_param("m", "dimension", ["=w", 0.01, 0.01])["ok"]
-    found = s.goal_seek("w", 0.05, apply=False)
-    assert found["ok"] and len(found["solutions"]) == 1
-    assert all(skip["value"] <= 0 for skip in found["skipped"])
+    assert s.set_param("sens", "position", [0, 0, "=0.01 - w"])["ok"]
+    s.add_object(
+        "m2",
+        "magnet.Cuboid",
+        {
+            "polarization": [0, 0, 1],
+            "dimension": [0.01] * 3,
+            "position": [0.03, 0, 0],
+        },
+    )
+    found = s.goal_seek("w", 0.04)
+    assert [step["value"] > 0 for step in found["solutions"]] == [True]
+    assert found["skipped"] and all(skip["value"] <= 0 for skip in found["skipped"])
 
     # H along z jumps at the cube's faces, h = ±5 mm, and passes 0 nowhere else
     s = _cube_and_sensor(x=0.001)
@@ -4762,6 +4789,9 @@ def test_goal_seek_leaves_out_values_the_scene_refuses_and_jumps():
         ("h", 0.05, {"component": "x", "points": [[0, 0, 0.02]]}, "changes nothing"),
         ("h", 0.05, {"points": [[0, 0, 0.02], [0, 0, 0.03]]}, "pick one with at="),
         ("h", 0.05, {"within": (0.03, 0.01)}, "nothing to search in"),
+        ("h", 0.05, {"within": (0.01, float("inf"))}, "two finite numbers"),
+        ("h", 0.05, {"points": [[0, 0, 0.02]], "at": 0}, "picks no single one"),
+        ("h", 0.05, {"points": [[0, 0, 0.02]] * 2, "at": 5}, "picks no single one"),
     ],
 )
 def test_goal_seek_says_why_it_finds_nothing(variable, target, options, said):

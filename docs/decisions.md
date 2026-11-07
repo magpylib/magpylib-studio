@@ -62,7 +62,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
 | [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
 | [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
-| [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | proposed 2026-11-07                                                  |
+| [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
 
 ---
 
@@ -2838,8 +2838,8 @@ side (#147), the same gap read in each variant is what a split view is for.
 
 ## 0054. A goal seek moves one variable to a reading
 
-**Status:** proposed 2026-11-07, with the call that builds it; hard limits first
-on Alex's word, the same day.
+**Status:** accepted 2026-11-07, on Alex's word: hard limits first, the nearest
+solution applied.
 
 ### Context
 
@@ -2859,9 +2859,14 @@ engine can search what a person or an agent guesses at.
   not reach but the scene allows is found. A variable with neither is refused,
   not guessed at. A count is searched over every whole number; a formula and a
   choice are refused.
-- **Every crossing, the nearest applied.** A scan, then each crossing refined to
-  the float; all are listed, and the one nearest the current value is set as one
-  undo step, so the design moves least. `apply=False` only looks.
+- **Each value as a slider sets it**, on a copy of the session: the scene's own
+  refusals, its follower answered and its solved parts solved again, so a
+  reading is the one the person would see at that value, and the scene is
+  untouched until the answer is set, followed in the same way.
+- **Every crossing, the nearest applied** (Alex, 2026-11-07). A scan, then each
+  crossing refined to the float; all are listed, and the one nearest the current
+  value is set as one undo step, so the design moves least. `apply=False` only
+  looks.
 - **Nothing left out quietly.** A value the scene refuses is listed in
   `skipped`, a jump across the target in `jumps`, and with no solution the
   answer says what the field reads over the range and the closest value.

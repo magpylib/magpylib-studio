@@ -2012,14 +2012,6 @@ def _same_pose(obj, position, orientation):
     return bool(np.all(turned.magnitude() < 1e-9))
 
 
-class _ManyReadings(Exception):
-    """The field at a goal seek's observer is not one reading: `shape` of them."""
-
-    def __init__(self, shape):
-        super().__init__(shape)
-        self.shape = tuple(shape)
-
-
 def _out_of_limits(name, value, limits):
     """Why `name` may not hold `value` under its `limits`, or None: one of its
     options, inside its hard bounds, a whole number for a count."""
@@ -8846,66 +8838,66 @@ class MagpylibStudioSession:
         `set_variable` takes, else the variable's limits, a hard bound before
         a soft one on each side, and refuses a variable with neither. It
         reads the field at `samples` values, then refines each crossing of
-        the target to the float. A count is searched over every whole number,
-        a crossing giving the closer of the two around it. A value the scene
-        refuses is left out and listed in `skipped`; where the reading jumps
-        across the target rather than passing through it -- a sensor crossing
-        a magnet's face -- the place is in `jumps`, not in `solutions`. Two
-        crossings closer together than the samples are can both be missed:
-        raise `samples`. Each value read is a rebuild of the scene,
-        `evaluations` of them, milliseconds each, and longer with a solve.
+        the target to the float; a count, to the closer of the two whole
+        numbers around it. Each value is tried on a copy of the scene as a
+        drag of its slider sets it -- its follower answered, its solved
+        parts solved again -- so the scene is not touched while it searches.
+        A value the scene refuses, or cannot solve for, is left out and
+        listed in `skipped`; where the reading jumps across the target rather
+        than passing through it -- a sensor crossing a magnet's face -- the
+        place is in `jumps`, not in `solutions`. Two crossings closer
+        together than the samples are can both be missed: raise `samples`.
+        Each value read is a rebuild, `evaluations` of them, milliseconds
+        each, and longer with a solve.
 
         Returns `solutions`, each `{"value", "reading"}`. With `apply`, the
-        one nearest the variable's current value is set, as one step to undo,
-        and named in `applied`; the search itself records nothing. With no
-        solution the result is refused, with the closest value read.
+        one nearest the variable's current value is set as a slider sets it,
+        one step to undo, and named in `applied`. With no solution the
+        result is refused, with the closest value read.
         """
         from scipy.optimize import brentq
 
+        def refused(error):
+            return {"ok": False, "error": error}
+
         if field not in _FIELDS:
-            return {"ok": False, "error": f"field must be one of {sorted(_FIELDS)}"}
+            return refused(f"field must be one of {sorted(_FIELDS)}")
         if component not in ("magnitude", "x", "y", "z"):
-            return {
-                "ok": False,
-                "error": "component must be 'magnitude', 'x', 'y' or 'z'",
-            }
+            return refused("component must be 'magnitude', 'x', 'y' or 'z'")
         variables = self.doc.get("variables") or {}
         if variable not in variables:
-            return {"ok": False, "error": f"unknown variable {variable!r}"}
+            return refused(f"unknown variable {variable!r}")
         if expressions.is_expression(variables[variable]):
-            return {
-                "ok": False,
-                "error": f"{variable} is a formula, {variables[variable]}: "
-                "seek a variable it reads instead",
-            }
+            return refused(
+                f"{variable} is a formula, {variables[variable]}: "
+                "seek a variable it reads instead"
+            )
         limits = (self.doc.get("variable_bounds") or {}).get(variable) or {}
         if "options" in limits:
-            return {
-                "ok": False,
-                "error": f"{variable} is a choice: compare its options with sweep",
-            }
+            return refused(f"{variable} is a choice: compare its options with sweep")
         if (
             isinstance(target, bool)
             or not isinstance(target, int | float)
             or not math.isfinite(target)
         ):
-            return {"ok": False, "error": f"target must be a number, not {target!r}"}
+            return refused(f"target must be a number, not {target!r}")
 
         hard = (limits.get("min"), limits.get("max"))
         if within is not None:
             try:
                 low, high = (float(v) for v in within)
             except (TypeError, ValueError):
-                return {"ok": False, "error": "within is (low, high), two numbers"}
+                return refused("within is (low, high), two numbers")
+            if not (math.isfinite(low) and math.isfinite(high)):
+                return refused("within is (low, high), two finite numbers")
         else:
             low = hard[0] if hard[0] is not None else limits.get("soft_min")
             high = hard[1] if hard[1] is not None else limits.get("soft_max")
             if low is None or high is None:
-                return {
-                    "ok": False,
-                    "error": f"{variable} has no range to search: give it limits, "
-                    "or within=(low, high)",
-                }
+                return refused(
+                    f"{variable} has no range to search: give it limits, "
+                    "or within=(low, high)"
+                )
         # never outside what the variable may hold, whoever named the range
         if hard[0] is not None:
             low = max(low, hard[0])
@@ -8915,120 +8907,139 @@ class MagpylibStudioSession:
         if integer:
             low, high = math.ceil(low), math.floor(high)
         if not low < high:
-            return {"ok": False, "error": f"{variable} has nothing to search in"}
-        if integer and high - low > 1000:
-            return {
-                "ok": False,
-                "error": f"{variable} counts from {low} to {high}: "
-                "narrow it with within=(low, high)",
-            }
+            return refused(f"{variable} has nothing to search in")
 
         if points is not None:
-            observer = np.atleast_2d(np.array(points, dtype=float))
-        else:
+            try:
+                observer = np.atleast_2d(np.array(points, dtype=float))
+            except (TypeError, ValueError):
+                return refused("points are [[x, y, z], ...], in metres")
+        elif sensor_id is None:
+            sensor_id = next(
+                (i for i, o in self._objs.items() if isinstance(o, magpy.Sensor)),
+                None,
+            )
             if sensor_id is None:
-                sensor_id = next(
-                    (i for i, o in self._objs.items() if isinstance(o, magpy.Sensor)),
-                    None,
-                )
-                if sensor_id is None:
-                    return {
-                        "ok": False,
-                        "error": "the scene has no sensor; pass points instead",
-                    }
-            elif not isinstance(self._objs.get(sensor_id), magpy.Sensor):
-                return {"ok": False, "error": f"{sensor_id!r} is not a Sensor"}
+                return refused("the scene has no sensor; pass points instead")
+        elif not isinstance(self._objs.get(sensor_id), magpy.Sensor):
+            return refused(f"{sensor_id!r} is not a Sensor")
         func = getattr(magpy, _FIELDS[field][0])
         unit = _FIELDS[field][1]
+        # over JSON a tuple comes as a list, which numpy would read as a
+        # choice of several rows
+        index = tuple(at) if isinstance(at, list) else at
 
-        def reading():
-            sources, _ = self._sources_for_field()
-            seen = observer if points is not None else self._objs[sensor_id]
-            values = np.asarray(func(sources, seen, sumup=True), dtype=float)
-            if at is not None:
-                values = values[at]
-            if values.shape != (3,):
-                raise _ManyReadings(values.shape[:-1])
-            if component == "magnitude":
-                return float(np.linalg.norm(values))
-            return float(values["xyz".index(component)])
+        # the scene to try values on, drawn and solved as this one is
+        trial = self._copied(json.dumps(self.to_dict()))
 
-        original = variables[variable]
+        def field_there():
+            sources, _ = trial._sources_for_field()
+            seen = observer if points is not None else trial._objs[sensor_id]
+            return np.asarray(func(sources, seen, sumup=True), dtype=float)
+
+        # what the observer reads, checked once, where the scene stands
+        try:
+            shape = field_there().shape
+        except Exception as e:  # noqa: BLE001 - said, as a refusal
+            return refused(f"the field cannot be read there: {e}")
+        many = shape[:-1]
+        said = " × ".join(str(n) for n in many) + " readings" if many else "1 reading"
+        if index is None and many:
+            return refused(
+                f"the field there is {said}, from a path, pixels or several "
+                "points: pick one with at="
+            )
+        if index is not None:
+            try:
+                picked = np.empty(shape)[index].shape
+            except (IndexError, TypeError, ValueError):
+                picked = None
+            if picked != (3,):
+                return refused(f"at={at!r} picks no single one of the {said} there")
+
         count = 0
         skipped = []
 
         def read(value):
             nonlocal count
             count += 1
-            self.doc["variables"][variable] = value
-            self._build()
-            return reading()
+            done = trial.followed(lambda: trial.set_variable(variable, value))
+            if not done.get("ok"):
+                raise ValueError(done.get("error"))
+            if done.get("not_followed"):
+                raise ValueError(f"not solved for: {done['not_followed']}")
+            stale = trial.stale_solves()
+            if stale:
+                raise ValueError(f"solved for another arrangement: {', '.join(stale)}")
+            values = field_there()
+            if index is not None:
+                values = values[index]
+            if component == "magnitude":
+                return float(np.linalg.norm(values))
+            return float(values["xyz".index(component)])
 
         def tried(value):
             """The reading at `value`, or None with why in `skipped`."""
             try:
                 return read(value)
-            except _ManyReadings:
-                raise
             except Exception as e:  # noqa: BLE001 - a value refused is a result
-                skipped.append({"value": value, "error": f"{type(e).__name__}: {e}"})
+                skipped.append({"value": value, "error": str(e)})
                 return None
 
+        if integer:
+            scanned = (
+                range(low, high + 1)
+                if high - low < samples
+                else sorted({round(v) for v in np.linspace(low, high, samples)})
+            )
+        else:
+            scanned = np.linspace(low, high, max(3, int(samples))).tolist()
+        read_at = [(v, r) for v in scanned if (r := tried(v)) is not None]
+        readings = [r for _, r in read_at]
+        # how close is the target: the reading's own size, or the target's
+        spread = max([abs(target)] + [abs(r) for r in readings])
+        tolerance = 1e-6 * spread
+        # a reading the variable does not move has no crossing to refine:
+        # equal to the last bits, as opposed coils' 1e-18 T at their centre
+        flat = not readings or np.ptp(readings) <= 1e-9 * spread
+
         solutions, jumps = [], []
-        try:
-            if integer:
-                values = list(range(low, high + 1))
-            else:
-                values = np.linspace(low, high, max(3, int(samples))).tolist()
-            read_at = [(v, tried(v)) for v in values]
-            read_at = [(v, r) for v, r in read_at if r is not None]
-            # how close is the target: the reading's own size, or the target's
-            spread = max([abs(target)] + [abs(r) for _, r in read_at])
-            tolerance = 1e-6 * spread
-            # a reading the variable does not move has no crossing to refine:
-            # equal to the last bits, as opposed coils' 1e-18 T at their centre
-            readings = [r for _, r in read_at]
-            flat = not readings or np.ptp(readings) <= 1e-9 * spread
-            pairs = [] if flat else itertools.pairwise(read_at)
-            for (a, ra), (b, rb) in pairs:
-                da, db = ra - target, rb - target
-                if da == 0:
-                    solutions.append((a, ra))
-                elif db != 0 and (da < 0) != (db < 0):
-                    if integer:
-                        solutions.append((a, ra) if abs(da) <= abs(db) else (b, rb))
-                        continue
-                    try:
-                        root = brentq(
-                            lambda v: read(v) - target,
-                            a,
-                            b,
-                            xtol=(high - low) * 1e-12,
-                        )
-                        found = read(root)
-                    except _ManyReadings:
-                        raise
-                    except Exception as e:  # noqa: BLE001
-                        skipped.append(
-                            {"value": (a + b) / 2, "error": f"{type(e).__name__}: {e}"}
-                        )
-                        continue
-                    if abs(found - target) <= tolerance:
-                        solutions.append((root, found))
+        for (a, ra), (b, rb) in [] if flat else itertools.pairwise(read_at):
+            da, db = ra - target, rb - target
+            if da == 0:
+                solutions.append((a, ra))
+            elif db == 0 or (da < 0) == (db < 0):
+                continue
+            elif integer:
+                # halve the whole numbers between, to the two around it
+                while b - a > 1:
+                    middle = (a + b) // 2
+                    rm = tried(middle)
+                    if rm is None:
+                        break
+                    if (rm - target < 0) == (da < 0):
+                        a, ra = middle, rm
                     else:
-                        jumps.append(root)
-            if read_at and not flat and read_at[-1][1] == target:
-                solutions.append(read_at[-1])
-        except _ManyReadings as many:
-            shape = " × ".join(str(n) for n in many.shape)
-            return {
-                "ok": False,
-                "error": f"the field there is {shape} readings, from a path, "
-                "pixels or several points: pick one with at=",
-            }
-        finally:
-            self.doc["variables"][variable] = original
-            self._build()
+                        b, rb = middle, rm
+                if b - a == 1:
+                    solutions.append(
+                        (a, ra) if abs(ra - target) <= abs(rb - target) else (b, rb)
+                    )
+            else:
+                try:
+                    root = brentq(
+                        lambda v: read(v) - target, a, b, xtol=(high - low) * 1e-12
+                    )
+                    found = read(root)
+                except Exception as e:  # noqa: BLE001 - said in `skipped`
+                    skipped.append({"value": (a + b) / 2, "error": str(e)})
+                    continue
+                if abs(found - target) <= tolerance:
+                    solutions.append((root, found))
+                else:
+                    jumps.append(root)
+        if read_at and not flat and read_at[-1][1] == target:
+            solutions.append(read_at[-1])
 
         # a crossing exactly on a sample can be found from both sides
         unique = []
@@ -9053,25 +9064,24 @@ class MagpylibStudioSession:
         if not unique:
             if not read_at:
                 error = f"no value of {variable} could be read"
+            elif flat:
+                level = float(np.mean(readings))
+                level = 0.0 if abs(level) <= 1e-9 * spread else level
+                error = (
+                    f"{variable} changes nothing here: the field reads "
+                    f"{level:g} {unit} at every value"
+                )
             else:
-                if flat:
-                    level = float(np.mean(readings))
-                    level = 0.0 if abs(level) <= 1e-9 * spread else level
-                    error = (
-                        f"{variable} changes nothing here: the field reads "
-                        f"{level:g} {unit} at every value"
+                error = (
+                    f"no value of {variable} from {low:g} to {high:g} reads "
+                    f"{target:g} {unit}: it reads {min(readings):g} to "
+                    f"{max(readings):g}"
+                )
+                if jumps:
+                    error += ", and jumps across it at " + ", ".join(
+                        f"{variable} = {v:g}" for v in jumps
                     )
-                else:
-                    lowest = min(r for _, r in read_at)
-                    highest = max(r for _, r in read_at)
-                    error = (
-                        f"no value of {variable} from {low:g} to {high:g} reads "
-                        f"{target:g} {unit}: it reads {lowest:g} to {highest:g}"
-                    )
-                    if jumps:
-                        error += ", and jumps across it at " + ", ".join(
-                            f"{variable} = {v:g}" for v in jumps
-                        )
+            if read_at:
                 value, found = min(read_at, key=lambda p: abs(p[1] - target))
                 result["closest"] = {"value": value, "reading": _wire(found)}
             return {"ok": False, "error": error, **result}
@@ -9081,10 +9091,13 @@ class MagpylibStudioSession:
                 (s["value"] for s in result["solutions"]),
                 key=lambda v: abs(v - current) if current is not None else 0,
             )
-            done = self.set_variable(variable, chosen)
+            # as the trial was: followed, so the scene is solved for it too
+            done = self.followed(lambda: self.set_variable(variable, chosen))
             if not done.get("ok"):
                 return {**done, **result}
             result["applied"] = chosen
+            if done.get("not_followed"):
+                result["not_followed"] = done["not_followed"]
         return {"ok": True, **result}
 
     # --- the event log -----------------------------------------------------

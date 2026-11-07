@@ -239,33 +239,41 @@ def _(mo):
 @app.cell
 def _(mo, pair_edited, pair_session, pair_view3d, pair_wanted):
     _ = pair_edited()
-    _found = pair_session.goal_seek(
+    pair_found = pair_session.goal_seek(
         "turns",
         pair_wanted.value / 1e3,  # in tesla
         points=[[0, 0, 0]],
         component="z",
-        apply=False,  # the view sets it below, so that it follows
+        apply=False,  # the view sets it, below, so that it follows
     )
-    if _found["ok"]:
-        _turns = _found["solutions"][0]["value"]
+    pair_turns = pair_found["solutions"][0]["value"] if pair_found["ok"] else None
+    # held by its name, as marimo needs of an element it is to answer
+    pair_set_turns = mo.ui.button(
+        label=f"Set turns = {pair_turns}",
+        on_click=lambda _: pair_view3d.set_variable("turns", pair_turns),
+        disabled=pair_turns is None,
+    )
+    return pair_found, pair_set_turns, pair_turns
+
+
+@app.cell
+def _(mo, pair_found, pair_set_turns, pair_turns, pair_wanted):
+    if pair_turns is None:
+        _answer = mo.callout(pair_found["error"], kind="warn")
+    else:
         _answer = mo.hstack(
             [
                 mo.md(
-                    f"**{_turns} turns** read "
-                    f"{_found['solutions'][0]['reading'] * 1e3:.2f} mT, "
+                    f"**{pair_turns} turns** read "
+                    f"{pair_found['solutions'][0]['reading'] * 1e3:.2f} mT, "
                     f"the closest a whole number comes "
-                    f"({_found['evaluations']} field reads)"
+                    f"({pair_found['evaluations']} field reads)"
                 ),
-                mo.ui.button(
-                    label=f"Set turns = {_turns}",
-                    on_click=lambda _: pair_view3d.set_variable("turns", _turns),
-                ),
+                pair_set_turns,
             ],
             justify="start",
             align="center",
         )
-    else:
-        _answer = mo.callout(_found["error"], kind="warn")
     mo.vstack([pair_wanted, _answer])
     return
 

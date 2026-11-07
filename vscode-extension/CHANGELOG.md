@@ -14,10 +14,12 @@ Python package it runs on. Open an entry for its details.
 reads 50 mT, over the variable's limits or `within=(low, high)`, and sets the
 one nearest its current value as one step to undo; `apply=False` only looks. It
 reads a field's magnitude or one component at one point, `at=` picking a
-sensor's pixel or a path's step, and searches a count over whole numbers. A
-value the scene refuses is left out and listed, a jump across the target is
-named, and with no solution it says what the field reads over the range and the
-closest value. The engine's RPC and the agent skill have it.
+sensor's pixel or a path's step, and searches a count over whole numbers. Each
+value is tried on a copy of the scene as its slider sets it, solved parts solved
+again, so the scene is untouched while it searches. A value the scene refuses is
+left out and listed, a jump across the target is named, and with no solution it
+says what the field reads over the range and the closest value. The engine's RPC
+and the agent skill have it.
 
 </details>
 

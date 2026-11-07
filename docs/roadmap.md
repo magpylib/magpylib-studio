@@ -48,7 +48,7 @@ code:
 | --------------------- | ------------------------------------------------------------------------------------------------------ |
 | a scene function      | `fn.build()` on its own copy; on the open scene (step 2), one undo step per run, refused whole (R1)    |
 | reads                 | the scene as a function (`to_builder_script`), and the variables                                       |
-| the field             | `get_field` and `sweep` on the scene's session; summaries as helpers if R4 shows they are worth having |
+| the field             | `get_field`, `sweep`, `goal_seek` on the scene's session; other helpers, if R4 shows them worth having |
 | `validate` (after R7) | the FEM job API, refusal-first, per `plans/fem.md` §12–13                                              |
 
 **Step 1 — on its own copy: the skill ✅** (2026-10-07). An Agent Skill inside
