@@ -386,6 +386,46 @@ read-only view works the overlaps out from the objects it was given, keyed as
 its payload. A check that fails leaves `overlaps` empty and says why in
 `overlaps_error`.
 
+**The ruler**
+([0053](decisions.md#0053-the-ruler-measures-features-in-every-pane)) is the
+renderer's alone, nothing asked of python, so a saved page and the VS Code panel
+measure as a notebook does. A measurement is two ends, each a feature, not a
+point: `{kind, objectId, part, index}`, the object, which of its drawn parts
+(`rulerParts`, in the order its node holds them), and which corner, edge, flat
+face, round surface or curve of that part's geometry (`rulerFeatures`, worked
+out once a geometry, when a ray first meets it). Each frame puts the ends where
+those features are now, so a measurement follows a drag and a run's steps, and
+names the same corner in a pane drawn at another variant; a pane without the
+feature draws no line.
+
+- **Features**: a corner is where faces meet at more than `EDGE_ANGLE`, or a
+  wire's end or bend; an edge runs corner to corner; a flat face is a plane's
+  triangles meeting those round them at an edge. The rest of a shape is round
+  surfaces, fitted as a cylinder's side or a sphere to 1e-4 of the radius and
+  measured exactly, by nearest points taken in turn from three starts, else on
+  their facets. A wire's bent run (`wireCurves`) is a circle where its points
+  lie on one (`circleOf`), else its segments. A dipole and a sensor's pixels are
+  points (`origins`, from `threejs._mark_dipoles`, and glyph anchors), never the
+  boxes they are drawn as.
+- **What is measured** follows from the pair: a distance between nearest points,
+  or the angle of two edges or faces that touch or cross. A distance ending in a
+  face's plane off the face runs on to it dashed (`extensionOf`). A pair
+  measured already, either way round, or one with the same line, is not measured
+  again (`measuredAlready`).
+- **Picking**: what a pick looks at -- the parts with a bounding sphere each,
+  and the points and wires -- is made again once the camera, the scene or a
+  run's step has stood still 120 ms; a hover casts five rays, tested on the
+  spheres first. On a sealed body of 4,096 cells, headless Chrome on an M4, a
+  hover's look is 0.8 ms at the median and 3 ms at worst.
+- **Drawn on the canvas**, the labels as textures as the scale bar is, so the
+  PNG and the split one have them.
+- **In a notebook**, `view.measurements` holds the ends and what each reads, a
+  length in metres or an angle, and a saved page carries it. `view.measure`
+  gives ends as an object and a point (`{objectId, near}`), which the view names
+  the first time the object is drawn (`nameEnd`, a corner before an edge, a
+  curve, a face, then a round surface) and tells back. Split, the panes are
+  handed the scene's view's list.
+
 **The notebook widget**, `SceneWidget`
 ([0010](decisions.md#0010-the-notebook-widget-edits-with-the-package-alone)), is
 that renderer as an anywidget with a legend that nests the objects, tools,

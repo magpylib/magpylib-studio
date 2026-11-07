@@ -4721,6 +4721,8 @@ def test_goal_seek_finds_every_crossing_and_sets_the_nearest_as_one_step():
 
     looked = s.goal_seek("h", 0.05, apply=False)
     assert looked["ok"] and "applied" not in looked
+    # a target worked out with numpy is a number all the same
+    assert s.goal_seek("h", np.float32(0.05), apply=False)["ok"]
     assert s.doc["variables"]["h"] == -0.03  # the search records nothing
     assert len(s.get_history()["undo"]) == before
 
@@ -4835,6 +4837,8 @@ def test_goal_seek_leaves_out_values_the_scene_refuses_and_jumps():
         ("h", 0.05, {"points": [[0, 0, 0.02], [0, 0, 0.03]]}, "pick one with at="),
         ("h", 0.05, {"within": (0.03, 0.01)}, "nothing to search in"),
         ("h", 0.05, {"within": (0.01, float("inf"))}, "two finite numbers"),
+        ("h", 0.05, {"samples": 2}, "samples is a whole number, 3 or more"),
+        ("h", 0.05, {"samples": 2.5}, "samples is a whole number, 3 or more"),
         ("h", 0.05, {"points": [[0, 0, 0.02]], "at": 0}, "picks no single one"),
         ("h", 0.05, {"points": [[0, 0, 0.02]] * 2, "at": 5}, "picks no single one"),
     ],

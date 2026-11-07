@@ -7266,6 +7266,8 @@ void main() {
    */
   function renderFrame(payload) {
     discard(new Set());
+    partsCache.clear(); // every node is new: a measurement's ends too
+    rulerMoved();
     // Frames and poses are two ways of playing a run, never both: a frame is
     // drawn afresh, so there is nothing of the first frame's left to move.
     tracks = null;
@@ -7296,6 +7298,10 @@ void main() {
    * by the matrix it was hung with. */
   function poseFrame(index) {
     glyphsMoved = true;
+    rulerMoved(); // what the ruler picks is where this step puts it
+    // a part built again for this step is not the one a measurement's end
+    // was counted in
+    if (changing.length) partsCache.clear();
     const pose = new THREE.Matrix4();
     const at = new THREE.Vector3();
     const turn = new THREE.Quaternion();

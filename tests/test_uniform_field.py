@@ -102,6 +102,22 @@ def test_the_view_is_told_each_in_the_global_frame_and_frames_without_them(edita
     assert "get_trace" not in vars(upward)
 
 
+def test_show_with_the_widget_backend_draws_a_field_only_in_the_corner():
+    """`magpy.show(..., backend="widget")` hands the backend traces already
+    made, the field's marker among them: left out, the corner says it."""
+    magnet, upward, _ = scene_of()
+    view = magpy.show(magnet, upward, backend="widget", return_fig=True)
+    assert [f["B"] for f in view.payload["fields"]] == [[0, 0, 0.1]]
+    drawn = {
+        item.get("name")
+        for items in view.payload.values()
+        if isinstance(items, list)
+        for item in items
+        if isinstance(item, dict)
+    }
+    assert "UniformField" not in drawn and drawn
+
+
 def test_a_field_given_beside_its_collection_counts_once():
     magnet, upward, _ = scene_of()
     held = magpy.Collection(magnet, upward)

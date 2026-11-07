@@ -107,6 +107,7 @@ import importlib
 import itertools
 import json
 import math
+import numbers
 import os
 import re
 import sys
@@ -8921,12 +8922,22 @@ class MagpylibStudioSession:
         limits = (self.doc.get("variable_bounds") or {}).get(variable) or {}
         if "options" in limits:
             return refused(f"{variable} is a choice: compare its options with sweep")
+        # numpy's numbers too, a target worked out with it; not a bool
         if (
             isinstance(target, bool)
-            or not isinstance(target, int | float)
+            or not isinstance(target, numbers.Real)
             or not math.isfinite(target)
         ):
             return refused(f"target must be a number, not {target!r}")
+        target = float(target)
+        # one reading, or two, says nothing of where the field goes
+        if (
+            isinstance(samples, bool)
+            or not isinstance(samples, numbers.Integral)
+            or samples < 3
+        ):
+            return refused(f"samples is a whole number, 3 or more, not {samples!r}")
+        samples = int(samples)
 
         hard = (limits.get("min"), limits.get("max"))
         if within is not None:
@@ -9034,7 +9045,7 @@ class MagpylibStudioSession:
                 else sorted({round(v) for v in np.linspace(low, high, samples)})
             )
         else:
-            scanned = np.linspace(low, high, max(3, int(samples))).tolist()
+            scanned = np.linspace(low, high, samples).tolist()
         read_at = [(v, r) for v in scanned if (r := tried(v)) is not None]
         readings = [r for _, r in read_at]
         # how close is the target: the reading's own size, or the target's

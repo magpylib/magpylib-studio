@@ -1984,11 +1984,6 @@ def _no_trace(**_):
     return []
 
 
-def _uniform_fields_in(objects):
-    """`fields_of` for what a view with no session draws, under its ids."""
-    return fields_of((str(id(obj)), obj) for obj in _uniform_fields_under(objects))
-
-
 def _leaf_count(collection):
     """How many objects that are not collections `collection` holds."""
     return sum(not isinstance(c, magpy.Collection) for c in collection.children_all)
@@ -2597,12 +2592,23 @@ def view_payload(scene, index=None, traces=None):
         frames = scene.frames if index is None else [scene.frames[_clamp(scene, index)]]
         traces = [t for frame in frames for t in frame.traces]
     reach = None if panel.ranges is None else panel.ranges.tolist()
+    # a uniform field is its arrow in the view's corner (`fields`), not the
+    # marker magpylib draws for it at the origin, nor a trace of its own: a
+    # backend is handed traces already made, where `_fields_undrawn` cannot
+    # reach, so they are left out here
+    fields = _uniform_fields_under(panel.objects)
+    undrawn = {str(id(field)) for field in fields}
+    drawn = [
+        item
+        for item in _keyed(traces, sealed=_sealed_in(scene))
+        if item["object_id"] not in undrawn
+    ]
     return {
-        **_by_kind(_keyed(traces, sealed=_sealed_in(scene))),
+        **_by_kind(drawn),
         "ranges": reach,
         "labels": panel.labels,
         "applied": applied_field(panel.objects),
-        "fields": _uniform_fields_in(panel.objects),
+        "fields": fields_of((str(id(field)), field) for field in fields),
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no
         # collection to carry. The renderer reads each as empty and skips them.

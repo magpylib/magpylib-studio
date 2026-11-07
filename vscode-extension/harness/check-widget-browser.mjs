@@ -1821,6 +1821,31 @@ async function savedPanes(port, base) {
         return { width: image.width, wide: Math.round(wide * devicePixelRatio), scene: scene.width };`);
         if (Math.abs(shot.width - shot.wide) > 2 || shot.width <= shot.scene)
           return `the picture, split: ${JSON.stringify(shot)}`;
+        // a pane with nothing drawn -- a variant the scene cannot use -- is
+        // a blank pane in it, not a button that saves nothing
+        const blank = await tab.evaluate(`
+        const pane = [...window.scene3ds].find((s) => s !== window.scene3d);
+        const own = pane.snapshot;
+        pane.snapshot = () => null;
+        try {
+          const href = await Promise.race([
+            new Promise((done) => {
+              window.magpySave = (url) => done(url);
+              document.querySelector('button[title^="Save the view as a PNG"]').click();
+            }),
+            new Promise((done) => setTimeout(() => done(null), 3000)),
+          ]);
+          if (!href) return null;
+          const image = new Image();
+          image.src = href;
+          await image.decode();
+          return image.width;
+        } finally {
+          pane.snapshot = own;
+          delete window.magpySave;
+        }`);
+        if (blank !== shot.width)
+          return `the picture, a pane not drawn: ${blank}, not ${shot.width}`;
         await tab.evaluate(`${spread}.click()`);
         const back = await tab.until(
           `return ${panes}.length === 1 && !${closing}`,
@@ -5510,6 +5535,47 @@ async function savedView(port, base, out, expected) {
           if ((await at("0")) === (await at("s.max"))) {
             return "the picture is the same at the first and last step";
           }
+        }
+        return thrown(run);
+      } finally {
+        await run.close();
+      }
+    });
+  }
+
+  // A measurement on a part the run builds again at each step: a corner of
+  // a magnet growing from 10 to 20 mm, to one of a 10 mm cube beside it, 30
+  // mm apart at the first step and 25.98 at the last -- carried or served
+  const MEASURED_RUNS = {
+    "morph-measured": "a measurement follows a run that changes shape",
+    "served-measured": "a measurement follows a run served frame by frame",
+  };
+  for (const [page, label] of Object.entries(MEASURED_RUNS)) {
+    await check(label, async () => {
+      const run = await openTab(port);
+      try {
+        await run.navigate(`${base}/out/${page}.html`);
+        const ready = await run.until(
+          `const t = document.querySelector(".magpy-scene-transport");
+          return t && !t.hidden && window.scene3d?.measurements()[0]?.label;`,
+          20_000,
+        );
+        if (!ready) return "never drew its measurement";
+        const at = async (step) => {
+          await run.evaluate(
+            `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); return 1`,
+          );
+          await wait(700);
+          return run.evaluate(
+            `return window.scene3d.measurements().map((m) => m.length)`,
+          );
+        };
+        const first = await at("0");
+        const last = await at("s.max");
+        const off = (got, want) =>
+          got.length !== 1 || Math.abs(got[0] - want) > 1e-3;
+        if (off(first, 30) || off(last, Math.sqrt(675))) {
+          return `first and last step: ${first}, ${last}`;
         }
         return thrown(run);
       } finally {

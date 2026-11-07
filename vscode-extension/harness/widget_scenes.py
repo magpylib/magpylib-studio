@@ -17,6 +17,9 @@ Writes into OUT:
   moves, which plays all the same;
 * ``served.html`` -- the growing magnet again, with nothing carried: served a
   frame at a time, as a run past the carry limit is;
+* ``morph-measured.html``, ``served-measured.html`` -- a magnet growing from
+  10 to 20 mm beside a 10 mm cube, a corner of each measured, carried and
+  served: 30 mm apart at the first step, 25.98 at the last;
 * ``run.json``, ``served.json`` -- a run that moves and a served one as a
   model holds them, for pages that play the notebook themselves;
 * ``panel.json`` -- what the ``studio`` backend leaves for the panel: a stack
@@ -312,6 +315,27 @@ def main(out):
         raise SystemExit("served.html: nothing carried, so frames are served")
     served.write_html(out / "served.html")
     (out / "served.json").write_text(json.dumps(served._saved()))
+
+    # a measurement on a part the run builds again at each step
+    growing = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1),
+        dimension=np.linspace((0.01,) * 3, (0.02,) * 3, 30),
+        style_label="growing",
+    )
+    beside = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0.04, 0, 0)
+    )
+    kept = threejs._CARRY_LIMIT
+    for name, limit in (("morph-measured", kept), ("served-measured", 0)):
+        threejs._CARRY_LIMIT = limit
+        try:
+            measured_run = SceneWidget(growing, beside, animation=True)
+        finally:
+            threejs._CARRY_LIMIT = kept
+        measured_run.measure(
+            (growing, (0.005, 0.005, 0.005)), (beside, (0.035, 0.005, 0.005))
+        )
+        measured_run.write_html(out / f"{name}.html")
 
     turning = magpy.Collection(
         *[
