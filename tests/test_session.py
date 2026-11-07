@@ -4727,6 +4727,7 @@ def test_goal_seek_takes_the_closer_whole_number_of_a_count():
 def test_goal_seek_reads_a_solved_scene_solved_at_each_value():
     """The U-core's current drives its solved core: read with the charges of
     100 A, the field at 151 A would be off by half, and 5 mT out of reach."""
+    pytest.importorskip("magpylib_material_response")
     s = MagpylibStudioSession()
     assert s.load_example("ucore")["ok"]
     found = s.goal_seek("current", 0.005, at=[7], within=(100, 200), samples=4)
