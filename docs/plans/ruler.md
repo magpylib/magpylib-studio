@@ -13,9 +13,11 @@ Alex that day, on the issue's open questions:
   own;
 - the legend's gap between two selected objects stays beside the ruler, for now;
 - curved surfaces are measured on their drawn facets, said in the label's
-  tooltip; exact values from python come later, if at all.
+  tooltip; exact values from python come later, if at all. Since, a sphere's and
+  a cylinder's side are found from their facets and measured exactly (Alex,
+  2026-11-07, §3).
 
-Built: all of §7, 2026-11-07.
+Built: all of §7, 2026-11-07; round surfaces and labels kept apart the same day.
 
 ---
 
@@ -52,6 +54,7 @@ What the two picks are decides what is measured, with no mode to choose:
 | corner   | face     | the distance to the face's plane, at right angles |
 | face     | face     | the gap, if they are parallel; else the angle     |
 | edge     | edge     | the shortest distance between them                |
+| any      | round    | the shortest distance, to the true shape          |
 
 Two features with a direction -- edges and faces -- that touch or cross are
 measured by their angle, the distance between them being none; parallel, by
@@ -72,6 +75,9 @@ parallel, the distance between their planes.
 - **A straight edge** runs from a corner to a corner without bending; **a flat
   face** is a plane's triangles where every one round them meets them at an
   edge, not smoothly as a sphere's or a cylinder's side's facets do.
+- **A round surface** is the rest of a shape's triangles, joined where they go
+  on smoothly: a sphere's, a cylinder's side, a segment's two. Under the pointer
+  when no corner, edge or flat face is, it is tinted whole.
 - **One dimension line, one label**, said by `sayLength`, or in degrees. Its
   tooltip gives Δx, Δy and Δz, and says when an end is on a curved surface's
   facets.
@@ -102,6 +108,13 @@ Both are worked out once a part, when the pointer first comes over it.
 - **It is mirrored** (§4): the same feature names the same corner of the same
   object in a pane drawn at another variant, where a point in the object's frame
   would not -- a variant that changes a magnet's size moves its corner.
+- **A round surface is its shape**, where it is one: a cylinder's side if every
+  facet's normal is at right angles to one axis, else a sphere if its vertices
+  are, to 1e-4 of the radius; part of the way round where a rim runs along the
+  axis. The vertices are on the true surface, so the fit is exact to rounding.
+  The nearest points of it and the other end are each the other's nearest in
+  turn, from the surface's nearest to the other's middle: a sphere's at once.
+  What is neither is measured on its facets, the tooltip says so.
 - **It is the view's**, not the document's: no undo step, nothing in the script,
   the saved scene or a saved page.
 
@@ -125,8 +138,8 @@ variant with fewer magnets -- draws no line for it.
 
 The lines and the labels are drawn by the renderer, the labels as textures as
 the scale bar is, so the PNG has them, and the split one each pane's (#149),
-with nothing more to do. A label faces the camera, stays its size on screen, and
-stands aside from the lines' ends.
+with nothing more to do. A label faces the camera, stays its size on screen,
+stands aside from the lines' ends, and above a label it would overlap.
 
 ## 6. Cost
 

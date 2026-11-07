@@ -2810,8 +2810,10 @@ side (#147), the same gap read in each variant is what a split view is for.
   a pane without the feature draws none.
 - **Drawn on the canvas**, labels as textures, so the PNG has them; a saved page
   does not carry them.
-- **On the drawn facets**: a curved surface is measured as drawn, and the label
-  says so.
+- **Round surfaces as their shapes**: a sphere's and a cylinder's side, found
+  from the facets drawn, whose vertices are on the true surface, are measured
+  exactly; any other curved surface on its drawn facets, and the label's tooltip
+  says so (Alex, 2026-11-07).
 - **The legend's gap stays**, object to object, exact, beside the ruler, feature
   to feature.
 

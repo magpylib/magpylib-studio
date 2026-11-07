@@ -97,17 +97,18 @@ says how far apart they are, its Δx, Δy and Δz in its tooltip. Two edges, an
 edge and a face, or two faces that touch or cross are at an angle, and the label
 says that; parallel, how far apart; neither, how far, the angle in the tooltip.
 What is under the pointer is what a click takes, shown before it: a corner
-within a few pixels, else an edge, else the face; a round surface has none of
-them, and a corner or an edge behind a shape is not offered through it. What has
-no size is a point: a dipole, a sensor and each of its pixels. It follows the
-objects as they move, several at once, each taken away by the × its label shows
-under the pointer. Turned off, a click selects again and the measurements stay,
-so drag an object by its handles and read the gap as it changes. Esc with the
-ruler on takes back the corner picked, then the measurements, then the ruler;
-with it off, once nothing is selected, the measurements. Split into panes, a
-measurement made in any is in all of them, each at its own variant: measure a
-gap once, read it in every variant. It is the view's, not the scene's: nothing
-to undo, and the PNG has the measurements, a saved page not.
+within a few pixels, else an edge, else the face, flat or round -- a sphere, a
+cylinder's side, measured as the true shape, not its facets -- and a corner or
+an edge behind a shape is not offered through it. What has no size is a point: a
+dipole, a sensor and each of its pixels. It follows the objects as they move,
+several at once, each taken away by the × its label shows under the pointer.
+Turned off, a click selects again and the measurements stay, so drag an object
+by its handles and read the gap as it changes. Esc with the ruler on takes back
+the corner picked, then the measurements, then the ruler; with it off, once
+nothing is selected, the measurements. Split into panes, a measurement made in
+any is in all of them, each at its own variant: measure a gap once, read it in
+every variant. It is the view's, not the scene's: nothing to undo, and the PNG
+has the measurements, a saved page not.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.

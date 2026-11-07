@@ -11,20 +11,21 @@ Python package it runs on. Open an entry for its details.
 <summary>A ruler in the view</summary>
 
 The ruler among the view's tools, or M, measures what is drawn: a click on a
-corner, a straight edge or a flat face, then on another, and a line between
-their nearest points with its length, in the scene's unit, its Δx, Δy and Δz in
-its tooltip; two edges, an edge and a face or two faces that touch or cross, the
-angle between them, which a distance's tooltip gives too. What is under the
-pointer is what a click takes, shown as it hovers: a round surface offers
-nothing, a dipole, a sensor and each pixel a point, and nothing behind a shape
-is offered through it. It follows the objects as they move, holds several at
-once, each taken away by its label's ×, and stays when the ruler is turned off,
-so an object can be selected and dragged while they show; Esc takes back the
-corner picked, then the measurements, the ruler on or, once nothing is selected,
-off. It works wherever the view does, a saved page and the VS Code panel
-included, edits nothing, and the PNG keeps the measurements
-([#125](https://github.com/magpylib/magpylib-studio/issues/125)). Split into
-panes, a measurement made in any is in every pane, at that pane's variant.
+corner, a straight edge, a flat face or a round one -- a sphere, a cylinder's
+side, exact, not its facets -- then on another, and a line between their nearest
+points with its length, in the scene's unit, its Δx, Δy and Δz in its tooltip;
+two edges, an edge and a face or two faces that touch or cross, the angle
+between them, which a distance's tooltip gives too. What is under the pointer is
+what a click takes, shown as it hovers: a dipole, a sensor and each pixel a
+point, and nothing behind a shape is offered through it. It follows the objects
+as they move, holds several at once, each taken away by its label's ×, and stays
+when the ruler is turned off, so an object can be selected and dragged while
+they show; Esc takes back the corner picked, then the measurements, the ruler on
+or, once nothing is selected, off. It works wherever the view does, a saved page
+and the VS Code panel included, edits nothing, and the PNG keeps the
+measurements ([#125](https://github.com/magpylib/magpylib-studio/issues/125)).
+Split into panes, a measurement made in any is in every pane, at that pane's
+variant; labels in one place stand one above the other.
 
 </details>
 

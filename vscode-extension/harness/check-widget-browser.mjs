@@ -1087,7 +1087,7 @@ async function resizedDrawsAtOnce(port, base) {
  *  corner, an edge and a face measures what it should. */
 async function savedRuler(port, base) {
   await check(
-    "the ruler measures between corners, edges and faces",
+    "the ruler measures between corners, edges, faces and round surfaces",
     async () => {
       const tab = await openTab(port);
       try {
@@ -1273,20 +1273,21 @@ async function savedRuler(port, base) {
         return [...window.scene3d.byObjectId.keys()]
           .map((id) => Object.values(window.scene3d.featuresOf(id)).join(" "))
           .sort();`);
+        // and round surfaces: a sphere's, a cylinder's side, a segment's two
         const kinds = [
-          "0 0 0",
-          "0 0 0",
-          "0 0 2",
-          "1 0 0",
-          "3 2 0",
-          "4 6 4",
-          "5 0 0",
-          "8 12 6",
-          "8 12 6",
-          "8 8 4",
+          "0 0 0 0",
+          "0 0 0 1",
+          "0 0 2 1",
+          "1 0 0 0",
+          "3 2 0 0",
+          "4 6 4 0",
+          "5 0 0 0",
+          "8 12 6 0",
+          "8 12 6 0",
+          "8 8 4 2",
         ];
         if (offered.join() !== kinds.join())
-          return `corners, edges and faces each shape offers: ${offered}`;
+          return `corners, edges, faces and round surfaces each shape offers: ${offered}`;
         // a wire's runs are picked, though a ray passes through them: its two
         // meet at its bend, at right angles
         const runs = await tab.evaluate(`const s = window.scene3d;
@@ -1366,7 +1367,13 @@ async function savedRuler(port, base) {
             const off = (end) => Math.hypot(...s.featureOf(end).point.map((x, k) => x - cam[k]));
             return off(a) - off(b);
           })[0];
-        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright };`);
+        // a sphere, and a cylinder's side, 5 mm apart: their own shapes, not
+        // their facets
+        const round = (faces) => [...s.byObjectId.keys()].find((id) =>
+          s.featuresOf(id).surface === 1 && s.featuresOf(id).face === faces);
+        const ball = feature("surface", round(0), 0);
+        const tube = feature("surface", round(2), 0);
+        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright, ball, tube };`);
         const centre = await tab.evaluate(
           `return window.scene3d.endOnPage(${JSON.stringify(picks.lowTop)})`,
         );
@@ -1419,6 +1426,13 @@ async function savedRuler(port, base) {
             picks.lowTop,
             { angle: 90 },
           ],
+          // drawn as float32 vertices: a round surface's fit to rounding
+          [
+            "a sphere and a cylinder's side",
+            picks.ball,
+            picks.tube,
+            { length: 5, within: 1e-5 },
+          ],
         ];
         for (const [named, a, b, expect] of pairs) {
           await pick(a);
@@ -1432,7 +1446,7 @@ async function savedRuler(port, base) {
             m.a.kind === a.kind &&
             m.b.kind === b.kind &&
             ("length" in expect
-              ? Math.abs(m.length - expect.length) < 1e-9
+              ? Math.abs(m.length - expect.length) < (expect.within ?? 1e-9)
               : Math.abs(m.angle - expect.angle) < 1e-9);
           if (!right) return `${named}: ${JSON.stringify(made)}`;
           // gone, for the next: Esc, the ruler on, takes the measurements
@@ -1467,6 +1481,27 @@ async function savedRuler(port, base) {
         await tab.evaluate(
           `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
         );
+        // a cylinder's segment, a quarter of the way round: its two round
+        // sides 5 mm apart, its outer 15 mm on from the low cube's side
+        // facing it; and two labels in one place, one above the other
+        const segment = await tab.evaluate(`const s = window.scene3d;
+          const id = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).surface === 2);
+          const end = (index) => ({ kind: "surface", objectId: id, part: 0, index });
+          const spans = [0, 1].map((i) => s.featureOf(end(i)).shape.span);
+          const pair = { a: end(0), b: end(1) };
+          s.setMeasurements([pair, { a: pair.b, b: pair.a }]);
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+          const made = s.measurements();
+          const [p, q] = made.map((m) => m.label);
+          const apart = p && q && (p[3] <= q[1] || q[3] <= p[1] || p[2] <= q[0] || q[2] <= p[0]);
+          s.setMeasurements([]);
+          return { spans, lengths: made.map((m) => m.length), apart };`);
+        if (
+          segment.spans.some((span) => Math.abs(span - Math.PI / 2) > 1e-5) ||
+          segment.lengths.some((length) => Math.abs(length - 5) > 1e-5) ||
+          !segment.apart
+        )
+          return `a segment's round sides, twice: ${JSON.stringify(segment)}`;
         // the ruler off, nothing selected: Esc takes the measurements too
         await pick(picks.lowTop);
         await pick(picks.highTop);

@@ -307,7 +307,7 @@ const KEY_LIST = {
     ["⌥ / Alt on an eye", "click: show only that row — slide: fade the rest"],
     [
       "M",
-      "measure: a corner, an edge or a face, then another — again: select, the measurements kept",
+      "measure: a corner, an edge, a face or a round surface, then another — again: select, the measurements kept",
     ],
     [
       "Esc",
@@ -774,7 +774,7 @@ function render({ model, el }) {
   // renderer says when it turns on or off, a key or Esc included.
   const rulerButton = iconButton(
     "ruler",
-    "Measure: click a corner, an edge or a face, then another (M)",
+    "Measure: click a corner, an edge, a face or a round surface, then another (M)",
     () => api?.setRuler(!api.rulerOn()),
   );
   pressed(rulerButton, false);

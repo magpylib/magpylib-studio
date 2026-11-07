@@ -7666,6 +7666,7 @@ void main() {
   // variable and a run.
   const RULER_INK = "#ff7a00";
   const RULER_LABEL_PX = 11; // the label's text, in CSS pixels
+  const LABEL_GAP = 3; // between two labels that would overlap, in CSS pixels
   const ruler = {
     on: false,
     first: null, // the end picked, waiting for the second
@@ -7784,7 +7785,7 @@ void main() {
       const corner = part.userData.glyph
         ? part.userData.glyph.anchor.toArray()
         : [...part.userData.origins];
-      found = { corner, edge: [], face: [], faceOf: new Map() };
+      found = { corner, edge: [], ...NO_FACES };
       featureCache.set(key, found);
     }
     if (!found) {
@@ -7795,12 +7796,19 @@ void main() {
       found = {
         corner: graph.corners.flatMap((point) => point.at),
         edge: straightEdges(graph),
-        ...(wire ? { face: [], faceOf: new Map() } : flatFaces(part.geometry)),
+        ...(wire ? NO_FACES : flatFaces(part.geometry)),
       };
       featureCache.set(key, found);
     }
     return found;
   }
+
+  const NO_FACES = Object.freeze({
+    face: [],
+    faceOf: new Map(),
+    surface: [],
+    surfaceOf: new Map(),
+  });
 
   /** A wide line's segments, flat, as `regionEdges` gives a shape's edges. */
   function linePairs(geometry) {
@@ -7894,8 +7902,7 @@ void main() {
    *  (`faceOf`). */
   function flatFaces(geometry) {
     const position = geometry.attributes.position;
-    const none = { face: [], faceOf: new Map() };
-    if (!position) return none;
+    if (!position) return NO_FACES;
     const index = geometry.index;
     const count = (index ? index.count : position.count) / 3;
     geometry.computeBoundingBox();
@@ -7950,10 +7957,9 @@ void main() {
         }
       }
     }
-    const face = [];
-    const faceOf = new Map();
-    for (const [plane, members] of planes) {
-      if (smooth.has(plane)) continue;
+    // a group of triangles as one: its middle, by area, and its triangles,
+    // flat; `into` told which triangle is in which
+    const gather = (members, into, index) => {
       const middle = new THREE.Vector3();
       let area = 0;
       const flat = [];
@@ -7961,15 +7967,200 @@ void main() {
         middle.addScaledVector(a.clone().add(b).add(c), piece / 3);
         area += piece;
         flat.push(...a.toArray(), ...b.toArray(), ...c.toArray());
-        faceOf.set(t, face.length);
+        into.set(t, index);
       }
+      return { point: middle.divideScalar(area).toArray(), triangles: flat };
+    };
+    const face = [];
+    const faceOf = new Map();
+    for (const [plane, members] of planes) {
+      if (smooth.has(plane)) continue;
       face.push({
         normal: members[0].normal.toArray(),
-        point: middle.divideScalar(area).toArray(),
-        triangles: flat,
+        ...gather(members, faceOf, face.length),
       });
     }
-    return { face, faceOf };
+    // the round surfaces: the other triangles, joined where they go on
+    // smoothly into each other -- a sphere one, a cylinder's side one, a
+    // ring's two, each its own shape where it is a sphere's or a cylinder's
+    const root = new Map();
+    const find = (t) => {
+      while (root.get(t) !== t) t = root.get(t);
+      return t;
+    };
+    for (const triangle of triangles) {
+      if (smooth.has(triangle.plane)) root.set(triangle, triangle);
+    }
+    for (const meeting of sides.values()) {
+      for (let i = 0; i < meeting.length; i++) {
+        for (let j = i + 1; j < meeting.length; j++) {
+          const [p, q] = [meeting[i], meeting[j]];
+          if (!root.has(p) || !root.has(q)) continue;
+          if (p.normal.angleTo(q.normal) < most) root.set(find(p), find(q));
+        }
+      }
+    }
+    const regions = new Map();
+    for (const triangle of root.keys()) {
+      const top = find(triangle);
+      if (!regions.has(top)) regions.set(top, []);
+      regions.get(top).push(triangle);
+    }
+    const surface = [];
+    const surfaceOf = new Map();
+    for (const members of regions.values()) {
+      surface.push({
+        shape: roundShape(members, sides, keyOf),
+        ...gather(members, surfaceOf, surface.length),
+      });
+    }
+    return { face, faceOf, surface, surfaceOf };
+  }
+
+  /** What a round surface is, from its triangles: a sphere's -- its
+   *  `centre` and `radius` --, a cylinder's side -- its `centre`, `axis`,
+   *  `radius`, how far along the axis it runs, `from` and `to`, and, part of
+   *  the way round, from which angle (`start`, from `u` towards `v`) over
+   *  which (`span`) -- or else `facets`, measured as drawn. Its vertices are
+   *  on the true surface, so a fit through them is exact, to rounding. */
+  function roundShape(members, sides, keyOf) {
+    const facets = { type: "facets" };
+    const seen = new Map();
+    for (const { a, b, c } of members) {
+      for (const v of [a, b, c]) seen.set(keyOf(v), v);
+    }
+    const points = [...seen.values()];
+    if (points.length < 5) return facets;
+    // a cylinder's side first: its two rims are on a sphere too
+    return (
+      cylinderOf(members, points, sides, seen) ?? sphereOf(points) ?? facets
+    );
+  }
+
+  /** A cylinder's side, by `roundShape`'s words, through `points`, or null. */
+  function cylinderOf(members, points, sides, seen) {
+    // a cylinder's side: every facet's normal at right angles to the axis,
+    // so the axis is at right angles to the two normals furthest apart
+    const first = members[0].normal;
+    let other = first;
+    for (const { normal } of members) {
+      if (
+        first.clone().cross(normal).lengthSq() >
+        first.clone().cross(other).lengthSq()
+      )
+        other = normal;
+    }
+    const axis = first.clone().cross(other);
+    if (!(axis.length() > 1e-6)) return null;
+    axis.normalize();
+    if (members.some(({ normal }) => Math.abs(normal.dot(axis)) > 1e-3)) {
+      return null;
+    }
+    const u = new THREE.Vector3(1, 0, 0);
+    if (Math.abs(axis.x) > 0.9) u.set(0, 1, 0);
+    u.addScaledVector(axis, -u.dot(axis)).normalize();
+    const v = axis.clone().cross(u);
+    const circle = solveSquares(
+      points.map((p) => [2 * p.dot(u), 2 * p.dot(v), 1]),
+      points.map((p) => p.dot(u) ** 2 + p.dot(v) ** 2),
+    );
+    if (!circle) return null;
+    const centre = u
+      .clone()
+      .multiplyScalar(circle[0])
+      .addScaledVector(v, circle[1]);
+    const radius = Math.sqrt(circle[2] + circle[0] ** 2 + circle[1] ** 2);
+    const radial = (p) => {
+      const d = p.clone().sub(centre);
+      return d.addScaledVector(axis, -d.dot(axis));
+    };
+    const off = Math.max(
+      ...points.map((p) => Math.abs(radial(p).length() - radius)),
+    );
+    if (!(radius > 0) || off > radius * 1e-4) return null;
+    const along = points.map((p) => p.clone().sub(centre).dot(axis));
+    const shape = {
+      type: "cylinder",
+      centre: centre.toArray(),
+      axis: axis.toArray(),
+      u: u.toArray(),
+      v: v.toArray(),
+      radius,
+      from: Math.min(...along),
+      to: Math.max(...along),
+      start: 0,
+      span: 2 * Math.PI,
+    };
+    // part of the way round: a side of its rim -- one of its triangles' alone
+    // -- runs along the axis
+    const mine = new Set(members);
+    const partial = [...sides.entries()].some(([side, meeting]) => {
+      if (meeting.filter((each) => mine.has(each)).length !== 1) return false;
+      const [p, q] = side.split("|").map((key) => seen.get(key));
+      return p && q && Math.abs(q.clone().sub(p).normalize().dot(axis)) > 0.999;
+    });
+    if (partial) {
+      const angles = points
+        .map((p) => Math.atan2(radial(p).dot(v), radial(p).dot(u)))
+        .sort((a, b) => a - b);
+      let gap = angles[0] + 2 * Math.PI - angles[angles.length - 1];
+      let start = angles[0];
+      for (let i = 1; i < angles.length; i++) {
+        if (angles[i] - angles[i - 1] > gap) {
+          gap = angles[i] - angles[i - 1];
+          start = angles[i];
+        }
+      }
+      Object.assign(shape, { start, span: 2 * Math.PI - gap });
+    }
+    return shape;
+  }
+
+  /** A sphere through `points`, by `roundShape`'s words, or null. */
+  function sphereOf(points) {
+    // a sphere: |v|^2 = 2 c.v + d, in the least squares
+    const sphere = solveSquares(
+      points.map((v) => [2 * v.x, 2 * v.y, 2 * v.z, 1]),
+      points.map((v) => v.lengthSq()),
+    );
+    if (sphere) {
+      const centre = new THREE.Vector3(sphere[0], sphere[1], sphere[2]);
+      const radius = Math.sqrt(sphere[3] + centre.lengthSq());
+      const off = Math.max(
+        ...points.map((v) => Math.abs(v.distanceTo(centre) - radius)),
+      );
+      if (radius > 0 && off < radius * 1e-4) {
+        return { type: "sphere", centre: centre.toArray(), radius };
+      }
+    }
+    return null;
+  }
+
+  /** `x` with the least squares of `rows . x - values`, or null. */
+  function solveSquares(rows, values) {
+    const n = rows[0].length;
+    const a = Array.from({ length: n }, () => new Array(n + 1).fill(0));
+    rows.forEach((row, r) => {
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) a[i][j] += row[i] * row[j];
+        a[i][n] += row[i] * values[r];
+      }
+    });
+    for (let c = 0; c < n; c++) {
+      let pivot = c;
+      for (let r = c + 1; r < n; r++) {
+        if (Math.abs(a[r][c]) > Math.abs(a[pivot][c])) pivot = r;
+      }
+      [a[c], a[pivot]] = [a[pivot], a[c]];
+      if (!(Math.abs(a[c][c]) > 1e-300)) return null;
+      for (let r = 0; r < n; r++) {
+        if (r === c) continue;
+        const f = a[r][c] / a[c][c];
+        for (let k = c; k <= n; k++) a[r][k] -= f * a[c][k];
+      }
+    }
+    const x = a.map((row, i) => row[n] / row[i]);
+    return x.every(Number.isFinite) ? x : null;
   }
 
   /** The feature an end names, where it is now, in the world -- a corner's
@@ -7998,8 +8189,17 @@ void main() {
       const b = world(list, 6 * end.index + 3);
       return { kind, a, b, point: a.clone().add(b).multiplyScalar(0.5) };
     }
-    const face = list[end.index];
+    const face = list?.[end.index];
     if (!face) return null;
+    if (kind === "surface") {
+      return {
+        kind,
+        point: world(face.point, 0),
+        shape: shapeInWorld(face.shape, part.matrixWorld),
+        triangles: face.triangles,
+        matrix: part.matrixWorld,
+      };
+    }
     const turn = new THREE.Matrix3().getNormalMatrix(part.matrixWorld);
     return {
       kind,
@@ -8019,7 +8219,10 @@ void main() {
    *  and `to` their middles; parallel, their distance; neither, their
    *  distance, and the angle they are at kept as `tilt`. */
   function between(p, q) {
-    if (p.kind > q.kind) [p, q] = [q, p]; // corner, edge, face: in that order
+    if (p.kind > q.kind) [p, q] = [q, p]; // corner, edge, face, surface
+    // a round surface: its nearest point to the other, exactly, from its
+    // shape, its distance only
+    if (q.kind === "surface") return nearestOf(p, q);
     const closestOnEdge = (point, edge) => {
       const ab = edge.b.clone().sub(edge.a);
       const t = THREE.MathUtils.clamp(
@@ -8079,6 +8282,103 @@ void main() {
     }
     if (touching) return { from: p.point, to: q.point, angle: tilt };
     return { ...nearest, tilt };
+  }
+
+  /** A round surface's shape, from its part's frame into the world. */
+  function shapeInWorld(shape, matrix) {
+    if (shape.type === "facets") return shape;
+    const scale = matrix.getMaxScaleOnAxis();
+    const way = (flat) =>
+      new THREE.Vector3().fromArray(flat).transformDirection(matrix);
+    const placed = {
+      ...shape,
+      centre: new THREE.Vector3().fromArray(shape.centre).applyMatrix4(matrix),
+      radius: shape.radius * scale,
+    };
+    if (shape.type === "cylinder") {
+      Object.assign(placed, {
+        axis: way(shape.axis),
+        u: way(shape.u),
+        v: way(shape.v),
+        from: shape.from * scale,
+        to: shape.to * scale,
+      });
+    }
+    return placed;
+  }
+
+  /** The point of a feature nearest `x`, all of them in the world: a
+   *  corner's own, an edge's or a face's nearest, a round surface's from
+   *  its shape -- a sphere's, a cylinder's side's -- or its facets'. */
+  function nearestOn(feature) {
+    if (feature.kind === "corner") return () => feature.point.clone();
+    if (feature.kind === "edge") {
+      const line = new THREE.Line3(feature.a, feature.b);
+      return (x) => line.closestPointToPoint(x, true, new THREE.Vector3());
+    }
+    const shape = feature.shape;
+    if (shape?.type === "sphere") {
+      return (x) => {
+        const out = x.clone().sub(shape.centre);
+        if (!(out.lengthSq() > 0)) out.set(0, 0, 1);
+        return out.setLength(shape.radius).add(shape.centre);
+      };
+    }
+    if (shape?.type === "cylinder") {
+      const { centre, axis, u, v, radius, from, to, start, span } = shape;
+      return (x) => {
+        const d = x.clone().sub(centre);
+        const h = d.dot(axis);
+        let angle = Math.atan2(d.dot(v), d.dot(u)) - start;
+        angle -= 2 * Math.PI * Math.floor(angle / (2 * Math.PI)); // 0 to 2pi
+        if (angle > span) {
+          // past the end it is nearest to, the way round
+          angle = angle - span < 2 * Math.PI - angle ? span : 0;
+        }
+        angle += start;
+        return centre
+          .clone()
+          .addScaledVector(axis, THREE.MathUtils.clamp(h, from, to))
+          .addScaledVector(u, radius * Math.cos(angle))
+          .addScaledVector(v, radius * Math.sin(angle));
+      };
+    }
+    // a face, or what is measured on its facets
+    const { triangles } = facePieces(feature);
+    const triangle = new THREE.Triangle();
+    return (x) => {
+      let best = null;
+      let least = Infinity;
+      for (const corners of triangles) {
+        const on = triangle
+          .set(...corners)
+          .closestPointToPoint(x, new THREE.Vector3());
+        const d = on.distanceToSquared(x);
+        if (d < least) [least, best] = [d, on];
+      }
+      return best ?? x.clone();
+    };
+  }
+
+  /** The nearest points of a feature and a round surface, and the `length`
+   *  between: each the nearest of one to the other in turn, from the
+   *  surface's nearest to the feature's middle -- a sphere's nearest to
+   *  anything at once, a cylinder's and a flat face's in a step or two. */
+  function nearestOf(p, q) {
+    const [onP, onQ] = [nearestOn(p), nearestOn(q)];
+    const facets = [p, q].some((f) => f.shape?.type === "facets");
+    let to = onQ(p.point);
+    let from = onP(to);
+    for (let i = 0; i < (facets ? 30 : 200); i++) {
+      const next = onQ(from);
+      const back = onP(next);
+      const still =
+        next.distanceToSquared(to) + back.distanceToSquared(from) <=
+        1e-24 * (from.distanceToSquared(to) + p.point.lengthSq() + 1e-30);
+      [to, from] = [next, back];
+      if (still) break;
+    }
+    return { from, to, length: from.distanceTo(to) };
   }
 
   /** A face's triangles in the world, and the segments round them. */
@@ -8341,10 +8641,12 @@ void main() {
     }
     if (!under) return null;
     const { objectId, p } = owners.get(under.object);
-    const face = rulerFeatures(under.object).faceOf.get(under.faceIndex);
-    return face === undefined
-      ? null
-      : { kind: "face", objectId, part: p, index: face };
+    const found = rulerFeatures(under.object);
+    for (const kind of ["face", "surface"]) {
+      const index = found[`${kind}Of`].get(under.faceIndex);
+      if (index !== undefined) return { kind, objectId, part: p, index };
+    }
+    return null;
   }
 
   /** How far `page` is from the segment from `a` to `b`, on the page. */
@@ -8525,6 +8827,13 @@ void main() {
         now.tilt !== undefined
           ? `, at ${Number(now.tilt.toPrecision(3))}° to each other`
           : "",
+      )
+      .concat(
+        [measured.a, measured.b].some(
+          (end) => rulerFeature(end)?.shape?.type === "facets",
+        )
+          ? ", on a curved surface's drawn facets"
+          : "",
       );
   }
 
@@ -8646,6 +8955,7 @@ void main() {
       cue(ruler.hovered);
     }
     const height = renderer.domElement.clientHeight || 1;
+    const placed = []; // the labels' boxes on the page so far
     for (const measured of ruler.list) {
       const now = measuredNow(measured);
       measured.label ??= makeLabel();
@@ -8673,21 +8983,35 @@ void main() {
         ends[0] && ends[1]
           ? Math.hypot(ends[1][0] - ends[0][0], ends[1][1] - ends[0][1])
           : 0;
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
       if (across < (measured.label.plain ?? w) + 40) {
-        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(
-          camera.quaternion,
-        );
         middle.addScaledVector(up, (h / 2 + 8) * perPixel);
       }
-      sprite.position.copy(middle);
-      sprite.scale.set(w * perPixel, h * perPixel, 1);
       const page = onScreen(middle);
-      measured.label.box = page && [
+      let box = page && [
         page[0] - w / 2,
         page[1] - h / 2,
         page[0] + w / 2,
         page[1] + h / 2,
       ];
+      // on a label placed before it: above that one, clear of every other
+      for (let tries = 0; box && tries < placed.length; tries++) {
+        const hit = placed.find(
+          (other) =>
+            box[0] < other[2] &&
+            box[2] > other[0] &&
+            box[1] < other[3] + LABEL_GAP &&
+            box[3] > other[1] - LABEL_GAP,
+        );
+        if (!hit) break;
+        const rise = box[3] - hit[1] + LABEL_GAP;
+        middle.addScaledVector(up, rise * perPixel);
+        box = [box[0], box[1] - rise, box[2], box[3] - rise];
+      }
+      if (box) placed.push(box);
+      sprite.position.copy(middle);
+      sprite.scale.set(w * perPixel, h * perPixel, 1);
+      measured.label.box = box;
     }
     rulerDots.geometry.setAttribute(
       "position",
@@ -8753,18 +9077,27 @@ void main() {
     if (feature.a)
       Object.assign(plain, { a: feature.a.toArray(), b: feature.b.toArray() });
     if (feature.normal) plain.normal = feature.normal.toArray();
+    if (feature.shape) {
+      plain.shape = Object.fromEntries(
+        Object.entries(feature.shape).map(([key, value]) => [
+          key,
+          value?.isVector3 ? value.toArray() : value,
+        ]),
+      );
+    }
     return plain;
   }
 
   /** How many corners, edges and faces of each kind an object offers: for
    *  a host's checks. */
   function featuresOf(objectId) {
-    const count = { corner: 0, edge: 0, face: 0 };
+    const count = { corner: 0, edge: 0, face: 0, surface: 0 };
     for (const part of rulerParts(objectId)) {
       const found = rulerFeatures(part);
       count.corner += found.corner.length / 3;
       count.edge += found.edge.length / 6;
       count.face += found.face.length;
+      count.surface += found.surface.length;
     }
     return count;
   }
