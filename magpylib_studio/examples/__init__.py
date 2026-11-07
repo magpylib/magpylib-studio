@@ -12,7 +12,7 @@ lesson in writing one::
     ring = EXAMPLES["rings"]
     ring.scene.build().save("ring.magpy.json")
 
-Six have a marimo notebook too, in the repository's `docs/notebooks/`, which
+Seven have a marimo notebook too, in the repository's `docs/notebooks/`, which
 imports the scene and adds plots and numbers round the view.
 """
 
@@ -128,7 +128,7 @@ EXAMPLES = {
             measure=((("upper", (0, 0, 0.005)), ("upper", (0, 0, -0.005))),),
         ),
         Example("tolerance", "probe_placement"),
-        Example("quiver", "turning_magnet"),
+        Example("quiver", "turning_magnet", notebook="turning_magnet.py"),
         Example("array", "magnet_array"),
         Example("solid", "superellipsoid"),
         Example("halbach", "halbach_stack"),

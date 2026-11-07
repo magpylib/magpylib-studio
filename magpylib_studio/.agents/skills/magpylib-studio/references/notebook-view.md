@@ -64,6 +64,11 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   feature meant -- the view takes that object's feature nearest it, a corner
   before an edge before a face, a round surface or a curve -- and a page saved
   after opens measured.
+- `view.step` is the step of the run on screen, the row of a field read along
+  the path (`sensor.getB(...)`): said when the run pauses, ends or is scrubbed,
+  not at each frame played. `view.step = 12` stops the run there. A plot follows
+  it with `view.observe(callback, "step")`, in marimo into a `mo.state` the plot
+  cell reads.
 
 ## A scene, its variants and a run
 

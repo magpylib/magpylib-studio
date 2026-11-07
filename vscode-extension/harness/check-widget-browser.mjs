@@ -3010,6 +3010,36 @@ async function staleFrame(port, base) {
   );
 }
 
+/** The step a notebook reads: a scrub over twenty steps tells a few, ending
+ *  on the last; a step set from python moves the run there and is said back
+ *  once, as marimo needs; a pause tells the step it stopped on. */
+async function stepTrait(port, base) {
+  await check(
+    "the step goes both ways, and a scrub tells only a few",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/step-trait.html`);
+        const result = await tab.until("return window.result", 15_000);
+        if (!result) return "never finished";
+        const { scrubbed, fromPython, toldAfterPython, paused } = result;
+        if (scrubbed.at(-1) !== 20 || scrubbed.length > 5)
+          return `scrubbed to 20, told ${JSON.stringify(scrubbed)}`;
+        if (fromPython.counter !== "8 / 30" || fromPython.thumb !== "7")
+          return `set to 7 from python, shown ${JSON.stringify(fromPython)}`;
+        // said back once, for marimo's cells to re-run
+        if (toldAfterPython !== scrubbed.length + 1)
+          return "a step set from python was not said back, once";
+        if (`${paused.step + 1} / 30` !== paused.counter || paused.step === 7)
+          return `paused, told ${JSON.stringify(paused)}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A run whose steps take longer to pose than they last -- a long path, a
  *  big scene -- must still let the page paint, and a repeating one must not
  *  lock it up. Posing is slowed here, by busy-waiting, to make it so. */
@@ -5529,6 +5559,7 @@ try {
   await barOverTransport(browser.port, base);
   await savedRunVariants(browser.port, base);
   await staleFrame(browser.port, base);
+  await stepTrait(browser.port, base);
   await silent(browser.port, base);
   await textFocus(browser.port, base);
   await panel(browser.port, base, expected);

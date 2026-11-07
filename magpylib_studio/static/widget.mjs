@@ -225,6 +225,11 @@ const NO_ANSWER =
  *  sending: a value held back behind the one away has been waited on too. */
 const BUSY_AFTER = 350;
 
+/** How often, in ms, a scrub tells the notebook its `step` at most: a plot
+ *  following it keeps up, and is not drawn again for each pixel the thumb
+ *  moves. The last place is told, however soon. */
+const STEP_TOLD_EVERY = 100;
+
 // The busy ring's turn, an angle the ring's colours are laid from and its
 // animation runs through. widget.css registers it with `@property`, which a
 // browser ignores in a shadow root -- where marimo draws a widget -- and the
@@ -870,7 +875,7 @@ function render({ model, el }) {
   transport.className = "magpy-scene-transport";
   transport.hidden = true; // until a payload says there is a run
   const play = iconButton("play", "Play the path (space)", () =>
-    setPlaying(!playing),
+    togglePlaying(),
   );
   const scrub = document.createElement("input");
   scrub.type = "range";
@@ -1589,7 +1594,7 @@ function render({ model, el }) {
       : undefined,
     play() {
       if (frames() < 2) return false;
-      setPlaying(!playing);
+      togglePlaying();
     },
     // Up from what was picked to the collection holding it, whose handles
     // move it whole -- a click in the view picks what is drawn, and a
@@ -1796,6 +1801,51 @@ function render({ model, el }) {
 
   const frames = () => model.get("frames");
   const duration = () => model.get("duration") || 5;
+
+  // --- the step a notebook reads ------------------------------------------
+  // `step` counts the path's steps, the rows of a field read along it; a run
+  // magpylib kept fewer frames of says which step each frame is.
+  const pathSteps = () => model.get("payload")?.path_indices;
+  const stepOf = (frame) => pathSteps()?.[frame] ?? frame;
+  /** The frame showing `step`, or the nearest to it. */
+  function frameOf(step) {
+    const steps = pathSteps();
+    if (!steps?.length) return step;
+    let best = 0;
+    for (let i = 1; i < steps.length; i++) {
+      if (Math.abs(steps[i] - step) < Math.abs(steps[best] - step)) best = i;
+    }
+    return best;
+  }
+  let toldAt = -Infinity;
+  let telling = null;
+  let toldStep = model.get("step"); // the last the view said, or said back
+  /** The step a run opens on: the one the model holds -- set before the view
+   *  was drawn, or the one it was left at, a cell shown a second time, or
+   *  what python set beside a new scene -- else the payload's. */
+  function openingStep() {
+    const step = model.get("step");
+    if (frames() < 2 || !Number.isInteger(step)) return openStep();
+    return Math.min(frameOf(step), frames() - 1);
+  }
+  shown = openingStep();
+  /** Say which step the run stopped on, or is scrubbed to: a few times a
+   *  second at most, the last always, and never each frame of a run played
+   *  -- a plot following it would be drawn sixty times a second. */
+  function tellStep(frame) {
+    clearTimeout(telling);
+    const wait = toldAt + STEP_TOLD_EVERY - performance.now();
+    if (wait > 0) {
+      telling = setTimeout(() => tellStep(frame), wait);
+      return;
+    }
+    toldAt = performance.now();
+    const step = stepOf(frame);
+    if (model.get("step") === step) return;
+    toldStep = step;
+    model.set("step", step);
+    model.save_changes();
+  }
 
   /** The transport, read straight off the model.
    *
@@ -2298,6 +2348,12 @@ function render({ model, el }) {
     else if (wanted !== null && wanted !== shown) askFor(wanted);
   }
 
+  /** Play, or pause and say where. */
+  function togglePlaying() {
+    setPlaying(!playing);
+    if (!playing) tellStep(shown);
+  }
+
   function setPlaying(on) {
     clearTimeout(early);
     playing = api ? api.setPlaying(on) : false;
@@ -2328,6 +2384,7 @@ function render({ model, el }) {
     if (next > frames() - 1) {
       if (!model.get("repeat")) {
         setPlaying(false);
+        tellStep(shown);
         return;
       }
       next = 0;
@@ -2348,6 +2405,7 @@ function render({ model, el }) {
   scrub.addEventListener("input", () => {
     if (playing) setPlaying(false);
     askFor(Number(scrub.value));
+    tellStep(Number(scrub.value));
   });
 
   model.on("msg:custom", (message) => {
@@ -3068,6 +3126,7 @@ function render({ model, el }) {
     "panes",
     "selected_variants",
     "measurements",
+    "step",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -3140,7 +3199,29 @@ function render({ model, el }) {
       inFlight = false;
       answered(); // nothing is owed any more
       wanted = null;
-      shown = openStep();
+      shown = openingStep();
+      clearTimeout(telling); // a step of the last run, not this one's
+    }
+    // A step set from code: the run stops there, and the view says it back,
+    // once, as it does `revision` -- marimo re-runs the cells that read the
+    // widget when the view says it changed, and a plot following the run
+    // would stay where it was. Said by the view itself, it is the step on
+    // screen or on its way, and nothing moves.
+    if (now.has("step") && model.get("step") !== toldStep) {
+      toldStep = model.get("step");
+      model.set("step", toldStep);
+      model.save_changes();
+      clearTimeout(telling); // a scrub's last word is this now
+      const frame = Math.min(frameOf(toldStep), frames() - 1);
+      if (frame >= 0 && frame !== shown && frame !== wanted) {
+        if (playing) setPlaying(false);
+        if (scene || !api) {
+          // drawn there once the run is drawn (`draw` asks for `shown`)
+          shown = frame;
+          scrub.value = String(frame);
+          showStep();
+        } else askFor(frame);
+      }
     }
     if (scene || now.has("tree")) {
       dressLegend();
@@ -3330,6 +3411,7 @@ function render({ model, el }) {
     placing.disconnect();
     darkQuery.removeEventListener("change", retheme);
     clearTimeout(early);
+    clearTimeout(telling);
     clearTimeout(silence);
     clearTimeout(noticeTimer);
     clearTimeout(cameraTimer);

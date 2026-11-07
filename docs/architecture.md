@@ -397,10 +397,15 @@ puts them out, and for the cell's own objects first copies them into a session
 in the kernel, named from the cell's variables as read when they were given. The
 view calls `rpc.handle` over its connection, restricted to a short allow-list,
 and a `revision` trait and `last_edit` fire once per settled edit, never per
-preview frame. With the handles, the sliders toggle at the foot of the edit
-column opens **the variables panel** in a column beside the view, which refits
-to what is left, or in a sheet below a view narrower than 720px, the widget
-growing by it (`static/variables.mjs`,
+preview frame. A run's transport writes a `step` trait, counted in the path's
+steps through the payload's `path_indices` where magpylib kept fewer frames,
+when the run stops on one or is scrubbed (every 100 ms at most), never per frame
+played; a step set from python is drawn and written back once, for marimo
+([0055](decisions.md#0055-a-plot-follows-the-run-by-its-step)). With the
+handles, the sliders toggle at the foot of the edit column opens **the variables
+panel** in a column beside the view, which refits to what is left, or in a sheet
+below a view narrower than 720px, the widget growing by it
+(`static/variables.mjs`,
 [0019](decisions.md#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them),
 [0024](decisions.md#0024-the-panels-dock-beside-the-view-and-below-a-narrow-one)):
 a slider per variable with a range, a dropdown for a choice, a box that reads
