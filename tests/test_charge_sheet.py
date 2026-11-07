@@ -465,7 +465,8 @@ def test_a_sheet_with_no_part_is_said_solved_for_another_arrangement():
     or a drag that lifts the magnet off it says so -- in the listing, the
     legend's tree and the notebook's `last_edit` -- and putting it back,
     moving or turning it all together, moving a uniform field, or a second
-    view on the scene say nothing; new charges are a solve again."""
+    view on the scene say nothing; new charges are a solve again. A sweep
+    leaves out a value that makes it stale, not one it was stale at already."""
     from typing import Annotated
 
     from magpylib_material_response import UniformField
@@ -514,8 +515,14 @@ def test_a_sheet_with_no_part_is_said_solved_for_another_arrangement():
     }
     assert [n["id"] for n in view.tree if n.get("stale")] == ["plate"]
     assert SceneWidget(built, editable=True)._session.stale_solves() == ["plate"]
+    swept = studio.sweep("lift", [0.02, 0.04], points=[[0, 0, 0.05]])
+    assert len(swept["steps"]) == 2 and "skipped" not in swept
     use("near")
     assert studio.stale_solves() == [] and "stale" not in view.last_edit
+    swept = studio.sweep("lift", [0.0085, 0.03], points=[[0, 0, 0.05]])
+    assert [step["value"] for step in swept["steps"]] == [0.0085]
+    assert swept["skipped"][0]["value"] == 0.03
+    assert "solved for another arrangement: plate" in swept["skipped"][0]["error"]
     _drag(view, "magnet", (0, 0, 0.02), (0, 0, 0.03))  # a drag's steps too
     assert studio.stale_solves() == ["plate"]
     assert view.undo()
