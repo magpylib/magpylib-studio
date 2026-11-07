@@ -113,8 +113,11 @@ Both are worked out once a part, when the pointer first comes over it.
   are, to 1e-4 of the radius; part of the way round where a rim runs along the
   axis. The vertices are on the true surface, so the fit is exact to rounding.
   The nearest points of it and the other end are each the other's nearest in
-  turn, from the surface's nearest to the other's middle: a sphere's at once.
-  What is neither is measured on its facets, the tooltip says so.
+  turn till they stand still, from three starts, the shortest kept: each one's
+  nearest to the other's middle, and the nearest pair of points sampled on the
+  two. One start alone stood still on the far side of a bore, a sphere across
+  its axis read 4 mm for 2. What is neither is measured on its facets, the
+  tooltip says so.
 - **It is the view's**, not the document's: no undo step, nothing in the script,
   the saved scene or a saved page.
 

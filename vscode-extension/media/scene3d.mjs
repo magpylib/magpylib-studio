@@ -8361,24 +8361,79 @@ void main() {
   }
 
   /** The nearest points of a feature and a round surface, and the `length`
-   *  between: each the nearest of one to the other in turn, from the
-   *  surface's nearest to the feature's middle -- a sphere's nearest to
-   *  anything at once, a cylinder's and a flat face's in a step or two. */
+   *  between: each the nearest of one to the other in turn till they stand
+   *  still, from three starts, the shortest kept -- each one's nearest to
+   *  the other's middle, and the nearest pair of points sampled on the two.
+   *  One start alone can stand still on the far side of a bore: from its
+   *  axis, a sphere across it looks nearest at its back. */
   function nearestOf(p, q) {
     const [onP, onQ] = [nearestOn(p), nearestOn(q)];
     const facets = [p, q].some((f) => f.shape?.type === "facets");
-    let to = onQ(p.point);
-    let from = onP(to);
-    for (let i = 0; i < (facets ? 30 : 200); i++) {
-      const next = onQ(from);
-      const back = onP(next);
-      const still =
-        next.distanceToSquared(to) + back.distanceToSquared(from) <=
-        1e-24 * (from.distanceToSquared(to) + p.point.lengthSq() + 1e-30);
-      [to, from] = [next, back];
-      if (still) break;
+    const size = Math.max(spreadOf(p), spreadOf(q), 1e-30);
+    const settle = (from) => {
+      let to = onQ(from);
+      from = onP(to);
+      for (let i = 0; i < (facets ? 30 : 200); i++) {
+        const next = onQ(from);
+        const back = onP(next);
+        const still =
+          next.distanceToSquared(to) + back.distanceToSquared(from) <=
+          1e-24 * size * size;
+        [to, from] = [next, back];
+        if (still) break;
+      }
+      return { from, to, length: from.distanceTo(to) };
+    };
+    const [ps, qs] = [samplesOf(p), samplesOf(q)];
+    let near = [ps[0], qs[0]];
+    let least = Infinity;
+    for (const a of ps) {
+      for (const b of qs) {
+        const d = a.distanceToSquared(b);
+        if (d < least) [least, near] = [d, [a, b]];
+      }
     }
-    return { from, to, length: from.distanceTo(to) };
+    const tries = [settle(onP(q.point)), settle(near[0])];
+    // and from the other's side: its nearest to this one's middle
+    const back = settle(onP(onQ(p.point)));
+    tries.push(back);
+    return tries.reduce((best, each) =>
+      each.length < best.length ? each : best,
+    );
+  }
+
+  const SAMPLES = 160; // points of a feature looked at for where to start
+
+  /** Points on a feature, in the world, at most about `SAMPLES`: a corner,
+   *  along an edge, a face's or a round surface's drawn vertices. */
+  function samplesOf(feature) {
+    if (feature.kind === "corner") return [feature.point];
+    if (feature.kind === "edge") {
+      return Array.from({ length: 9 }, (_, k) =>
+        feature.a.clone().lerp(feature.b, k / 8),
+      );
+    }
+    const flat = feature.triangles;
+    const count = flat.length / 3;
+    const step = Math.max(1, Math.floor(count / SAMPLES));
+    const points = [];
+    for (let i = 0; i < count; i += step) {
+      points.push(
+        new THREE.Vector3(
+          flat[3 * i],
+          flat[3 * i + 1],
+          flat[3 * i + 2],
+        ).applyMatrix4(feature.matrix),
+      );
+    }
+    return points;
+  }
+
+  /** How far a feature reaches, about: for a tolerance. */
+  function spreadOf(feature) {
+    if (feature.kind === "corner") return feature.point.length();
+    const box = new THREE.Box3().setFromPoints(samplesOf(feature));
+    return box.getSize(new THREE.Vector3()).length() + box.max.length();
   }
 
   /** A face's triangles in the world, and the segments round them. */

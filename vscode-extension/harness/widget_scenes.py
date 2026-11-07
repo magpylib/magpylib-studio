@@ -667,6 +667,18 @@ def main(out):
         ),
     ]
     SceneWidget(*shapes).write_html(out / "shapes.html")
+    # a sphere across a ring's axis, 1 mm off it: 2 mm from the bore at its
+    # nearest, 6 mm at its back, where a nearest point looked for from the
+    # axis would stop (#125)
+    bore = [
+        magpy.magnet.CylinderSegment(
+            polarization=(0, 0, 1), dimension=(0.005, 0.01, 0.01, 0, 360)
+        ),
+        magpy.magnet.Sphere(
+            polarization=(0, 0, 1), diameter=0.004, position=(0.001, 0, 0)
+        ),
+    ]
+    SceneWidget(*bore).write_html(out / "bore.html")
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
     soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top
     SceneWidget(soft).write_html(out / "applied.html")

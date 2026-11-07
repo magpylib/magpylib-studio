@@ -1512,6 +1512,24 @@ async function savedRuler(port, base) {
           return [made, s.measurements().length];`);
         if (cleared.join() !== "1,0")
           return `Esc, the ruler off and nothing selected: ${cleared}`;
+        // a sphere in a ring's bore, across its axis: 2 mm at its nearest,
+        // whichever is picked first
+        await tab.navigate(`${base}/out/bore.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the bore never drew";
+        const bore = await tab.evaluate(`const s = window.scene3d;
+          const ids = [...s.byObjectId.keys()];
+          const end = (id, index) => ({ kind: "surface", objectId: id, part: 0, index });
+          const ring = ids.find((id) => s.featuresOf(id).surface === 2);
+          const ball = end(ids.find((id) => id !== ring), 0);
+          const inner = [0, 1].map((i) => end(ring, i))
+            .find((e) => s.featureOf(e).shape.radius < 7);
+          s.setMeasurements([{ a: ball, b: inner }, { a: inner, b: ball }]);
+          return s.measurements().map((m) => m.length);`);
+        if (bore.length !== 2 || bore.some((d) => Math.abs(d - 2) > 1e-5))
+          return `a sphere in a bore, either way round: ${bore}`;
         return thrown(tab);
       } finally {
         await tab.close();
