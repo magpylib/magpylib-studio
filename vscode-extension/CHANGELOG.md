@@ -166,16 +166,11 @@ drag the engine answers -- a resize by an object's grips most of all -- cleared
 the view's canvas, the same size given again, and the whole view flashed blank
 till the next frame; so did each step of a resize of the window, the panel or a
 sash between panes. The canvas keeps its picture now, and a resized view is
-drawn in the frame it is resized in.
-
-</details>
-
-<details>
-<summary>Copies made in a drag keep their group's colour</summary>
-
-Dragging a count up -- the coil pair's turns -- drew each copy a step made in
-the next colour of magpylib's sequence, pink, red, green, till the slider was
-let go; they are the colour of their coil from the first step now.
+drawn in the frame it is resized in. And dragging a count up -- the coil pair's
+turns -- drew each copy a step made in the next colour of magpylib's sequence,
+pink, red, green, till the slider was let go: they are their coil's colour from
+the first step now
+([#153](https://github.com/magpylib/magpylib-studio/pull/153)).
 
 </details>
 

@@ -2676,7 +2676,12 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
     its ``colors``, which a scene drawn whole names as ``colors``: magpylib
     colours what no style colours by its place among what it draws, so two
     loops of one coil, one colour in the coil, are two colours drawn alone.
-    What is drawn here is lent the colour it had, for the drawing.
+    What is drawn here is lent the colour it had, for the drawing. What was
+    made since -- a pattern's count raised in the gesture -- is lent the
+    colour the whole scene would give it, kept in `whole` for the steps
+    after. Its group's, held in one; at the top level, the sequence's next,
+    which an uncoloured object after it may still show till the scene is
+    drawn whole again: the sequence has moved on under it.
     """
     live = live or {}
     derived = derived or {}
@@ -2702,13 +2707,16 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
         elif drawn:
             colors = (whole or {}).get("colors") or {}
             own = {id(obj): key for key, obj in live.items()}
-            if any(own.get(id(obj)) not in colors for obj in drawn):
-                # made since the scene was drawn whole -- a pattern's count
-                # raised in the gesture: coloured as drawn whole it would be,
-                # its group's, not the next of the sequence drawn alone
+            keys = [own.get(id(obj)) for obj in drawn]
+            if any(key not in colors for key in keys):
+                # made since the scene was drawn whole: coloured as drawn
+                # whole it would be, not the next of the sequence drawn alone,
+                # and kept, so the gesture's later steps lend it again
                 colors = {**_cycled_colors(objects, live), **colors}
-            for obj in drawn:
-                color = colors.get(own.get(id(obj)))
+                if whole is not None:
+                    whole["colors"] = colors
+            for obj, key in zip(drawn, keys, strict=True):
+                color = colors.get(key)
                 if color is not None and obj.style.color is None:
                     obj.style.color = color
                     lent.append(obj)
