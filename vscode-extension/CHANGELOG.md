@@ -170,6 +170,15 @@ drawn in the frame it is resized in.
 
 </details>
 
+<details>
+<summary>Copies made in a drag keep their group's colour</summary>
+
+Dragging a count up -- the coil pair's turns -- drew each copy a step made in
+the next colour of magpylib's sequence, pink, red, green, till the slider was
+let go; they are the colour of their coil from the first step now.
+
+</details>
+
 ## [0.14.1]
 
 ### Added
