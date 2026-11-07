@@ -166,16 +166,24 @@ drag the engine answers -- a resize by an object's grips most of all -- cleared
 the view's canvas, the same size given again, and the whole view flashed blank
 till the next frame; so did each step of a resize of the window, the panel or a
 sash between panes. The canvas keeps its picture now, and a resized view is
-drawn in the frame it is resized in.
+drawn in the frame it is resized in. And dragging a count up -- the coil pair's
+turns -- drew each copy a step made in the next colour of magpylib's sequence,
+pink, red, green, till the slider was let go: they are their coil's colour from
+the first step now
+([#153](https://github.com/magpylib/magpylib-studio/pull/153)).
 
 </details>
 
 <details>
-<summary>Copies made in a drag keep their group's colour</summary>
+<summary>A sweep reads a solved part solved at each value</summary>
 
-Dragging a count up -- the coil pair's turns -- drew each copy a step made in
-the next colour of magpylib's sequence, pink, red, green, till the slider was
-let go; they are the colour of their coil from the first step now.
+`sweep`, and the Field view's plot against a variable, read a solved part -- the
+U-core's core -- with the charges solved for the value the scene was at: the
+U-core's field at 0, 100 and 200 A read 2.6, 3.3 and 4.0 mT, where it is 0, 3.3
+and 6.6. Each value is now set as its slider sets it, solved again, as goal seek
+does; a value the scene refuses is left out and listed in `skipped`, where a
+magnet it could not draw was left out of the reading, and the plot's title says
+how many ([#154](https://github.com/magpylib/magpylib-studio/pull/154)).
 
 </details>
 
