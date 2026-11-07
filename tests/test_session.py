@@ -669,6 +669,20 @@ def test_a_drags_later_steps_keep_the_colours_of_its_first():
     assert "partial" in steps[1] and later == first
     assert all(s._objs[key].style.color is None for key in ("lower", "upper"))
 
+    # loops a step makes, raising the coil pair's turns, take their coil's
+    # colour too, not the next of the sequence as drawn alone
+    from magpylib_studio.examples.coil_pair import coil_pair
+
+    s = coil_pair.build().session
+    rest = {item["line_color"] for item in s.get_scene()["scatters"]}
+    s.begin_interaction()
+    for turns in (7, 8, 9):
+        s.set_variable("turns", turns)
+        step = s.get_scene(partial=True)
+        assert {item["line_color"] for item in step["scatters"]} == rest
+    s.end_interaction()
+    assert "partial" in step and len(rest) == 1
+
 
 @pytest.mark.parametrize(
     "move",

@@ -2702,6 +2702,11 @@ def scene_payload(objects, live=None, derived=None, fields=None, only=None, whol
         elif drawn:
             colors = (whole or {}).get("colors") or {}
             own = {id(obj): key for key, obj in live.items()}
+            if any(own.get(id(obj)) not in colors for obj in drawn):
+                # made since the scene was drawn whole -- a pattern's count
+                # raised in the gesture: coloured as drawn whole it would be,
+                # its group's, not the next of the sequence drawn alone
+                colors = {**_cycled_colors(objects, live), **colors}
             for obj in drawn:
                 color = colors.get(own.get(id(obj)))
                 if color is not None and obj.style.color is None:
