@@ -8703,26 +8703,51 @@ class MagpylibStudioSession:
 
         return self._edit_variants(mutate, f"remove variant {name}")
 
-    def sweep(self, variable, values, sensor_id=None, points=None, field="B"):
-        """Rebuild the scene once per value of a variable and read the field.
+    def _trial(self):
+        """A copy of this session to try values of its variables on, drawn and
+        solved as this one is (`_copied`): what `sweep` and `goal_seek` read,
+        so that the scene itself is never touched by a search."""
+        return self._copied(json.dumps(self.to_dict()))
 
-        This is what variables are *for*: a parameter study. It costs a full
-        re-fold of the document per step, which is milliseconds — the scene is
-        rebuilt from the log on every ordinary edit anyway. Nothing is
-        recorded in the history: the document ends on the value it started on.
+    def _set_as_slider(self, variable, value):
+        """Set `variable` to `value` as a drag of its slider in a view does:
+        `followed`, its follower answered and its solved parts solved again.
+        Raises ValueError when the scene refuses the value -- a magnet that
+        cannot be that size -- or what it shows there cannot be trusted: a
+        solve not done, or one solved for another arrangement
+        (docs/decisions.md#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date).
+        A plain rebuild would read a smaller scene for the first, and
+        charges solved for the old value for the second."""
+        done = self.followed(lambda: self.set_variable(variable, value))
+        if not done.get("ok"):
+            raise ValueError(done.get("error"))
+        if done.get("not_followed"):
+            raise ValueError(f"not solved for: {done['not_followed']}")
+        stale = self.stale_solves()
+        if stale:
+            raise ValueError(f"solved for another arrangement: {', '.join(stale)}")
+
+    def sweep(self, variable, values, sensor_id=None, points=None, field="B"):
+        """Read the field at each of `values` of a variable.
+
+        This is what variables are *for*: a parameter study. Each value is set
+        on a copy of the scene as a drag of its slider sets it
+        (`_set_as_slider`), its solved parts solved again, milliseconds a
+        value without them. Nothing is recorded in the history, and the scene
+        stays as it is. The first value the scene refuses, or cannot be read
+        at, ends the sweep, with the steps read before it.
         """
         variables = self.doc.get("variables") or {}
         if variable not in variables:
             return {"ok": False, "error": f"unknown variable {variable!r}"}
         if not isinstance(values, list | tuple) or not values:
             return {"ok": False, "error": "values must be a non-empty list"}
-        original = variables[variable]
+        trial = self._trial()
         steps = []
         try:
             for value in values:
-                self.doc["variables"][variable] = value
-                self._build()
-                data = self.get_field(sensor_id=sensor_id, points=points, field=field)
+                trial._set_as_slider(variable, value)
+                data = trial.get_field(sensor_id=sensor_id, points=points, field=field)
                 steps.append(
                     {
                         "value": value,
@@ -8737,9 +8762,6 @@ class MagpylibStudioSession:
                 "variable": variable,
                 "steps": steps,
             }
-        finally:
-            self.doc["variables"][variable] = original
-            self._build()
         return {
             "ok": True,
             "variable": variable,
@@ -8929,8 +8951,7 @@ class MagpylibStudioSession:
         # choice of several rows
         index = tuple(at) if isinstance(at, list) else at
 
-        # the scene to try values on, drawn and solved as this one is
-        trial = self._copied(json.dumps(self.to_dict()))
+        trial = self._trial()
 
         def field_there():
             sources, _ = trial._sources_for_field()
@@ -8963,14 +8984,7 @@ class MagpylibStudioSession:
         def read(value):
             nonlocal count
             count += 1
-            done = trial.followed(lambda: trial.set_variable(variable, value))
-            if not done.get("ok"):
-                raise ValueError(done.get("error"))
-            if done.get("not_followed"):
-                raise ValueError(f"not solved for: {done['not_followed']}")
-            stale = trial.stale_solves()
-            if stale:
-                raise ValueError(f"solved for another arrangement: {', '.join(stale)}")
+            trial._set_as_slider(variable, value)
             values = field_there()
             if index is not None:
                 values = values[index]

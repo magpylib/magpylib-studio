@@ -4654,6 +4654,11 @@ def test_sweep_reads_the_field_and_leaves_the_scene_where_it_found_it():
     assert list(s._objs["sens"].position) == [0, 0, 0.01]
     assert len(s.get_history()["undo"]) == steps_before  # not an edit
     assert s.sweep("nope", [1])["ok"] is False
+    # a size the cube cannot have ends the sweep, never read as no cube
+    s.set_param("m", "dimension", ["=gap", 0.01, 0.01])
+    refused = s.sweep("gap", [0.01, -0.01, 0.02])
+    assert refused["ok"] is False and len(refused["steps"]) == 1
+    assert "dimension" in refused["error"]
 
     fig = s.get_sweep_figure("gap", [0.01, 0.02])
     assert fig["data"][0]["x"] == [0.01, 0.02]
@@ -4724,12 +4729,16 @@ def test_goal_seek_takes_the_closer_whole_number_of_a_count():
     assert sparse["evaluations"] < found["evaluations"]
 
 
-def test_goal_seek_reads_a_solved_scene_solved_at_each_value():
+def test_a_search_reads_a_solved_scene_solved_at_each_value():
     """The U-core's current drives its solved core: read with the charges of
     100 A, the field at 151 A would be off by half, and 5 mT out of reach."""
     pytest.importorskip("magpylib_material_response")
     s = MagpylibStudioSession()
     assert s.load_example("ucore")["ok"]
+    swept = s.sweep("current", [0, 100, 200])
+    zero, one, two = (step["magnitude"][7] for step in swept["steps"])
+    assert zero == 0 and np.isclose(two, 2 * one)  # linear: no magnet in it
+    assert s.doc["variables"]["current"] == 100
     found = s.goal_seek("current", 0.005, at=[7], within=(100, 200), samples=4)
     assert np.isclose(found["applied"], 151.4, atol=0.1)
     assert np.isclose(s.get_field()["magnitude"][7], 0.005, rtol=1e-5)

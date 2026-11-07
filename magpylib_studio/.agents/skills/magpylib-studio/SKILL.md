@@ -213,10 +213,10 @@ print(
 )  # {'ok': False, 'error': 'n = 6.5 counts things, ...'}
 ```
 
-- `sweep(variable, values, points=... or sensor_id=..., field="B")` rebuilds the
-  scene once per value and reads the field each time, in milliseconds, and
-  leaves the scene on the value it started with. `values` must be a list:
-  `.tolist()` a numpy array.
+- `sweep(variable, values, points=... or sensor_id=..., field="B")` reads the
+  field at each value as the slider would set it, solved parts solved again, in
+  milliseconds a value without them, and leaves the scene as it was. `values`
+  must be a list: `.tolist()` a numpy array.
 - `goal_seek(variable, target, points=... or sensor_id=..., field="B")` finds
   the values of one variable where the field reads `target`, in SI, over the
   variable's limits or `within=(low, high)`, and sets the one nearest the
