@@ -673,15 +673,20 @@ def test_a_drags_later_steps_keep_the_colours_of_its_first():
     # colour too, not the next of the sequence as drawn alone
     from magpylib_studio.examples.coil_pair import coil_pair
 
+    def drawn(scene):
+        return {(item["object_id"], item["line_color"]) for item in scene["scatters"]}
+
     s = coil_pair.build().session
-    rest = {item["line_color"] for item in s.get_scene()["scatters"]}
+    shown = s.get_scene()
+    rest = drawn(shown)
     s.begin_interaction()
-    for turns in (7, 8, 9):
+    s.shows(shown)  # the first step drawn against the view's, as a slider's is
+    for turns in (7, 8, 9, 8):
         s.set_variable("turns", turns)
         step = s.get_scene(partial=True)
-        assert {item["line_color"] for item in step["scatters"]} == rest
+        assert "partial" in step and drawn(step) == rest
     s.end_interaction()
-    assert "partial" in step and len(rest) == 1
+    assert drawn(s.get_scene()) == rest and len(rest) == 2  # a loop per coil
 
 
 @pytest.mark.parametrize(
