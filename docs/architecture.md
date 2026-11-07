@@ -229,7 +229,8 @@ which its copies follow.
   mesh paths to its own folder. Variants stay with their scene.
 - Variables: hard bounds and `integer` are enforced in the fold, so they hold
   however a value arrived; renaming rewrites expressions through the AST;
-  `sweep` re-folds once per value and records nothing.
+  `sweep` and `goal_seek` set each value on a copy of the session as a slider
+  sets it (`_set_as_slider`: followed, solved again) and record nothing.
 - Units: every operation that shows a value says how it is `shown`; `quantity`
   and `read_values` read what is typed, `15 mm` or `1.5 cm`, in decimal.
 

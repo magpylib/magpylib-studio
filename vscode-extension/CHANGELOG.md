@@ -174,6 +174,19 @@ the first step now
 
 </details>
 
+<details>
+<summary>A sweep reads a solved part solved at each value</summary>
+
+`sweep`, and the Field view's plot against a variable, read a solved part -- the
+U-core's core -- with the charges solved for the value the scene was at: the
+U-core's field at 0, 100 and 200 A read 2.6, 3.3 and 4.0 mT, where it is 0, 3.3
+and 6.6. Each value is now set as its slider sets it, solved again, as goal seek
+does; a value the scene refuses is left out and listed in `skipped`, where a
+magnet it could not draw was left out of the reading, and the plot's title says
+how many ([#154](https://github.com/magpylib/magpylib-studio/pull/154)).
+
+</details>
+
 ## [0.14.1]
 
 ### Added
