@@ -49,6 +49,7 @@ WORDS = (
 SESSION = (
     "get_field",
     "sweep",
+    "goal_seek",
     "set_variable",
     "set_variables",
     "get_variables",
