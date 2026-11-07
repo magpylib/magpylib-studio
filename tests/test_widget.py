@@ -2698,6 +2698,48 @@ def test_panes_and_selection_name_variants_of_the_scene(trait):
     assert getattr(view, trait) == ["many"], "a variant taken away leaves them"
 
 
+def test_measurements_are_named_ends_and_a_saved_page_carries_them():
+    """`measurements`, the ruler's, is a list of two ends each, as the view
+    names a feature, with what each reads; a pair without its ends is
+    refused, a page saved from the view carries them, and `measure` names
+    an end by a point at its feature."""
+    a = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3)
+    b = magpy.magnet.Cuboid(
+        polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0.02, 0, 0)
+    )
+    end = {"kind": "corner", "part": 0, "index": 0}
+    pair = {"a": {**end, "objectId": str(id(a))}, "b": {**end, "objectId": str(id(b))}}
+    view = widget.SceneWidget(a, b, measurements=[pair])
+    assert view.measurements == [{**pair, "length": None, "angle": None}]
+    with pytest.raises(traitlets.TraitError, match="two ends, 'a' and 'b'"):
+        view.measurements = [{"a": pair["a"]}]
+    with pytest.raises(traitlets.TraitError, match="two ends"):
+        view.measurements = [{**pair, "b": {**pair["b"], "kind": "vertex"}}]
+    assert _scene_of(view.to_html())["state"]["measurements"] == view.measurements
+    view.measurements = []
+    assert _scene_of(view.to_html())["state"]["measurements"] == []
+    # a script's: each end an object and a point at its feature, in metres,
+    # which the view names as a click would
+    assert view.measure((a, (0.005, 0, 0)), (str(id(b)), (0.015, 0, 0))) is view
+    assert view.measurements == [
+        {
+            "a": {"objectId": str(id(a)), "near": [0.005, 0.0, 0.0]},
+            "b": {"objectId": str(id(b)), "near": [0.015, 0.0, 0.0]},
+            "length": None,
+            "angle": None,
+        }
+    ]
+    with pytest.raises(ValueError, match="not an object in this view"):
+        view.measure((magpy.Sensor(), (0, 0, 0)), (a, (0, 0, 0)))
+    with pytest.raises(ValueError, match="an end is"):
+        view.measure((a, (0, 0)), (b, (0, 0, 0)))
+    with pytest.raises(ValueError, match="an end is"):
+        view.measure((a, (float("nan"), 0, 0)), (b, (0, 0, 0)))
+    # the same pair again, either way round: measured once
+    view.measure((b, (0.015, 0, 0)), (a, (0.005, 0, 0)))
+    assert len(view.measurements) == 1
+
+
 def test_a_variant_pane_drawn_unsolved_says_it_once_and_a_new_follower_redraws():
     """A pane's copy its follower refused is said on the pane's tag, not in a
     toast for every frame drawn; a new follower makes the copies again."""

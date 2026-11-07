@@ -873,6 +873,807 @@ async function savedVariants(port, base) {
   );
 }
 
+/** The ruler split into panes (#125): a measurement made in the scene's
+ *  pane is in every variant's, each its own length -- the distance between
+ *  its own corners there -- one made in a variant's pane is in the scene's,
+ *  the picture of the panes has them, and Esc takes them away from all. */
+async function rulerInPanes(port, base) {
+  await check(
+    "a measurement is in every pane, at its own variant",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/variants.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the page never drew";
+        await tab.evaluate(
+          `document.querySelector('button[title^="Measure"]').click()`,
+        );
+        // of a view, the corner of the magnet's copy `part` nearest its camera
+        const nearest = (view, part) => `(() => {
+        const s = ${view};
+        const cam = s.cameraState().position;
+        let best = null, least = Infinity;
+        for (let index = 0; index < 8; index++) {
+          const end = { kind: "corner", objectId: "magnet", part: ${part}, index };
+          const f = s.featureOf(end);
+          if (!f) continue;
+          const d = Math.hypot(...f.point.map((x, k) => x - cam[k]));
+          if (d < least) [least, best] = [d, end];
+        }
+        return best;
+      })()`;
+        // two corners of the scene's first two copies, clicked
+        const scene = "window.scene3d";
+        const clickInView = async (view, end) => {
+          const at = await tab.evaluate(`const s = ${view};
+          const p = s.endOnPage(${JSON.stringify(end)});
+          const canvas = s.canvasOf();
+          const r = canvas.getBoundingClientRect();
+          return p && { x: r.left + p[0], y: r.top + p[1] };`);
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...at,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...at,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+        };
+        for (const part of [0, 1]) {
+          await clickInView(
+            scene,
+            await tab.evaluate(`return ${nearest(scene, part)}`),
+          );
+        }
+        await tab.evaluate(
+          `document.querySelector(".magpy-scene-spread").click()`,
+        );
+        const panes = await tab.until(
+          `return [...document.querySelectorAll(".magpy-pane")].length === 3 &&
+          !document.querySelector(".magpy-pane-busy") && [...window.scene3ds].length === 3`,
+          15_000,
+        );
+        if (!panes) return "the panes never opened";
+        // each view's measurement: there, and the distance between its own ends
+        const each =
+          await tab.evaluate(`return [...window.scene3ds].map((s) => {
+        const [m] = s.measurements();
+        if (!m || m.length === null) return null;
+        const a = s.featureOf(m.a).point, b = s.featureOf(m.b).point;
+        return { length: m.length, apart: Math.hypot(...a.map((x, k) => x - b[k])) };
+      });`);
+        if (each.some((m) => !m || Math.abs(m.length - m.apart) > 1e-9))
+          return `a view's measurement: ${JSON.stringify(each)}`;
+        if (new Set(each.map((m) => m.length.toFixed(6))).size !== 3)
+          return `the variants measure alike: ${JSON.stringify(each)}`;
+        // the picture of the panes has them
+        const shot = `const r = await new Promise((done) => {
+          window.magpySave = (url) => done(url);
+          document.querySelector('button[title^="Save the view as a PNG"]').click();
+        });
+        delete window.magpySave;
+        return r;`;
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
+        const measured = await tab.evaluate(shot);
+        // one made in a variant's pane: in the scene's, and the other's, too
+        const pane = "[...window.scene3ds].at(-1)";
+        for (const part of [0, 2]) {
+          await clickInView(
+            pane,
+            await tab.evaluate(`return ${nearest(pane, part)}`),
+          );
+        }
+        const counts = await tab.evaluate(
+          `return [...window.scene3ds].map((s) => s.measurements().length)`,
+        );
+        if (counts.join() !== "2,2,2")
+          return `measured in a pane, each view's: ${counts}`;
+        // Esc, pressed as a person presses it: a first end picked in a
+        // variant's pane goes first, the measurements stay; the next Esc
+        // takes them from all, and from the picture
+        await clickInView(
+          pane,
+          await tab.evaluate(`return ${nearest(pane, 3)}`),
+        );
+        if (!(await tab.evaluate(`return ${pane}.rulerPending()`)))
+          return "a click in a variant's pane picked no first end";
+        const esc = async () => {
+          await tab.evaluate(
+            `document.querySelector(".magpy-scene-stage").focus()`,
+          );
+          for (const type of ["keyDown", "keyUp"]) {
+            await tab.send("Input.dispatchKeyEvent", {
+              type,
+              key: "Escape",
+              code: "Escape",
+              windowsVirtualKeyCode: 27,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 200));
+          return tab.evaluate(
+            `return [...window.scene3ds].map((s) => [s.measurements().length, s.rulerPending()])`,
+          );
+        };
+        const first = await esc();
+        if (first.map((v) => v.join(" ")).join() !== "2 false,2 false,2 false")
+          return `Esc with a pane's pick half made: ${JSON.stringify(first)}`;
+        await esc();
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
+        const left = await tab.evaluate(
+          `return [...window.scene3ds].map((s) => s.measurements().length)`,
+        );
+        if (left.join() !== "0,0,0") return `after Esc, each view's: ${left}`;
+        if ((await tab.evaluate(shot)) === measured)
+          return "the picture of the panes is the same with its measurements or without";
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** A view resized is drawn in the frame it was resized in: the canvas a
+ *  resize clears is never painted blank, which flashed at every step of a
+ *  drag of the window or of a sash between panes. */
+async function resizedDrawsAtOnce(port, base) {
+  await check("a view resized is never painted blank", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/small.html`);
+      if (!(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000)))
+        return "the page never drew";
+      await new Promise((done) => setTimeout(done, 500));
+      const inked = await tab.evaluate(`
+        const scene = document.querySelector(".magpy-scene");
+        const canvas = ${VIEW}.querySelector("canvas");
+        const ink = () => {
+          const t = document.createElement("canvas");
+          t.width = canvas.width;
+          t.height = canvas.height;
+          const c = t.getContext("2d");
+          c.drawImage(canvas, 0, 0);
+          const d = c.getImageData(0, 0, t.width, t.height).data;
+          let n = 0;
+          for (let i = 0; i < d.length; i += 4 * 97) {
+            if (d[i + 3] > 0 && (d[i] < 250 || d[i + 1] < 250 || d[i + 2] < 250)) n++;
+          }
+          return n;
+        };
+        const seen = [];
+        for (let k = 0; k < 4; k++) {
+          // resized in one frame, looked at in the next: what was painted
+          await new Promise((done) => requestAnimationFrame(() => {
+            scene.style.width = (k % 2 ? 640 : 760) + "px";
+            requestAnimationFrame(() => { seen.push(ink()); done(); });
+          }));
+        }
+        return seen;`);
+      if (inked.some((n) => n === 0))
+        return `the frames after a resize, inked: ${inked}`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** The ruler (#125) on a saved page: the button turns it on, two clicks on
+ *  two corners measure the distance between them, exactly, and the label
+ *  is in the picture; moved, the measurement follows; the ruler off, it
+ *  stays, and its label's x takes it away; Esc takes back the pick, then
+ *  the measurements, then the ruler. A round surface offers no corner, edge
+ *  or face, a wire its ends, its bends and its runs; and each pair of a
+ *  corner, an edge and a face measures what it should. */
+async function savedRuler(port, base) {
+  await check(
+    "the ruler measures between corners, edges, faces, round surfaces and curves",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/small.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the page never drew";
+        const button = `document.querySelector('button[title^="Measure"]')`;
+        await tab.evaluate(`${button}.click()`);
+        const on = await tab.evaluate(
+          `return window.scene3d.rulerOn() && ${button}.classList.contains("on")`,
+        );
+        if (!on) return "the button did not turn the ruler on";
+        const mouse = async (end, type = "click") => {
+          const at = await tab.evaluate(`
+          const c = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+          const p = window.scene3d.endOnPage(${JSON.stringify(end)});
+          return p && { x: c.left + p[0], y: c.top + p[1] };`);
+          if (!at) return false;
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...at,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          if (type !== "click") return true;
+          for (const kind of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type: kind,
+              ...at,
+              button: "left",
+              buttons: kind === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+          return true;
+        };
+        // of each magnet, the corner nearest the camera: in sight, as a corner
+        // behind a shape is not offered
+        const nearest = async (objectId) =>
+          await tab.evaluate(`const s = window.scene3d;
+          const cam = s.cameraState().position;
+          let best = null, least = Infinity;
+          for (let index = 0; index < 8; index++) {
+            const end = { kind: "corner", objectId: "${objectId}", part: 0, index };
+            const p = s.featureOf(end).point;
+            const d = Math.hypot(p[0] - cam[0], p[1] - cam[1], p[2] - cam[2]);
+            if (d < least) [least, best] = [d, end];
+          }
+          return best;`);
+        const a = await nearest("obj");
+        const b = await nearest("obj_2");
+        // each end on a vertex of its own magnet, as drawn, and the length the
+        // distance between them: worked out here, apart from the ruler
+        const truth = `const m = window.scene3d.measurements()[0];
+        const on = (id, at) => {
+          let near = Infinity;
+          window.scene3d.byObjectId.get(id).traverse((p) => {
+            if (!p.isMesh || p.isInstancedMesh || p.isLineSegments2) return;
+            p.updateWorldMatrix(true, false);
+            const v = p.geometry.attributes.position.array, e = p.matrixWorld.elements;
+            for (let i = 0; i < v.length; i += 3) {
+              const w = [0, 1, 2].map((k) => e[k] * v[i] + e[4 + k] * v[i + 1] + e[8 + k] * v[i + 2] + e[12 + k]);
+              near = Math.min(near, Math.hypot(w[0] - at[0], w[1] - at[1], w[2] - at[2]));
+            }
+          });
+          return near;
+        };
+        const [p, q] = [m.from, m.to];
+        return { off: Math.max(on("obj", p), on("obj_2", q)), apart: Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]), length: m.length };`;
+        const clear = await tab.evaluate(`return window.scene3d.snapshot()`);
+        if (!(await mouse(a)) || !(await mouse(b)))
+          return "a corner is off the view";
+        const made = await tab.evaluate(`return window.scene3d.measurements()`);
+        if (made.length !== 1) return `measured ${JSON.stringify(made)}`;
+        const sure = await tab.evaluate(truth);
+        if (sure.off > 1e-12 || Math.abs(sure.length - sure.apart) > 1e-12)
+          return `the ends off their corners: ${JSON.stringify(sure)}`;
+        const want = sure.length;
+        // the pointer off the view: no corner hovered, its dot no part of it
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
+        if ((await tab.evaluate(`return window.scene3d.snapshot()`)) === clear)
+          return "the picture has no measurement in it";
+        // moved, as a drag moves it: the measurement follows
+        await tab.evaluate(`const n = window.scene3d.byObjectId.get("obj");
+        n.position.z += 0.003; n.updateMatrixWorld(true);`);
+        const now = await tab.evaluate(truth);
+        if (
+          now.off > 1e-12 ||
+          Math.abs(now.length - now.apart) > 1e-12 ||
+          Math.abs(now.length - want) < 1e-6
+        )
+          return `moved: ${JSON.stringify(now)}, ${want} before`;
+        // the ruler off: no more picks, the measurement kept, and its x still
+        // takes it away
+        await tab.evaluate(`${button}.click()`);
+        const kept = await tab.evaluate(
+          `return [window.scene3d.rulerOn(), ${button}.classList.contains("on"), window.scene3d.measurements().length]`,
+        );
+        if (kept.join() !== "false,false,1")
+          return `the ruler off, [on, pressed, measurements]: ${kept}`;
+        // its label's x
+        const box = await tab.evaluate(
+          `return window.scene3d.measurements()[0].label`,
+        );
+        const at =
+          await tab.evaluate(`const c = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+        return { x: c.left + ${box[2]} - 7, y: c.top + ${(box[1] + box[3]) / 2} };`);
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          ...at,
+        });
+        await new Promise((done) => setTimeout(done, 250));
+        // a button there: the pointer says so
+        const cursor = await tab.evaluate(
+          `return ${VIEW}.querySelector("canvas").style.cursor`,
+        );
+        if (cursor !== "pointer")
+          return `on a label's x, the cursor is ${cursor}`;
+        for (const kind of ["mousePressed", "mouseReleased"]) {
+          await tab.send("Input.dispatchMouseEvent", {
+            type: kind,
+            ...at,
+            button: "left",
+            buttons: kind === "mousePressed" ? 1 : 0,
+            clickCount: 1,
+          });
+        }
+        await new Promise((done) => setTimeout(done, 150));
+        if (
+          (await tab.evaluate(
+            `return window.scene3d.measurements().length`,
+          )) !== 0
+        )
+          return "its label's x left the measurement";
+        // back where it was, where the ruler last looked for corners: a drag's
+        // own redraw is what has it look again
+        await tab.evaluate(`const n = window.scene3d.byObjectId.get("obj");
+        n.position.z -= 0.003; n.updateMatrixWorld(true);`);
+        // Esc: the pick half made, then the measurements, then the ruler
+        await tab.evaluate(`${button}.click()`);
+        const esc = `return window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`;
+        await mouse(a);
+        await mouse(b);
+        await mouse(a);
+        const steps = [];
+        for (let i = 0; i < 3; i++) {
+          await tab.evaluate(esc);
+          steps.push(
+            await tab.evaluate(
+              `return [window.scene3d.measurements().length, window.scene3d.rulerOn()]`,
+            ),
+          );
+        }
+        if (
+          JSON.stringify(steps) !==
+          JSON.stringify([
+            [1, true],
+            [0, true],
+            [0, false],
+          ])
+        )
+          return `Esc, step by step: ${JSON.stringify(steps)}`;
+        if (await tab.evaluate(`return ${button}.classList.contains("on")`))
+          return "the ruler off, its button stayed pressed";
+        // features, not a facet's: a sphere offers none, a cylinder its two
+        // flat ends, a loop its curve, a bent wire its ends, its bend and its
+        // two runs, an arc its ends and its curve; a cube, a cylinder's
+        // segment and a tetrahedron theirs; what has no size a point each --
+        // a dipole one, drawn at any size, a sensor of 2 x 2 pixels its own
+        // and its pixels' middles, not the boxes they are drawn as
+        await tab.navigate(`${base}/out/shapes.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the shapes never drew";
+        const offered = await tab.evaluate(`window.scene3d.setRuler(true);
+        return [...window.scene3d.byObjectId.keys()]
+          .map((id) => Object.values(window.scene3d.featuresOf(id)).join(" "))
+          .sort();`);
+        // and round surfaces: a sphere's, a cylinder's side, a segment's two
+        const kinds = [
+          "0 0 0 0 1",
+          "0 0 0 1 0",
+          "0 0 2 1 0",
+          "1 0 0 0 0",
+          "1 0 0 0 0",
+          "2 0 0 0 1",
+          "3 2 0 0 0",
+          "4 6 4 0 0",
+          "5 0 0 0 0",
+          "8 12 6 0 0",
+          "8 12 6 0 0",
+          "8 8 4 2 0",
+        ];
+        if (offered.join() !== kinds.join())
+          return `corners, edges, faces, round surfaces and curves each shape offers: ${offered}`;
+        // a wire's runs are picked, though a ray passes through them: its two
+        // meet at its bend, at right angles
+        const runs = await tab.evaluate(`const s = window.scene3d;
+          const wire = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).edge === 2);
+          return [0, 1].map((index) => ({ kind: "edge", objectId: wire, part: 0, index }));`);
+        for (const end of runs) {
+          const at =
+            await tab.evaluate(`const c = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+            const p = window.scene3d.endOnPage(${JSON.stringify(end)});
+            return { x: c.left + p[0], y: c.top + p[1] };`);
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...at,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...at,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+        }
+        const bend = await tab.evaluate(`return window.scene3d.measurements()`);
+        if (
+          bend.length !== 1 ||
+          bend[0].a.kind !== "edge" ||
+          Math.abs(bend[0].angle - 90) > 1e-9
+        )
+          return `a wire's two runs: ${JSON.stringify(bend)}`;
+        await tab.evaluate(
+          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        );
+        // each pair, picked by real clicks, from a corner of the view where a
+        // cube shows every face it turns to the camera: the two cubes' tops
+        // 3 mm apart, a top and a side at 90°, and so on
+        const picks = await tab.evaluate(`
+        const s = window.scene3d;
+        const st = s.cameraState();
+        const d = Math.hypot(...st.position.map((v, k) => v - st.target[k]));
+        s.setCamera({ ...st, up: [0, 0, 1],
+          position: st.target.map((t, k) => t + (d * [1, -1, 1][k]) / Math.sqrt(3)) });
+        const cubes = [...s.byObjectId.keys()].filter((id) => s.featuresOf(id).edge === 12);
+        const feature = (kind, id, index) => ({ kind, objectId: id, part: 0, index });
+        const top = (id) => [0, 1, 2, 3, 4, 5].map((i) => feature("face", id, i))
+          .find((end) => s.featureOf(end).normal[2] > 0.99);
+        cubes.sort((a, b) => s.featureOf(top(a)).point[2] - s.featureOf(top(b)).point[2]);
+        const [low, high] = cubes;
+        const cam = s.cameraState().position;
+        const facing = (end) => {
+          const f = s.featureOf(end);
+          const v = f.point.map((x, k) => cam[k] - x);
+          return f.normal.reduce((sum, n, k) => sum + n * v[k], 0) / Math.hypot(...v);
+        };
+        const side = [0, 1, 2, 3, 4, 5].map((i) => feature("face", low, i))
+          .filter((end) => Math.abs(s.featureOf(end).normal[2]) < 0.01)
+          .sort((a, b) => facing(b) - facing(a))[0];
+        const height = s.featureOf(top(low)).point[2];
+        const atTheTop = (f) => [f.a ?? f.point, f.b ?? f.point].every((p) => Math.abs(p[2] - height) < 1e-9);
+        const edges = [...Array(12).keys()].map((i) => feature("edge", low, i))
+          .filter((end) => atTheTop(s.featureOf(end)));
+        const way = (end) => { const f = s.featureOf(end); return f.b.map((x, k) => x - f.a[k]); };
+        const parallel = (u, v) => Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) < 1e-9;
+        const [e0] = edges;
+        const e1 = edges.find((end) => end !== e0 && parallel(way(e0), way(end)));
+        const corner = [...Array(8).keys()].map((i) => feature("corner", low, i))
+          .find((end) => atTheTop(s.featureOf(end)));
+        // a top edge meeting e0 at a corner, and the upright edge nearest
+        // the camera, which meets the top
+        const e2 = edges.find((end) => !parallel(way(e0), way(end)));
+        const upright = [...Array(12).keys()].map((i) => feature("edge", low, i))
+          .filter((end) => Math.abs(way(end)[2]) > 1e-9)
+          .sort((a, b) => {
+            const off = (end) => Math.hypot(...s.featureOf(end).point.map((x, k) => x - cam[k]));
+            return off(a) - off(b);
+          })[0];
+        // a sphere, and a cylinder's side, 5 mm apart: their own shapes, not
+        // their facets
+        const round = (faces) => [...s.byObjectId.keys()].find((id) =>
+          s.featuresOf(id).surface === 1 && s.featuresOf(id).face === faces);
+        const ball = feature("surface", round(0), 0);
+        const tube = feature("surface", round(2), 0);
+        // a loop and an arc, as their circles; the dipole drawn at a size
+        // of its own, a point
+        const ids = [...s.byObjectId.keys()];
+        const loop = feature("curve", ids.find((id) => s.featuresOf(id).curve === 1 && !s.featuresOf(id).corner), 0);
+        const arc = feature("curve", ids.find((id) => s.featuresOf(id).curve === 1 && s.featuresOf(id).corner === 2), 0);
+        const dipole = ids.map((id) => feature("corner", id, 0)).find((end) =>
+          s.featuresOf(end.objectId).corner === 1 && Math.abs(s.featureOf(end).point[1] + 40) < 1e-9);
+        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright, ball, tube, loop, arc, dipole };`);
+        const centre = await tab.evaluate(
+          `return window.scene3d.endOnPage(${JSON.stringify(picks.lowTop)})`,
+        );
+        // a click on a feature, an edge's a few pixels inward, off its rim
+        const pick = async (end) => {
+          let at = await tab.evaluate(
+            `return window.scene3d.endOnPage(${JSON.stringify(end)})`,
+          );
+          if (end.kind === "edge") {
+            const [dx, dy] = [centre[0] - at[0], centre[1] - at[1]];
+            const n = Math.hypot(dx, dy) || 1;
+            at = [at[0] + (3 * dx) / n, at[1] + (3 * dy) / n];
+          }
+          const page =
+            await tab.evaluate(`const c = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+          return { x: c.left + ${at[0]}, y: c.top + ${at[1]} };`);
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...page,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...page,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+        };
+        const pairs = [
+          [
+            "two parallel faces",
+            picks.lowTop,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
+          [
+            "a face and a face across it",
+            picks.lowTop,
+            picks.side,
+            { angle: 90 },
+          ],
+          // its foot past the other cube's top: dashed from there to it
+          [
+            "a corner and a face",
+            picks.corner,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
+          ["two edges", picks.e0, picks.e1, { length: 10 }],
+          [
+            "an edge and a face",
+            picks.e0,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
+          ["a corner and an edge", picks.corner, picks.e1, { length: 10 }],
+          // touching: the angle, the distance being none
+          ["two edges meeting at a corner", picks.e0, picks.e2, { angle: 90 }],
+          [
+            "an edge meeting a face",
+            picks.upright,
+            picks.lowTop,
+            { angle: 90 },
+          ],
+          // drawn as float32 vertices: a round surface's fit to rounding
+          [
+            "a sphere and a cylinder's side",
+            picks.ball,
+            picks.tube,
+            { length: 5, within: 1e-5 },
+          ],
+          [
+            "a sphere and a loop",
+            picks.ball,
+            picks.loop,
+            { length: 20, within: 1e-5 },
+          ],
+          // nearest the arc's end: its circle, all round, is nearer
+          [
+            "a dipole and an arc",
+            picks.dipole,
+            picks.arc,
+            { length: Math.hypot(25, 10), within: 1e-5 },
+          ],
+        ];
+        for (const [named, a, b, expect] of pairs) {
+          await pick(a);
+          await pick(b);
+          const made = await tab.evaluate(
+            `return window.scene3d.measurements()`,
+          );
+          const [m] = made;
+          const right =
+            made.length === 1 &&
+            m.a.kind === a.kind &&
+            m.b.kind === b.kind &&
+            ("length" in expect
+              ? Math.abs(m.length - expect.length) < (expect.within ?? 1e-9)
+              : Math.abs(m.angle - expect.angle) < 1e-9);
+          if (!right) return `${named}: ${JSON.stringify(made)}`;
+          // dashed only where the foot is off the face, ending on its edge
+          const dashed = m.extension;
+          if (Boolean(expect.extension) !== dashed.length > 0)
+            return `${named}, its extension line: ${JSON.stringify(dashed)}`;
+          if (
+            dashed.length &&
+            (Math.hypot(...dashed[0].map((x, k) => x - m.to[k])) > 1e-9 ||
+              Math.abs(dashed[1][2] - m.to[2]) > 1e-9 ||
+              !(Math.hypot(...dashed[1].map((x, k) => x - m.to[k])) > 1))
+          )
+            return `${named}, its extension line: ${JSON.stringify(dashed)}`;
+          // the same pair again, the other way round: not a second
+          if (named === "a corner and a face") {
+            await pick(b);
+            await pick(a);
+            const again = await tab.evaluate(
+              `return window.scene3d.measurements().length`,
+            );
+            if (again !== 1) return `${named}, measured twice: ${again}`;
+          }
+          // gone, for the next: Esc, the ruler on, takes the measurements
+          await tab.evaluate(
+            `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+          );
+        }
+        // two of the sensor's pixels, 4 mm apart, from their middles
+        const pixels = await tab.evaluate(`const s = window.scene3d;
+          const id = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).corner === 5);
+          const ends = [];
+          for (let part = 0; part < 4; part++) {
+            for (let index = 0; index < 5; index++) {
+              const end = { kind: "corner", objectId: id, part, index };
+              const f = s.featureOf(end);
+              if (f) ends.push({ end, at: f.point });
+            }
+          }
+          const apart = (e, o) => Math.hypot(...o.at.map((x, k) => x - e.at[k]));
+          const a = ends.find((e) => ends.some((o) => o !== e && Math.abs(apart(e, o) - 4) < 1e-9));
+          const b = a && ends.find((o) => o !== a && Math.abs(apart(a, o) - 4) < 1e-9);
+          return a && b ? [a.end, b.end] : null;`);
+        if (!pixels)
+          return "the sensor's pixels offer no two points 4 mm apart";
+        await pick(pixels[0]);
+        await pick(pixels[1]);
+        const across = await tab.evaluate(
+          `return window.scene3d.measurements()`,
+        );
+        if (across.length !== 1 || Math.abs(across[0].length - 4) > 1e-9)
+          return `two pixels: ${JSON.stringify(across)}`;
+        await tab.evaluate(
+          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        );
+        // a cylinder's segment, a quarter of the way round: its two round
+        // sides 5 mm apart, its outer 15 mm on from the low cube's side
+        // facing it -- the pair given twice, either way round, one
+        // measurement; and two labels in one place, one above the other:
+        // the low cube's top's two diagonals, which cross at its middle
+        const segment = await tab.evaluate(`const s = window.scene3d;
+          const id = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).surface === 2);
+          const end = (index) => ({ kind: "surface", objectId: id, part: 0, index });
+          const spans = [0, 1].map((i) => s.featureOf(end(i)).shape.span);
+          const pair = { a: end(0), b: end(1) };
+          s.setMeasurements([pair, { a: pair.b, b: pair.a }]);
+          const lengths = s.measurements().map((m) => m.length);
+          const low = ${JSON.stringify(picks.lowTop)};
+          const height = s.featureOf(low).point[2];
+          const top = [...Array(8).keys()]
+            .map((index) => ({ kind: "corner", objectId: low.objectId, part: 0, index }))
+            .filter((e) => Math.abs(s.featureOf(e).point[2] - height) < 1e-9);
+          const far = (e) => top.find((o) => Math.hypot(...s.featureOf(o).point.map((x, k) => x - s.featureOf(e).point[k])) > 14);
+          const other = top.find((e) => e !== top[0] && e !== far(top[0]));
+          s.setMeasurements([{ a: top[0], b: far(top[0]) }, { a: other, b: far(other) }]);
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+          const [p, q] = s.measurements().map((m) => m.label);
+          const apart = p && q && (p[3] <= q[1] || q[3] <= p[1] || p[2] <= q[0] || q[2] <= p[0]);
+          s.setMeasurements([]);
+          return { spans, lengths, apart };`);
+        if (
+          segment.spans.some((span) => Math.abs(span - Math.PI / 2) > 1e-5) ||
+          segment.lengths.length !== 1 ||
+          segment.lengths.some((length) => Math.abs(length - 5) > 1e-5) ||
+          !segment.apart
+        )
+          return `a segment's round sides, given twice, and two labels in one place: ${JSON.stringify(segment)}`;
+        // the ruler off, nothing selected: Esc takes the measurements too
+        await pick(picks.lowTop);
+        await pick(picks.highTop);
+        const cleared = await tab.evaluate(`const s = window.scene3d;
+          const made = s.measurements().length;
+          s.setRuler(false);
+          s.viewKey(new KeyboardEvent("keydown", { key: "Escape" }));
+          return [made, s.measurements().length];`);
+        if (cleared.join() !== "1,0")
+          return `Esc, the ruler off and nothing selected: ${cleared}`;
+        // a sphere in a ring's bore, across its axis: 2 mm at its nearest,
+        // whichever is picked first
+        await tab.navigate(`${base}/out/bore.html`);
+        if (
+          !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
+        )
+          return "the bore never drew";
+        const bore = await tab.evaluate(`const s = window.scene3d;
+          const ids = [...s.byObjectId.keys()];
+          const end = (id, index) => ({ kind: "surface", objectId: id, part: 0, index });
+          const ring = ids.find((id) => s.featuresOf(id).surface === 2);
+          const ball = end(ids.find((id) => id !== ring), 0);
+          const inner = [0, 1].map((i) => end(ring, i))
+            .find((e) => s.featureOf(e).shape.radius < 7);
+          // one pair either way round is one measurement: each on its own
+          return [{ a: ball, b: inner }, { a: inner, b: ball }].flatMap((pair) => {
+            s.setMeasurements([pair]);
+            return s.measurements().map((m) => m.length);
+          });`);
+        if (bore.length !== 2 || bore.some((d) => Math.abs(d - 2) > 1e-5))
+          return `a sphere in a bore, either way round: ${bore}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
+/** The ruler's measurements as a notebook holds them (#125): set from python
+ *  before the view is drawn, they are drawn, and the trait says what they
+ *  read, in metres; taken away in the view, the trait is empty; set again, the
+ *  view has them back. And a page saved with them opens with them. */
+async function measurementsTrait(port, base) {
+  await check(
+    "the measurements trait goes both ways, and a page keeps it",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/measure-trait.html`);
+        if (!(await tab.until("return window.ready", 20_000)))
+          return "never ready";
+        // what they read, once the scene settled
+        const read = await tab.until(`const m = page.model.get("measurements");
+        return m?.[0]?.length != null && m;`);
+        // each end given by a point at a corner: named a corner, as a click
+        // names it, and told back so
+        if (
+          !read ||
+          read.length !== 1 ||
+          Math.abs(read[0].length - 0.02) > 1e-9 ||
+          [read[0].a, read[0].b].some(
+            (end) => end.kind !== "corner" || end.near,
+          )
+        )
+          return `the trait, drawn: ${JSON.stringify(read)}`;
+        const drawn = await tab.evaluate(
+          `return window.scene3d.measurements().map((m) => m.length)`,
+        );
+        if (drawn.length !== 1 || Math.abs(drawn[0] - 20) > 1e-6)
+          return `in the view, set from python: ${drawn}`;
+        // taken away in the view, by Esc with the ruler on
+        const gone = await tab.evaluate(`const s = window.scene3d;
+        s.setRuler(true);
+        s.viewKey(new KeyboardEvent("keydown", { key: "Escape" }));
+        return page.model.get("measurements");`);
+        if (gone.length)
+          return `taken away in the view, the trait: ${JSON.stringify(gone)}`;
+        // set as a cell sets it: the view has them back
+        const back =
+          await tab.evaluate(`page.model.set("measurements", ${JSON.stringify(read)});
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        return window.scene3d.measurements().map((m) => m.length);`);
+        if (back.length !== 1 || Math.abs(back[0] - 20) > 1e-6)
+          return `set again, in the view: ${back}`;
+        // a page saved with them: drawn as it opens
+        await tab.navigate(`${base}/out/measured.html`);
+        const saved = await tab.until(
+          `const m = window.scene3d?.measurements();
+        return m?.length && m[0].label && m.map((each) => each.length);`,
+          20_000,
+        );
+        if (!saved || saved.length !== 1 || Math.abs(saved[0] - 20) > 1e-6)
+          return `a saved page's: ${JSON.stringify(saved)}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** Variants side by side (#127) on a saved page: a chip lifted out of the
  *  foot and dropped on the right half of the view is a pane of its own there,
  *  drawn from the scenes the page carries, beside the scene's; closed, the
@@ -2416,6 +3217,27 @@ async function panel(port, base, expected) {
         return `the panel says ${JSON.stringify(result.failed)}`;
       }
       return null;
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
+/** A render of the scene, the view the same size -- each step of a drag the
+ *  engine answers, a resize by its grips most of all -- leaves the picture
+ *  where it was until the next frame draws over it: a canvas given its size
+ *  again, unchanged, is cleared, and flashed the whole view blank at every
+ *  step. */
+async function renderKeepsThePicture(port, base) {
+  await check("a drag's step never leaves the view blank", async () => {
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/pages/redraw.html`);
+      const result = await tab.until("return window.result", 20_000);
+      if (!result) return "never finished";
+      if (result.steps.some((n) => n === 0))
+        return `drawn after each step, of 256 sampled: ${result.steps}`;
+      return thrown(tab);
     } finally {
       await tab.close();
     }
@@ -4711,6 +5533,7 @@ try {
   await textFocus(browser.port, base);
   await panel(browser.port, base, expected);
   await heldReadings(browser.port, base);
+  await renderKeepsThePicture(browser.port, base);
   await studioDrag(browser.port, base);
   await editing(browser.port, base);
   await pencil(browser.port, base);
@@ -4731,6 +5554,10 @@ try {
   await sealedBody(browser.port, base);
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
+  await savedRuler(browser.port, base);
+  await measurementsTrait(browser.port, base);
+  await rulerInPanes(browser.port, base);
+  await resizedDrawsAtOnce(browser.port, base);
   await savedPanes(browser.port, base);
   await glyphs(browser.port, base);
   await marks(browser.port, base);

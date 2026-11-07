@@ -1,0 +1,61 @@
+<!doctype html>
+<!--
+  The panel's own renderer, media/scene3d.mjs, drawing the quiver example,
+  then drawing it again as each step of a drag does -- a resize by its grips
+  most of all, which sends the scene back at every step -- and reading the
+  canvas at once, before the next frame: a render that cleared it, the view
+  the same size, flashed the whole view blank at every step.
+
+  `window.result` is how much of the canvas each render left drawn.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/three/build/three.module.js",
+          "three/addons/": "/three/examples/jsm/"
+        }
+      }
+    </script>
+    <style>
+      #view {
+        width: 640px;
+        height: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <script type="module">
+      import { createScene3d } from "/media/scene3d.mjs";
+      const scene3d = createScene3d();
+      const [before, after] = await (await fetch("/out/readings.json")).json();
+      const el = document.getElementById("view");
+      const frame = () => new Promise((done) => requestAnimationFrame(done));
+      // how many of a sample of the canvas's pixels are drawn at all
+      const inked = () => {
+        const canvas = el.querySelector("canvas");
+        const probe = document.createElement("canvas");
+        probe.width = probe.height = 16;
+        const ctx = probe.getContext("2d");
+        ctx.drawImage(canvas, 0, 0, 16, 16);
+        const data = ctx.getImageData(0, 0, 16, 16).data;
+        let n = 0;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 0) n++;
+        return n;
+      };
+      scene3d.render(el, before);
+      for (let i = 0; i < 5; i++) await frame();
+      const steps = [];
+      for (let i = 0; i < 4; i++) {
+        // a drag's step: the magnet held, the rest drawn from the answer
+        scene3d.render(el, i % 2 ? before : after, { keep: ["magnet"] });
+        steps.push(inked());
+        await frame();
+      }
+      window.result = { steps };
+    </script>
+  </body>
+</html>

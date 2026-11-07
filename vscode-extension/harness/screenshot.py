@@ -1,11 +1,11 @@
 """The Python half of `screenshot.mjs`.
 
-    python harness/screenshot.py scene OUT EXAMPLE
+    python harness/screenshot.py scene OUT
     python harness/screenshot.py join FRAMES COUNT X Y PNG GIF
 
-``scene`` writes OUT, a ``.magpy.json``: the Halbach design of the marimo
-notebook EXAMPLE, its cell run alone, its ``density`` at the top of its slider
-and the field lines on. Denser than that, the pixels are closer than the view
+``scene`` writes OUT, a ``.magpy.json``: the Halbach design the package ships,
+``magpylib_studio.examples.halbach_ring``, its ``density`` at the top of its
+slider and the field lines on. Denser than that, the pixels are closer than the view
 fills the plane with lines in its 400 (``FIELD_LINES_MOST``), which then stop
 short of the rings.
 
@@ -16,11 +16,9 @@ becomes PNG in 256 colours, and every pair a frame of GIF, smaller, one palette
 for all, looping.
 """
 
-import ast
 import json
 import pathlib
 import sys
-from typing import Annotated
 
 #: The flow's period, as `scene3d.mjs` runs it: 0.8 pulses a second.
 PERIOD_MS = 1250
@@ -31,30 +29,10 @@ GIF_WIDTH = 1600
 LEAN = 0.2
 
 
-def scene(out, example):
-    import magpylib as magpy
+def scene(out):
+    from magpylib_studio.examples.halbach_ring import halbach_ring
 
-    import magpylib_studio
-
-    # the cell that defines `halbach`, run as a script with what marimo
-    # would hand it
-    cell = next(
-        node
-        for node in ast.parse(example.read_text()).body
-        if isinstance(node, ast.FunctionDef)
-        and any(
-            isinstance(inner, ast.FunctionDef) and inner.name == "halbach"
-            for inner in node.body
-        )
-    )
-    given = {"Annotated": Annotated, "magpy": magpy}
-    names = {
-        arg.arg: given.get(arg.arg) or getattr(magpylib_studio, arg.arg)
-        for arg in cell.args.args
-    }
-    body = [node for node in cell.body if not isinstance(node, ast.Return)]
-    exec(compile(ast.Module(body, []), example, "exec"), names)  # noqa: S102
-    session = names["halbach"].build().session
+    session = halbach_ring.build().session
     session.set_variable(
         "density", session.to_dict()["variable_bounds"]["density"]["soft_max"]
     )
@@ -109,7 +87,7 @@ def join(frames, count, x, y, png, gif):
 if __name__ == "__main__":
     command, *args = sys.argv[1:]
     if command == "scene":
-        scene(pathlib.Path(args[0]), pathlib.Path(args[1]))
+        scene(pathlib.Path(args[0]))
     else:
         frames, count, x, y, png, gif = args
         join(pathlib.Path(frames), int(count), float(x), float(y), png, gif)

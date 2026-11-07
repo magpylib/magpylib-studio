@@ -91,6 +91,34 @@ only it, **Esc** lets go, **space** plays. On a view that offers the pencil,
 mode. They come from one table in `scene3d.mjs` that both hosts use. Tab is the
 one the widget does not take: in a notebook it moves between cells.
 
+**The ruler**, or M, measures what is drawn: a click on a corner, a straight
+edge or a flat face, then on another, and a line between their nearest points
+says how far apart they are, its Δx, Δy and Δz in its tooltip. Two edges, an
+edge and a face, or two faces that touch or cross are at an angle, and the label
+says that; parallel, how far apart; neither, how far, the angle in the tooltip.
+A distance to a face's plane that ends off the face runs on to it dashed. A pair
+measured already is not measured again. What is under the pointer is what a
+click takes, shown before it: a corner within a few pixels, else an edge, else
+the face, flat or round -- a sphere, a cylinder's side, measured as the true
+shape, not its facets -- or a wire's curve, a Circle's loop measured as the true
+circle; and a corner or an edge behind a shape is not offered through it. What
+has no size is a point: a dipole, whatever size its arrow is drawn at, a sensor
+and each of its pixels. It follows the objects as they move, several at once,
+each taken away by the × its label shows under the pointer. Turned off, a click
+selects again and the measurements stay, so drag an object by its handles and
+read the gap as it changes. Esc with the ruler on takes back the corner picked,
+then the measurements, then the ruler; with it off, once nothing is selected,
+the measurements. Split into panes, a measurement made in any is in all of them,
+each at its own variant: measure a gap once, read it in every variant. It is the
+view's, not the scene's: nothing to undo, and the PNG has the measurements.
+`view.measurements` lists them, each pair's ends and what it reads, a length in
+metres or an angle in degrees, for a cell to read; `[]` takes them away, and a
+list read from the view puts it back. A page saved from the view carries them.
+`view.measure((upper, (0, 0, 0.005)), (lower, (0, 0, -0.005)))` measures from a
+script: each end an object and a point in metres at the feature meant, the
+corner, edge, face, round surface or curve of it nearest the point -- the
+facing-magnets example's page opens so.
+
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.
 Split into panes, the PNG holds every pane in its place, each with its tag. The

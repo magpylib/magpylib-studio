@@ -625,6 +625,93 @@ def main(out):
         ),
     ]
     SceneWidget(*pushed).write_html(out / "overlap.html")
+    # one of each kind of corner, for the ruler (#125): a round surface and a
+    # loop have none, a bent wire its ends and its bend, a loop a curve
+    shapes = [
+        magpy.magnet.Sphere(
+            polarization=(0, 0, 1), diameter=0.01, position=(-0.03, 0, 0)
+        ),
+        magpy.magnet.Cylinder(
+            polarization=(0, 0, 1), dimension=(0.01, 0.01), position=(-0.015, 0, 0)
+        ),
+        magpy.current.Circle(current=1, diameter=0.01, position=(0, 0, 0)),
+        magpy.current.Polyline(
+            current=1,
+            vertices=[(0, 0, 0), (0.01, 0, 0), (0.01, 0.01, 0)],
+            position=(0.015, 0, 0),
+        ),
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.02, 0)
+        ),
+        # the same, 3 mm higher: two faces parallel and in sight, to measure
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0, 0.04, 0.003)
+        ),
+        magpy.magnet.CylinderSegment(
+            polarization=(0, 0, 1),
+            dimension=(0.005, 0.01, 0.01, 0, 90),
+            position=(0.02, 0.02, 0),
+        ),
+        magpy.magnet.Tetrahedron(
+            polarization=(0, 0, 1),
+            vertices=[(0, 0, 0), (0.01, 0, 0), (0, 0.01, 0), (0, 0, 0.01)],
+            position=(-0.03, 0.02, 0),
+        ),
+    ]
+    # a quarter of a circle, finely drawn: a curve, its two ends corners
+    shapes.append(
+        magpy.current.Polyline(
+            current=1,
+            vertices=[
+                (0.005 * np.cos(t), -0.03 + 0.005 * np.sin(t), 0)
+                for t in np.linspace(0, np.pi / 2, 21)
+            ],
+        )
+    )
+    # what has no size, a point each: a dipole, one drawn at a size of its
+    # own too, and a sensor of 2 x 2 pixels
+    shapes += [
+        magpy.misc.Dipole(moment=(0, 0, 1), position=(0.03, -0.02, 0)),
+        magpy.misc.Dipole(
+            moment=(0, 0, 1),
+            position=(0.03, -0.04, 0),
+            style_sizemode="absolute",
+            style_size=0.01,
+        ),
+        magpy.Sensor(
+            pixel=[[[x, y, 0] for x in (-0.002, 0.002)] for y in (-0.002, 0.002)],
+            position=(0.03, 0.04, 0),
+        ),
+    ]
+    SceneWidget(*shapes).write_html(out / "shapes.html")
+    # a sphere across a ring's axis, 1 mm off it: 2 mm from the bore at its
+    # nearest, 6 mm at its back, where a nearest point looked for from the
+    # axis would stop (#125)
+    bore = [
+        magpy.magnet.CylinderSegment(
+            polarization=(0, 0, 1), dimension=(0.005, 0.01, 0.01, 0, 360)
+        ),
+        magpy.magnet.Sphere(
+            polarization=(0, 0, 1), diameter=0.004, position=(0.001, 0, 0)
+        ),
+    ]
+    SceneWidget(*bore).write_html(out / "bore.html")
+    # two cubes 20 mm apart, a corner of one measured to the same corner of
+    # the other, set from python: the model a page plays a notebook with,
+    # and a page saved with it (#125)
+    pair = [
+        magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3),
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0.02, 0, 0)
+        ),
+    ]
+    # a corner of each, named by a point at it, as a script names an end
+    measured = SceneWidget(*pair)
+    measured.measure(
+        (pair[0], (-0.005, -0.005, 0.005)), (pair[1], (0.015, -0.005, 0.005))
+    )
+    (out / "measured.json").write_text(json.dumps(measured._saved()["state"]))
+    measured.write_html(out / "measured.html")
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
     soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top
     SceneWidget(soft).write_html(out / "applied.html")

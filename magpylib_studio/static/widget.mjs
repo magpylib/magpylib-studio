@@ -160,6 +160,10 @@ const ICONS = {
     '<rect x="4.5" y="4.5" width="9.5" height="9.5" rx="1.2"/>' +
     '<path d="M2 11.5V3a1 1 0 0 1 1-1h8.5"/>' +
     '<path d="M7.25 7.25l4 4M11.25 7.25l-4 4"/>',
+  // a ruler laid across, its marks along one edge (#125)
+  ruler:
+    '<path d="M2 11 11 2l3 3-9 9z"/>' +
+    '<path d="M5 8l1.5 1.5M7 6l1 1M9 4l1.5 1.5"/>',
   sliders:
     '<path d="M2 4h12M2 8h12M2 12h12"/>' +
     '<circle cx="6" cy="4" r="1.6"/><circle cx="10.5" cy="8" r="1.6"/>' +
@@ -301,7 +305,14 @@ const KEY_LIST = {
     ["5", "perspective or parallel"],
     ["H", "hide the selection — ⇧H: show only it"],
     ["⌥ / Alt on an eye", "click: show only that row — slide: fade the rest"],
-    ["Esc", "select nothing"],
+    [
+      "M",
+      "measure: a corner, an edge, a face, a round surface or a wire's curve, then another — again: select, the measurements kept",
+    ],
+    [
+      "Esc",
+      "select nothing — then the measurements; measuring: the pick first",
+    ],
     ["space", "play the path"],
     ["⌘ / Ctrl click", "add to the selection"],
   ],
@@ -759,8 +770,95 @@ function render({ model, el }) {
   markImage.src = MARK;
   markImage.alt = "";
   mark.append(markImage);
+  // The ruler: a view setting, so in every view, a saved page's too; the
+  // renderer says when it turns on or off, a key or Esc included.
+  const rulerButton = iconButton(
+    "ruler",
+    "Measure: click a corner, an edge, a face, a round surface or a wire's curve, then another (M)",
+    () => api?.setRuler(!api.rulerOn()),
+  );
+  pressed(rulerButton, false);
+  view.addEventListener("rulerchange", (event) => {
+    pressed(rulerButton, event.detail.on);
+    mirrorRuler(event.detail.on, api);
+  });
+  view.addEventListener("measurechange", (event) => {
+    mirrorMeasurements(event.detail.list, api);
+    tellMeasurements();
+  });
+  // Split into panes, one ruler and one list of measurements for them all,
+  // each pane's at its own variant (#125): a view that changed them, by a
+  // key, a click or a label's x, has them handed on to the others.
+  const rulerViews = () => [api, ...grid.apis].filter(Boolean);
+  function mirrorRuler(on, from) {
+    for (const each of rulerViews()) if (each !== from) each.setRuler(on);
+  }
+  function mirrorMeasurements(list, from) {
+    for (const each of rulerViews()) {
+      if (each !== from) each.setMeasurements(list);
+    }
+  }
+  // The measurements as the `measurements` trait says them, for a notebook
+  // to read and a saved page to carry: each pair's ends, and what it reads in
+  // the scene's view -- a length in metres, or an angle in degrees. Told
+  // when one is made or taken away, and once the scene settles after it
+  // moved (`MEASURE_SETTLE`): not at every step of a drag.
+  const MEASURE_SETTLE = 250;
+  let measureSoon = null;
+  function tellMeasurements() {
+    clearTimeout(measureSoon);
+    measureSoon = null;
+    if (!api) return;
+    const now = api.measurements().map((m) => ({
+      a: m.a,
+      b: m.b,
+      length: m.angle == null ? m.metres : null,
+      angle: m.angle,
+    }));
+    const told = model.get("measurements") || [];
+    if (JSON.stringify(told) === JSON.stringify(now)) return;
+    // ends named by a point, as this view named them: the panes take its
+    // names, each having named them by a variant of its own
+    if (told.some(({ a, b }) => a?.near || b?.near)) {
+      mirrorMeasurements(
+        now.map(({ a, b }) => ({ a, b })),
+        api,
+      );
+    }
+    model.set("measurements", now);
+    model.save_changes();
+  }
+  function tellMeasurementsSoon() {
+    clearTimeout(measureSoon);
+    if (api?.rulerPairs().length || (model.get("measurements") || []).length) {
+      measureSoon = setTimeout(tellMeasurements, MEASURE_SETTLE);
+    }
+  }
+  const sameEnd = (p, q) =>
+    ["kind", "objectId", "part", "index"].every(
+      (key) => p?.[key] === q?.[key],
+    ) && String(p?.near) === String(q?.near);
+  /** The measurements the trait names, in every view, where they are not
+   *  the ones there: assigned from python, or a saved page's. */
+  function showMeasurements() {
+    if (!api) return;
+    const pairs = (model.get("measurements") || []).map(({ a, b }) => ({
+      a,
+      b,
+    }));
+    const have = api.rulerPairs();
+    const same =
+      have.length === pairs.length &&
+      have.every(
+        (m, i) => sameEnd(m.a, pairs[i].a) && sameEnd(m.b, pairs[i].b),
+      );
+    if (same) return;
+    api.setMeasurements(pairs);
+    mirrorMeasurements(pairs, api);
+    tellMeasurementsSoon(); // what they read, once drawn
+  }
   tools.append(
-    group(fitButton, projectionButton),
+    group(fitButton, projectionButton, rulerButton),
     group(legendButton, axesButton, flowButton, themeButton),
     group(editButton),
     group(pictureButton, exportButton),
@@ -1552,6 +1650,16 @@ function render({ model, el }) {
   stage.addEventListener("keydown", (event) => {
     // typed into a box -- the readout's -- a key is a character, not a command
     if (event.target.closest?.("input, select, textarea")) return;
+    // Esc, a first end picked in a variant's pane: that pick goes first, as
+    // it would in the scene's own view
+    const picking =
+      event.key === "Escape" && grid.apis.find((each) => each.rulerPending());
+    if (picking) {
+      picking.viewKey(event);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!editKey(event) && !api?.viewKey(event, viewActions)) return;
     event.preventDefault();
     event.stopPropagation(); // the notebook listens further up
@@ -1621,6 +1729,7 @@ function render({ model, el }) {
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // frames the view again as its size settles -- see draw
   let unplaced = false; // a draw waits for the view to be on the page
+  let keptRuler = null; // a released view's ruler, for its next renderer
   let kept = null; // where the camera was, for a view drawn again to look from
 
   /** Let go of the scene3d, for a view off the page (`sweep`) or torn down.
@@ -1630,6 +1739,8 @@ function render({ model, el }) {
   function release() {
     shared.views.delete(held);
     if (!api) return;
+    // the ruler and its measurements, for the view drawn again to take up
+    keptRuler = { on: api.rulerOn(), pairs: api.rulerPairs() };
     clearTimeout(gridTimer);
     // the variants' panes let go of theirs too -- a view let go of, not a
     // choice: the trait keeps them, and drawn again they open again
@@ -1893,7 +2004,18 @@ function render({ model, el }) {
   const grid = createGrid(panesEl, {
     view,
     mainApi: () => api,
-    factory: () => sharedModule.createScene3d(),
+    // a pane opened measures as the view does, its ruler on or off with it
+    factory: () => {
+      const made = sharedModule.createScene3d();
+      made.setRuler(api?.rulerOn() ?? false);
+      made.setMeasurements(api?.rulerPairs() ?? []);
+      return made;
+    },
+    onRuler: (on, from) => mirrorRuler(on, from),
+    onMeasure: (list, from) => {
+      mirrorMeasurements(list, from);
+      tellMeasurements();
+    },
     sceneOf: (name, frame) =>
       call("variant_scene", frame == null ? { name } : { name, frame }, {
         quiet: true,
@@ -2945,6 +3067,7 @@ function render({ model, el }) {
     "variants",
     "panes",
     "selected_variants",
+    "measurements",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -2969,6 +3092,7 @@ function render({ model, el }) {
     }
     // which variant the values are in, after any edit of them
     if (now.has("panes")) showPanes();
+    if (now.has("measurements")) showMeasurements();
     if (now.has("selected_variants")) {
       chosen = model.get("selected_variants") || [];
       dressSelected();
@@ -3082,6 +3206,13 @@ function render({ model, el }) {
       api = module.createScene3d();
       sharedModule = module;
       shared.views.add(held);
+      // drawn again after a release: measuring as it was
+      if (keptRuler) {
+        api.setMeasurements(keptRuler.pairs);
+        api.setRuler(keptRuler.on);
+        pressed(rulerButton, keptRuler.on);
+        keptRuler = null;
+      } else showMeasurements(); // a saved page's, or set from python
     }
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
@@ -3104,6 +3235,7 @@ function render({ model, el }) {
     });
     if (!framed) showProjection("perspective");
     api.render(view, payload, { keepCamera: framed });
+    tellMeasurementsSoon(); // what they read in the scene drawn now
     // After the render, which hangs the canvas in this view.
     keepCorner();
     // A saved view opens where it was looking when it was saved, and one

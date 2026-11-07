@@ -61,6 +61,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0050](#0050-a-saved-page-carries-its-variants)                                                | A saved page carries its variants                            |
 | [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
 | [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
+| [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
 
 ---
 
@@ -2780,3 +2781,56 @@ solve's polarization, and nothing said so.
   solved for as it stands.
 - A run of more steps than are captured whole (`MAX_DRAGGABLE_PATH`, 1024) is
   magpylib's own subsample, and its frames keep no lines.
+
+## 0053. The ruler measures features, in every pane
+
+**Status:** accepted 2026-11-06, on Alex's word (#125); the design is
+[plans/ruler.md](plans/ruler.md).
+
+### Context
+
+The view measured only the gap between two selected objects, in the legend, from
+python, in an editable view. Designing a part asks for more: a corner to a
+corner, a corner to a face, a face to a face, an edge to an edge, and the angle
+between two faces, in any view, a saved page included. With variants side by
+side (#147), the same gap read in each variant is what a split view is for.
+
+### Decision
+
+- **One tool, in the renderer**: a ruler, the key M, whose two picks decide what
+  is measured. A view setting, not an edit: nothing in the document, the undo
+  history, the script or a saved page.
+- **Several measurements at once**, each cleared by its ×, all of them by Esc
+  with the ruler on. The ruler off, a click selects again and they stay,
+  following a drag of what they measure.
+- **An end is a feature, not a point**: an object's id, which drawn part of it,
+  and which vertex, edge or face. It follows a drag and a run's steps, and names
+  the same corner in a pane drawn at another variant.
+- **Mirrored into every pane** of a split view, each at its own variant's value;
+  a pane without the feature draws none.
+- **Drawn on the canvas**, labels as textures, so the PNG has them; a saved page
+  carries them since (Alex, 2026-11-07), and `view.measurements` says them to a
+  notebook.
+- **Round surfaces as their shapes**: a sphere's and a cylinder's side, found
+  from the facets drawn, whose vertices are on the true surface, are measured
+  exactly; any other curved surface on its drawn facets, and the label's tooltip
+  says so (Alex, 2026-11-07). A wire's bent run is a curve, a circle where it is
+  one, a Circle's loop measured exactly; and a dipole is its position however
+  its arrow is drawn (Alex, 2026-11-07).
+- **The legend's gap stays**, object to object, exact, beside the ruler, feature
+  to feature.
+
+### Rejected
+
+- A point in the object's frame as an end: it follows a drag, not a variant that
+  resizes the object.
+- Labels as HTML over the view: out of the PNG.
+- Exact values from python in the first version: a saved page has none, a view
+  to look at no session.
+
+### Limits
+
+- A feature is a vertex, edge or face of what is drawn: a variant that changes
+  how an object is drawn -- another number of facets -- may move or lose it.
+- `view.measurements` reads the scene's view alone, not a value a variant; its
+  ends are a view's object ids and a feature's number, not names a script knows.

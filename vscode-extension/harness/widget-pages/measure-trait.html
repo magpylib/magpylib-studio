@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  The ruler's measurements as a notebook holds them (#125): two cubes 20 mm
+  apart, a corner of each measured, set from python before the view was
+  drawn. The page plays the notebook with a model of its own, as host.mjs's
+  pages do, and says `window.ready`; the harness does the rest.
+
+  `window.page.model` is that model: the view writes `measurements` there,
+  and the harness sets it as a cell would.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/static/widget.css" />
+  </head>
+  <body>
+    <div id="root" style="width: 720px"></div>
+    <script type="module">
+      import widget from "/static/widget.js";
+
+      const state = await (await fetch("/out/measured.json")).json();
+      const values = structuredClone(state);
+      const listeners = {};
+      const model = {
+        get: (key) => values[key],
+        set(key, value) {
+          values[key] = value;
+          for (const listener of listeners[`change:${key}`] || [])
+            listener(value);
+        },
+        save_changes() {},
+        on: (event, listener) => (listeners[event] ||= []).push(listener),
+        off() {},
+        send() {},
+      };
+      const el = document.getElementById("root");
+      widget.render({ model, el });
+      window.page = { model };
+      for (let i = 0; i < 80 && !el.querySelector("canvas"); i++) {
+        await new Promise((done) => setTimeout(done, 50));
+      }
+      window.ready = true;
+    </script>
+  </body>
+</html>

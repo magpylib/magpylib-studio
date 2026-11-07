@@ -8,6 +8,34 @@ Python package it runs on. Open an entry for its details.
 ### Added
 
 <details>
+<summary>A ruler in the view</summary>
+
+The ruler among the view's tools, or M, measures what is drawn: a click on a
+corner, a straight edge, a flat face or a round one -- a sphere, a cylinder's
+side, exact, not its facets -- or a wire's curve, a Circle's loop as a true
+circle -- then on another, and a line between their nearest points with its
+length, in the scene's unit, its Δx, Δy and Δz in its tooltip; two edges, an
+edge and a face or two faces that touch or cross, the angle between them, which
+a distance's tooltip gives too; a distance to a face's plane that ends off the
+face runs on to it dashed, and a pair is measured once. What is under the
+pointer is what a click takes, shown as it hovers: a dipole, however its arrow
+is drawn, a sensor and each pixel a point, and nothing behind a shape is offered
+through it. It follows the objects as they move, holds several at once, each
+taken away by its label's ×, and stays when the ruler is turned off, so an
+object can be selected and dragged while they show; Esc takes back the corner
+picked, then the measurements, the ruler on or, once nothing is selected, off.
+It works wherever the view does, a saved page and the VS Code panel included,
+edits nothing, and the PNG and a page saved from it keep the measurements;
+`view.measurements` lists them for a notebook, a length in metres or an angle
+each, and `view.measure` makes one from a script, each end an object and a point
+at the feature meant, as the facing-magnets example's docs page opens
+([#125](https://github.com/magpylib/magpylib-studio/issues/125)). Split into
+panes, a measurement made in any is in every pane, at that pane's variant;
+labels in one place stand one above the other.
+
+</details>
+
+<details>
 <summary>Variants side by side</summary>
 
 A variant's chip, lifted out of the view's foot and dropped on a side of the
@@ -108,6 +136,21 @@ versions, every kind of object, the solved U-core, the run over a solved plate
 and the Halbach stack joined it, the two solved ones when
 magpylib-material-response is installed. Each notebook names what it needs in
 its script header, and its example's docs page runs it in molab (#144).
+
+</details>
+
+### Fixed
+
+<details>
+<summary>A view no longer flashes blank while it is edited</summary>
+
+Since one renderer draws every view
+([#146](https://github.com/magpylib/magpylib-studio/pull/146)), each step of a
+drag the engine answers -- a resize by an object's grips most of all -- cleared
+the view's canvas, the same size given again, and the whole view flashed blank
+till the next frame; so did each step of a resize of the window, the panel or a
+sash between panes. The canvas keeps its picture now, and a resized view is
+drawn in the frame it is resized in.
 
 </details>
 
