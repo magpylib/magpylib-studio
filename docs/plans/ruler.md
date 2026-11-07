@@ -58,9 +58,10 @@ measured by their angle, the distance between them being none; parallel, by
 their distance; neither, by their distance, the angle in the label's tooltip.
 What has no size is a point: a dipole, a sensor at its position and each of its
 pixels at its middle, not the boxes they are drawn as (Alex, 2026-11-07). The
-pairs the other way round are the same. An edge with a corner or a face is the
-distance from the corner to the edge, or the edge's nearest point to the face's
-plane.
+pairs the other way round are the same. A corner and an edge are the distance
+from the corner to the edge; an edge or a face and a face that are neither
+parallel nor touching, the shortest distance between them, as drawn, and
+parallel, the distance between their planes.
 
 - **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
   or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
