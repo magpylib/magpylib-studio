@@ -322,6 +322,15 @@ def test_step_counts_the_steps_of_the_path(swept):
     view.step = 7
     assert view._saved()["state"]["step"] == 7
     assert view._saved(steps=(3, 9))["state"]["step"] == 4
+    # a page's steps are counted as `step` is: in the thinned run, the
+    # frames nearest them
+    thinned.step = 11
+    page = _scene_of(thinned.to_html(steps=(thinned.step, thinned.step)))
+    assert page["state"]["payload"]["path_indices"] == [11]
+    two = _scene_of(thinned.to_html(steps=(4, 11)))["state"]["payload"]
+    assert two["path_indices"] == [4, 11]
+    with pytest.raises(ValueError, match="path's 12 steps"):
+        thinned.to_html(steps=(4, 12))
 
 
 def test_the_capture_is_no_backend_to_choose(scene_objects):

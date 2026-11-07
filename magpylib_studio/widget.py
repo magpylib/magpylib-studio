@@ -1751,16 +1751,42 @@ class SceneWidget(anywidget.AnyWidget):
 
         `run` is `False` for a page without the run: it holds the step the
         scene is drawn at -- a session's last, a captured run's first -- and
-        its variants theirs. `steps`, ``(first, last)`` counted from 0, keeps
-        that stretch of the run alone, the variants' too, and opens on its
-        first step where the scene's own is cut away; ``(k, k)`` is the one
-        step, still.
+        its variants theirs. `steps`, ``(first, last)`` counted from 0 as
+        `step` counts them, keeps that stretch of the run alone, the
+        variants' too, and opens on the step kept nearest the one the view
+        shows; ``(k, k)`` is the one step, still. In a run magpylib kept
+        fewer frames of, each end is the frame nearest it, as `step` is.
 
         It opens where the view was looking, as the view last said -- which a
         view says once it stops moving. One never drawn has not said, and the
         page frames the scene.
         """
+        steps = self._frames_of(steps)
         return self._page(title, variants=variants, run=run, steps=steps)
+
+    def _frames_of(self, steps):
+        """`steps`, a stretch of the path's steps as `step` counts them, as
+        the frames that show it: in a run magpylib kept fewer frames of, each
+        end the frame nearest it, the earlier of two as near, as
+        `_valid_step` picks. As given otherwise -- `_kept` says what is wrong
+        with it -- and where the frames are the path's steps."""
+        path = (self.payload or {}).get("path_indices")
+        if steps is None or not path:
+            return steps
+        try:
+            first, last = (int(step) for step in steps)
+        except (TypeError, ValueError):
+            return steps
+        if not 0 <= first <= last <= path[-1]:
+            raise ValueError(
+                f"steps {first}..{last} are not a stretch of the path's "
+                f"{path[-1] + 1} steps, 0..{path[-1]}"
+            )
+        frames = range(len(path))
+        return tuple(
+            min(frames, key=lambda frame, k=k: abs(path[frame] - k))
+            for k in (first, last)
+        )
 
     def _page(
         self, title="magpylib scene", limit=None, variants=True, run=True, steps=None

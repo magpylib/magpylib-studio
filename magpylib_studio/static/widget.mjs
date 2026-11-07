@@ -1025,9 +1025,9 @@ function render({ model, el }) {
     const names = model.get("variants") || [];
     const said = [];
     if (frames() > 1) {
-      said.push(
-        first === last ? `step ${first + 1}` : `steps ${first + 1}–${last + 1}`,
-      );
+      // counted as the counter counts: the path's steps, not the frames
+      const [from, to] = [stepOf(first) + 1, stepOf(last) + 1];
+      said.push(first === last ? `step ${from}` : `steps ${from}–${to}`);
       const span = Math.max(frames() - 1, 1);
       trim.style.setProperty("--from", `${(first / span) * 100}%`);
       trim.style.setProperty("--to", `${(last / span) * 100}%`);

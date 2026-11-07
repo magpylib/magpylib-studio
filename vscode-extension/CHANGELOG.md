@@ -201,6 +201,16 @@ how many ([#154](https://github.com/magpylib/magpylib-studio/pull/154)).
 
 </details>
 
+<details>
+<summary>A uniform field shown with <code>backend="widget"</code> is its arrow alone</summary>
+
+`magpy.show(magnet, field, backend="widget")` drew a uniform field twice: its
+arrow in the view's corner, and the dot magpylib draws for an object with no
+shape, at the origin. It is the arrow alone now, as in a session's view and the
+studio's panel.
+
+</details>
+
 ## [0.14.1]
 
 ### Added

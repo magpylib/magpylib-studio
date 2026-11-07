@@ -296,7 +296,9 @@ export function createGrid(el, options) {
    *  its place, outlined, with its tag's name over it -- not its x, which is
    *  a control -- and the scale bar where the view draws it. Gives back
    *  `{ picture, width }`, a PNG data URL and its width in CSS pixels, or
-   *  null while a pane has nothing drawn. */
+   *  null while no pane has anything drawn. A pane with nothing drawn -- a
+   *  variant the scene cannot use as it stands, or one still on its way --
+   *  is its outline and its tag, blank. */
   async function picture() {
     const all = panes();
     const boxes = all.map((pane) => pane.body.getBoundingClientRect());
@@ -308,13 +310,19 @@ export function createGrid(el, options) {
     for (const pane of all) {
       const api = pane === scenePane ? mainApi() : pane.api;
       const shot = api?.snapshot({ asShown: true });
-      if (!shot) return null;
+      if (!shot) {
+        shots.push(null);
+        continue;
+      }
       const image = new Image();
       image.src = shot;
       await image.decode();
       shots.push(image);
     }
-    const k = shots[0].width / Math.max(boxes[0].width, 1); // device pixels
+    const drawn = shots.findIndex(Boolean);
+    if (drawn < 0) return null;
+    // device pixels
+    const k = shots[drawn].width / Math.max(boxes[drawn].width, 1);
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(width * k);
     canvas.height = Math.round(height * k);
@@ -331,7 +339,7 @@ export function createGrid(el, options) {
       ctx.beginPath();
       ctx.roundRect(...at, ...size, round);
       ctx.clip();
-      ctx.drawImage(shots[i], ...at, ...size);
+      if (shots[i]) ctx.drawImage(shots[i], ...at, ...size);
       ctx.restore();
       ctx.strokeStyle = look.outlineColor;
       ctx.lineWidth = (parseFloat(look.outlineWidth) || 1) * k;
