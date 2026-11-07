@@ -16,7 +16,7 @@ times a second while the thumb moves, so a plot of what a sensor reads can mark
 where the run is; `view.step = 12` sends the run there. A run magpylib kept
 fewer frames of counts in the path's steps all the same. The turning magnet's
 notebook plots the field above the magnet beside the view, its marker following
-the run, and a step typed under it moves the view
+the run, and a click on a curve sends the view to that step
 ([#157](https://github.com/magpylib/magpylib-studio/pull/157)).
 
 </details>
