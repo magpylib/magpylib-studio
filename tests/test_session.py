@@ -4660,6 +4660,112 @@ def test_sweep_reads_the_field_and_leaves_the_scene_where_it_found_it():
     assert "gap" in fig["layout"]["title"]["text"]
 
 
+def _cube_and_sensor(z="=h", x=0.0, low=-0.02, high=0.02, **bounds):
+    """A 10 mm cube polarized along z, and a sensor whose height is `h`."""
+    s = MagpylibStudioSession()
+    s.set_variable("h", 0.01)
+    s.set_variable_bounds("h", min=low, max=high, **bounds)
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]},
+    )
+    s.add_object("sens", "Sensor", {"position": [x, 0, z]})
+    return s
+
+
+def test_goal_seek_finds_every_crossing_and_sets_the_nearest_as_one_step():
+    s = _cube_and_sensor(low=-0.04, high=0.04)
+    s.set_variable("h", -0.03)
+    before = len(s.get_history()["undo"])
+
+    looked = s.goal_seek("h", 0.05, apply=False)
+    assert looked["ok"] and "applied" not in looked
+    assert s.doc["variables"]["h"] == -0.03  # the search records nothing
+    assert len(s.get_history()["undo"]) == before
+
+    found = s.goal_seek("h", 0.05)
+    # above and below the cube, mirror images; the one below is nearer -0.03
+    low, high = (step["value"] for step in found["solutions"])
+    assert np.isclose(low, -high) and 0.005 < high < 0.04
+    assert found["applied"] == low == s.doc["variables"]["h"]
+    assert np.isclose(s.get_field()["magnitude"][0], 0.05, rtol=1e-6)
+    assert len(s.get_history()["undo"]) == before + 1
+    s.undo()
+    assert s.doc["variables"]["h"] == -0.03
+
+
+def test_goal_seek_takes_the_closer_whole_number_of_a_count():
+    s = MagpylibStudioSession()
+    s.set_variable("n", 4)
+    s.set_variable_bounds("n", min=1, max=20, integer=True)
+    s.add_object("ring", "Collection", {})
+    s.add_object(
+        "m",
+        "magnet.Cuboid",
+        {
+            "polarization": [0, 0, 1],
+            "dimension": [0.005] * 3,
+            "position": [0.02, 0, 0],
+        },
+        parent="ring",
+    )
+    s.duplicate_around("m", "=n", axis="z")
+    s.add_object("c", "Sensor", {"position": [0, 0, 0.005]})
+    four, five = (s.sweep("n", [k])["steps"][0]["magnitude"][0] for k in (4, 5))
+    target = four + 0.6 * (five - four)
+
+    found = s.goal_seek("n", target)
+    assert found["solutions"] == [{"value": 5, "reading": five}]
+    assert found["applied"] == 5 and found["evaluations"] == 20
+
+
+def test_goal_seek_leaves_out_values_the_scene_refuses_and_jumps():
+    s = _cube_and_sensor(z=0.01)
+    s.set_variable("w", 0.01)
+    s.set_variable_bounds("w", min=-0.01, max=0.02)
+    assert s.set_param("m", "dimension", ["=w", 0.01, 0.01])["ok"]
+    found = s.goal_seek("w", 0.05, apply=False)
+    assert found["ok"] and len(found["solutions"]) == 1
+    assert all(skip["value"] <= 0 for skip in found["skipped"])
+
+    # H along z jumps at the cube's faces, h = ±5 mm, and passes 0 nowhere else
+    s = _cube_and_sensor(x=0.001)
+    jumped = s.goal_seek("h", 0.0, field="H", component="z")
+    assert not jumped["ok"] and jumped["solutions"] == []
+    assert np.allclose(sorted(jumped["jumps"]), [-0.005, 0.005])
+    assert "jumps across it at h = -0.005" in jumped["error"]
+
+
+@pytest.mark.parametrize(
+    ("variable", "target", "options", "said"),
+    [
+        ("nope", 0.05, {}, "unknown variable 'nope'"),
+        ("twice", 0.05, {}, "twice is a formula"),
+        ("axis", 0.05, {}, "axis is a choice"),
+        ("free", 0.05, {}, "free has no range to search"),
+        ("h", "0.05", {}, "target must be a number"),
+        ("h", 5.0, {}, "it reads"),
+        ("h", 0.05, {"component": "x", "points": [[0, 0, 0.02]]}, "changes nothing"),
+        ("h", 0.05, {"points": [[0, 0, 0.02], [0, 0, 0.03]]}, "pick one with at="),
+        ("h", 0.05, {"within": (0.03, 0.01)}, "nothing to search in"),
+    ],
+)
+def test_goal_seek_says_why_it_finds_nothing(variable, target, options, said):
+    s = _cube_and_sensor(low=0.006)
+    s.set_variable("twice", "=h * 2")
+    s.set_variable("axis", "z")
+    s.set_variable_bounds("axis", options=["x", "z"])
+    s.set_variable("free", 1.0)
+    before = json.dumps(s.doc, sort_keys=True)
+
+    result = s.goal_seek(variable, target, **options)
+    assert result["ok"] is False and said in result["error"]
+    assert json.dumps(s.doc, sort_keys=True) == before
+    if "it reads" in said:  # out of reach: the nearest it came
+        assert result["closest"]["value"] == 0.006
+
+
 def _mirrored_pair():
     """A magnet and the mirror image of it — the shape of the shipped pair."""
     s = MagpylibStudioSession()

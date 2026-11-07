@@ -62,6 +62,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0051](#0051-a-choice-picks-a-structure-with-a-switch)                                         | A choice picks a structure, with a switch                    |
 | [0052](#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date)                            | A solve that cannot be done again is said out of date        |
 | [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
+| [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | proposed 2026-11-07                                                  |
 
 ---
 
@@ -2834,3 +2835,46 @@ side (#147), the same gap read in each variant is what a split view is for.
   how an object is drawn -- another number of facets -- may move or lose it.
 - `view.measurements` reads the scene's view alone, not a value a variant; its
   ends are a view's object ids and a feature's number, not names a script knows.
+
+## 0054. A goal seek moves one variable to a reading
+
+**Status:** proposed 2026-11-07, with the call that builds it.
+
+### Context
+
+"Which gap gives 50 mT at the sensor?" is the question a design is made of, and
+the studio answered it by guesses: a slider dragged by hand, or a loop an agent
+writes, one guess per turn in the evals (R4). A field is milliseconds, so the
+engine can search what a person or an agent guesses at.
+
+### Decision
+
+- **One variable, one number.** `session.goal_seek(variable, target, ...)` reads
+  one component of one field at one observer: a sensor with pixels or a path, or
+  several points, is refused until `at` picks one. Several variables at once is
+  an optimisation, with a goal to weigh, and stays a script's.
+- **Over the variable's own range**: `within`, else its limits, a hard bound
+  before a soft one on each side, so a value the slider does not reach but the
+  scene allows is found. A variable with neither is refused, not guessed at. A
+  count is searched over every whole number; a formula and a choice are refused.
+- **Every crossing, the nearest applied.** A scan, then each crossing refined to
+  the float; all are listed, and the one nearest the current value is set as one
+  undo step, so the design moves least. `apply=False` only looks.
+- **Nothing left out quietly.** A value the scene refuses is listed in
+  `skipped`, a jump across the target in `jumps`, and with no solution the
+  answer says what the field reads over the range and the closest value.
+- **The engine's call first.** The RPC, the skill and a notebook have it; a
+  control in the view waits until someone asks for one (0022).
+
+### Rejected
+
+- Searching the soft range only: it is where the slider sits, not what the
+  design may hold.
+- Applying only a single solution: two mirror-image heights are the common case,
+  and refusing them both leaves the person where they were.
+
+### Limits
+
+- Two crossings closer together than the samples can both be missed; `samples`
+  raises the density.
+- A scene with a solve pays it at each value read, `evaluations` of them.

@@ -217,6 +217,21 @@ print(
   scene once per value and reads the field each time, in milliseconds, and
   leaves the scene on the value it started with. `values` must be a list:
   `.tolist()` a numpy array.
+- `goal_seek(variable, target, points=... or sensor_id=..., field="B")` finds
+  the values of one variable where the field reads `target`, in SI, over the
+  variable's limits or `within=(low, high)`, and sets the one nearest the
+  current value as one step (`apply=False` only looks). The reading must be one
+  number: `component="magnitude"` (the default) or `"x"`, `"y"`, `"z"`, at one
+  point; a sensor with pixels or a path needs `at=` to pick one. With no
+  solution it is refused, saying what the field reads over the range and the
+  `closest` value.
+
+```python
+found = s.session.goal_seek("radius", 0.1, points=[(0, 0, 0)])
+assert found["ok"], found["error"]
+print(found["solutions"], found["applied"])  # the radius for 0.1 T at the centre
+```
+
 - `set_variable(name, value)` changes a value for good;
   `set_variables({name: value, ...})` changes several as one step, checked as
   the combination they make.
@@ -230,8 +245,9 @@ print(
 
 ## Search a design
 
-Search in one script, not one run per guess: a try costs milliseconds in a loop,
-and a turn when each guess is a run of its own.
+One variable to a target value is `goal_seek`, above. For more than one, search
+in one script, not one run per guess: a try costs milliseconds in a loop, and a
+turn when each guess is a run of its own.
 
 ```python
 best = None

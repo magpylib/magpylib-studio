@@ -440,7 +440,10 @@ setting in both. Chart mode swaps in the read-only plotly figure.
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D
 rendering along the sensors), `get_field_map` (a heatmap on a plane or off a
 sensor's pixel grid, sized from the scene's extent), `get_sweep_figure` (the
-field against a variable).
+field against a variable), `goal_seek` (the values of a variable where one
+reading meets a target: a scan, each crossing refined by Brent's method, the
+nearest set as one step;
+[0054](decisions.md#0054-a-goal-seek-moves-one-variable-to-a-reading)).
 
 **Scripts draw in the window they were run from**
 ([0014](decisions.md#0014-the-window-stamp-says-where-never-whether)): the

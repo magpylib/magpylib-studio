@@ -89,6 +89,7 @@ _PUBLIC = {
     "goto_history",
     "sweep",
     "get_sweep_figure",
+    "goal_seek",
     "get_variables",
     "unknown_variables",
     "expression_help",

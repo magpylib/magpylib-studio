@@ -83,6 +83,10 @@ Protocol surface (all JSON-serializable in/out):
   remove_variant(name)                 -> {"ok": bool, "error"?: str}
   sweep(variable, values, sensor_id?, points?, field?) -> {"ok", "steps": [...]}
   get_sweep_figure(variable, values, …) -> plotly line-plot JSON
+  goal_seek(variable, target, sensor_id?, points?, field?, component?, at?,
+            within?, samples?, apply?) -> {"ok", "solutions", "applied"?, ...}
+                                          the values reading `target`; the
+                                          nearest set as 1 undo step
   get_events()                         -> {"events": [{index, id, target, source}]}
   edit_event(event_id, changes)        -> {"ok": bool, "error"?: str}
   remove_event(event_id)               -> {"ok": bool, "error"?: str}
@@ -100,6 +104,7 @@ import difflib
 import functools
 import hashlib
 import importlib
+import itertools
 import json
 import math
 import os
@@ -2005,6 +2010,14 @@ def _same_pose(obj, position, orientation):
     except ValueError:  # paths of different lengths
         return False
     return bool(np.all(turned.magnitude() < 1e-9))
+
+
+class _ManyReadings(Exception):
+    """The field at a goal seek's observer is not one reading: `shape` of them."""
+
+    def __init__(self, shape):
+        super().__init__(shape)
+        self.shape = tuple(shape)
 
 
 def _out_of_limits(name, value, limits):
@@ -8806,6 +8819,270 @@ class MagpylibStudioSession:
         if template:
             fig.layout.template = template
         return json.loads(fig.to_json())
+
+    def goal_seek(
+        self,
+        variable,
+        target,
+        sensor_id=None,
+        points=None,
+        field="B",
+        component="magnitude",
+        at=None,
+        within=None,
+        samples=32,
+        apply=True,
+    ):
+        """The values of `variable` at which the field reads `target`, in SI
+        (tesla for B and J, A/m for H and M).
+
+        The reading is one number: `component` ('magnitude', 'x', 'y' or
+        'z') of `field` at one observer, the sensor `sensor_id` or the first
+        sensor, or `points`. A sensor with pixels or a path, several points,
+        or a source on a path read several: `at` picks one, an index into the
+        readings' leading axes, `(step, pixel)` for instance.
+
+        The search runs over `within`, `(low, high)` in the values
+        `set_variable` takes, else the variable's limits, a hard bound before
+        a soft one on each side, and refuses a variable with neither. It
+        reads the field at `samples` values, then refines each crossing of
+        the target to the float. A count is searched over every whole number,
+        a crossing giving the closer of the two around it. A value the scene
+        refuses is left out and listed in `skipped`; where the reading jumps
+        across the target rather than passing through it -- a sensor crossing
+        a magnet's face -- the place is in `jumps`, not in `solutions`. Two
+        crossings closer together than the samples are can both be missed:
+        raise `samples`. Each value read is a rebuild of the scene,
+        `evaluations` of them, milliseconds each, and longer with a solve.
+
+        Returns `solutions`, each `{"value", "reading"}`. With `apply`, the
+        one nearest the variable's current value is set, as one step to undo,
+        and named in `applied`; the search itself records nothing. With no
+        solution the result is refused, with the closest value read.
+        """
+        from scipy.optimize import brentq
+
+        if field not in _FIELDS:
+            return {"ok": False, "error": f"field must be one of {sorted(_FIELDS)}"}
+        if component not in ("magnitude", "x", "y", "z"):
+            return {
+                "ok": False,
+                "error": "component must be 'magnitude', 'x', 'y' or 'z'",
+            }
+        variables = self.doc.get("variables") or {}
+        if variable not in variables:
+            return {"ok": False, "error": f"unknown variable {variable!r}"}
+        if expressions.is_expression(variables[variable]):
+            return {
+                "ok": False,
+                "error": f"{variable} is a formula, {variables[variable]}: "
+                "seek a variable it reads instead",
+            }
+        limits = (self.doc.get("variable_bounds") or {}).get(variable) or {}
+        if "options" in limits:
+            return {
+                "ok": False,
+                "error": f"{variable} is a choice: compare its options with sweep",
+            }
+        if (
+            isinstance(target, bool)
+            or not isinstance(target, int | float)
+            or not math.isfinite(target)
+        ):
+            return {"ok": False, "error": f"target must be a number, not {target!r}"}
+
+        hard = (limits.get("min"), limits.get("max"))
+        if within is not None:
+            try:
+                low, high = (float(v) for v in within)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "within is (low, high), two numbers"}
+        else:
+            low = hard[0] if hard[0] is not None else limits.get("soft_min")
+            high = hard[1] if hard[1] is not None else limits.get("soft_max")
+            if low is None or high is None:
+                return {
+                    "ok": False,
+                    "error": f"{variable} has no range to search: give it limits, "
+                    "or within=(low, high)",
+                }
+        # never outside what the variable may hold, whoever named the range
+        if hard[0] is not None:
+            low = max(low, hard[0])
+        if hard[1] is not None:
+            high = min(high, hard[1])
+        integer = bool(limits.get("integer"))
+        if integer:
+            low, high = math.ceil(low), math.floor(high)
+        if not low < high:
+            return {"ok": False, "error": f"{variable} has nothing to search in"}
+        if integer and high - low > 1000:
+            return {
+                "ok": False,
+                "error": f"{variable} counts from {low} to {high}: "
+                "narrow it with within=(low, high)",
+            }
+
+        if points is not None:
+            observer = np.atleast_2d(np.array(points, dtype=float))
+        else:
+            if sensor_id is None:
+                sensor_id = next(
+                    (i for i, o in self._objs.items() if isinstance(o, magpy.Sensor)),
+                    None,
+                )
+                if sensor_id is None:
+                    return {
+                        "ok": False,
+                        "error": "the scene has no sensor; pass points instead",
+                    }
+            elif not isinstance(self._objs.get(sensor_id), magpy.Sensor):
+                return {"ok": False, "error": f"{sensor_id!r} is not a Sensor"}
+        func = getattr(magpy, _FIELDS[field][0])
+        unit = _FIELDS[field][1]
+
+        def reading():
+            sources, _ = self._sources_for_field()
+            seen = observer if points is not None else self._objs[sensor_id]
+            values = np.asarray(func(sources, seen, sumup=True), dtype=float)
+            if at is not None:
+                values = values[at]
+            if values.shape != (3,):
+                raise _ManyReadings(values.shape[:-1])
+            if component == "magnitude":
+                return float(np.linalg.norm(values))
+            return float(values["xyz".index(component)])
+
+        original = variables[variable]
+        count = 0
+        skipped = []
+
+        def read(value):
+            nonlocal count
+            count += 1
+            self.doc["variables"][variable] = value
+            self._build()
+            return reading()
+
+        def tried(value):
+            """The reading at `value`, or None with why in `skipped`."""
+            try:
+                return read(value)
+            except _ManyReadings:
+                raise
+            except Exception as e:  # noqa: BLE001 - a value refused is a result
+                skipped.append({"value": value, "error": f"{type(e).__name__}: {e}"})
+                return None
+
+        solutions, jumps = [], []
+        try:
+            if integer:
+                values = list(range(low, high + 1))
+            else:
+                values = np.linspace(low, high, max(3, int(samples))).tolist()
+            read_at = [(v, tried(v)) for v in values]
+            read_at = [(v, r) for v, r in read_at if r is not None]
+            # a reading the variable does not move has no crossing to refine
+            flat = all(r == read_at[0][1] for _, r in read_at)
+            # how close is the target: the reading's own size, or the target's
+            spread = max([abs(target)] + [abs(r) for _, r in read_at])
+            tolerance = 1e-6 * spread
+            pairs = [] if flat else itertools.pairwise(read_at)
+            for (a, ra), (b, rb) in pairs:
+                da, db = ra - target, rb - target
+                if da == 0:
+                    solutions.append((a, ra))
+                elif db != 0 and (da < 0) != (db < 0):
+                    if integer:
+                        solutions.append((a, ra) if abs(da) <= abs(db) else (b, rb))
+                        continue
+                    try:
+                        root = brentq(
+                            lambda v: read(v) - target,
+                            a,
+                            b,
+                            xtol=(high - low) * 1e-12,
+                        )
+                        found = read(root)
+                    except _ManyReadings:
+                        raise
+                    except Exception as e:  # noqa: BLE001
+                        skipped.append(
+                            {"value": (a + b) / 2, "error": f"{type(e).__name__}: {e}"}
+                        )
+                        continue
+                    if abs(found - target) <= tolerance:
+                        solutions.append((root, found))
+                    else:
+                        jumps.append(root)
+            if read_at and not flat and read_at[-1][1] == target:
+                solutions.append(read_at[-1])
+        except _ManyReadings as many:
+            shape = " × ".join(str(n) for n in many.shape)
+            return {
+                "ok": False,
+                "error": f"the field there is {shape} readings, from a path, "
+                "pixels or several points: pick one with at=",
+            }
+        finally:
+            self.doc["variables"][variable] = original
+            self._build()
+
+        # a crossing exactly on a sample can be found from both sides
+        unique = []
+        for value, found in solutions:
+            if not any(abs(value - v) <= (high - low) * 1e-9 for v, _ in unique):
+                unique.append((value, found))
+        result = {
+            "variable": variable,
+            "target": target,
+            "field": field,
+            "component": component,
+            "unit": unit,
+            "within": [low, high],
+            "evaluations": count,
+            "solutions": [
+                {"value": int(v) if integer else v, "reading": _wire(r)}
+                for v, r in unique
+            ],
+            **({"jumps": jumps} if jumps else {}),
+            **({"skipped": skipped} if skipped else {}),
+        }
+        if not unique:
+            if not read_at:
+                error = f"no value of {variable} could be read"
+            else:
+                first = read_at[0][1]
+                if flat:
+                    error = (
+                        f"{variable} changes nothing here: the field reads "
+                        f"{first:g} {unit} at every value"
+                    )
+                else:
+                    lowest = min(r for _, r in read_at)
+                    highest = max(r for _, r in read_at)
+                    error = (
+                        f"no value of {variable} from {low:g} to {high:g} reads "
+                        f"{target:g} {unit}: it reads {lowest:g} to {highest:g}"
+                    )
+                    if jumps:
+                        error += ", and jumps across it at " + ", ".join(
+                            f"{variable} = {v:g}" for v in jumps
+                        )
+                value, found = min(read_at, key=lambda p: abs(p[1] - target))
+                result["closest"] = {"value": value, "reading": _wire(found)}
+            return {"ok": False, "error": error, **result}
+        if apply:
+            current = self._vars.get(variable)
+            chosen = min(
+                (s["value"] for s in result["solutions"]),
+                key=lambda v: abs(v - current) if current is not None else 0,
+            )
+            done = self.set_variable(variable, chosen)
+            if not done.get("ok"):
+                return {**done, **result}
+            result["applied"] = chosen
+        return {"ok": True, **result}
 
     # --- the event log -----------------------------------------------------
     def get_events(self):
