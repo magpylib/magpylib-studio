@@ -54,6 +54,9 @@ Then try a few things:
   applied again. **Build Up To Here** shows the scene as it was at that step.
 - **See the field.** The Field view shows it along a sensor's path, as a map
   over a plane, or swept against a variable.
+- **Measure.** The ruler in the 3D view, or M, measures between corners, edges
+  and faces, round ones as their true shapes, and the angle where they meet. The
+  measurements follow the objects as you drag them, and the PNG keeps them.
 - **Switch to code and back.** **Edit Python Script** shows the scene as a
   magpylib function whose parameters are the variables, and saving the tab
   applies your edits. **Export as Python Script…** writes plain magpylib that
@@ -87,6 +90,7 @@ In the 3D view:
 | X, Y, Z / A                  | Hold a drag to one axis / free it again                |
 | L                            | Switch between world axes and the object's own         |
 | S                            | Snap to round steps                                    |
+| M                            | The ruler; Esc takes back what it measured             |
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo, redo                                             |
 
 In the Objects view: Cmd/Ctrl+S saves, Cmd/Ctrl+C, X and V copy, cut and paste,

@@ -214,6 +214,38 @@ re-fold of the document per step, which is milliseconds — the scene is
 rebuilt from the log on every ordinary edit anyway. Nothing is
 recorded in the history: the document ends on the value it started on.
 
+### `session.goal_seek(variable, target, sensor_id=None, points=None, field='B', component='magnitude', at=None, within=None, samples=32, apply=True)`
+
+The values of `variable` at which the field reads `target`, in SI
+(tesla for B and J, A/m for H and M).
+
+The reading is one number: `component` ('magnitude', 'x', 'y' or
+'z') of `field` at one observer, the sensor `sensor_id` or the first
+sensor, or `points`. A sensor with pixels or a path, several points,
+or a source on a path read several: `at` picks one, an index into the
+readings' leading axes, `(step, pixel)` for instance.
+
+The search runs over `within`, `(low, high)` in the values
+`set_variable` takes, else the variable's limits, a hard bound before
+a soft one on each side, and refuses a variable with neither. It
+reads the field at `samples` values, then refines each crossing of
+the target to the float; a count, to the closer of the two whole
+numbers around it. Each value is tried on a copy of the scene as a
+drag of its slider sets it -- its follower answered, its solved
+parts solved again -- so the scene is not touched while it searches.
+A value the scene refuses, or cannot solve for, is left out and
+listed in `skipped`; where the reading jumps across the target rather
+than passing through it -- a sensor crossing a magnet's face -- the
+place is in `jumps`, not in `solutions`. Two crossings closer
+together than the samples are can both be missed: raise `samples`.
+Each value read is a rebuild, `evaluations` of them, milliseconds
+each, and longer with a solve.
+
+Returns `solutions`, each `{"value", "reading"}`. With `apply`, the
+one nearest the variable's current value is set as a slider sets it,
+one step to undo, and named in `applied`. With no solution the
+result is refused, with the closest value read.
+
 ### `session.set_variable(name, value, unit=None)`
 
 Define or redefine a variable. `value` is a number, or an

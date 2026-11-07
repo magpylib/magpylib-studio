@@ -60,14 +60,14 @@ Called plainly, each does what magpylib would.
 
 ```{eval-rst}
 .. autoclass:: magpylib_studio.widget.SceneWidget
-   :members: update, set_variable, save_variant, undo, redo, reset, save, to_html, write_html, panel, objects, picked
+   :members: update, set_variable, save_variant, undo, redo, reset, save, to_html, write_html, panel, objects, picked, measure, measurements
 ```
 
 ## The session
 
 ```{eval-rst}
 .. autoclass:: magpylib_studio.session.MagpylibStudioSession
-   :members: load_scene, load_example, list_examples, get_field, sweep, set_variable, set_variables, get_variables, use_variant, save_variant, to_builder_script
+   :members: load_scene, load_example, list_examples, get_field, sweep, goal_seek, set_variable, set_variables, get_variables, use_variant, save_variant, to_builder_script
 ```
 
 ## The examples

@@ -214,5 +214,69 @@ def _(go, mo, np, pair_chosen, pair_edited, pair_session, pair_shown, pair_view3
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## The turns for a field
+
+    How many turns give the field you want at the centre? `goal_seek`
+    searches one variable for a target reading, here Bz at the centre
+    over every whole number of turns the scene allows, and the button sets
+    the answer in the view, one step to undo. Opposed, the coils cancel
+    at the centre whatever their turns, and it says so.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    pair_wanted = mo.ui.number(
+        start=0.5, stop=20, step=0.5, value=2.0, label="Bz at the centre (mT)"
+    )
+    return (pair_wanted,)
+
+
+@app.cell
+def _(mo, pair_edited, pair_session, pair_view3d, pair_wanted):
+    _ = pair_edited()
+    pair_found = pair_session.goal_seek(
+        "turns",
+        pair_wanted.value / 1e3,  # in tesla
+        points=[[0, 0, 0]],
+        component="z",
+        apply=False,  # the view sets it, below, so that it follows
+    )
+    pair_turns = pair_found["solutions"][0]["value"] if pair_found["ok"] else None
+    # held by its name, as marimo needs of an element it is to answer
+    pair_set_turns = mo.ui.button(
+        label=f"Set turns = {pair_turns}",
+        on_click=lambda _: pair_view3d.set_variable("turns", pair_turns),
+        disabled=pair_turns is None,
+    )
+    return pair_found, pair_set_turns, pair_turns
+
+
+@app.cell
+def _(mo, pair_found, pair_set_turns, pair_turns, pair_wanted):
+    if pair_turns is None:
+        _answer = mo.callout(pair_found["error"], kind="warn")
+    else:
+        _answer = mo.hstack(
+            [
+                mo.md(
+                    f"**{pair_turns} turns** read "
+                    f"{pair_found['solutions'][0]['reading'] * 1e3:.2f} mT, "
+                    f"the closest a whole number comes "
+                    f"({pair_found['evaluations']} field reads)"
+                ),
+                pair_set_turns,
+            ],
+            justify="start",
+            align="center",
+        )
+    mo.vstack([pair_wanted, _answer])
+    return
+
+
 if __name__ == "__main__":
     app.run()
