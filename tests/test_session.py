@@ -4720,6 +4720,19 @@ def test_goal_seek_takes_the_closer_whole_number_of_a_count():
     assert found["applied"] == 5 and found["evaluations"] == 20
 
 
+def test_goal_seek_finds_nothing_where_coils_cancel():
+    """Opposed coils read rounding noise at their centre, about 1e-18 T,
+    whatever their turns: that is no field to seek."""
+    from magpylib_studio.examples.coil_pair import coil_pair
+
+    s = coil_pair.build().session
+    s.use_variant("anti-Helmholtz")
+    result = s.goal_seek("turns", 0.002, points=[[0, 0, 0]], component="z")
+    assert result["error"] == (
+        "turns changes nothing here: the field reads 0 T at every value"
+    )
+
+
 def test_goal_seek_leaves_out_values_the_scene_refuses_and_jumps():
     s = _cube_and_sensor(z=0.01)
     s.set_variable("w", 0.01)

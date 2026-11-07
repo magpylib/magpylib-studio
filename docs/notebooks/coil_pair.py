@@ -214,5 +214,61 @@ def _(go, mo, np, pair_chosen, pair_edited, pair_session, pair_shown, pair_view3
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ## The turns for a field
+
+    How many turns give the field you want at the centre? `goal_seek`
+    searches one variable for a target reading, here Bz at the centre
+    over every whole number of turns the scene allows, and the button sets
+    the answer in the view, one step to undo. Opposed, the coils cancel
+    at the centre whatever their turns, and it says so.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    pair_wanted = mo.ui.number(
+        start=0.5, stop=20, step=0.5, value=2.0, label="Bz at the centre (mT)"
+    )
+    return (pair_wanted,)
+
+
+@app.cell
+def _(mo, pair_edited, pair_session, pair_view3d, pair_wanted):
+    _ = pair_edited()
+    _found = pair_session.goal_seek(
+        "turns",
+        pair_wanted.value / 1e3,  # in tesla
+        points=[[0, 0, 0]],
+        component="z",
+        apply=False,  # the view sets it below, so that it follows
+    )
+    if _found["ok"]:
+        _turns = _found["solutions"][0]["value"]
+        _answer = mo.hstack(
+            [
+                mo.md(
+                    f"**{_turns} turns** read "
+                    f"{_found['solutions'][0]['reading'] * 1e3:.2f} mT, "
+                    f"the closest a whole number comes "
+                    f"({_found['evaluations']} field reads)"
+                ),
+                mo.ui.button(
+                    label=f"Set turns = {_turns}",
+                    on_click=lambda _: pair_view3d.set_variable("turns", _turns),
+                ),
+            ],
+            justify="start",
+            align="center",
+        )
+    else:
+        _answer = mo.callout(_found["error"], kind="warn")
+    mo.vstack([pair_wanted, _answer])
+    return
+
+
 if __name__ == "__main__":
     app.run()

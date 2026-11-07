@@ -8982,11 +8982,13 @@ class MagpylibStudioSession:
                 values = np.linspace(low, high, max(3, int(samples))).tolist()
             read_at = [(v, tried(v)) for v in values]
             read_at = [(v, r) for v, r in read_at if r is not None]
-            # a reading the variable does not move has no crossing to refine
-            flat = all(r == read_at[0][1] for _, r in read_at)
             # how close is the target: the reading's own size, or the target's
             spread = max([abs(target)] + [abs(r) for _, r in read_at])
             tolerance = 1e-6 * spread
+            # a reading the variable does not move has no crossing to refine:
+            # equal to the last bits, as opposed coils' 1e-18 T at their centre
+            readings = [r for _, r in read_at]
+            flat = not readings or np.ptp(readings) <= 1e-9 * spread
             pairs = [] if flat else itertools.pairwise(read_at)
             for (a, ra), (b, rb) in pairs:
                 da, db = ra - target, rb - target
@@ -9052,11 +9054,12 @@ class MagpylibStudioSession:
             if not read_at:
                 error = f"no value of {variable} could be read"
             else:
-                first = read_at[0][1]
                 if flat:
+                    level = float(np.mean(readings))
+                    level = 0.0 if abs(level) <= 1e-9 * spread else level
                     error = (
                         f"{variable} changes nothing here: the field reads "
-                        f"{first:g} {unit} at every value"
+                        f"{level:g} {unit} at every value"
                     )
                 else:
                     lowest = min(r for _, r in read_at)

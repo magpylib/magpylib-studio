@@ -2838,7 +2838,8 @@ side (#147), the same gap read in each variant is what a split view is for.
 
 ## 0054. A goal seek moves one variable to a reading
 
-**Status:** proposed 2026-11-07, with the call that builds it.
+**Status:** proposed 2026-11-07, with the call that builds it; hard limits first
+on Alex's word, the same day.
 
 ### Context
 
@@ -2854,9 +2855,10 @@ engine can search what a person or an agent guesses at.
   several points, is refused until `at` picks one. Several variables at once is
   an optimisation, with a goal to weigh, and stays a script's.
 - **Over the variable's own range**: `within`, else its limits, a hard bound
-  before a soft one on each side, so a value the slider does not reach but the
-  scene allows is found. A variable with neither is refused, not guessed at. A
-  count is searched over every whole number; a formula and a choice are refused.
+  before a soft one on each side (Alex, 2026-11-07), so a value the slider does
+  not reach but the scene allows is found. A variable with neither is refused,
+  not guessed at. A count is searched over every whole number; a formula and a
+  choice are refused.
 - **Every crossing, the nearest applied.** A scan, then each crossing refined to
   the float; all are listed, and the one nearest the current value is set as one
   undo step, so the design moves least. `apply=False` only looks.
