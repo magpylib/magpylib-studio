@@ -963,6 +963,12 @@ async function rulerInPanes(port, base) {
         });
         delete window.magpySave;
         return r;`;
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
         const measured = await tab.evaluate(shot);
         // one made in a variant's pane: in the scene's, and the other's, too
         const pane = "[...window.scene3ds].at(-1)";
@@ -977,10 +983,42 @@ async function rulerInPanes(port, base) {
         );
         if (counts.join() !== "2,2,2")
           return `measured in a pane, each view's: ${counts}`;
-        // Esc: gone from all, and from the picture
-        await tab.evaluate(
-          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        // Esc, pressed as a person presses it: a first end picked in a
+        // variant's pane goes first, the measurements stay; the next Esc
+        // takes them from all, and from the picture
+        await clickInView(
+          pane,
+          await tab.evaluate(`return ${nearest(pane, 3)}`),
         );
+        if (!(await tab.evaluate(`return ${pane}.rulerPending()`)))
+          return "a click in a variant's pane picked no first end";
+        const esc = async () => {
+          await tab.evaluate(
+            `document.querySelector(".magpy-scene-stage").focus()`,
+          );
+          for (const type of ["keyDown", "keyUp"]) {
+            await tab.send("Input.dispatchKeyEvent", {
+              type,
+              key: "Escape",
+              code: "Escape",
+              windowsVirtualKeyCode: 27,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 200));
+          return tab.evaluate(
+            `return [...window.scene3ds].map((s) => [s.measurements().length, s.rulerPending()])`,
+          );
+        };
+        const first = await esc();
+        if (first.map((v) => v.join(" ")).join() !== "2 false,2 false,2 false")
+          return `Esc with a pane's pick half made: ${JSON.stringify(first)}`;
+        await esc();
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
         const left = await tab.evaluate(
           `return [...window.scene3ds].map((s) => s.measurements().length)`,
         );
@@ -1130,6 +1168,13 @@ async function savedRuler(port, base) {
         if (sure.off > 1e-12 || Math.abs(sure.length - sure.apart) > 1e-12)
           return `the ends off their corners: ${JSON.stringify(sure)}`;
         const want = sure.length;
+        // the pointer off the view: no corner hovered, its dot no part of it
+        await tab.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: 1,
+          y: 1,
+        });
+        await new Promise((done) => setTimeout(done, 250));
         if ((await tab.evaluate(`return window.scene3d.snapshot()`)) === clear)
           return "the picture has no measurement in it";
         // moved, as a drag moves it: the measurement follows
@@ -1242,6 +1287,42 @@ async function savedRuler(port, base) {
         ];
         if (offered.join() !== kinds.join())
           return `corners, edges and faces each shape offers: ${offered}`;
+        // a wire's runs are picked, though a ray passes through them: its two
+        // meet at its bend, at right angles
+        const runs = await tab.evaluate(`const s = window.scene3d;
+          const wire = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).edge === 2);
+          return [0, 1].map((index) => ({ kind: "edge", objectId: wire, part: 0, index }));`);
+        for (const end of runs) {
+          const at =
+            await tab.evaluate(`const c = ${VIEW}.querySelector("canvas").getBoundingClientRect();
+            const p = window.scene3d.endOnPage(${JSON.stringify(end)});
+            return { x: c.left + p[0], y: c.top + p[1] };`);
+          await tab.send("Input.dispatchMouseEvent", {
+            type: "mouseMoved",
+            ...at,
+          });
+          await new Promise((done) => setTimeout(done, 250));
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await tab.send("Input.dispatchMouseEvent", {
+              type,
+              ...at,
+              button: "left",
+              buttons: type === "mousePressed" ? 1 : 0,
+              clickCount: 1,
+            });
+          }
+          await new Promise((done) => setTimeout(done, 150));
+        }
+        const bend = await tab.evaluate(`return window.scene3d.measurements()`);
+        if (
+          bend.length !== 1 ||
+          bend[0].a.kind !== "edge" ||
+          Math.abs(bend[0].angle - 90) > 1e-9
+        )
+          return `a wire's two runs: ${JSON.stringify(bend)}`;
+        await tab.evaluate(
+          `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
+        );
         // each pair, picked by real clicks, from a corner of the view where a
         // cube shows every face it turns to the camera: the two cubes' tops
         // 3 mm apart, a top and a side at 90°, and so on

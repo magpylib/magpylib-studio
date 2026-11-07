@@ -2686,6 +2686,7 @@ export function createScene3d() {
     if (now && camera && !disposed) {
       sizeGrips();
       still();
+      return;
     }
     redraw();
   }
@@ -7671,8 +7672,8 @@ void main() {
     hovered: null, // the end a click would pick now
     over: null, // the measurement whose label is under the pointer
     list: [], // { a, b, label }
-    targets: null, // the corners on the page, in cells, with their owners
-    meshes: null, // what a ray is cast at: each part with its owner
+    meshes: null, // what a ray is cast at: each shape's part with its owner
+    loose: null, // what a ray cannot hit: points and wires, with owners
     stale: true, // the camera or the scene moved since `targets`
     movedAt: 0,
   };
@@ -7736,7 +7737,7 @@ void main() {
       for (let at = part; at && at !== node.parent; at = at.parent) {
         const was = at.userData;
         if (was.path || was.arrows || was.field) return true;
-        if (was.outline || was.mark) return true;
+        if (was.outline || was.mark || was.region) return true;
         // what a mark sized by the zoom draws: its anchor is the point
         if (was.glyph && at !== part) return true;
       }
@@ -7753,7 +7754,9 @@ void main() {
         !part.isInstancedMesh &&
         !part.isLineSegments2 &&
         !part.userData.glyph;
-      const wire = part.isLineSegments2 && part.userData.flow;
+      // a wire's own line, not the stream lines drawn over a sheet
+      const wire =
+        part.isLineSegments2 && part.userData.flow && !part.parent?.isMesh;
       const point = Boolean(part.userData.glyph || part.userData.origins);
       if (shape || wire || point) parts.push(part);
     });
@@ -8041,49 +8044,123 @@ void main() {
     }
     if (p.kind === "corner" && q.kind === "face")
       return apart(p.point, footOn(p.point, q));
-    // two with a direction: how far apart, and at what angle
+    // two with a direction: how far apart, and at what angle -- touching
+    // or crossing judged on the edges and faces themselves, not their
+    // lines and planes, which meet far off whenever they are not parallel
     const degrees = (sine) =>
       THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(sine, 0, 1)));
     const flat = Math.sin(THREE.MathUtils.degToRad(0.5)); // parallel, near enough
-    let near;
+    const piecesOf = (feature) =>
+      feature.kind === "edge"
+        ? { segments: [[feature.a, feature.b]], triangles: [] }
+        : facePieces(feature);
+    const [pp, qp] = [piecesOf(p), piecesOf(q)];
+    const extent = Math.max(spanOf(pp), spanOf(qp), 1e-30);
+    const nearest = nearestBetween(pp, qp);
+    const touching = nearest.length < extent * 1e-7;
     let tilt; // the angle between them, 0 to 90°
+    let across = null; // parallel: the distance at right angles
     if (p.kind === "edge" && q.kind === "edge") {
-      const [from, to] = closestBetween(
-        new THREE.Line3(p.a, p.b),
-        new THREE.Line3(q.a, q.b),
-      );
-      near = apart(from, to);
       const u = p.b.clone().sub(p.a).normalize();
       const v = q.b.clone().sub(q.a).normalize();
       tilt = degrees(u.clone().cross(v).length());
     } else if (p.kind === "edge") {
-      // the end of the edge nearer the face's plane; none, where it crosses
-      const [da, db] = [p.a, p.b].map((end) =>
-        q.normal.dot(end.clone().sub(q.point)),
-      );
-      if (da * db <= 0) {
-        const at = p.a.clone().lerp(p.b, da === db ? 0 : da / (da - db));
-        near = apart(at, at);
-      } else {
-        const end = Math.abs(da) <= Math.abs(db) ? p.a : p.b;
-        near = apart(end, footOn(end, q));
-      }
       const u = p.b.clone().sub(p.a).normalize();
       tilt = degrees(Math.abs(u.dot(q.normal)));
+      const middle = p.a.clone().add(p.b).multiplyScalar(0.5);
+      across = apart(middle, footOn(middle, q));
     } else {
-      // two faces: parallel, the gap; else their planes meet somewhere
       const cosine = Math.min(Math.abs(p.normal.dot(q.normal)), 1);
       tilt = THREE.MathUtils.radToDeg(Math.acos(cosine));
-      near = tilt < 0.5 ? apart(p.point, footOn(p.point, q)) : null;
+      across = apart(p.point, footOn(p.point, q));
     }
-    const parallel = Math.sin(THREE.MathUtils.degToRad(tilt)) < flat;
-    if (parallel) return near;
-    // touching or crossing: the distance is none, the angle is the measure
-    const reach = p.point.distanceTo(q.point) || 1;
-    if (!near || near.length < reach * 1e-9) {
-      return { from: p.point, to: q.point, angle: tilt };
+    if (Math.sin(THREE.MathUtils.degToRad(tilt)) < flat) {
+      return across ?? nearest; // parallel: how far apart
     }
-    return { ...near, tilt };
+    if (touching) return { from: p.point, to: q.point, angle: tilt };
+    return { ...nearest, tilt };
+  }
+
+  /** A face's triangles in the world, and the segments round them. */
+  function facePieces(face) {
+    const triangles = [];
+    const flat = face.triangles;
+    for (let i = 0; i + 8 < flat.length; i += 9) {
+      triangles.push(
+        [0, 3, 6].map((k) =>
+          new THREE.Vector3(
+            flat[i + k],
+            flat[i + k + 1],
+            flat[i + k + 2],
+          ).applyMatrix4(face.matrix),
+        ),
+      );
+    }
+    const segments = triangles.flatMap(([a, b, c]) => [
+      [a, b],
+      [b, c],
+      [c, a],
+    ]);
+    return { segments, triangles };
+  }
+
+  /** How far the pieces of a feature reach: its size, for a tolerance. */
+  function spanOf({ segments }) {
+    const box = new THREE.Box3();
+    for (const [a, b] of segments) box.expandByPoint(a).expandByPoint(b);
+    return box.getSize(new THREE.Vector3()).length();
+  }
+
+  /** The nearest points of two features' pieces -- segments and
+   *  triangles -- and the `length` between: none, where a segment of one
+   *  goes through a triangle of the other. */
+  function nearestBetween(first, second) {
+    let best = { length: Infinity, from: null, to: null };
+    const consider = (from, to) => {
+      const length = from.distanceTo(to);
+      if (length < best.length) best = { from, to, length };
+    };
+    const triangle = new THREE.Triangle();
+    const onTriangle = (point, corners) =>
+      triangle.set(...corners).closestPointToPoint(point, new THREE.Vector3());
+    const through = (segment, corners) => {
+      const [a, b] = segment;
+      const way = b.clone().sub(a);
+      const length = way.length();
+      if (!length) return null;
+      const hit = new THREE.Ray(a, way.divideScalar(length)).intersectTriangle(
+        ...corners,
+        false,
+        new THREE.Vector3(),
+      );
+      return hit && hit.distanceTo(a) <= length ? hit : null;
+    };
+    for (const [one, other, flip] of [
+      [first, second, false],
+      [second, first, true],
+    ]) {
+      for (const segment of one.segments) {
+        for (const corners of other.triangles) {
+          const hit = through(segment, corners);
+          if (hit) return { from: hit, to: hit.clone(), length: 0 };
+          for (const end of segment) {
+            const on = onTriangle(end, corners);
+            if (flip) consider(on, end);
+            else consider(end, on);
+          }
+        }
+      }
+    }
+    for (const a of first.segments) {
+      for (const b of second.segments) {
+        const [from, to] = closestBetween(
+          new THREE.Line3(...a),
+          new THREE.Line3(...b),
+        );
+        consider(from, to);
+      }
+    }
+    return best;
   }
 
   /** The nearest points of two segments, `[on the first, on the second]`. */
@@ -8117,125 +8194,154 @@ void main() {
     ];
   }
 
-  /** The corners drawn, each with its owner, in cells of `SNAP_PIXELS` on
-   *  the page, as `snapTargets` keeps the vertices for a drag; and the parts
-   *  a ray is cast at for an edge or a face. */
+  /** What a pick looks through, made again once the camera or the scene
+   *  has moved: the shapes a ray is cast at, each with its owner, and what a
+   *  ray cannot hit -- the points of what has no size, and wires, whose
+   *  runs are thin lines -- with their owners too. */
   function rulerTargets() {
-    const seen = new Set();
-    const cells = new Map();
     const meshes = [];
-    const at = new THREE.Vector3();
+    const loose = [];
     for (const [objectId, node] of byObjectId) {
       if (!node.visible) continue;
       node.updateMatrixWorld(true);
       rulerParts(objectId).forEach((part, p) => {
         if (!part.visible && !part.userData.flow) return;
-        // a ray is cast at what has faces or a run, not at a point's mark
-        if (!part.userData.glyph && !part.userData.origins) {
-          meshes.push({ part, objectId, p });
+        const point = part.userData.glyph || part.userData.origins;
+        if (point || part.isLineSegments2) {
+          loose.push({ part, objectId, p });
+          return;
         }
-        const flat = rulerFeatures(part).corner;
-        for (let i = 0; 3 * i + 2 < flat.length; i++) {
-          at.set(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]);
-          at.applyMatrix4(part.matrixWorld);
-          const key = `${at.x.toFixed(12)},${at.y.toFixed(12)},${at.z.toFixed(12)}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const page = onScreen(at);
-          if (!page) continue;
-          const cell = cellOf(page);
-          if (!cells.has(cell)) cells.set(cell, []);
-          cells.get(cell).push({
-            page,
-            end: { kind: "corner", objectId, part: p, index: i },
-          });
-        }
+        // where it is, as a sphere: what a ray is tested on first
+        if (!part.geometry.boundingSphere)
+          part.geometry.computeBoundingSphere();
+        const sphere = part.geometry.boundingSphere
+          .clone()
+          .applyMatrix4(part.matrixWorld);
+        meshes.push({ part, objectId, p, sphere });
       });
     }
-    return { cells, meshes };
+    return { meshes, loose };
   }
 
-  /** The end a click at `event` would pick: a corner within `SNAP_PIXELS`,
-   *  else a straight edge of what is under the pointer within as much, else
-   *  the flat face under it; or null. The targets are made again once the
-   *  camera has stood still a moment. */
+  /** The end a click at `event` would pick, or null: of the shape under the
+   *  pointer -- or under a point a few pixels off it, for a corner or an
+   *  edge on its outline -- and of the points and wires near it, a corner
+   *  or a point within `SNAP_PIXELS` first, else a straight edge, else the
+   *  flat face under the pointer; the nearest first, and only what is in
+   *  sight. Looks at the parts under the pointer alone, so a body of
+   *  thousands of cells costs a ray, not a look at each cell. */
   function rulerTarget(event) {
     if (ruler.stale && performance.now() - ruler.movedAt > 120) {
-      ({ cells: ruler.targets, meshes: ruler.meshes } = rulerTargets());
+      ({ meshes: ruler.meshes, loose: ruler.loose } = rulerTargets());
       ruler.stale = false;
     }
-    if (!ruler.targets || !event) return null;
+    if (!ruler.meshes || !event) return null;
     const rect = renderer.domElement.getBoundingClientRect();
     const page = [event.clientX - rect.left, event.clientY - rect.top];
-    // what is under a point of the page: the nearest surface a ray from the
-    // camera through it meets, and how far along the ray it is
     const owners = new Map(ruler.meshes.map((each) => [each.part, each]));
-    const parts = ruler.meshes.map((each) => each.part);
+    // the nearest surface a ray through a point of the page meets: the
+    // spheres round the shapes first, a loop of sums, and their triangles
+    // only for the few it passes -- a body of thousands of cells is
+    // thousands of spheres to a ray, and a handful of meshes
     const castAt = ([x, y]) => {
       raycaster.setFromCamera(
         new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1),
         camera,
       );
+      const passed = ruler.meshes
+        .filter((each) => raycaster.ray.intersectsSphere(each.sphere))
+        .map((each) => each.part);
       return (
         raycaster
-          .intersectObjects(parts, false)
+          .intersectObjects(passed, false)
           .find((each) => owners.has(each.object)) ?? null
       );
     };
-    // in sight: nothing nearer the camera along the ray to it than itself --
-    // a corner or an edge behind a shape is not offered through it
-    const slack = (distance) => distance * 1e-4 + 1e-9;
-    const corner = nearestTarget(ruler.targets, page);
-    if (corner) {
-      const point = rulerFeature(corner.end)?.point;
-      const hit = point && castAt(corner.page);
-      const along = point && raycaster.ray.origin.distanceTo(point);
-      if (point && (!hit || hit.distance >= along - slack(along)))
-        return corner.end;
+    const TRIED = 6; // candidates looked at for sight, nearest first
+    // in sight: nothing nearer the camera along the ray to it than itself,
+    // `room` further along allowed, for an edge a pixel or two off a surface
+    const inSight = (point, room = 0) => {
+      const at = onScreen(point);
+      if (!at) return false;
+      const hit = castAt(at);
+      const along = raycaster.ray.origin.distanceTo(point);
+      return !hit || hit.distance >= along - (along * 1e-4 + 1e-9) - room;
+    };
+    const perPixel = scenePerPixel(rect.height || 1);
+    const under = castAt(page);
+    // the parts under the pointer, and under points just off it
+    const nearby = new Map();
+    const reach = SNAP_PIXELS * 0.7;
+    for (const [dx, dy] of [
+      [0, 0],
+      [reach, 0],
+      [-reach, 0],
+      [0, reach],
+      [0, -reach],
+    ]) {
+      const hit = dx || dy ? castAt([page[0] + dx, page[1] + dy]) : under;
+      if (hit) nearby.set(hit.object, owners.get(hit.object));
     }
-    const hit = castAt(page);
-    if (!hit) return null;
-    const { objectId } = owners.get(hit.object);
-    const ray = raycaster.ray.clone();
-    const far = new THREE.Line3(
-      ray.origin,
-      ray.at(hit.distance * 4 + 1, new THREE.Vector3()),
-    );
-    // an edge of the object under the pointer, near enough on the page and
-    // not behind the surface the pointer is on
-    let best = null;
-    let distance = SNAP_PIXELS;
-    rulerParts(objectId).forEach((part, p) => {
+    const looked = [...nearby.values(), ...ruler.loose];
+    // corners and points, nearest first, the first in sight
+    const corners = [];
+    for (const { part, objectId, p } of looked) {
+      const flat = rulerFeatures(part).corner;
+      for (let i = 0; 3 * i + 2 < flat.length; i++) {
+        const end = { kind: "corner", objectId, part: p, index: i };
+        const feature = rulerFeature(end);
+        const at = feature && onScreen(feature.point);
+        if (!at) continue;
+        const d = Math.hypot(at[0] - page[0], at[1] - page[1]);
+        if (d <= SNAP_PIXELS) corners.push({ d, end, point: feature.point });
+      }
+    }
+    corners.sort((a, b) => a.d - b.d);
+    for (const { end, point } of corners.slice(0, TRIED)) {
+      if (inSight(point)) return end;
+    }
+    // straight edges, the same way: the point of each nearest the pointer's
+    // ray must be in sight, a few pixels of depth allowed
+    const ray = (() => {
+      raycaster.setFromCamera(
+        new THREE.Vector2(
+          (page[0] / rect.width) * 2 - 1,
+          -(page[1] / rect.height) * 2 + 1,
+        ),
+        camera,
+      );
+      const far =
+        (under?.distance ?? controls.target.distanceTo(camera.position)) * 4 +
+        1;
+      return new THREE.Line3(
+        raycaster.ray.origin.clone(),
+        raycaster.ray.at(far, new THREE.Vector3()),
+      );
+    })();
+    const edges = [];
+    for (const { part, objectId, p } of looked) {
       const flat = rulerFeatures(part).edge;
       for (let i = 0; 6 * i + 5 < flat.length; i++) {
-        const feature = rulerFeature({
-          kind: "edge",
-          objectId,
-          part: p,
-          index: i,
-        });
+        const end = { kind: "edge", objectId, part: p, index: i };
+        const feature = rulerFeature(end);
         const ends = feature && [onScreen(feature.a), onScreen(feature.b)];
         if (!ends?.[0] || !ends[1]) continue;
         const d = toSegment(page, ends[0], ends[1]);
-        if (d > distance) continue;
+        if (d > SNAP_PIXELS) continue;
         const [, onEdge] = closestBetween(
-          far,
+          ray,
           new THREE.Line3(feature.a, feature.b),
         );
-        const along = ray.origin.distanceTo(onEdge);
-        // on the surface the pointer is on, an edge a few pixels off it is
-        // a little further along the ray; one behind the shape, a shape's
-        // depth further
-        const near = (d + 2) * 3 * scenePerPixel(rect.height || 1);
-        if (along > hit.distance + Math.max(slack(hit.distance), near))
-          continue;
-        distance = d;
-        best = { kind: "edge", objectId, part: p, index: i };
+        edges.push({ d, end, onEdge });
       }
-    });
-    if (best) return best;
-    const { p } = owners.get(hit.object);
-    const face = rulerFeatures(hit.object).faceOf.get(hit.faceIndex);
+    }
+    edges.sort((a, b) => a.d - b.d);
+    for (const { d, end, onEdge } of edges.slice(0, TRIED)) {
+      if (inSight(onEdge, (d + 2) * 3 * perPixel)) return end;
+    }
+    if (!under) return null;
+    const { objectId, p } = owners.get(under.object);
+    const face = rulerFeatures(under.object).faceOf.get(under.faceIndex);
     return face === undefined
       ? null
       : { kind: "face", objectId, part: p, index: face };
@@ -8268,6 +8374,7 @@ void main() {
     ruler.on = now;
     ruler.first = null;
     ruler.hovered = null;
+    if (now) hover(null); // what a click would select: it measures now
     rulerMoved();
     if (renderer) renderer.domElement.style.cursor = now ? "crosshair" : "";
     host?.dispatchEvent(
@@ -8307,7 +8414,12 @@ void main() {
   function rulerHover(event) {
     const over = event ? labelAt(event) : null;
     // on a label, nothing is picked through it
+    const was = ruler.hovered;
     ruler.hovered = over || !ruler.on ? null : rulerTarget(event);
+    const changed =
+      over !== ruler.over ||
+      Boolean(was) !== Boolean(ruler.hovered) ||
+      (was && ruler.hovered && !sameEnd(was, ruler.hovered));
     if (over !== ruler.over) {
       ruler.over = over;
       renderer.domElement.title = over ? tooltipOf(over) : "";
@@ -8320,8 +8432,9 @@ void main() {
     if (ruler.on || over || wasOverLabel) {
       renderer.domElement.style.cursor = cursor;
     }
+    // drawn again only for what changed: the pick, or the label hovered
+    if (changed) redraw();
     wasOverLabel = Boolean(over);
-    redraw();
     return Boolean(over);
   }
   let wasOverLabel = false;
@@ -8532,7 +8645,7 @@ void main() {
       cue(ruler.first);
       cue(ruler.hovered);
     }
-    const perPixel = scenePerPixel(renderer.domElement.clientHeight || 1);
+    const height = renderer.domElement.clientHeight || 1;
     for (const measured of ruler.list) {
       const now = measuredNow(measured);
       measured.label ??= makeLabel();
@@ -8552,6 +8665,8 @@ void main() {
       }
       const middle = a.clone().add(b).multiplyScalar(0.5);
       const [w, h] = measured.label.size;
+      // at the label's own depth, so it is the size its box says
+      const perPixel = perPixelAt(middle, height);
       // a line shorter on screen than its label: the label stands above it
       const ends = [onScreen(a), onScreen(b)];
       const across =
@@ -8588,6 +8703,17 @@ void main() {
       "position",
       new THREE.Float32BufferAttribute(faces, 3),
     );
+  }
+
+  /** How much of the scene a pixel spans at `point`'s depth: the same
+   *  everywhere in a parallel view, nearer the camera less in a perspective
+   *  one. */
+  function perPixelAt(point, height) {
+    if (camera.isOrthographicCamera) return scenePerPixel(height);
+    const ahead = camera.getWorldDirection(new THREE.Vector3());
+    const depth = point.clone().sub(camera.position).dot(ahead);
+    const seen = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    return seen / camera.zoom / height;
   }
 
   /** The measurements made: each end's feature, where the two nearest points
@@ -8709,6 +8835,8 @@ void main() {
     setPointsMode,
     setRuler,
     rulerOn: () => ruler.on,
+    /** Whether a first end is picked, the second awaited. */
+    rulerPending: () => Boolean(ruler.first),
     rulerPairs,
     setMeasurements,
     measurements,

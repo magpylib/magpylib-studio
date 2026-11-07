@@ -1590,6 +1590,16 @@ function render({ model, el }) {
   stage.addEventListener("keydown", (event) => {
     // typed into a box -- the readout's -- a key is a character, not a command
     if (event.target.closest?.("input, select, textarea")) return;
+    // Esc, a first end picked in a variant's pane: that pick goes first, as
+    // it would in the scene's own view
+    const picking =
+      event.key === "Escape" && grid.apis.find((each) => each.rulerPending());
+    if (picking) {
+      picking.viewKey(event);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!editKey(event) && !api?.viewKey(event, viewActions)) return;
     event.preventDefault();
     event.stopPropagation(); // the notebook listens further up
@@ -1659,6 +1669,7 @@ function render({ model, el }) {
   let framed = false; // whether this widget has drawn into the view yet
   let refit = null; // frames the view again as its size settles -- see draw
   let unplaced = false; // a draw waits for the view to be on the page
+  let keptRuler = null; // a released view's ruler, for its next renderer
   let kept = null; // where the camera was, for a view drawn again to look from
 
   /** Let go of the scene3d, for a view off the page (`sweep`) or torn down.
@@ -1668,6 +1679,8 @@ function render({ model, el }) {
   function release() {
     shared.views.delete(held);
     if (!api) return;
+    // the ruler and its measurements, for the view drawn again to take up
+    keptRuler = { on: api.rulerOn(), pairs: api.rulerPairs() };
     clearTimeout(gridTimer);
     // the variants' panes let go of theirs too -- a view let go of, not a
     // choice: the trait keeps them, and drawn again they open again
@@ -3128,6 +3141,13 @@ function render({ model, el }) {
       api = module.createScene3d();
       sharedModule = module;
       shared.views.add(held);
+      // drawn again after a release: measuring as it was
+      if (keptRuler) {
+        api.setMeasurements(keptRuler.pairs);
+        api.setRuler(keptRuler.on);
+        pressed(rulerButton, keptRuler.on);
+        keptRuler = null;
+      }
     }
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;

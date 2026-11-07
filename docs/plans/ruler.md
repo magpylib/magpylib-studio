@@ -59,8 +59,8 @@ their distance; neither, by their distance, the angle in the label's tooltip.
 What has no size is a point: a dipole, a sensor at its position and each of its
 pixels at its middle, not the boxes they are drawn as (Alex, 2026-11-07). The
 pairs the other way round are the same. An edge with a corner or a face is the
-distance from the corner to the edge's line, or the edge's nearest point to the
-face's plane.
+distance from the corner to the edge, or the edge's nearest point to the face's
+plane.
 
 - **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
   or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
@@ -129,13 +129,19 @@ stands aside from the lines' ends.
 
 ## 6. Cost
 
-- Snap targets for vertices, as a drag takes them: when the ruler comes on and
-  each time the camera stops, in the pane under the pointer.
-- One ray a frame on the pointer's move, as hover already casts, for the face
-  and the part under it.
-- A part's faces and edges once, the first time the pointer is over it.
-- Checked on a sealed collection of thousands of cells (#86–#88): orbit and
-  hover with the ruler on no slower than with it off, on the slow-machine run.
+- What a pick looks at, made again once the camera or the scene has stood still
+  a moment: the shapes' parts, each with a bounding sphere, and what a ray
+  cannot hit -- points and wires.
+- A hover casts a ray at the pointer and four a few pixels round it; each is
+  tested on the spheres first, a loop of sums, and on the triangles of the few
+  it passes. The corners, edges and face come from the parts those rays meet,
+  and from the points and wires near the pointer; at most six candidates of a
+  kind are tested for sight, the nearest first.
+- A part's corners, edges and faces once, when a ray first meets it.
+- Measured on a sealed body of 4,096 cells, headless Chrome on an M4: a hover's
+  look takes 0.8 ms at the median and 3 ms at worst, against 2.7 ms for the
+  selection's own hover with the ruler off. What the ruler adds is a redraw when
+  the feature under the pointer changes, to show it.
 
 ## 7. The order
 
