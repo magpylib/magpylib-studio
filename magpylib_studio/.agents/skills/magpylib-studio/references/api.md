@@ -213,8 +213,9 @@ This is what variables are *for*: a parameter study. Each value is set
 on a copy of the scene as a drag of its slider sets it
 (`_set_as_slider`), its solved parts solved again, milliseconds a
 value without them. Nothing is recorded in the history, and the scene
-stays as it is. The first value the scene refuses, or cannot be read
-at, ends the sweep, with the steps read before it.
+stays as it is. A value the scene refuses, or cannot be read at, is
+left out of `steps` and listed in `skipped`, with why; with none read,
+the sweep is refused.
 
 ### `session.goal_seek(variable, target, sensor_id=None, points=None, field='B', component='magnitude', at=None, within=None, samples=32, apply=True)`
 

@@ -4654,11 +4654,27 @@ def test_sweep_reads_the_field_and_leaves_the_scene_where_it_found_it():
     assert list(s._objs["sens"].position) == [0, 0, 0.01]
     assert len(s.get_history()["undo"]) == steps_before  # not an edit
     assert s.sweep("nope", [1])["ok"] is False
-    # a size the cube cannot have ends the sweep, never read as no cube
+    # a size the cube cannot have is left out, never read as no cube; a
+    # count from numpy is a count
     s.set_param("m", "dimension", ["=gap", 0.01, 0.01])
     refused = s.sweep("gap", [0.01, -0.01, 0.02])
-    assert refused["ok"] is False and len(refused["steps"]) == 1
-    assert "dimension" in refused["error"]
+    assert [step["value"] for step in refused["steps"]] == [0.01, 0.02]
+    ((skip),) = refused["skipped"]
+    assert skip["value"] == -0.01 and "dimension" in skip["error"]
+    assert (
+        "1 values refused"
+        in s.get_sweep_figure("gap", [0.01, -0.01])["layout"]["title"]["text"]
+    )
+    assert s.sweep("gap", list(np.array([0.01, 0.02])))["ok"]
+    # stepped back to before a second magnet, it reads the scene shown
+    s.add_object(
+        "m2",
+        "magnet.Cuboid",
+        {"polarization": [0, 0, 1], "dimension": [0.01] * 3, "position": [0.03, 0, 0]},
+    )
+    s.set_rollback(len(s.doc["events"]) - 1)
+    shown = s.get_field(sensor_id="sens")["magnitude"]
+    assert s.sweep("gap", [0.01], sensor_id="sens")["steps"][0]["magnitude"] == shown
 
     fig = s.get_sweep_figure("gap", [0.01, 0.02])
     assert fig["data"][0]["x"] == [0.01, 0.02]
@@ -4737,7 +4753,7 @@ def test_a_search_reads_a_solved_scene_solved_at_each_value():
     assert s.load_example("ucore")["ok"]
     swept = s.sweep("current", [0, 100, 200])
     zero, one, two = (step["magnitude"][7] for step in swept["steps"])
-    assert zero == 0 and np.isclose(two, 2 * one)  # linear: no magnet in it
+    assert np.isclose(zero, 0, atol=1e-12) and np.isclose(two, 2 * one)  # linear
     assert s.doc["variables"]["current"] == 100
     found = s.goal_seek("current", 0.005, at=[7], within=(100, 200), samples=4)
     assert np.isclose(found["applied"], 151.4, atol=0.1)

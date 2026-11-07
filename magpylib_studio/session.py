@@ -8611,11 +8611,15 @@ class MagpylibStudioSession:
         }
         return {"ok": True}
 
-    def _copied(self, doc):
+    def _copied(self, doc, strict=False):
         """A session of `doc`, this one's document as JSON, drawn and solved
-        as this one is: the same follower, sheets solved for the same."""
+        as this one is: the same follower, sheets solved for the same. With
+        `strict`, a document that does not load raises ValueError, where
+        otherwise the copy is left as empty as it came."""
         made = MagpylibStudioSession(mesh_cache=self._mesh_cache)
-        made.load_scene(json.loads(doc), self._base_dir)
+        loaded = made.load_scene(json.loads(doc), self._base_dir)
+        if strict and not loaded.get("ok"):
+            raise ValueError(f"the scene does not copy: {loaded.get('error')}")
         made.follower = self.follower
         made._solved_for = {
             key: dict(seen) for key, seen in getattr(self, "_solved_for", {}).items()
@@ -8706,8 +8710,17 @@ class MagpylibStudioSession:
     def _trial(self):
         """A copy of this session to try values of its variables on, drawn and
         solved as this one is (`_copied`): what `sweep` and `goal_seek` read,
-        so that the scene itself is never touched by a search."""
-        return self._copied(json.dumps(self.to_dict()))
+        so that the scene itself is never touched by a search. Stepped back
+        (`set_rollback`), it is the scene the steps shown build. It keeps no
+        history, nothing on it being undone, and takes the solves that were
+        out of date before it as its own (`_set_as_slider`). Raises
+        ValueError when the scene does not copy."""
+        trial = self._copied(json.dumps(self.to_dict()), strict=True)
+        if self._rollback is not None:  # a variable's value keeps it
+            trial.set_rollback(self._rollback)
+        trial._history_paused = True
+        trial._stale_before = set(trial.stale_solves())
+        return trial
 
     def _set_as_slider(self, variable, value):
         """Set `variable` to `value` as a drag of its slider in a view does:
@@ -8718,12 +8731,16 @@ class MagpylibStudioSession:
         (docs/decisions.md#0052-a-solve-that-cannot-be-done-again-is-said-out-of-date).
         A plain rebuild would read a smaller scene for the first, and
         charges solved for the old value for the second."""
+        if isinstance(value, np.generic):  # a value from a numpy array
+            value = value.item()
         done = self.followed(lambda: self.set_variable(variable, value))
         if not done.get("ok"):
             raise ValueError(done.get("error"))
         if done.get("not_followed"):
             raise ValueError(f"not solved for: {done['not_followed']}")
-        stale = self.stale_solves()
+        # out of date already before the trial is the scene's, said there
+        before = getattr(self, "_stale_before", set())
+        stale = [key for key in self.stale_solves() if key not in before]
         if stale:
             raise ValueError(f"solved for another arrangement: {', '.join(stale)}")
 
@@ -8734,41 +8751,40 @@ class MagpylibStudioSession:
         on a copy of the scene as a drag of its slider sets it
         (`_set_as_slider`), its solved parts solved again, milliseconds a
         value without them. Nothing is recorded in the history, and the scene
-        stays as it is. The first value the scene refuses, or cannot be read
-        at, ends the sweep, with the steps read before it.
+        stays as it is. A value the scene refuses, or cannot be read at, is
+        left out of `steps` and listed in `skipped`, with why; with none read,
+        the sweep is refused.
         """
         variables = self.doc.get("variables") or {}
         if variable not in variables:
             return {"ok": False, "error": f"unknown variable {variable!r}"}
         if not isinstance(values, list | tuple) or not values:
             return {"ok": False, "error": "values must be a non-empty list"}
-        trial = self._trial()
-        steps = []
+        steps, skipped = [], []
         try:
-            for value in values:
+            trial = self._trial()
+        except ValueError as e:
+            return {"ok": False, "error": str(e), "variable": variable, "steps": steps}
+        for value in values:
+            try:
                 trial._set_as_slider(variable, value)
                 data = trial.get_field(sensor_id=sensor_id, points=points, field=field)
-                steps.append(
-                    {
-                        "value": value,
-                        "values": data["values"],
-                        "magnitude": data["magnitude"],
-                    }
-                )
-        except Exception as e:  # noqa: BLE001 - a bad value is a result, not a crash
-            return {
-                "ok": False,
-                "error": f"{type(e).__name__}: {e}",
-                "variable": variable,
-                "steps": steps,
-            }
-        return {
-            "ok": True,
-            "variable": variable,
-            "field": field,
-            "unit": _FIELDS[field][1],
-            "steps": steps,
-        }
+            except Exception as e:  # noqa: BLE001 - a bad value is a result, not a crash
+                skipped.append({"value": value, "error": f"{type(e).__name__}: {e}"})
+                continue
+            steps.append(
+                {
+                    "value": value,
+                    "values": data["values"],
+                    "magnitude": data["magnitude"],
+                }
+            )
+        said = {"variable": variable, "steps": steps}
+        if skipped:
+            said["skipped"] = skipped
+        if not steps:
+            return {"ok": False, "error": skipped[0]["error"], **said}
+        return {"ok": True, "field": field, "unit": _FIELDS[field][1], **said}
 
     def get_sweep_figure(
         self,
@@ -8781,7 +8797,8 @@ class MagpylibStudioSession:
         template=None,
     ):
         """A sweep as a plotly line plot: the field against the variable, one
-        trace per observation point (a sensor path gives one per step)."""
+        trace per observation point (a sensor path gives one per step). Values
+        the scene refuses are left out, and the title says how many."""
         result = self.sweep(variable, values, sensor_id, points, field)
         if not result["ok"]:
             raise ValueError(result["error"])
@@ -8825,7 +8842,14 @@ class MagpylibStudioSession:
         label = f"|{field}|" if component == "magnitude" else f"{field}{component}"
         fig = go.Figure(traces)
         fig.update_layout(
-            title={"text": f"{label} against {variable}"},
+            title={
+                "text": f"{label} against {variable}"
+                + (
+                    f" ({len(result['skipped'])} values refused)"
+                    if result.get("skipped")
+                    else ""
+                )
+            },
             xaxis={"title": {"text": axis}},
             yaxis={"title": {"text": f"{label} ({field_symbol})"}},
             margin={"l": 60, "r": 20, "t": 50, "b": 50},
@@ -8951,7 +8975,10 @@ class MagpylibStudioSession:
         # choice of several rows
         index = tuple(at) if isinstance(at, list) else at
 
-        trial = self._trial()
+        try:
+            trial = self._trial()
+        except ValueError as e:
+            return refused(str(e))
 
         def field_there():
             sources, _ = trial._sources_for_field()

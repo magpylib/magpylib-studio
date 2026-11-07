@@ -177,8 +177,9 @@ drawn in the frame it is resized in.
 U-core's core -- with the charges solved for the value the scene was at: the
 U-core's field at 0, 100 and 200 A read 2.6, 3.3 and 4.0 mT, where it is 0, 3.3
 and 6.6. Each value is now set as its slider sets it, solved again, as goal seek
-does, and a value the scene refuses ends the sweep saying why, where a magnet it
-could not draw was left out of the reading.
+does; a value the scene refuses is left out and listed in `skipped`, where a
+magnet it could not draw was left out of the reading, and the plot's title says
+how many ([#154](https://github.com/magpylib/magpylib-studio/pull/154)).
 
 </details>
 

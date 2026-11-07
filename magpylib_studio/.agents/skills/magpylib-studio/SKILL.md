@@ -215,8 +215,9 @@ print(
 
 - `sweep(variable, values, points=... or sensor_id=..., field="B")` reads the
   field at each value as the slider would set it, solved parts solved again, in
-  milliseconds a value without them, and leaves the scene as it was. `values`
-  must be a list: `.tolist()` a numpy array.
+  milliseconds a value without them, and leaves the scene as it was. A value the
+  scene refuses is left out of `steps` and listed in `skipped`, with why.
+  `values` must be a list: `.tolist()` a numpy array.
 - `goal_seek(variable, target, points=... or sensor_id=..., field="B")` finds
   the values of one variable where the field reads `target`, in SI, over the
   variable's limits or `within=(low, high)`, and sets the one nearest the
