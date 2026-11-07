@@ -307,7 +307,7 @@ const KEY_LIST = {
     ["⌥ / Alt on an eye", "click: show only that row — slide: fade the rest"],
     [
       "M",
-      "measure: a corner, an edge, a face or a round surface, then another — again: select, the measurements kept",
+      "measure: a corner, an edge, a face, a round surface or a wire's curve, then another — again: select, the measurements kept",
     ],
     [
       "Esc",
@@ -774,7 +774,7 @@ function render({ model, el }) {
   // renderer says when it turns on or off, a key or Esc included.
   const rulerButton = iconButton(
     "ruler",
-    "Measure: click a corner, an edge, a face or a round surface, then another (M)",
+    "Measure: click a corner, an edge, a face, a round surface or a wire's curve, then another (M)",
     () => api?.setRuler(!api.rulerOn()),
   );
   pressed(rulerButton, false);
@@ -817,6 +817,14 @@ function render({ model, el }) {
     }));
     const told = model.get("measurements") || [];
     if (JSON.stringify(told) === JSON.stringify(now)) return;
+    // ends named by a point, as this view named them: the panes take its
+    // names, each having named them by a variant of its own
+    if (told.some(({ a, b }) => a?.near || b?.near)) {
+      mirrorMeasurements(
+        now.map(({ a, b }) => ({ a, b })),
+        api,
+      );
+    }
     model.set("measurements", now);
     model.save_changes();
   }
@@ -827,7 +835,9 @@ function render({ model, el }) {
     }
   }
   const sameEnd = (p, q) =>
-    ["kind", "objectId", "part", "index"].every((key) => p?.[key] === q?.[key]);
+    ["kind", "objectId", "part", "index"].every(
+      (key) => p?.[key] === q?.[key],
+    ) && String(p?.near) === String(q?.near);
   /** The measurements the trait names, in every view, where they are not
    *  the ones there: assigned from python, or a saved page's. */
   function showMeasurements() {

@@ -48,6 +48,10 @@ class Example:
     #: has one: the scene
     #: imported, and what a notebook adds round it.
     notebook: str | None = None
+    #: What its docs page opens measured: pairs of ends, each an object's id
+    #: and a point in metres at the feature meant, as `SceneWidget.measure`
+    #: takes them.
+    measure: tuple = ()
 
     @property
     def available(self):
@@ -116,7 +120,13 @@ EXAMPLES = {
         Example("rings", "halbach_ring", field_lines=True, notebook="halbach_ring.py"),
         Example("helmholtz", "coil_pair", field_lines=True, notebook="coil_pair.py"),
         Example("spiral", "helical_winding"),
-        Example("pair", "facing_magnets"),
+        # the gap between the two faces: the upper magnet's bottom, and its
+        # mirror's top, drawn as a copy of it
+        Example(
+            "pair",
+            "facing_magnets",
+            measure=((("upper", (0, 0, 0.005)), ("upper", (0, 0, -0.005))),),
+        ),
         Example("tolerance", "probe_placement"),
         Example("quiver", "turning_magnet"),
         Example("array", "magnet_array"),

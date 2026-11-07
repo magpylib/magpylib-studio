@@ -2814,7 +2814,9 @@ side (#147), the same gap read in each variant is what a split view is for.
 - **Round surfaces as their shapes**: a sphere's and a cylinder's side, found
   from the facets drawn, whose vertices are on the true surface, are measured
   exactly; any other curved surface on its drawn facets, and the label's tooltip
-  says so (Alex, 2026-11-07).
+  says so (Alex, 2026-11-07). A wire's bent run is a curve, a circle where it is
+  one, a Circle's loop measured exactly; and a dipole is its position however
+  its arrow is drawn (Alex, 2026-11-07).
 - **The legend's gap stays**, object to object, exact, beside the ruler, feature
   to feature.
 

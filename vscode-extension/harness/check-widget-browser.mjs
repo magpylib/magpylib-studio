@@ -1087,7 +1087,7 @@ async function resizedDrawsAtOnce(port, base) {
  *  corner, an edge and a face measures what it should. */
 async function savedRuler(port, base) {
   await check(
-    "the ruler measures between corners, edges, faces and round surfaces",
+    "the ruler measures between corners, edges, faces, round surfaces and curves",
     async () => {
       const tab = await openTab(port);
       try {
@@ -1260,10 +1260,11 @@ async function savedRuler(port, base) {
         if (await tab.evaluate(`return ${button}.classList.contains("on")`))
           return "the ruler off, its button stayed pressed";
         // features, not a facet's: a sphere offers none, a cylinder its two
-        // flat ends, a loop none, a bent wire its ends, its bend and its two
-        // runs; a cube, a cylinder's segment and a tetrahedron theirs; what
-        // has no size a point each -- a dipole one, a sensor of 2 x 2 pixels
-        // its own and its pixels' middles, not the boxes they are drawn as
+        // flat ends, a loop its curve, a bent wire its ends, its bend and its
+        // two runs, an arc its ends and its curve; a cube, a cylinder's
+        // segment and a tetrahedron theirs; what has no size a point each --
+        // a dipole one, drawn at any size, a sensor of 2 x 2 pixels its own
+        // and its pixels' middles, not the boxes they are drawn as
         await tab.navigate(`${base}/out/shapes.html`);
         if (
           !(await tab.until(`return ${VIEW}?.querySelector("canvas")`, 20_000))
@@ -1275,19 +1276,21 @@ async function savedRuler(port, base) {
           .sort();`);
         // and round surfaces: a sphere's, a cylinder's side, a segment's two
         const kinds = [
-          "0 0 0 0",
-          "0 0 0 1",
-          "0 0 2 1",
-          "1 0 0 0",
-          "3 2 0 0",
-          "4 6 4 0",
-          "5 0 0 0",
-          "8 12 6 0",
-          "8 12 6 0",
-          "8 8 4 2",
+          "0 0 0 0 1",
+          "0 0 0 1 0",
+          "0 0 2 1 0",
+          "1 0 0 0 0",
+          "1 0 0 0 0",
+          "2 0 0 0 1",
+          "3 2 0 0 0",
+          "4 6 4 0 0",
+          "5 0 0 0 0",
+          "8 12 6 0 0",
+          "8 12 6 0 0",
+          "8 8 4 2 0",
         ];
         if (offered.join() !== kinds.join())
-          return `corners, edges, faces and round surfaces each shape offers: ${offered}`;
+          return `corners, edges, faces, round surfaces and curves each shape offers: ${offered}`;
         // a wire's runs are picked, though a ray passes through them: its two
         // meet at its bend, at right angles
         const runs = await tab.evaluate(`const s = window.scene3d;
@@ -1373,7 +1376,14 @@ async function savedRuler(port, base) {
           s.featuresOf(id).surface === 1 && s.featuresOf(id).face === faces);
         const ball = feature("surface", round(0), 0);
         const tube = feature("surface", round(2), 0);
-        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright, ball, tube };`);
+        // a loop and an arc, as their circles; the dipole drawn at a size
+        // of its own, a point
+        const ids = [...s.byObjectId.keys()];
+        const loop = feature("curve", ids.find((id) => s.featuresOf(id).curve === 1 && !s.featuresOf(id).corner), 0);
+        const arc = feature("curve", ids.find((id) => s.featuresOf(id).curve === 1 && s.featuresOf(id).corner === 2), 0);
+        const dipole = ids.map((id) => feature("corner", id, 0)).find((end) =>
+          s.featuresOf(end.objectId).corner === 1 && Math.abs(s.featureOf(end).point[1] + 40) < 1e-9);
+        return { lowTop: top(low), highTop: top(high), side, corner, e0, e1, e2, upright, ball, tube, loop, arc, dipole };`);
         const centre = await tab.evaluate(
           `return window.scene3d.endOnPage(${JSON.stringify(picks.lowTop)})`,
         );
@@ -1407,16 +1417,32 @@ async function savedRuler(port, base) {
           await new Promise((done) => setTimeout(done, 150));
         };
         const pairs = [
-          ["two parallel faces", picks.lowTop, picks.highTop, { length: 3 }],
+          [
+            "two parallel faces",
+            picks.lowTop,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
           [
             "a face and a face across it",
             picks.lowTop,
             picks.side,
             { angle: 90 },
           ],
-          ["a corner and a face", picks.corner, picks.highTop, { length: 3 }],
+          // its foot past the other cube's top: dashed from there to it
+          [
+            "a corner and a face",
+            picks.corner,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
           ["two edges", picks.e0, picks.e1, { length: 10 }],
-          ["an edge and a face", picks.e0, picks.highTop, { length: 3 }],
+          [
+            "an edge and a face",
+            picks.e0,
+            picks.highTop,
+            { length: 3, extension: true },
+          ],
           ["a corner and an edge", picks.corner, picks.e1, { length: 10 }],
           // touching: the angle, the distance being none
           ["two edges meeting at a corner", picks.e0, picks.e2, { angle: 90 }],
@@ -1432,6 +1458,19 @@ async function savedRuler(port, base) {
             picks.ball,
             picks.tube,
             { length: 5, within: 1e-5 },
+          ],
+          [
+            "a sphere and a loop",
+            picks.ball,
+            picks.loop,
+            { length: 20, within: 1e-5 },
+          ],
+          // nearest the arc's end: its circle, all round, is nearer
+          [
+            "a dipole and an arc",
+            picks.dipole,
+            picks.arc,
+            { length: Math.hypot(25, 10), within: 1e-5 },
           ],
         ];
         for (const [named, a, b, expect] of pairs) {
@@ -1449,6 +1488,26 @@ async function savedRuler(port, base) {
               ? Math.abs(m.length - expect.length) < (expect.within ?? 1e-9)
               : Math.abs(m.angle - expect.angle) < 1e-9);
           if (!right) return `${named}: ${JSON.stringify(made)}`;
+          // dashed only where the foot is off the face, ending on its edge
+          const dashed = m.extension;
+          if (Boolean(expect.extension) !== dashed.length > 0)
+            return `${named}, its extension line: ${JSON.stringify(dashed)}`;
+          if (
+            dashed.length &&
+            (Math.hypot(...dashed[0].map((x, k) => x - m.to[k])) > 1e-9 ||
+              Math.abs(dashed[1][2] - m.to[2]) > 1e-9 ||
+              !(Math.hypot(...dashed[1].map((x, k) => x - m.to[k])) > 1))
+          )
+            return `${named}, its extension line: ${JSON.stringify(dashed)}`;
+          // the same pair again, the other way round: not a second
+          if (named === "a corner and a face") {
+            await pick(b);
+            await pick(a);
+            const again = await tab.evaluate(
+              `return window.scene3d.measurements().length`,
+            );
+            if (again !== 1) return `${named}, measured twice: ${again}`;
+          }
           // gone, for the next: Esc, the ruler on, takes the measurements
           await tab.evaluate(
             `window.scene3d.viewKey(new KeyboardEvent("keydown", { key: "Escape" }))`,
@@ -1483,25 +1542,36 @@ async function savedRuler(port, base) {
         );
         // a cylinder's segment, a quarter of the way round: its two round
         // sides 5 mm apart, its outer 15 mm on from the low cube's side
-        // facing it; and two labels in one place, one above the other
+        // facing it -- the pair given twice, either way round, one
+        // measurement; and two labels in one place, one above the other:
+        // the low cube's top's two diagonals, which cross at its middle
         const segment = await tab.evaluate(`const s = window.scene3d;
           const id = [...s.byObjectId.keys()].find((k) => s.featuresOf(k).surface === 2);
           const end = (index) => ({ kind: "surface", objectId: id, part: 0, index });
           const spans = [0, 1].map((i) => s.featureOf(end(i)).shape.span);
           const pair = { a: end(0), b: end(1) };
           s.setMeasurements([pair, { a: pair.b, b: pair.a }]);
+          const lengths = s.measurements().map((m) => m.length);
+          const low = ${JSON.stringify(picks.lowTop)};
+          const height = s.featureOf(low).point[2];
+          const top = [...Array(8).keys()]
+            .map((index) => ({ kind: "corner", objectId: low.objectId, part: 0, index }))
+            .filter((e) => Math.abs(s.featureOf(e).point[2] - height) < 1e-9);
+          const far = (e) => top.find((o) => Math.hypot(...s.featureOf(o).point.map((x, k) => x - s.featureOf(e).point[k])) > 14);
+          const other = top.find((e) => e !== top[0] && e !== far(top[0]));
+          s.setMeasurements([{ a: top[0], b: far(top[0]) }, { a: other, b: far(other) }]);
           await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-          const made = s.measurements();
-          const [p, q] = made.map((m) => m.label);
+          const [p, q] = s.measurements().map((m) => m.label);
           const apart = p && q && (p[3] <= q[1] || q[3] <= p[1] || p[2] <= q[0] || q[2] <= p[0]);
           s.setMeasurements([]);
-          return { spans, lengths: made.map((m) => m.length), apart };`);
+          return { spans, lengths, apart };`);
         if (
           segment.spans.some((span) => Math.abs(span - Math.PI / 2) > 1e-5) ||
+          segment.lengths.length !== 1 ||
           segment.lengths.some((length) => Math.abs(length - 5) > 1e-5) ||
           !segment.apart
         )
-          return `a segment's round sides, twice: ${JSON.stringify(segment)}`;
+          return `a segment's round sides, given twice, and two labels in one place: ${JSON.stringify(segment)}`;
         // the ruler off, nothing selected: Esc takes the measurements too
         await pick(picks.lowTop);
         await pick(picks.highTop);
@@ -1526,8 +1596,11 @@ async function savedRuler(port, base) {
           const ball = end(ids.find((id) => id !== ring), 0);
           const inner = [0, 1].map((i) => end(ring, i))
             .find((e) => s.featureOf(e).shape.radius < 7);
-          s.setMeasurements([{ a: ball, b: inner }, { a: inner, b: ball }]);
-          return s.measurements().map((m) => m.length);`);
+          // one pair either way round is one measurement: each on its own
+          return [{ a: ball, b: inner }, { a: inner, b: ball }].flatMap((pair) => {
+            s.setMeasurements([pair]);
+            return s.measurements().map((m) => m.length);
+          });`);
         if (bore.length !== 2 || bore.some((d) => Math.abs(d - 2) > 1e-5))
           return `a sphere in a bore, either way round: ${bore}`;
         return thrown(tab);
@@ -1554,10 +1627,15 @@ async function measurementsTrait(port, base) {
         // what they read, once the scene settled
         const read = await tab.until(`const m = page.model.get("measurements");
         return m?.[0]?.length != null && m;`);
+        // each end given by a point at a corner: named a corner, as a click
+        // names it, and told back so
         if (
           !read ||
           read.length !== 1 ||
-          Math.abs(read[0].length - 0.02) > 1e-9
+          Math.abs(read[0].length - 0.02) > 1e-9 ||
+          [read[0].a, read[0].b].some(
+            (end) => end.kind !== "corner" || end.near,
+          )
         )
           return `the trait, drawn: ${JSON.stringify(read)}`;
         const drawn = await tab.evaluate(

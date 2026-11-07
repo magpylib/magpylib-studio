@@ -60,12 +60,19 @@ What the two picks are decides what is measured, with no mode to choose:
 Two features with a direction -- edges and faces -- that touch or cross are
 measured by their angle, the distance between them being none; parallel, by
 their distance; neither, by their distance, the angle in the label's tooltip.
-What has no size is a point: a dipole, a sensor at its position and each of its
-pixels at its middle, not the boxes they are drawn as (Alex, 2026-11-07). The
-pairs the other way round are the same. A corner and an edge are the distance
-from the corner to the edge; an edge or a face and a face that are neither
-parallel nor touching, the shortest distance between them, as drawn, and
-parallel, the distance between their planes.
+What has no size is a point: a dipole -- drawn at any size, `sizemode` absolute
+or a model of its own too, marked in Python with its position (`_mark_dipoles`)
+-- a sensor at its position and each of its pixels at its middle, not the boxes
+they are drawn as (Alex, 2026-11-07). The pairs the other way round are the
+same. A corner and an edge are the distance from the corner to the edge; an edge
+or a face and a face that are neither parallel nor touching, the shortest
+distance between them, as drawn, and parallel, the distance between their
+planes. Where such a distance ends in a face's plane but off the face -- a
+corner's foot past its edge, a parallel face's middle beside it -- a dashed line
+runs on from that end to the face's nearest point, as a drawing's extension line
+does, so the end is seen to be that face's (Alex, 2026-11-07). A pair measured
+already, either way round, or another whose line is the same, is not measured
+again.
 
 - **Hovering shows the pick first**: a dot on a corner, the edge drawn bright,
   or the face tinted, within `SNAP_PIXELS`. A corner beats an edge, an edge a
@@ -119,6 +126,12 @@ Both are worked out once a part, when the pointer first comes over it.
   two. One start alone stood still on the far side of a bore, a sphere across
   its axis read 4 mm for 2. What is neither is measured on its facets, the
   tooltip says so.
+- **A wire's curve** is a run of it that bends, corner to corner, or a loop with
+  none: a Circle's, an arc a Polyline draws finely. A circle where its points
+  are on one, to 1e-4 of the radius -- a cylinder's side of no height, part of
+  the way round where it is open, measured the same way -- else its segments,
+  which are the wire. Picked as an edge is, by its segment nearest the pointer
+  on the page, and drawn bright whole (Alex, 2026-11-07).
 - **It is the view's**, not the document's: no undo step, nothing in the script
   or the saved scene. The view's `measurements` trait holds them, and a page
   saved from the view carries that.
@@ -196,8 +209,11 @@ Each with its checks in the browser harness (§8).
 
 - `view.measurements` is built: each pair's ends and what it reads in the
   scene's view, a length in metres or an angle, told when one is made or taken
-  away and once the scene settles; assignable, and carried by a saved page.
-  Open: a value a variant, for a notebook to plot a gap per variant; and ends a
-  script can name -- an object, not a view's `id` and a feature's number.
+  away and once the scene settles; assignable, and carried by a saved page. Ends
+  a script names are built too: `view.measure`, each end an object and a point
+  in metres at the feature, which the view names as a click would -- nearest, a
+  corner before an edge before a face -- the first time the object is drawn, and
+  tells back (Alex, 2026-11-07). Open: a value a variant, for a notebook to plot
+  a gap per variant.
 - Folding the legend's gap into the ruler, once the ruler measures object to
   object as well.

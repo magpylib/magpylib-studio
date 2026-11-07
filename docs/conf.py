@@ -120,14 +120,14 @@ _PAGE = """\
 <iframe class="magpy-example" src="../_static/examples/{module}.html"
   title="{title}, in the 3D view" loading="lazy"></iframe>
 
-The view is the scene as a saved page: {holds}. To edit it and drag its sliders,
+{measured}The view is the scene as a saved page: {holds}. To edit it and drag its sliders,
 open it {where}
 
 ```python
 from magpylib_studio.examples import EXAMPLES
 from magpylib_studio.widget import SceneWidget
 
-SceneWidget(EXAMPLES["{key}"].scene, editable=True{lines})
+{opened}
 ```
 
 Written as a scene function, with what it imports, it reads:
@@ -238,6 +238,30 @@ def _code(module):
     return re.sub(r"\n{3,}", "\n\n\n", kept).strip()
 
 
+#: Said on the page of an example that opens measured (`Example.measure`).
+_MEASURED = """\
+It opens measured, as the ruler (M) would: `view.measure` names each end by an
+object and a point on the feature meant, in metres, and the saved page keeps
+what it measures. Drag the sliders in an editable view and the measurement
+follows.
+
+"""
+
+
+def _opened(example, key):
+    """The lines a page's notebook opens its example with: the view, and
+    what it measures, as the saved page above it does."""
+    lines = ", field_lines=True" if example.field_lines else ""
+    view = f'SceneWidget(EXAMPLES["{key}"].scene, editable=True{lines})'
+    if not example.measure:
+        return view
+    said = [f"view = {view}"]
+    said += [
+        f"view.measure({a!r}, {b!r})".replace("'", '"') for a, b in example.measure
+    ]
+    return "\n".join([*said, "view"])
+
+
 def _write_examples(_app=None):
     """One page per example, and their index, from `magpylib_studio.examples`:
     written at each build, never by hand, so they say what the examples say.
@@ -261,13 +285,16 @@ def _write_examples(_app=None):
             holds=_holds(example),
             where=where,
             key=key,
-            lines=", field_lines=True" if example.field_lines else "",
+            opened=_opened(example, key),
+            measured=_MEASURED if example.measure else "",
             code=_code(example.module),
             notebook=_NOTEBOOK.format(path=example.notebook)
             if example.notebook
             else "",
         )
         view = SceneWidget(example.scene.build(), field_lines=example.field_lines)
+        for pair in example.measure:
+            view.measure(*pair)
         _write(VIEWS_DIR / f"{example.module}.html", view.to_html(title=example.title))
         _write(EXAMPLES_DIR / f"{example.module}.md", page)
         sentence = example.summary

@@ -432,6 +432,8 @@ def _mesh_payload(trace):
         **({"arrows": True} if trace.get("arrows") else {}),
         # a sensor's axes or a dipole's arrow, sized by the view: `_mark_glyphs`
         **({"glyph": trace["glyph"]} if "glyph" in trace else {}),
+        # a dipole's arrow the view does not size: where it is, `_mark_dipoles`
+        **({"origins": trace["origins"]} if "origins" in trace else {}),
     }
 
 
@@ -705,7 +707,8 @@ def _capture(
         scene = _reread(scene, fields)
     style = {key: value for key, value in kwargs.items() if key.startswith("style")}
     scene = _mark_pixels(scene, objects, fields or read, style)
-    return _mark_glyphs(scene, objects, drawn_at, scaled)
+    scene = _mark_glyphs(scene, objects, drawn_at, scaled)
+    return _mark_dipoles(scene, objects)
 
 
 def _mark_glyphs(scene, objects=None, drawn_at=None, scaled=None):
@@ -778,6 +781,54 @@ def _mark_glyphs(scene, objects=None, drawn_at=None, scaled=None):
             traces.extend(parts)
         if glyphs:
             traces = _on_axes(traces, glyphs)
+        frames.append(dataclasses.replace(frame, traces=tuple(traces)))
+    return dataclasses.replace(scene, frames=tuple(frames))
+
+
+def _mark_dipoles(scene, objects=None):
+    """`scene`, with each dipole's mesh that the view does not size --
+    ``sizemode="absolute"``, a model of its own, an arrow `_mark_glyphs`
+    left as drawn -- marked ``origins``: where the dipole is at each copy
+    drawn, flat, in the drawing's unit. A dipole has no size, whatever its
+    arrow is drawn at: the ruler measures from its position alone, as from
+    a glyph's anchor, not from the arrow's corners and faces. `objects` are
+    those the scene was drawn from; without them, the ones magpylib handed
+    its backend."""
+    from magpylib._src.display.traces_utility import path_frames_to_indices
+    from magpylib._src.style import get_style
+
+    if objects is None:
+        objects = [o for panel in scene.panels for o in panel.objects]
+    known = {
+        id(each): each
+        for obj in _given(objects)
+        for each in (obj, *getattr(obj, "children_all", ()))
+        if isinstance(each, magpy.misc.Dipole)
+    }
+    per_metre = _drawn_per_metre(scene) if known else None
+    if not per_metre:
+        return scene
+    steps = scene.animation.path_indices if scene.is_animation else ()
+    frames = []
+    for n, frame in enumerate(scene.frames):
+        traces = []
+        for trace in frame.traces:
+            obj = known.get(trace.get("object_id"))
+            if (
+                obj is not None
+                and trace.get("type") == "mesh3d"
+                and "glyph" not in trace
+            ):
+                positions = np.atleast_2d(np.asarray(obj.position, dtype=float))
+                if n < len(steps):
+                    at = [steps[n]]
+                else:
+                    frames_drawn = get_style(obj, magpy.defaults).path.frames
+                    at = path_frames_to_indices(frames_drawn, len(positions))
+                at = np.minimum(np.asarray(at, dtype=int), len(positions) - 1)
+                anchors = positions[at] * per_metre
+                trace = {**trace, "origins": np.round(anchors, 12).ravel().tolist()}
+            traces.append(trace)
         frames.append(dataclasses.replace(frame, traces=tuple(traces)))
     return dataclasses.replace(scene, frames=tuple(frames))
 
@@ -2403,6 +2454,7 @@ def run_payload(scene):
     scene = _mark_pixels(scene)
     if not any("glyph" in trace for frame in scene.frames for trace in frame.traces):
         scene = _mark_glyphs(scene)
+    scene = _mark_dipoles(scene)
     animated = len(scene.frames) > 1
     played = played_payload(scene) if animated else None
     payload = played or view_payload(scene, index=0)

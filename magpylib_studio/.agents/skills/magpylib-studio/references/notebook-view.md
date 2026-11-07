@@ -59,8 +59,11 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   when one is made or taken away, and once the scene settles after an edit. `[]`
   takes them away; a list read from the view puts it back. A page from
   `view.write_html` carries them. An end names a feature by the view's object id
-  and a number, so a script cannot write one by hand: measure in the view, then
-  save.
+  and a number; a script names one with
+  `view.measure((obj, point), (obj, point))`, each point in metres at the
+  feature meant -- the view takes that object's feature nearest it, a corner
+  before an edge before a face, a round surface or a curve -- and a page saved
+  after opens measured.
 
 ## A scene, its variants and a run
 

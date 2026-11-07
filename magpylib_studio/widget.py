@@ -47,6 +47,7 @@ import gzip
 import hashlib
 import html
 import json
+import math
 import os
 import pathlib
 import string
@@ -71,7 +72,24 @@ EXPORT_NAME = "magpylib-scene.html"
 #: The ways `SceneWidget.axes` says the scene's scale.
 AXES = ("cube", "box", "none")
 #: What an end of a measurement is, as the view's ruler names it.
-_FEATURES = ("corner", "edge", "face", "surface")
+_FEATURES = ("corner", "edge", "face", "surface", "curve")
+
+
+def _named_end(end):
+    """Whether `end` names a feature as a view does -- its kind, part and
+    index -- or as `SceneWidget.measure` does, by a point in metres near it,
+    which the view turns into one."""
+    if not isinstance(end, dict) or end.get("objectId") is None:
+        return False
+    near = end.get("near")
+    if "kind" not in end and isinstance(near, list | tuple) and len(near) == 3:
+        return all(isinstance(x, int | float) and math.isfinite(x) for x in near)
+    return (
+        end.get("kind") in _FEATURES
+        and isinstance(end.get("part"), int)
+        and isinstance(end.get("index"), int)
+    )
+
 
 #: A saved view: the widget itself, run against a model this page holds. The
 #: bundle and the scene travel gzipped and in base64 -- a third of the size,
@@ -800,7 +818,8 @@ class SceneWidget(anywidget.AnyWidget):
     #:
     #: Assignable: ``[]`` takes them all away, and a list read from this
     #: view, or one showing the same objects, puts those back; what they read
-    #: comes back from the view.
+    #: comes back from the view. `measure` adds one from a script, its ends
+    #: named by points at their features.
     measurements = traitlets.List(traitlets.Dict()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
@@ -1201,6 +1220,43 @@ class SceneWidget(anywidget.AnyWidget):
         every edit."""
         return self._editing("to_script").to_script()
 
+    def measure(self, a, b):
+        """Measure between two objects, as two clicks with the ruler do, and
+        return self: a script's way to a measurement a saved page opens with.
+
+        Each end is ``(obj, point)``: an object in the view, or its id as
+        `selected` names it, and a point in metres at the feature meant. The
+        view takes that object's feature nearest the point -- a corner the
+        point is at, else an edge it is on, else a face, a round surface or a
+        wire's curve -- so ``(magnet, (0, 0, 0.005))`` is the face of a 10 mm
+        cube at the origin that the point is on, its top. Added to
+        `measurements`, which then names the feature the view took; a pair
+        measured already is not measured again.
+        """
+        objects = self.objects
+        ends = []
+        for end in (a, b):
+            try:
+                obj, point = end
+                near = [float(x) for x in np.asarray(point, dtype=float).reshape(3)]
+                if not all(math.isfinite(x) for x in near):
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"an end is (object, point in metres), not {end!r}"
+                ) from None
+            if isinstance(obj, str) and obj in objects:
+                key = obj
+            else:
+                key = next((k for k, o in objects.items() if o is obj), None)
+            if key is None:
+                raise ValueError(f"{obj!r} is not an object in this view")
+            ends.append({"objectId": key, "near": near})
+        given = [(each["a"], each["b"]) for each in self.measurements]
+        if tuple(ends) not in given and tuple(ends[::-1]) not in given:
+            self.measurements = [*self.measurements, {"a": ends[0], "b": ends[1]}]
+        return self
+
     def set(self, object_id, *, position=None, orientation=None, **params):
         """Edit an object from the notebook, as a drag in the view does.
 
@@ -1441,14 +1497,7 @@ class SceneWidget(anywidget.AnyWidget):
         kept = []
         for each in proposal["value"]:
             ends = [each.get(key) if isinstance(each, dict) else None for key in "ab"]
-            if not all(
-                isinstance(end, dict)
-                and end.get("kind") in _FEATURES
-                and isinstance(end.get("part"), int)
-                and isinstance(end.get("index"), int)
-                and end.get("objectId") is not None
-                for end in ends
-            ):
+            if not all(_named_end(end) for end in ends):
                 raise traitlets.TraitError(
                     "a measurement is a dict of two ends, 'a' and 'b', each "
                     "the feature a view names, as `measurements` reads them: "
