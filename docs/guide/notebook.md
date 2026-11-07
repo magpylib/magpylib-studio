@@ -108,7 +108,10 @@ the corner picked, then the measurements, then the ruler; with it off, once
 nothing is selected, the measurements. Split into panes, a measurement made in
 any is in all of them, each at its own variant: measure a gap once, read it in
 every variant. It is the view's, not the scene's: nothing to undo, and the PNG
-has the measurements, a saved page not.
+has the measurements. `view.measurements` lists them, each pair's ends and what
+it reads, a length in metres or an angle in degrees, for a cell to read; `[]`
+takes them away, and a list read from the view puts it back. A page saved from
+the view carries them.
 
 **Full screen** gives the view the screen, legend and controls with it. The
 **camera** saves the view as a PNG, as it is on screen and without the legend.

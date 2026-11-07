@@ -2809,7 +2809,8 @@ side (#147), the same gap read in each variant is what a split view is for.
 - **Mirrored into every pane** of a split view, each at its own variant's value;
   a pane without the feature draws none.
 - **Drawn on the canvas**, labels as textures, so the PNG has them; a saved page
-  does not carry them.
+  carries them since (Alex, 2026-11-07), and `view.measurements` says them to a
+  notebook.
 - **Round surfaces as their shapes**: a sphere's and a cylinder's side, found
   from the facets drawn, whose vertices are on the true surface, are measured
   exactly; any other curved surface on its drawn facets, and the label's tooltip
@@ -2829,4 +2830,5 @@ side (#147), the same gap read in each variant is what a split view is for.
 
 - A feature is a vertex, edge or face of what is drawn: a variant that changes
   how an object is drawn -- another number of facets -- may move or lose it.
-- Read by eye only, for now: no `view.measurements` for a notebook to plot.
+- `view.measurements` reads the scene's view alone, not a value a variant; its
+  ends are a view's object ids and a feature's number, not names a script knows.

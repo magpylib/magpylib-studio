@@ -782,9 +782,10 @@ function render({ model, el }) {
     pressed(rulerButton, event.detail.on);
     mirrorRuler(event.detail.on, api);
   });
-  view.addEventListener("measurechange", (event) =>
-    mirrorMeasurements(event.detail.list, api),
-  );
+  view.addEventListener("measurechange", (event) => {
+    mirrorMeasurements(event.detail.list, api);
+    tellMeasurements();
+  });
   // Split into panes, one ruler and one list of measurements for them all,
   // each pane's at its own variant (#125): a view that changed them, by a
   // key, a click or a label's x, has them handed on to the others.
@@ -796,6 +797,55 @@ function render({ model, el }) {
     for (const each of rulerViews()) {
       if (each !== from) each.setMeasurements(list);
     }
+  }
+  // The measurements as the `measurements` trait says them, for a notebook
+  // to read and a saved page to carry: each pair's ends, and what it reads in
+  // the scene's view -- a length in metres, or an angle in degrees. Told
+  // when one is made or taken away, and once the scene settles after it
+  // moved (`MEASURE_SETTLE`): not at every step of a drag.
+  const MEASURE_SETTLE = 250;
+  let measureSoon = null;
+  function tellMeasurements() {
+    clearTimeout(measureSoon);
+    measureSoon = null;
+    if (!api) return;
+    const now = api.measurements().map((m) => ({
+      a: m.a,
+      b: m.b,
+      length: m.angle == null ? m.metres : null,
+      angle: m.angle,
+    }));
+    const told = model.get("measurements") || [];
+    if (JSON.stringify(told) === JSON.stringify(now)) return;
+    model.set("measurements", now);
+    model.save_changes();
+  }
+  function tellMeasurementsSoon() {
+    clearTimeout(measureSoon);
+    if (api?.rulerPairs().length || (model.get("measurements") || []).length) {
+      measureSoon = setTimeout(tellMeasurements, MEASURE_SETTLE);
+    }
+  }
+  const sameEnd = (p, q) =>
+    ["kind", "objectId", "part", "index"].every((key) => p?.[key] === q?.[key]);
+  /** The measurements the trait names, in every view, where they are not
+   *  the ones there: assigned from python, or a saved page's. */
+  function showMeasurements() {
+    if (!api) return;
+    const pairs = (model.get("measurements") || []).map(({ a, b }) => ({
+      a,
+      b,
+    }));
+    const have = api.rulerPairs();
+    const same =
+      have.length === pairs.length &&
+      have.every(
+        (m, i) => sameEnd(m.a, pairs[i].a) && sameEnd(m.b, pairs[i].b),
+      );
+    if (same) return;
+    api.setMeasurements(pairs);
+    mirrorMeasurements(pairs, api);
+    tellMeasurementsSoon(); // what they read, once drawn
   }
   tools.append(
     group(fitButton, projectionButton, rulerButton),
@@ -1952,7 +2002,10 @@ function render({ model, el }) {
       return made;
     },
     onRuler: (on, from) => mirrorRuler(on, from),
-    onMeasure: (list, from) => mirrorMeasurements(list, from),
+    onMeasure: (list, from) => {
+      mirrorMeasurements(list, from);
+      tellMeasurements();
+    },
     sceneOf: (name, frame) =>
       call("variant_scene", frame == null ? { name } : { name, frame }, {
         quiet: true,
@@ -3004,6 +3057,7 @@ function render({ model, el }) {
     "variants",
     "panes",
     "selected_variants",
+    "measurements",
   ]) {
     model.on(`change:${name}`, () => {
       if (!changed.size) queueMicrotask(catchUp);
@@ -3028,6 +3082,7 @@ function render({ model, el }) {
     }
     // which variant the values are in, after any edit of them
     if (now.has("panes")) showPanes();
+    if (now.has("measurements")) showMeasurements();
     if (now.has("selected_variants")) {
       chosen = model.get("selected_variants") || [];
       dressSelected();
@@ -3147,7 +3202,7 @@ function render({ model, el }) {
         api.setRuler(keptRuler.on);
         pressed(rulerButton, keptRuler.on);
         keptRuler = null;
-      }
+      } else showMeasurements(); // a saved page's, or set from python
     }
     const payload = model.get("payload") || {};
     if (!payload.meshes) return;
@@ -3170,6 +3225,7 @@ function render({ model, el }) {
     });
     if (!framed) showProjection("perspective");
     api.render(view, payload, { keepCamera: framed });
+    tellMeasurementsSoon(); // what they read in the scene drawn now
     // After the render, which hangs the canvas in this view.
     keepCorner();
     // A saved view opens where it was looking when it was saved, and one

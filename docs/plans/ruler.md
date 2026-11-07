@@ -10,7 +10,8 @@ Alex that day, on the issue's open questions:
 - with the view split into panes, a measurement is mirrored into every pane, at
   that pane's variant;
 - the PNG keeps the measurements; a saved page does not, and has a ruler of its
-  own;
+  own; since, a saved page carries them, and `view.measurements` says them to a
+  notebook (Alex, 2026-11-07, §10);
 - the legend's gap between two selected objects stays beside the ruler, for now;
 - curved surfaces are measured on their drawn facets, said in the label's
   tooltip; exact values from python come later, if at all. Since, a sphere's and
@@ -118,8 +119,9 @@ Both are worked out once a part, when the pointer first comes over it.
   two. One start alone stood still on the far side of a bore, a sphere across
   its axis read 4 mm for 2. What is neither is measured on its facets, the
   tooltip says so.
-- **It is the view's**, not the document's: no undo step, nothing in the script,
-  the saved scene or a saved page.
+- **It is the view's**, not the document's: no undo step, nothing in the script
+  or the saved scene. The view's `measurements` trait holds them, and a page
+  saved from the view carries that.
 
 Snapping keeps whose corner each target is, to anchor a corner pick: an owner
 and an index beside each world position, in the same cells.
@@ -192,8 +194,10 @@ Each with its checks in the browser harness (§8).
 
 ## 10. Open
 
-- `view.measurements`, read only, a value a variant, as `panes` and
-  `selected_variants` are, for a notebook to plot a gap per variant. Later; the
-  features of §3 make it possible.
+- `view.measurements` is built: each pair's ends and what it reads in the
+  scene's view, a length in metres or an angle, told when one is made or taken
+  away and once the scene settles; assignable, and carried by a saved page.
+  Open: a value a variant, for a notebook to plot a gap per variant; and ends a
+  script can name -- an object, not a view's `id` and a feature's number.
 - Folding the legend's gap into the ruler, once the ruler measures object to
   object as well.

@@ -2437,6 +2437,7 @@ def saved_state(
     theme="auto",
     height=DEFAULT_HEIGHT,
     camera=None,
+    measurements=(),
 ):
     """What a saved view's model holds: the widget's traits, as a page or the
     studio's panel reads them. One layout, for `SceneWidget._saved` and for
@@ -2457,6 +2458,8 @@ def saved_state(
         "duration": duration,
         "repeat": repeat,
         "camera": camera,
+        # the ruler's, drawn as the page opens
+        "measurements": [dict(each) for each in measurements],
         # no python behind the view, so nothing to ask for an export
         "standalone": True,
     }

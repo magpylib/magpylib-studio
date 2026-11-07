@@ -1538,6 +1538,64 @@ async function savedRuler(port, base) {
   );
 }
 
+/** The ruler's measurements as a notebook holds them (#125): set from python
+ *  before the view is drawn, they are drawn, and the trait says what they
+ *  read, in metres; taken away in the view, the trait is empty; set again, the
+ *  view has them back. And a page saved with them opens with them. */
+async function measurementsTrait(port, base) {
+  await check(
+    "the measurements trait goes both ways, and a page keeps it",
+    async () => {
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/pages/measure-trait.html`);
+        if (!(await tab.until("return window.ready", 20_000)))
+          return "never ready";
+        // what they read, once the scene settled
+        const read = await tab.until(`const m = page.model.get("measurements");
+        return m?.[0]?.length != null && m;`);
+        if (
+          !read ||
+          read.length !== 1 ||
+          Math.abs(read[0].length - 0.02) > 1e-9
+        )
+          return `the trait, drawn: ${JSON.stringify(read)}`;
+        const drawn = await tab.evaluate(
+          `return window.scene3d.measurements().map((m) => m.length)`,
+        );
+        if (drawn.length !== 1 || Math.abs(drawn[0] - 20) > 1e-6)
+          return `in the view, set from python: ${drawn}`;
+        // taken away in the view, by Esc with the ruler on
+        const gone = await tab.evaluate(`const s = window.scene3d;
+        s.setRuler(true);
+        s.viewKey(new KeyboardEvent("keydown", { key: "Escape" }));
+        return page.model.get("measurements");`);
+        if (gone.length)
+          return `taken away in the view, the trait: ${JSON.stringify(gone)}`;
+        // set as a cell sets it: the view has them back
+        const back =
+          await tab.evaluate(`page.model.set("measurements", ${JSON.stringify(read)});
+        await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        return window.scene3d.measurements().map((m) => m.length);`);
+        if (back.length !== 1 || Math.abs(back[0] - 20) > 1e-6)
+          return `set again, in the view: ${back}`;
+        // a page saved with them: drawn as it opens
+        await tab.navigate(`${base}/out/measured.html`);
+        const saved = await tab.until(
+          `const m = window.scene3d?.measurements();
+        return m?.length && m[0].label && m.map((each) => each.length);`,
+          20_000,
+        );
+        if (!saved || saved.length !== 1 || Math.abs(saved[0] - 20) > 1e-6)
+          return `a saved page's: ${JSON.stringify(saved)}`;
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** Variants side by side (#127) on a saved page: a chip lifted out of the
  *  foot and dropped on the right half of the view is a pane of its own there,
  *  drawn from the scenes the page carries, beside the scene's; closed, the
@@ -5419,6 +5477,7 @@ try {
   await collectionTrace(browser.port, base);
   await savedVariants(browser.port, base);
   await savedRuler(browser.port, base);
+  await measurementsTrait(browser.port, base);
   await rulerInPanes(browser.port, base);
   await resizedDrawsAtOnce(browser.port, base);
   await savedPanes(browser.port, base);

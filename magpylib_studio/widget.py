@@ -70,6 +70,8 @@ EXPORT_NAME = "magpylib-scene.html"
 
 #: The ways `SceneWidget.axes` says the scene's scale.
 AXES = ("cube", "box", "none")
+#: What an end of a measurement is, as the view's ruler names it.
+_FEATURES = ("corner", "edge", "face", "surface")
 
 #: A saved view: the widget itself, run against a model this page holds. The
 #: bundle and the scene travel gzipped and in base64 -- a third of the size,
@@ -787,6 +789,19 @@ class SceneWidget(anywidget.AnyWidget):
     #: those; ``[]`` marks none. A name the scene has no variant of is
     #: refused.
     selected_variants = traitlets.List(traitlets.Unicode()).tag(sync=True)
+    #: The ruler's measurements (#125), in the order they were made: each a
+    #: dict of its two ends, ``"a"`` and ``"b"`` -- which feature of which
+    #: drawn object, as the view names it -- and what it reads in the scene's
+    #: view: ``"length"`` in metres, or ``"angle"`` in degrees where two
+    #: edges or faces meet, the other None. A cell reads it once a
+    #: measurement is made or taken away, and once the scene settles after
+    #: an edit moved one. A page saved from the view carries them
+    #: (`to_html`), drawn as it opens.
+    #:
+    #: Assignable: ``[]`` takes them all away, and a list read from this
+    #: view, or one showing the same objects, puts those back; what they read
+    #: comes back from the view.
+    measurements = traitlets.List(traitlets.Dict()).tag(sync=True)
     #: Prototype (#45): lines of the field through the pixels of each sensor
     #: that reads it, drawn while a drag moves the magnets. An editable view's.
     #: Its switch in the view is the eye on each sensor's field lines, a row
@@ -1419,6 +1434,36 @@ class SceneWidget(anywidget.AnyWidget):
             )
         return names
 
+    @traitlets.validate("measurements")
+    def _measurements_named(self, proposal):
+        # each its two ends, as the view names a feature: a pair without
+        # them would draw nothing, and say so only in the view
+        kept = []
+        for each in proposal["value"]:
+            ends = [each.get(key) if isinstance(each, dict) else None for key in "ab"]
+            if not all(
+                isinstance(end, dict)
+                and end.get("kind") in _FEATURES
+                and isinstance(end.get("part"), int)
+                and isinstance(end.get("index"), int)
+                and end.get("objectId") is not None
+                for end in ends
+            ):
+                raise traitlets.TraitError(
+                    "a measurement is a dict of two ends, 'a' and 'b', each "
+                    "the feature a view names, as `measurements` reads them: "
+                    f"not {each!r}"
+                )
+            kept.append(
+                {
+                    "a": dict(ends[0]),
+                    "b": dict(ends[1]),
+                    "length": each.get("length"),
+                    "angle": each.get("angle"),
+                }
+            )
+        return kept
+
     @traitlets.validate("axes")
     def _axes_named(self, proposal):
         # One of AXES, whichever way it was asked for: the view, a saved page
@@ -1699,6 +1744,7 @@ class SceneWidget(anywidget.AnyWidget):
             theme=self.theme,
             height=self.height,
             camera=self._camera,
+            measurements=self.measurements,
         )
         if not run:
             state["frames"] = 1  # the step drawn, still

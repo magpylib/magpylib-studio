@@ -9096,9 +9096,10 @@ void main() {
   }
 
   /** The measurements made: each end's feature, where the two nearest points
-   *  are, in the world, and the `length` between them, or the faces'
-   *  `angle`; and where its label is on the page. For a host's checks and,
-   *  later, a notebook (plans/ruler.md §10). */
+   *  are, in the world, and the `length` between them, in the scene's unit
+   *  and in `metres`, or the faces' `angle`; and where its label is on the
+   *  page. For a host to tell a notebook (`view.measurements`), and its
+   *  checks. */
   function measurements() {
     return ruler.list.map((measured) => {
       const now = measuredNow(measured);
@@ -9108,6 +9109,11 @@ void main() {
         from: now?.from.toArray() ?? null,
         to: now?.to.toArray() ?? null,
         length: now?.length ?? null,
+        // the length in metres, where the scene's unit is one of a length
+        metres:
+          now?.length != null && METRES[unit]
+            ? now.length * METRES[unit]
+            : null,
         angle: now?.angle ?? null,
         tilt: now?.tilt ?? null, // a distance's: the angle the two are at
         label: measured.label?.box ? [...measured.label.box] : null,

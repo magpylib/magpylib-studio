@@ -679,6 +679,25 @@ def main(out):
         ),
     ]
     SceneWidget(*bore).write_html(out / "bore.html")
+    # two cubes 20 mm apart, a corner of one measured to the same corner of
+    # the other, set from python: the model a page plays a notebook with,
+    # and a page saved with it (#125)
+    pair = [
+        magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01,) * 3),
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(0.02, 0, 0)
+        ),
+    ]
+    measured = SceneWidget(*pair)
+    corner = lambda obj: {  # noqa: E731
+        "kind": "corner",
+        "objectId": str(id(obj)),
+        "part": 0,
+        "index": 0,
+    }
+    measured.measurements = [{"a": corner(pair[0]), "b": corner(pair[1])}]
+    (out / "measured.json").write_text(json.dumps(measured._saved()["state"]))
+    measured.write_html(out / "measured.html")
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.02, 0.02, 0.02))
     soft.H_ext = (0, 0, 0.1)  # upright, its head just past the square's top
     SceneWidget(soft).write_html(out / "applied.html")

@@ -22,10 +22,12 @@ as they move, holds several at once, each taken away by its label's ×, and stay
 when the ruler is turned off, so an object can be selected and dragged while
 they show; Esc takes back the corner picked, then the measurements, the ruler on
 or, once nothing is selected, off. It works wherever the view does, a saved page
-and the VS Code panel included, edits nothing, and the PNG keeps the
-measurements ([#125](https://github.com/magpylib/magpylib-studio/issues/125)).
-Split into panes, a measurement made in any is in every pane, at that pane's
-variant; labels in one place stand one above the other.
+and the VS Code panel included, edits nothing, and the PNG and a page saved from
+it keep the measurements; `view.measurements` lists them for a notebook, a
+length in metres or an angle each
+([#125](https://github.com/magpylib/magpylib-studio/issues/125)). Split into
+panes, a measurement made in any is in every pane, at that pane's variant;
+labels in one place stand one above the other.
 
 </details>
 

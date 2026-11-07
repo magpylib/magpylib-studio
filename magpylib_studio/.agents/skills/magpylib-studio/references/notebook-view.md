@@ -53,6 +53,14 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   click do not. Assignable, names checked. `session.variant_session(name)` is
   the copy of the scene at that variant, the one its pane is drawn from: its
   `get_field` gives a curve per selected variant.
+- `view.measurements` lists the ruler's measurements (M, or the ruler button):
+  each a dict of its two ends, `"a"` and `"b"`, and what it reads in the scene's
+  view, `"length"` in metres or `"angle"` in degrees, the other None. It updates
+  when one is made or taken away, and once the scene settles after an edit. `[]`
+  takes them away; a list read from the view puts it back. A page from
+  `view.write_html` carries them. An end names a feature by the view's object id
+  and a number, so a script cannot write one by hand: measure in the view, then
+  save.
 
 ## A scene, its variants and a run
 
