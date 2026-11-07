@@ -2907,16 +2907,19 @@ field over the run and not say where the view was, nor move it.
   ([0022](#0022-what-the-widget-is-and-is-not)).
 - **Counted in the path's steps,** the rows of a field read along it, not in
   frames: a run magpylib kept fewer frames of (`animation_maxframes`) carries
-  which step each frame is, and a step set between two kept ones shows the
-  nearest.
-- **Said when the run stops on one**: a pause, its end, a scrub -- at most every
-  100 ms while the thumb moves, its last place always -- and never at each frame
+  which step each frame is, a step set between two kept ones is the nearest
+  kept, and the transport's counter counts the same steps.
+- **Said when the run stops on one**: a pause, its end, a drag, the view let go
+  of, a scrub -- at most every 100 ms while the thumb moves, its last place
+  always, and a frame still on its way where it lands -- and never at each frame
   played, so a plot following it is not drawn again sixty times a second.
-- **Set from code, said back once**, as `revision` is: marimo re-runs the cells
-  that read a widget when the view says it changed, not when python does.
+- **Set from code, said back once**, in the message that says `revision` back
+  when an edit set both: marimo re-runs the cells that read a widget when the
+  view says it changed, not when python does. While the run plays the trait
+  holds where it started, so setting that same step does nothing.
 - **A new scene opens where its step says**: python sets it with the scene, a
-  capture's first step, a session's last, and a step set before the view is
-  drawn is where it opens.
+  capture's first step, a session's last; a step given to the constructor, or
+  set before the view is drawn, is where it opens, and a saved page opens on it.
 
 ### Rejected
 

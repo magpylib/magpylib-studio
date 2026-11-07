@@ -3012,7 +3012,8 @@ async function staleFrame(port, base) {
 
 /** The step a notebook reads: a scrub over twenty steps tells a few, ending
  *  on the last; a step set from python moves the run there and is said back
- *  once, as marimo needs; a pause tells the step it stopped on. */
+ *  once, as marimo needs; a pause tells the step it stopped on -- in a served
+ *  run, where the frame on its way lands, counted in the path's steps. */
 async function stepTrait(port, base) {
   await check(
     "the step goes both ways, and a scrub tells only a few",
@@ -3022,7 +3023,8 @@ async function stepTrait(port, base) {
         await tab.navigate(`${base}/pages/step-trait.html`);
         const result = await tab.until("return window.result", 15_000);
         if (!result) return "never finished";
-        const { scrubbed, fromPython, toldAfterPython, paused } = result;
+        const { scrubbed, fromPython, toldAfterPython, paused, landed } =
+          result;
         if (scrubbed.at(-1) !== 20 || scrubbed.length > 5)
           return `scrubbed to 20, told ${JSON.stringify(scrubbed)}`;
         if (fromPython.counter !== "8 / 30" || fromPython.thumb !== "7")
@@ -3032,6 +3034,13 @@ async function stepTrait(port, base) {
           return "a step set from python was not said back, once";
         if (`${paused.step + 1} / 30` !== paused.counter || paused.step === 7)
           return `paused, told ${JSON.stringify(paused)}`;
+        // served, paused with a frame on its way, every other step kept
+        if (
+          `${landed.step + 1} / ${2 * 29 + 1}` !== landed.counter ||
+          landed.step % 2 ||
+          !landed.step
+        )
+          return `paused in flight, told ${JSON.stringify(landed)}`;
         return thrown(tab);
       } finally {
         await tab.close();

@@ -11,6 +11,7 @@
   </head>
   <body style="margin: 12px">
     <div id="widget"></div>
+    <div id="served"></div>
     <script type="module">
       import { widget, wait } from "./host.mjs";
 
@@ -63,7 +64,57 @@
       await wait(50);
       const paused = { step: values.step, counter: counter() };
 
-      window.result = { scrubbed, fromPython, toldAfterPython, paused };
+      // A run served a frame at a time, 300 ms each, whose steps are every
+      // other step of its path (`path_indices`): paused with a frame on its
+      // way, the step told is where that frame lands, counted in path steps.
+      const morph = await (await fetch("/out/served.json")).json();
+      const kept = morph.state.payload;
+      const served = structuredClone(morph.state);
+      served.payload = {
+        ...kept,
+        path_indices: Array.from({ length: served.frames }, (_, i) => 2 * i),
+      };
+      const heard = {};
+      const servedTold = [];
+      const second = {
+        get: (key) => served[key],
+        set(key, value) {
+          served[key] = value;
+          for (const listener of heard[`change:${key}`] || []) listener(value);
+        },
+        save_changes() {
+          if (servedTold.at(-1) !== served.step) servedTold.push(served.step);
+        },
+        on: (event, listener) => (heard[event] ||= []).push(listener),
+        off() {},
+        send(message) {
+          if (message.kind !== "frame") return;
+          const at = Math.min(message.index, morph.run.length - 1);
+          setTimeout(() => {
+            for (const listener of heard["msg:custom"] || []) {
+              listener({
+                kind: "frame",
+                ...morph.run[at],
+                runId: message.runId,
+              });
+            }
+          }, 300);
+        },
+      };
+      const box = document.getElementById("served");
+      widget.render({ model: second, el: box });
+      await wait(1500);
+      box.querySelector(".magpy-scene-transport button").click();
+      await wait(1000);
+      box.querySelector(".magpy-scene-transport button").click(); // in flight
+      await wait(800); // landed
+      const landed = {
+        step: served.step,
+        counter: box.querySelector(".magpy-scene-counter").textContent,
+        told: servedTold,
+      };
+
+      window.result = { scrubbed, fromPython, toldAfterPython, paused, landed };
     </script>
   </body>
 </html>
