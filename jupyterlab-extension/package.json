@@ -10,7 +10,8 @@
     "lib/**/*.js"
   ],
   "scripts": {
-    "build": "tsc && jupyter labextension build ."
+    "build": "tsc && jupyter labextension build . && node stamp.mjs",
+    "check": "node harness/check-lab.mjs"
   },
   "dependencies": {
     "@jupyter-widgets/jupyterlab-manager": "^5.0.16",

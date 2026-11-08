@@ -1441,9 +1441,30 @@ class SceneWidget(anywidget.AnyWidget):
     def save(self, file):
         """Write an editable view's scene as a ``.magpy.json`` document, as
         the VS Code studio saves one -- and opens."""
-        doc = self._editing("save").to_dict()
-        text = json.dumps(doc, indent=2) + "\n"
-        pathlib.Path(file).write_text(text, encoding="utf-8")
+        pathlib.Path(file).write_text(self.document, encoding="utf-8")
+
+    @property
+    def document(self):
+        """An editable view's scene as the text of a ``.magpy.json``
+        document: what `save` writes. A host that keeps the file itself -- the
+        JupyterLab scene tab -- reads it after each settled edit, which
+        `revision` counts."""
+        doc = self._editing("document").to_dict()
+        return json.dumps(doc, indent=2) + "\n"
+
+    def take_document(self, text):
+        """Put the scene of a ``.magpy.json`` document's `text` in the view,
+        as one step that `undo` takes back: the file reverted, or changed on
+        disk. Returns whether the scene changed. A document this package
+        cannot read -- not a scene, or written by a newer one -- is refused,
+        and the scene stays as it was."""
+        session = self._editing("take_document")
+        if text == self.document:
+            return False
+        result = session.replace_scene(json.loads(text), label="changed on disk")
+        if not result.get("ok"):
+            raise ValueError(f"take_document: {result.get('error')}")
+        return self._show({"by": "replace"})
 
     @traitlets.observe("variables")
     def _variables_assigned(self, change):

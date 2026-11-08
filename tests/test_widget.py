@@ -1734,6 +1734,33 @@ def test_a_scene_is_edited_from_its_script_or_its_file(tmp_path):
     assert json.loads(saved.read_text(encoding="utf-8")) == studio._session.to_dict()
 
 
+def test_a_host_keeps_the_file_through_the_document(tmp_path):
+    """The JupyterLab tab's loop: an edit is read back as the file's text, and
+    the file's text taken in -- a revert -- is one step to undo; the same text
+    is no step, and one this package cannot read leaves the scene as it was."""
+    studio = _studio()
+    saved = tmp_path / "scene.magpy.json"
+    studio.save(saved)
+    assert saved.read_text(encoding="utf-8") == studio.document
+    magnet = next(key for key in studio.objects if key not in ("ring", "probe"))
+    studio.set(magnet, position=(0.05, 0, 0))
+    edited = studio.document
+    assert edited != saved.read_text(encoding="utf-8")
+
+    revision = studio.revision
+    assert studio.take_document(saved.read_text(encoding="utf-8"))
+    assert studio.revision == revision + 1
+    assert np.ravel(studio.objects[magnet].position) != pytest.approx([0.05, 0, 0])
+    assert studio._session.get_history()["undo"][-1] == "changed on disk"
+    assert studio.undo() and studio.document == edited
+    assert not studio.take_document(edited)
+
+    newer = json.loads(edited) | {"version": 99}
+    with pytest.raises(ValueError, match="newer"):
+        studio.take_document(json.dumps(newer))
+    assert studio.document == edited
+
+
 def test_a_scene_written_in_code_is_edited_as_it_is():
     """Its own session, not a copy: what a drag does is in the scene after."""
     from magpylib_studio import name, scene

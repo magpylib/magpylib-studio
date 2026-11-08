@@ -1,0 +1,49 @@
+{
+  "name": "magpylib-studio-jupyterlab",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Prototype: open a .magpy.json scene in JupyterLab as a Magpylib Studio tab.",
+  "license": "BSD-2-Clause",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*.js"
+  ],
+  "scripts": {
+    "build": "tsc && jupyter labextension build . && node stamp.mjs",
+    "check": "node harness/check-lab.mjs"
+  },
+  "dependencies": {
+    "@jupyter-widgets/jupyterlab-manager": "^5.0.16",
+    "@jupyterlab/application": "^4.4.0",
+    "@jupyterlab/apputils": "^4.4.0",
+    "@jupyterlab/coreutils": "^6.4.0",
+    "@jupyterlab/docregistry": "^4.4.0",
+    "@jupyterlab/outputarea": "^4.4.0",
+    "@jupyterlab/rendermime": "^4.4.0",
+    "@jupyterlab/services": "^7.4.0",
+    "@lumino/widgets": "^2.5.0"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "^4.4.0",
+    "typescript": "~5.5.0"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "labextension",
+    "sharedPackages": {
+      "@jupyter-widgets/base": {
+        "bundled": false,
+        "singleton": true
+      },
+      "@jupyter-widgets/jupyterlab-manager": {
+        "bundled": false,
+        "singleton": true
+      }
+    },
+    "_build": {
+      "load": "static/remoteEntry.8bb3c008ae04cf0aa6a1.js",
+      "extension": "./extension"
+    }
+  }
+}

@@ -13,6 +13,7 @@
  * kernel as one undo step.
  */
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
+import { showErrorMessage } from '@jupyterlab/apputils';
 import { PathExt } from '@jupyterlab/coreutils';
 import {
   ABCWidgetFactory,
@@ -31,38 +32,25 @@ const FACTORY = 'Magpylib Studio';
 const COMM = 'magpylib-studio.document';
 
 /** What the kernel runs for a tab: the view, and the comm its document goes
- *  out on whenever an edit settles (`revision`). `__mstudio_take` puts a
- *  document the tab was given -- a revert, the file reloaded -- back into the
- *  scene, as one undo step. */
-function kernelCode(name: string): string {
+ *  out on whenever an edit settles (`revision`). `__mstudio.take_document`
+ *  puts a document the tab was given -- a revert -- back into the scene, as
+ *  one undo step. */
+function kernelCode(name: string, height: number): string {
   return `
-import json as _json
 from comm import create_comm as _create_comm
 from IPython.display import display as _display
 from magpylib_studio.widget import SceneWidget as _SceneWidget
 
-__mstudio = _SceneWidget(${JSON.stringify(name)}, editable=True, height=640)
+__mstudio = _SceneWidget(${JSON.stringify(name)}, editable=True, height=${height})
 __mstudio_comm = _create_comm(target_name=${JSON.stringify(COMM)})
-
-def __mstudio_text():
-    return _json.dumps(__mstudio._editing("save").to_dict(), indent=2) + "\\n"
-
-def __mstudio_sync(_change=None):
-    __mstudio_comm.send({"text": __mstudio_text()})
-
-def __mstudio_take(text):
-    if text == __mstudio_text():
-        return
-    session = __mstudio._editing("revert")
-    result = session.replace_scene(_json.loads(text), label="changed on disk")
-    if not result.get("ok"):
-        raise ValueError(result.get("error"))
-    __mstudio._show({"by": "replace"})
-
-__mstudio.observe(__mstudio_sync, "revision")
+__mstudio.observe(lambda _change: __mstudio_comm.send({"text": __mstudio.document}), "revision")
 _display(__mstudio)
 `;
 }
+
+/** The view's height in a tab of `height` pixels: the tab, less the output
+ *  area's own margin. */
+const viewHeight = (height: number) => Math.max(240, Math.floor(height) - 12);
 
 class SceneTab extends DocumentWidget<Panel> {}
 
@@ -78,7 +66,7 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
   protected createNewWidget(context: DocumentRegistry.Context): SceneTab {
     const content = new Panel();
     content.addClass('mstudio-scene-tab');
-    content.node.style.overflow = 'auto';
+    content.node.style.overflow = 'hidden';
     const tab = new SceneTab({ context, content });
     this.start(context, tab).catch((err: unknown) => {
       content.node.textContent = `Magpylib Studio cannot draw this scene: ${err}`;
@@ -136,19 +124,44 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
         }
       };
     });
-    // A text the model took from elsewhere -- Revert, the file reloaded --
-    // goes back to the scene.
+    // A text the model took from elsewhere -- Revert -- goes back to the
+    // scene; one it cannot read is said, and the scene stays as it was.
     context.model.contentChanged.connect(() => {
       if (ours) {
         return;
       }
-      const text = context.model.toString();
-      void kernel.requestExecute({
-        code: `__mstudio_take(${JSON.stringify(text)})`,
-        silent: true,
+      const future = kernel.requestExecute({
+        code: `__mstudio.take_document(${JSON.stringify(context.model.toString())})`,
+        silent: false,
         store_history: false,
-      }).done;
+      });
+      future.onIOPub = (msg) => {
+        if (msg.header.msg_type === 'error') {
+          const { evalue } = msg.content as { evalue: string };
+          void showErrorMessage('Magpylib Studio: the file was not taken in', evalue);
+        }
+      };
     });
+
+    // The view fills the tab: its height is the widget's, set as the tab is
+    // resized, once it settles.
+    let sizing: ReturnType<typeof setTimeout> | undefined;
+    let sized = viewHeight(tab.content.node.clientHeight || 652);
+    new ResizeObserver(() => {
+      clearTimeout(sizing);
+      sizing = setTimeout(() => {
+        const height = viewHeight(tab.content.node.clientHeight);
+        if (tab.isDisposed || !tab.content.node.clientHeight || height === sized) {
+          return;
+        }
+        sized = height;
+        void kernel.requestExecute({
+          code: `__mstudio.height = ${height}`,
+          silent: true,
+          store_history: false,
+        }).done;
+      }, 150);
+    }).observe(tab.content.node);
 
     // Trusted, as a notebook's own outputs are: the widget's renderer is not a
     // safe one, and an untrusted output falls back to its text.
@@ -157,7 +170,7 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
       rendermime,
     });
     tab.content.addWidget(area);
-    await OutputArea.execute(kernelCode(PathExt.basename(context.path)), area, sessionContext);
+    await OutputArea.execute(kernelCode(PathExt.basename(context.path), sized), area, sessionContext);
   }
 }
 

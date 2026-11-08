@@ -31,8 +31,11 @@ ci:
 # build produces: prettier undoes the minification, trailing-whitespace edits
 # the shader strings three.js carries, and codespell reads minified names as
 # misspelled words. `npm run check:widget` is the check it does have, and it
-# compares the bundle against the sources rather than its own contents.
-exclude: ^vscode-extension/(node_modules|out|\.vscode-test)/|^magpylib_studio/static/(widget|panel)\.js$
+# compares the bundle against the sources rather than its own contents. The
+# JupyterLab scene tab's build, `jupyterlab-extension/labextension/`, likewise:
+# committed for the wheel, checked against its sources by a stamp
+# (`tests/test_labextension.py`).
+exclude: ^vscode-extension/(node_modules|out|\.vscode-test)/|^magpylib_studio/static/(widget|panel)\.js$|^jupyterlab-extension/(node_modules|lib|labextension)/
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
