@@ -37,7 +37,9 @@ def _windings():
         [[0, h, 0], [0, h, h], [0, -h, h], [0, -h, -h], [0, h, -h], [0, h, 0]]
     )
     turn = create_polyline_fillet(square, max_radius=0.006, N=2)
-    pack = np.array([(x, h + 0.0011, 0) for x in (np.arange(4) - 1.5) * 0.0044])
+    # the winding pack across the turn at its start: along the coil's axis,
+    # 1.1 mm outward (material-response 0.12 takes it in the turn's frame)
+    pack = np.array([(x, 0.0011) for x in (np.arange(4) - 1.5) * 0.0044])
     return move_grid_along_polyline(turn, pack)
 
 

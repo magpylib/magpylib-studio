@@ -5,6 +5,18 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>The U-core example needs material-response 0.12</summary>
+
+Its winding pack is drawn across the turn, along the coil's axis and outward, as
+material-response 0.12 takes it in the polyline's own frame; the windings are
+the same
+([magpylib-material-response#191](https://github.com/magpylib/magpylib-material-response/pull/191)).
+
+</details>
+
 ## [0.15.0]
 
 ### Added
