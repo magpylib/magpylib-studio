@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { setTextFocus, tookTextFocus } from './textFocus';
+import { PackageView, waitingHtml } from './packageView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /** Calls from this panel that change the scene, not just what it displays. */
@@ -83,6 +84,8 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   private scene: string | undefined;
   private sceneKey: string | undefined;
   private ready = false;
+  /** The view the page was drawn with: none, before an engine said one. */
+  private drawnWith: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -99,17 +102,15 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
      *  gesture in progress wants the views that show it live and nothing
      *  else: the document is not settled until the thumb is released. */
     private readonly onPreview: (scene: string | undefined) => void,
+    /** The view the engine's package draws with, once an engine has said. */
+    private readonly packageView: () => PackageView | undefined,
   ) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.description = this.scene;
-    this.ready = false;
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [this.extensionUri],
-    };
-    webviewView.webview.html = this.html(webviewView.webview);
+    this.drawnWith = undefined;
+    this.draw();
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (tookTextFocus(message, webviewView.webview)) {
@@ -173,16 +174,38 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private html(webview: vscode.Webview): string {
+  /** Draw the page with the engine's view, unless it is drawn with it
+   *  already: called when the view is shown, and when the engine's view is
+   *  another (an engine started, or one in another interpreter). */
+  redraw(): void {
+    this.draw();
+  }
+
+  private draw(): void {
+    const webviewView = this.view;
+    const packageView = this.packageView();
+    if (!webviewView || (packageView && this.drawnWith === packageView.dir)) {
+      return;
+    }
+    this.ready = false;
+    this.drawnWith = packageView?.dir;
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.extensionUri, ...(packageView?.roots ?? [])],
+    };
+    webviewView.webview.html = packageView
+      ? this.html(webviewView.webview, packageView)
+      : waitingHtml('Open a scene to see its variables.');
+  }
+
+  private html(webview: vscode.Webview, packageView: PackageView): string {
     const nonce = webviewNonce();
     const styleUri = mediaUri(webview, this.extensionUri, 'variables.css');
     const scriptUri = mediaUri(webview, this.extensionUri, 'variables.mjs');
-    // The panel itself is the package's, copied beside media/ by `npm run
-    // compile` (harness/copy-widget.js) with the notebook widget's bundle,
-    // whose stylesheet dresses its rows.
-    const widgetDir = vscode.Uri.joinPath(this.extensionUri, 'widget');
-    const panelUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'variables.mjs'));
-    const widgetStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
+    // The panel itself is the engine's package's (`packageView`), with the
+    // notebook widget's stylesheet, which dresses its rows.
+    const panelUri = packageView.uri(webview, 'variables.mjs');
+    const widgetStyleUri = packageView.uri(webview, 'widget.css');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>

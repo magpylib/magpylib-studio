@@ -165,17 +165,6 @@ function dropWidget() {
   widgetRun = [];
 }
 
-/** The scene graph is a module, and modules run after this script does — so a
- *  payload can arrive before there is anything to draw it with. `load` fires
- *  once every deferred module has executed. */
-function whenScene3d(run) {
-  if (window.scene3d) {
-    run();
-  } else {
-    window.addEventListener("load", run, { once: true });
-  }
-}
-
 function drawn(payload, stale) {
   current = payload;
   statusEl.textContent = payload.script;
@@ -187,8 +176,7 @@ function drawn(payload, stale) {
     if (drawing === "widget") dropWidget();
     // The renderers do not share a canvas. Plotly keeps its state on the
     // element rather than in the DOM it drew, so emptying the element without
-    // telling it leaves that state describing a plot that is gone; the scene
-    // graph re-hangs its own canvas when it finds the host emptied.
+    // telling it leaves that state describing a plot that is gone.
     if (drawing === "plotly") Plotly.purge(canvasEl);
     canvasEl.innerHTML = "";
   }
@@ -197,13 +185,6 @@ function drawn(payload, stale) {
   document.body.dataset.kind = payload.kind;
   if (payload.kind === "widget") {
     drawWidget(payload.body || {});
-    return;
-  }
-  if (payload.kind === "scene") {
-    // keepCamera is the whole point of addressing panels rather than
-    // replacing them: a rerun of the script redraws this scene where the
-    // user left the camera.
-    whenScene3d(() => window.scene3d.render(canvasEl, payload.body || {}));
     return;
   }
   const figure = payload.body || {};
@@ -243,13 +224,7 @@ new MutationObserver(() => {
   if (!current) return;
   // the widget watches the theme itself, as it does in a notebook
   if (current.kind === "widget") return;
-  if (current.kind === "scene") {
-    // The scene reads the editor background off the same CSS variable each
-    // time it renders, so redrawing it is what picks the new theme up.
-    whenScene3d(() => window.scene3d.render(canvasEl, current.body || {}));
-  } else {
-    Plotly.relayout(canvasEl, { template: plotTemplate() });
-  }
+  Plotly.relayout(canvasEl, { template: plotTemplate() });
 }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 // Hidden panels here are torn down and rebuilt from the HTML rather than

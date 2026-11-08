@@ -1746,9 +1746,10 @@ suite('magpylib-studio', () => {
       /before several scenes/,
     );
     assert.match(String(engineMismatch({})), /did not say which version/);
-    assert.match(String(engineMismatch({ protocol: 1 })), /older than this extension needs/);
-    assert.match(String(engineMismatch({ protocol: 3 })), /update the extension/);
-    assert.strictEqual(engineMismatch({ protocol: 2 }), undefined, 'the engine of this repo is refused');
+    // 2 has no view to draw its scenes with: the extension carries none
+    assert.match(String(engineMismatch({ protocol: 2 })), /older than this extension needs/);
+    assert.match(String(engineMismatch({ protocol: 4 })), /update the extension/);
+    assert.strictEqual(engineMismatch({ protocol: 3 }), undefined, 'the engine of this repo is refused');
   });
 
   test('an even ramp is spaced the way the call that writes it spaces it', () => {

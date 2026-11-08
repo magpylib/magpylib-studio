@@ -3,8 +3,8 @@
  * a view does with the renderer's `dragstart` and `objecttransform` events.
  *
  * Here, in the package, because two views do it: the studio's panel in VS
- * Code, and the notebook widget once it edits. The extension copies this file
- * (`harness/copy-widget.js`); nothing here knows which view it is in. Each
+ * Code, and the notebook widget once it edits. Both load it from the package
+ * (decision 0056); nothing here knows which view it is in. Each
  * says how a pose reaches its engine -- messages to the extension's host, or
  * the kernel connection -- and what to show while one is on its way.
  *

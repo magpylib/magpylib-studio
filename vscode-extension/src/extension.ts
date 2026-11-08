@@ -24,6 +24,7 @@ import {
 } from './scenes';
 import { setTextFocus, tookTextFocus, undoTyping } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
+import { PackageView, packageView } from './packageView';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
@@ -46,6 +47,12 @@ import {
 } from './sceneTree';
 
 let engine: EngineClient | undefined;
+/** The view of the engine's package, which every scene it serves is drawn
+ *  with: said by the engine when it starts (`packageView`). */
+let engineView: PackageView | undefined;
+/** Fired when the engine's view is another: the first engine's, or that of an
+ *  engine started in another interpreter. What is drawn is drawn again. */
+const engineViewChanged = new vscode.EventEmitter<PackageView>();
 let fieldPanel: vscode.WebviewPanel | undefined;
 /** The scene the field panel belongs to: the one it was opened for. */
 let fieldScene: SceneDocument | undefined;
@@ -1814,11 +1821,13 @@ function tellRestart(
   }
 }
 
-/** The engine protocols this extension speaks: 2 is a session per scene
- *  (`rpc.PROTOCOL`). An engine outside the range is refused: one from before
- *  sessions ignores their names and would serve every tab from one scene,
- *  without a word, and a newer one may speak what this does not know. */
-const ENGINE_PROTOCOL = { min: 2, max: 2 };
+/** The engine protocols this extension speaks (`rpc.PROTOCOL`): 2 is a
+ *  session per scene, 3 an engine that says where its view is, which every
+ *  scene it serves is drawn with (`packageView`). An engine outside the range
+ *  is refused: one from before sessions ignores their names and would serve
+ *  every tab from one scene, without a word, one from before 3 has no view to
+ *  draw with, and a newer one may speak what this does not know. */
+const ENGINE_PROTOCOL = { min: 3, max: 3 };
 
 /** Why the engine that answered `version` so cannot serve this extension, or
  *  undefined when it can. `error` is what the request raised instead. */
@@ -1947,7 +1956,7 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
   // Asked before anything else: an engine that cannot serve several scenes
   // must not be handed one. A process that died on starting has said so
   // through onExit, and its error is passed on as it is.
-  const said = await client.request<{ protocol?: unknown }>('version').then(
+  const said = await client.request<{ protocol?: unknown; static?: unknown }>('version').then(
     (answer) => ({ answer, error: undefined }),
     (error: unknown) => {
       if (!(error instanceof EngineError)) {
@@ -1956,8 +1965,19 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
       return { answer: undefined, error: error.rpcError };
     },
   );
-  const mismatch = engineMismatch(said.answer, said.error);
-  if (mismatch) {
+  let mismatch = engineMismatch(said.answer, said.error);
+  let view: PackageView | undefined;
+  if (!mismatch) {
+    // An engine whose view is not there could serve its scenes and not draw
+    // one: refused like the rest, with the file it misses.
+    try {
+      view = packageView(said.answer?.static);
+    } catch (err) {
+      mismatch = err instanceof Error ? err.message : String(err);
+    }
+  }
+  if (mismatch || !view) {
+    mismatch ??= 'it did not say where its view is';
     client.dispose();
     refusedEngine = { python: pythonPath, reason: mismatch };
     engineOutput.appendLine(`[engine refused: ${mismatch}]`);
@@ -1980,7 +2000,74 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
     throw new Error(`the engine in ${pythonPath} was refused: ${mismatch}`);
   }
   engine = client;
+  if (engineView?.dir !== view.dir) {
+    engineView = view;
+    engineViewChanged.fire(view);
+  }
   return client;
+}
+
+/** The view the engine's scenes are drawn with, starting the engine when none
+ *  is running yet. */
+async function whenEngineView(context: vscode.ExtensionContext): Promise<PackageView> {
+  await getRawEngine(context);
+  return engineView!;
+}
+
+/** Which view each scene's tab was drawn with, so that it is drawn again only
+ *  when the engine's is another. */
+const drawnWith = new WeakMap<vscode.WebviewPanel, string>();
+
+/** Draw a scene's tab with the engine's view: once the engine has said where
+ *  that is, and again whenever it is another (`engineViewChanged`). Until then
+ *  the tab is empty; when the engine cannot start, it says why. */
+function drawScenePanel(
+  context: vscode.ExtensionContext,
+  panel: vscode.WebviewPanel,
+  view: PackageView | undefined = engineView,
+): void {
+  const draw = (shown: PackageView) => {
+    if (drawnWith.get(panel) === shown.dir) {
+      return;
+    }
+    drawnWith.set(panel, shown.dir);
+    try {
+      panel.webview.options = {
+        ...PANEL_OPTIONS(context),
+        localResourceRoots: [context.extensionUri, ...shown.roots],
+      };
+      panel.webview.html = createWebviewHtml(context, panel.webview, shown);
+    } catch {
+      // closed while the engine started
+    }
+  };
+  if (view) {
+    draw(view);
+    return;
+  }
+  void whenEngineView(context).then(draw, (err: unknown) => {
+    try {
+      panel.webview.html = notDrawnHtml(err instanceof Error ? err.message : String(err));
+    } catch {
+      // closed while the engine started
+    }
+  });
+}
+
+/** A tab that cannot be drawn: the engine did not start, and the message it
+ *  gave is said where the scene would be. */
+function notDrawnHtml(reason: string): string {
+  const text = reason.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+</head>
+<body style="font: var(--vscode-font-family); color: var(--vscode-descriptionForeground); padding: 1em;">
+  <p>Magpylib Studio cannot draw this scene: ${text}.</p>
+</body>
+</html>`;
 }
 
 /** The tree item a keyboard shortcut should act on (menus pass it directly).
@@ -2066,7 +2153,7 @@ function adoptScenePanel(
   doc.panels.add(panel);
   panel.iconPath = logoUri(context); // tabs render icons in full colour
   panel.webview.options = PANEL_OPTIONS(context);
-  panel.webview.html = createWebviewHtml(context, panel.webview);
+  drawScenePanel(context, panel);
   wireRpcRouter(panel.webview, () => Promise.resolve(engineFor(context, doc)));
   panel.webview.onDidReceiveMessage((message) => {
     if (tookTextFocus(message, panel.webview)) {
@@ -2983,6 +3070,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       refreshLiveSurfaces();
     },
+    () => engineView,
   );
   variablesTree = variables;
 
@@ -3023,6 +3111,23 @@ export function activate(context: vscode.ExtensionContext): void {
       broadcastMutation();
     }),
     () => selectedObjectId,
+    () => engineView,
+  );
+
+  // Everything drawn with the package's view is drawn again with the engine's
+  // when that is another: the first engine's, or one started in another
+  // interpreter, whose package may be of another version.
+  context.subscriptions.push(
+    engineViewChanged,
+    engineViewChanged.event((view) => {
+      for (const doc of openScenes()) {
+        for (const panel of doc.panels) {
+          drawScenePanel(context, panel, view);
+        }
+      }
+      variables.redraw();
+      inspector?.redraw();
+    }),
   );
 
   /** One of the scene's variants, picked; none when it has none. */
@@ -6951,6 +7056,7 @@ export function sceneFileState(): {
 export function createWebviewHtml(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,
+  view: PackageView,
 ): string {
   const nonce = webviewNonce();
   const styleUri = mediaUri(webview, context.extensionUri, 'studioView.css');
@@ -6964,12 +7070,10 @@ export function createWebviewHtml(
     ),
   );
   // The notebook widget draws the scene: the same view, controls and keys as
-  // a notebook cell and the script panel. It is the package's, copied beside
-  // media/ by `npm run compile` (harness/copy-widget.js), and loads its
-  // renderer from a blob -- hence `blob:` below.
-  const widgetDir = vscode.Uri.joinPath(context.extensionUri, 'widget');
-  const widgetUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.js'));
-  const widgetStyleUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
+  // a notebook cell and the script panel. It is the engine's package's
+  // (`packageView`), and loads its renderer from a blob -- hence `blob:` below.
+  const widgetUri = view.uri(webview, 'widget.js');
+  const widgetStyleUri = view.uri(webview, 'widget.css');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -482,6 +482,17 @@ history and the script tab, and marks the scene unsaved. In the studio hiding is
 an edit; in a notebook a view setting; the model decides. Fading is a view
 setting in both. Chart mode swaps in the read-only plotly figure.
 
+**The extension carries no view**
+([0056](decisions.md#0056-every-host-draws-with-the-packages-view)): the scene
+tabs, the script panel and the side bar's Variables and Inspector load
+`widget.js`, `widget.css`, `variables.mjs` and `inspector.mjs` from the package
+that wrote what they draw -- the engine's, which `version` names, or the one a
+script's figure names (`static`, payload 3) -- by their real paths, each folder
+a root the webview may load from (`src/packageView.ts`). A view is then always
+of its payload's version, which changes with every release and so is no
+protocol's business. An engine started in another interpreter draws everything
+again with its own.
+
 **Field views**: `get_field` (summed B, H, J or M at points or along a sensor,
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D
 rendering along the sensors), `get_field_map` (a heatmap on a plane or off a
@@ -607,9 +618,10 @@ of its own only on a connection that has never opened one by name -- the
 one-scene host, the "Try it" below; after an `open_session` it is refused
 (`SessionError`), so a call that forgot its scene fails rather than reading an
 empty one. `version` says the package's version, the protocol number
-(`rpc.PROTOCOL`, 2 since sessions) and the newest document version read. Every
-session resolves meshes through one cache per process, keyed by what the source
-read, so a part in two scenes is reoriented once.
+(`rpc.PROTOCOL`: 2 since sessions, 3 since it says where its view is), the
+newest document version read and the package's view (`static`). Every session
+resolves meshes through one cache per process, keyed by what the source read, so
+a part in two scenes is reoriented once.
 
 ```
 -> {"id": 3, "method": "open_session", "params": {"session": "4f2a9c", "path": "ring.magpy.json"}}

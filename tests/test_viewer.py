@@ -52,6 +52,8 @@ def test_view_is_written_whole(drop):
     assert payload["kind"] == "plotly"
     assert payload["title"] == "A scene"
     assert payload["index"] == 0
+    # what the panel draws a widget figure with: this package's view
+    assert payload["static"] == str(viewer.STATIC)
     # Nothing half-written is left behind for the watcher to trip over.
     assert [p.name for p in drop.iterdir()] == [path.name]
 

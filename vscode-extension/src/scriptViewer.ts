@@ -3,6 +3,7 @@ import { basename, extname } from 'path';
 
 import * as vscode from 'vscode';
 
+import { PackageView, packageView } from './packageView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /**
@@ -23,9 +24,11 @@ import { mediaUri, nonce as webviewNonce } from './webview';
 /** Must match `VIEWS_SUBDIR` in magpylib_studio/viewer.py. */
 const VIEWS_SUBDIR = 'views';
 
-/** The `PAYLOAD_VERSION`s there this panel reads whole; it refuses the rest.
- *  2 added the `widget` kind; a 1 is a package from before it, still drawn. */
-const PAYLOAD_VERSIONS = [1, 2];
+/** The `PAYLOAD_VERSION`s there this panel reads; it refuses the rest. 2 added
+ *  the `widget` kind, 3 the `static` it is drawn with. A widget figure from
+ *  before 3 names no view to draw it with, and is refused by name (`read`);
+ *  a plotly one is plotly's, and drawn from any. */
+const PAYLOAD_VERSIONS = [1, 2, 3];
 
 const PANEL_TYPE = 'magpylibScriptView';
 
@@ -45,6 +48,9 @@ interface ViewPayload {
   digest?: string | null;
   title: string | null;
   written: number;
+  /** Where the package that drew it has its view, which a widget figure is
+   *  drawn with (`packageView`). Absent before payload 3. */
+  static?: string;
   body: unknown;
 }
 
@@ -63,6 +69,8 @@ interface View {
   panel: vscode.WebviewPanel;
   payload: ViewPayload;
   stale: boolean;
+  /** The package view the page was drawn with; none for a plotly figure. */
+  drawnWith: string | undefined;
 }
 
 const views = new Map<string, View>();
@@ -133,7 +141,11 @@ function panelTitle(payload: ViewPayload, stale = false): string {
   return stale ? `${base} •` : base;
 }
 
-function html(context: vscode.ExtensionContext, webview: vscode.Webview): string {
+function html(
+  context: vscode.ExtensionContext,
+  webview: vscode.Webview,
+  view: PackageView | undefined,
+): string {
   const nonce = webviewNonce();
   const styleUri = mediaUri(webview, context.extensionUri, 'scriptView.css');
   const scriptUri = mediaUri(webview, context.extensionUri, 'scriptView.js');
@@ -164,30 +176,12 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
       'codicon.css',
     ),
   );
-  const scene3dUri = mediaUri(webview, context.extensionUri, 'scene3d.mjs');
-  // The notebook widget, which a `widget` figure is drawn with: copied in by
-  // `npm run compile`, see harness/copy-widget.js.
-  const widgetDir = vscode.Uri.joinPath(context.extensionUri, 'widget');
-  const widgetUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.js'));
-  const widgetCssUri = webview.asWebviewUri(vscode.Uri.joinPath(widgetDir, 'widget.css'));
-  // Same mapping as the studio's own panel: three ships ESM only and its
-  // addons import the bare name, so the specifiers are mapped rather than
-  // rewritten.
-  const threeUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(
-      context.extensionUri,
-      'node_modules',
-      'three',
-      'build',
-      'three.module.min.js',
-    ),
-  );
-  const threeAddonsUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, 'node_modules', 'three', 'examples', 'jsm'),
-  );
-  const importMap = JSON.stringify({
-    imports: { three: `${threeUri}`, 'three/addons/': `${threeAddonsUri}/` },
-  });
+  // The notebook widget, which a `widget` figure is drawn with: that of the
+  // package that drew it (`packageView`). A plotly figure needs none.
+  const widgetUri = view ? `${view.uri(webview, 'widget.js')}` : '';
+  const widgetCss = view
+    ? `<link rel="stylesheet" href="${view.uri(webview, 'widget.css')}" />`
+    : '';
   // `blob:` in script-src: the widget loads its renderer from a blob URL, one
   // module instance per view, so that two views on a page are two scenes.
   return `<!DOCTYPE html>
@@ -199,15 +193,8 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
   <title>Magpylib View</title>
   <link rel="stylesheet" href="${codiconUri}" />
   <link rel="stylesheet" href="${styleUri}" />
-  <link rel="stylesheet" href="${widgetCssUri}" />
+  ${widgetCss}
   <script nonce="${nonce}" src="${plotlyUri}"></script>
-  <script type="importmap" nonce="${nonce}">${importMap}</script>
-  <script type="module" nonce="${nonce}">
-    // The panel's own view, the first made here: on window as scene3d,
-    // which scriptView.js drives.
-    import { createScene3d } from "${scene3dUri}";
-    createScene3d();
-  </script>
 </head>
 <body data-widget="${widgetUri}">
   <div id="bar">
@@ -285,12 +272,42 @@ async function noticeOnce(
   }
 }
 
+/** Why figures went undrawn, each said once: a script re-run ten times with
+ *  an old package is one thing to fix, not ten messages. */
+const refused = new Set<string>();
+
+/** Say that a figure from `payload.python` cannot be drawn, and what fixes it. */
+function notDrawn(payload: ViewPayload, reason: string): void {
+  const python = payload.python ?? 'the interpreter that ran it';
+  say(`not drawn: ${payload.script}: ${reason}`);
+  if (refused.has(`${python}\0${reason}`)) {
+    return;
+  }
+  refused.add(`${python}\0${reason}`);
+  void vscode.window.showWarningMessage(
+    `Magpylib Studio: a figure from ${python} cannot be drawn: ${reason}. ` +
+      `Install magpylib-studio there again: "${python}" -m pip install --upgrade magpylib-studio`,
+  );
+}
+
 /** Show `payload`, in the panel that file already owns or in a new one. */
 function draw(
   context: vscode.ExtensionContext,
   key: string,
   payload: ViewPayload,
 ): void {
+  // A widget figure is drawn with the view of the package that drew it, which
+  // reads its payload whatever version that is (`packageView`).
+  let view: PackageView | undefined;
+  if (payload.kind === 'widget') {
+    try {
+      view = packageView(payload.static);
+    } catch (err) {
+      notDrawn(payload, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+  const roots = [context.extensionUri, ...(view?.roots ?? [])];
   const existing = views.get(key);
   if (existing) {
     existing.payload = payload;
@@ -298,6 +315,14 @@ function draw(
     // only thing that settles this.
     existing.stale = false;
     existing.panel.title = panelTitle(payload);
+    if (view && existing.drawnWith !== view.dir) {
+      // Run again in another interpreter: the page is drawn anew with its
+      // view, and asks for the payload when it is ready.
+      existing.drawnWith = view.dir;
+      existing.panel.webview.options = { enableScripts: true, localResourceRoots: roots };
+      existing.panel.webview.html = html(context, existing.panel.webview, view);
+      return;
+    }
     void existing.panel.webview.postMessage({ type: 'view', payload, stale: false });
     return;
   }
@@ -308,10 +333,10 @@ function draw(
     // still typing in, and a figure appearing is not a reason to take the
     // cursor away from it.
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-    { enableScripts: true, localResourceRoots: [context.extensionUri] },
+    { enableScripts: true, localResourceRoots: roots },
   );
-  views.set(key, { panel, payload, stale: false });
-  panel.webview.html = html(context, panel.webview);
+  views.set(key, { panel, payload, stale: false, drawnWith: view?.dir });
+  panel.webview.html = html(context, panel.webview, view);
   void noticeOnce(context, payload);
   panel.webview.onDidReceiveMessage((message: PageMessage) => {
     // The page asks when it is ready rather than being told when the panel is
@@ -529,8 +554,13 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
     return undefined;
   }
   // `scene` is what a package older than the widget-in-the-panel writes, and
-  // is still drawn as it always was.
-  if (!['plotly', 'scene', 'widget'].includes(payload.kind)) {
+  // a widget figure before payload 3 names no view to draw it with: neither
+  // can be drawn by this extension, which carries no view of its own.
+  if (payload.kind === 'scene' || (payload.kind === 'widget' && payload.version < 3)) {
+    notDrawn(payload, 'its magpylib-studio is older than this extension');
+    return undefined;
+  }
+  if (!['plotly', 'widget'].includes(payload.kind)) {
     say(`ignoring ${uri.fsPath}: unknown figure kind ${payload.kind}`);
     return undefined;
   }

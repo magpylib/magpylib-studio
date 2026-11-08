@@ -64,6 +64,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
 | [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
 | [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
+| [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
 
 ---
 
@@ -2929,3 +2930,68 @@ field over the run and not say where the view was, nor move it.
   a plot redrawn each time would fall behind the run it follows.
 - Counting in frames: the index would mean a row of `getB` only when magpylib
   kept every step.
+
+---
+
+## 0056. Every host draws with the package's view
+
+**Status:** accepted 2026-11-08, on Alex's word ("yes"). Builds on
+[0010](#0010-the-notebook-widget-edits-with-the-package-alone),
+[0011](#0011-one-view) and
+[0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them).
+
+### Context
+
+The package is the product: its anywidget edits in any notebook, and the VS Code
+panels mount the same widget and panels, so studio is not locked into one
+editor. But the extension shipped a copy of that view, made at its build, and
+the engine it talked to was whatever pip had installed. The two are released
+together and installed apart. The payload between them changed with nearly every
+release -- since protocol 2 it gained `applied`, `colors`, `fields`, `name`,
+`partial` and the `pixels` kind -- and `rpc.PROTOCOL`, bumped by hand, did not
+move. A mismatched pair passed the check and drew wrongly without a word: a
+newer engine sends a uniform field as `fields`, which an older view does not
+draw.
+
+### Decision
+
+- **The extension carries no view.** The scene tabs and the side bar's Variables
+  and Inspector load the notebook widget's bundle and stylesheet and the two
+  panels from the engine's package, which `version` names (`static`); the script
+  panel from the package that drew the figure, which the figure names (payload
+  3). A view is then always of its payload's version, and the payload stays the
+  package's private business, unversioned.
+- **By real path.** VS Code refuses a file whose real path is outside every
+  root, and an installer may link a package's files from its cache; each file is
+  resolved, and its folder made a root. Under remote development the extension
+  runs where the engine does, and VS Code loads these as it loads the
+  extension's own files: one code path, read in its source.
+- **Protocol 3** says the engine names its view; the extension refuses an engine
+  before it, or one whose view is not whole, with Install the Engine. A figure
+  from an older package is refused by name, with the command that upgrades it in
+  that interpreter; a plotly figure, which needs no view, is drawn from any.
+- **Drawn again when the engine's view is another**: an engine started in
+  another interpreter redraws every tab and side bar view with its own. The side
+  bar does not start an engine to draw itself; until a scene opens it says so.
+
+### Rejected
+
+- **Release in lockstep, refusing an engine of another version**: closes the
+  gap, but asks everyone with a pinned engine to upgrade at each release, and
+  keeps a copy that has to be the same version as something installed apart.
+- **Bump the protocol whenever the payload changes**: it already failed, five
+  keys without a bump; a rule kept by hand is the gap.
+- **A public scene format, the view a library with bindings to other
+  languages**: magpylib's backend protocol already says what a scene draws; a
+  second format would be a second contract for the same picture, and the traces
+  are built in python, so another language could only replay them.
+
+### Consequences
+
+- A feature lands in the package first; the extension adds only what needs an
+  editor: files, saving and backups, the script tab, tabs, the side bar.
+- `three` is a build dependency of the extension now, not shipped in it: no
+  extension webview loads the renderer raw.
+- The renderer's source, `vscode-extension/media/scene3d.mjs`, still sits in the
+  extension's folder while the package builds it; moving it is a later change of
+  layout alone.

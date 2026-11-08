@@ -23,12 +23,18 @@ import sys
 from importlib import metadata
 
 from magpylib_studio.session import DOC_VERSION, MagpylibStudioSession
+from magpylib_studio.viewer import STATIC
 
 #: What a host checks before it trusts this engine with its scenes, bumped
 #: whenever a request or an answer changes shape. 2: requests name their
 #: session. An engine from before ignores `session` and would serve every
 #: scene from one, without a word -- which is why there is a number to check.
-PROTOCOL = 2
+#: 3: `version` says where the package's view is (`static`), which the host
+#: draws every scene of this engine with. A host loads its views from there
+#: rather than carrying a copy, so the scene's payload, which changes with
+#: every release, is never this number's business: the view that reads it
+#: comes from the package that wrote it (docs/decisions.md, 0056).
+PROTOCOL = 3
 
 # Only these methods are callable over the wire (no dunders / private helpers).
 _PUBLIC = {
@@ -246,12 +252,18 @@ class Engine:
 
     def version(self):
         """The package's version, the protocol's and the newest document this
-        engine reads: what a host checks before it opens a scene here."""
+        engine reads: what a host checks before it opens a scene here. And
+        where the package's view is, which the host draws its scenes with."""
         try:
             package = metadata.version("magpylib-studio")
         except metadata.PackageNotFoundError:
             package = None
-        return {"package": package, "protocol": PROTOCOL, "document": DOC_VERSION}
+        return {
+            "package": package,
+            "protocol": PROTOCOL,
+            "document": DOC_VERSION,
+            "static": str(STATIC),
+        }
 
     def handle(self, request):
         """Dispatch one request to the engine or to the session it names."""
