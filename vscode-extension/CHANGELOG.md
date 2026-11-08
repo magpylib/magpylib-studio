@@ -5,6 +5,22 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>The extension draws with the engine's own view</summary>
+
+The scene tabs, the side bar and the script panel load the view from the
+installed `magpylib-studio` package instead of a copy inside the extension, so a
+scene is always drawn by the view of the version that wrote it. Before, an
+extension and an engine of different versions could pass the version check and
+draw some things wrongly without a word, such as a uniform field. The extension
+now needs an engine of this release or newer and offers to install one; a
+script's figure from an older package says how to upgrade it there. The
+extension is smaller too, without three.js inside.
+
+</details>
+
 ## [0.15.0]
 
 ### Added

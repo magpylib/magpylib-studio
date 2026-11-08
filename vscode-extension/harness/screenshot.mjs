@@ -95,7 +95,7 @@ function install() {
     `${pkg.publisher}.${pkg.name}-${pkg.version}`,
   );
   fs.mkdirSync(studio, { recursive: true });
-  for (const part of ["package.json", "media", "widget", "schemas"]) {
+  for (const part of ["package.json", "media", "schemas"]) {
     fs.cpSync(path.join(EXT, part), path.join(studio, part), {
       recursive: true,
     });

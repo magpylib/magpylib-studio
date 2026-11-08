@@ -34,10 +34,20 @@ import sys
 import time
 from pathlib import Path
 
-#: Bumped when the payload's shape changes. A panel that does not know a
-#: version says so rather than drawing part of it. 2 added the `widget` kind,
-#: which a panel reading only 1 would drop with a less helpful word.
-PAYLOAD_VERSION = 2
+#: Bumped when what the panel itself reads changes: the fields around `body`.
+#: A panel that does not know a version says so rather than drawing part of
+#: it. 2 added the `widget` kind, which a panel reading only 1 would drop with
+#: a less helpful word. 3 says where this package's view is (`static`), which
+#: the panel draws a widget figure with -- so `body`, which that view reads,
+#: changes with the package and never bumps this.
+PAYLOAD_VERSION = 3
+
+#: The package's view: the notebook widget's bundle and stylesheet, and the
+#: panels a host mounts beside it. Every host loads them from the package that
+#: drew the scene -- a notebook through anywidget, the VS Code panels from the
+#: path the engine and a script's figure name -- so a view never draws a
+#: payload of another version (docs/decisions.md, 0056).
+STATIC = Path(__file__).parent / "static"
 
 #: The stamp names the window's storage directory, which holds other things.
 #: The views get a subdirectory of their own so only they are watched.
@@ -171,6 +181,9 @@ def write_view(
         # marks itself out of date each time is one nobody believes.
         "digest": _digest(script),
         "written": time.time(),
+        # What draws it: the view of the package that wrote it, wherever the
+        # interpreter that ran the script has it.
+        "static": str(STATIC),
         "body": body,
     }
     target = views / f"{key}.json"

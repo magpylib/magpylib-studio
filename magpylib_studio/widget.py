@@ -60,8 +60,7 @@ import numpy as np
 import traitlets
 
 from magpylib_studio import threejs
-
-STATIC = pathlib.Path(__file__).parent / "static"
+from magpylib_studio.viewer import STATIC
 
 #: How tall the scene is drawn when nobody says; see `threejs.DEFAULT_HEIGHT`.
 DEFAULT_HEIGHT = threejs.DEFAULT_HEIGHT

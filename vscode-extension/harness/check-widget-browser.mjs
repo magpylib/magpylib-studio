@@ -155,10 +155,9 @@ async function launch(chrome, profile) {
 
 /** This repo's files, over http: modules do not load from file://. */
 function serve(out) {
-  // three.js for the pages that load the panel's own renderer, from the copy
-  // the panel loads it from. `widget/` is what `npm run compile` copies out
-  // of the package's static files, and is served from where it is copied
-  // from: a run needs no build.
+  // three.js for the pages that load the panel's own renderer. `widget/` is
+  // the package's static files, which the panels load from the package
+  // (decision 0056), served under the name the pages use: a run needs no build.
   const roots = {
     static: STATIC,
     widget: STATIC,

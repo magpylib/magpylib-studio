@@ -10,6 +10,9 @@ harness/**
 .vscode-test/**
 .vscode-test.mjs
 media/jsconfig.json
+# The renderer's source: the package bundles it into its view, which every
+# webview here loads from the package (decision 0056); none loads this.
+media/scene3d.mjs
 tsconfig.json
 package-lock.json
 .vscode/**

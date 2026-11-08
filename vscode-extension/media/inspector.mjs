@@ -1,6 +1,6 @@
 // The Inspector: the package's own panel -- `magpylib_studio/static/
-// inspector.mjs`, copied to widget/ by `harness/copy-widget.js` beside the
-// notebook widget's bundle -- mounted in a sidebar webview, in full: header,
+// inspector.mjs`, loaded from the engine's package beside the notebook
+// widget's bundle (`packageView`) -- mounted in a sidebar webview, in full: header,
 // step, parameters, pose, the style tree with its filter. The same panel the
 // widget floats beside its edit column, compact (decision 0023); what
 // differs is where the calls go.

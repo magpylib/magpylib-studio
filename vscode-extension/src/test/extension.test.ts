@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,7 @@ import {
   splitTerms,
   stopEngineForTest,
 } from '../extension';
+import { packageView } from '../packageView';
 import { bringToFront, frontScene, openScenes, SceneDocument } from '../scenes';
 import {
   isObject,
@@ -1746,9 +1747,30 @@ suite('magpylib-studio', () => {
       /before several scenes/,
     );
     assert.match(String(engineMismatch({})), /did not say which version/);
-    assert.match(String(engineMismatch({ protocol: 1 })), /older than this extension needs/);
-    assert.match(String(engineMismatch({ protocol: 3 })), /update the extension/);
-    assert.strictEqual(engineMismatch({ protocol: 2 }), undefined, 'the engine of this repo is refused');
+    // 2 has no view to draw its scenes with: the extension carries none
+    assert.match(String(engineMismatch({ protocol: 2 })), /older than this extension needs/);
+    assert.match(String(engineMismatch({ protocol: 4 })), /update the extension/);
+    assert.strictEqual(engineMismatch({ protocol: 3 }), undefined, 'the engine of this repo is refused');
+  });
+
+  test('a package upgraded in place is another view, and one missing a file none', () => {
+    // The folder an engine names stays the same when pip upgrades the package
+    // in it; the view drawn from it must not, or the old bundle goes on
+    // drawing the new engine's payloads.
+    const dir = mkdtempSync(join(tmpdir(), 'view-'));
+    const files = ['widget.js', 'widget.css', 'variables.mjs', 'inspector.mjs'];
+    for (const file of files) {
+      writeFileSync(join(dir, file), '// 0.15');
+    }
+    const before = packageView(dir);
+    writeFileSync(join(dir, 'widget.js'), '// 0.16, longer');
+    const after = packageView(dir);
+    assert.strictEqual(after.dir, before.dir);
+    assert.notStrictEqual(after.key, before.key);
+    rmSync(join(dir, 'inspector.mjs'));
+    assert.throws(() => packageView(dir), /inspector\.mjs is missing/);
+    assert.throws(() => packageView(undefined), /did not say where its view is/);
+    rmSync(dir, { recursive: true });
   });
 
   test('an even ramp is spaced the way the call that writes it spaces it', () => {
