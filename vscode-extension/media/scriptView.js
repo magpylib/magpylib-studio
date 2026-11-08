@@ -40,40 +40,8 @@ let drawing = null;
 // legend, playback, tools and keys as a notebook cell. One model for the
 // panel's life: a re-run of the script re-points it, as `update()` does a
 // cell's, which keeps the camera where the user left it.
-let widgetModel = null;
-let widgetRun = []; // a run too big to carry as changes, every frame of it
-let widgetCleanup = null; // what `render` hands back, to let its renderer go
+let figure = null; // the package's figure (host.mjs `mountFigure`), once drawn
 let widgetLoad = 0; // which figure a load still on its way is for
-
-/** A model the widget can be run against, held here: what anywidget hands a
- *  widget, answering for frames from the run the figure carries. */
-function localModel(state) {
-  const values = { ...state };
-  const listeners = {};
-  const emit = (event, value) =>
-    (listeners[event] || []).forEach((listener) => listener(value));
-  return {
-    get: (key) => values[key],
-    set(key, value) {
-      values[key] = value;
-      emit(`change:${key}`, value);
-    },
-    save_changes() {},
-    on: (event, listener) => (listeners[event] ||= []).push(listener),
-    off() {},
-    send(message) {
-      if (message.kind !== "frame" || !widgetRun.length) return;
-      const at = Math.max(0, Math.min(message.index, widgetRun.length - 1));
-      setTimeout(() =>
-        emit("msg:custom", {
-          kind: "frame",
-          ...widgetRun[at],
-          runId: message.runId,
-        }),
-      );
-    },
-  };
-}
 
 // The widget saves its picture as a download, which a webview does not have:
 // the click would do nothing. It hands the file here instead, and the host
@@ -87,65 +55,30 @@ window.magpySave = (href, filename) => {
 
 /** The widget fills the panel; its height is the model's, so it follows. */
 const fittedHeight = () => Math.max(240, canvasEl.clientHeight - 2);
-const fitWidget = () => widgetModel?.set("height", fittedHeight());
-new ResizeObserver(fitWidget).observe(canvasEl);
+new ResizeObserver(() => figure?.resize(fittedHeight())).observe(canvasEl);
 
-/** Each object's place in the legend -- its position and name at every level
- *  down -- by its id. The ids are the objects' own, from the process that
- *  drew them, so a re-run's are all new; the place is what carries over. */
-function placesIn(tree, above = "", places = new Map()) {
-  tree.forEach((node, i) => {
-    const place = `${above}/${i}:${node.label}`;
-    places.set(node.id, place);
-    placesIn(node.children || [], place, places);
-  });
-  return places;
-}
-
-/** `ids` in the tree `before`, as the ids of the same places in `after`.
- *  One whose place is gone, or now holds something else, is dropped. */
-function carried(ids, before, after) {
-  const was = placesIn(before);
-  const now = new Map([...placesIn(after)].map(([id, place]) => [place, id]));
-  return ids.map((id) => now.get(was.get(id))).filter(Boolean);
-}
-
+/** A `widget` figure, drawn by the package that drew it (`mountFigure`, in
+ *  its host.mjs): the first one, or a re-run's in the view as it was left. */
 async function drawWidget(body) {
   const load = ++widgetLoad;
-  const state = body.state || {};
-  if (widgetModel) {
-    widgetRun = body.run || [];
-    // A re-run: the script's new figure, in the view as the user left it.
-    // What was set here -- theme, axes, what is hidden and picked -- was set
-    // by the user, not the script, and stays. Everything before the payload:
-    // the widget reads a new payload with the tree, run length and pace it
-    // belongs to.
-    const before = widgetModel.get("tree") || [];
-    const after = state.tree || [];
-    for (const key of ["hidden", "selected"]) {
-      widgetModel.set(key, carried(widgetModel.get(key) || [], before, after));
-    }
-    for (const key of ["tree", "frames", "duration", "repeat"]) {
-      widgetModel.set(key, state[key]);
-    }
-    widgetModel.set("payload", state.payload);
+  if (figure) {
+    figure.show(body, fittedHeight());
     return;
   }
   try {
-    const widget = (await import(document.body.dataset.widget)).default;
+    const { mountFigure } = await import(document.body.dataset.host);
     // Overtaken while it loaded: a newer figure is drawing, or the panel
     // has moved on to another kind.
     if (load !== widgetLoad) return;
-    const model = localModel({ ...state, height: fittedHeight() });
     canvasEl.innerHTML = "";
     const el = document.createElement("div");
     canvasEl.append(el);
-    widgetRun = body.run || [];
-    widgetCleanup = widget.render({ model, el }) || null;
-    widgetModel = model;
+    figure = mountFigure(el);
+    figure.show(body, fittedHeight());
   } catch (error) {
     if (load !== widgetLoad) return;
     // Said, not swallowed: an empty panel tells nobody anything.
+    figure = null;
     canvasEl.innerHTML = "";
     const failed = document.createElement("p");
     failed.className = "failed";
@@ -159,10 +92,8 @@ async function drawWidget(body) {
  *  stopped, and any load of it still on its way dropped. */
 function dropWidget() {
   widgetLoad += 1;
-  widgetCleanup?.();
-  widgetCleanup = null;
-  widgetModel = null;
-  widgetRun = [];
+  figure?.dispose();
+  figure = null;
 }
 
 function drawn(payload, stale) {

@@ -22,7 +22,9 @@ import ast
 import dataclasses
 import functools
 import importlib
+import importlib.metadata
 import importlib.util
+import itertools
 import pathlib
 import re
 
@@ -42,7 +44,9 @@ class Example:
     #: harness and the evals are written against them.
     gallery: bool = True
     #: The packages it needs beyond the studio's own: a part solved by
-    #: magpylib-material-response, which is not one of them.
+    #: magpylib-material-response, which is not one of them. Each is its
+    #: module, or its module, its distribution and the least version that
+    #: draws it -- an older one is no use, and is left out as a missing one is.
     needs: tuple = ()
     #: Its marimo notebook in the repository's `docs/notebooks/`, where it
     #: has one: the scene
@@ -57,7 +61,7 @@ class Example:
     def available(self):
         """Whether what it `needs` is installed: the gallery offers it only
         then, and its module solves at import."""
-        return all(importlib.util.find_spec(name) for name in self.needs)
+        return all(_installed(need) for need in self.needs)
 
     @property
     def scene(self):
@@ -111,7 +115,40 @@ def _said(module):
     return said
 
 
-_SOLVED = ("magpylib_material_response",)
+def _installed(need):
+    """Whether `need` -- a module, or a module, its distribution and the
+    least version of it -- is installed."""
+    module, distribution, least = (
+        need if isinstance(need, tuple) else (need, None, None)
+    )
+    if not importlib.util.find_spec(module):
+        return False
+    if least is None:
+        return True
+    try:
+        version = importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return _release(version) >= _release(least)
+
+
+def _release(version):
+    """The numbers a version leads with: "0.12.0.dev3" is (0, 12, 0)."""
+    numbers = []
+    for part in version.split("."):
+        digits = "".join(itertools.takewhile(str.isdigit, part))
+        if not digits:
+            break
+        numbers.append(int(digits))
+        if digits != part:
+            break
+    return tuple(numbers)
+
+
+#: A part solved by magpylib-material-response, from 0.12: the U-core's
+#: winding pack is laid out in its turn's frame, as 0.12 takes it, and an
+#: older one fails to draw it.
+_SOLVED = (("magpylib_material_response", "magpylib-material-response", "0.12"),)
 
 #: In the gallery's order: each leans on a different feature.
 EXAMPLES = {

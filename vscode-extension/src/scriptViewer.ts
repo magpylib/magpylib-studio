@@ -180,9 +180,11 @@ function html(
       'codicon.css',
     ),
   );
-  // The notebook widget, which a `widget` figure is drawn with: that of the
-  // package that drew it (`packageView`). A plotly figure needs none.
-  const widgetUri = view ? `${view.uri(webview, 'widget.js')}` : '';
+  // The notebook widget, which a `widget` figure is drawn with, and the
+  // package's glue that draws a figure with it (host.mjs `mountFigure`):
+  // those of the package that drew it (`packageView`). A plotly figure needs
+  // none.
+  const hostUri = view ? `${view.uri(webview, 'host.mjs')}` : '';
   const widgetCss = view
     ? `<link rel="stylesheet" href="${view.uri(webview, 'widget.css')}" />`
     : '';
@@ -200,7 +202,7 @@ function html(
   ${widgetCss}
   <script nonce="${nonce}" src="${plotlyUri}"></script>
 </head>
-<body data-widget="${widgetUri}">
+<body data-host="${hostUri}">
   <div id="bar">
     <span id="status">Waiting for a figure…</span>
     <button id="promote" hidden title="Runs this script again in the studio, which takes its objects">
@@ -288,10 +290,12 @@ function notDrawn(payload: ViewPayload, reason: string): void {
     return;
   }
   refused.add(`${python}\0${reason}`);
+  // PowerShell, Windows' terminal, runs a quoted path only after `&`
+  const call = process.platform === 'win32' ? '& ' : '';
   void vscode.window.showWarningMessage(
     python
       ? `Magpylib Studio: a figure from ${python} cannot be drawn: ${reason}. ` +
-          `Install magpylib-studio there again: "${python}" -m pip install --upgrade magpylib-studio`
+          `Install magpylib-studio there again: ${call}"${python}" -m pip install --upgrade magpylib-studio`
       : `Magpylib Studio: a figure cannot be drawn: ${reason}. Upgrade ` +
           'magpylib-studio in the Python that ran the script.',
   );

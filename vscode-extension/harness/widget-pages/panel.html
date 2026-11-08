@@ -33,7 +33,7 @@
     </script>
   </head>
   <body
-    data-widget="/static/widget.js"
+    data-host="/static/host.mjs"
     class="vscode-dark"
     data-vscode-theme-kind="vscode-dark"
   >
@@ -56,7 +56,7 @@
         return test();
       };
       const missing = new URLSearchParams(location.search).has("missing");
-      if (missing) document.body.dataset.widget = "/static/no-such-bundle.js";
+      if (missing) document.body.dataset.host = "/static/no-such-host.mjs";
       const body = await (await fetch("/out/panel.json")).json();
       const figure = { kind: "widget", script: "/tmp/rings.py", body };
       postMessage({ type: "view", payload: figure, stale: false });

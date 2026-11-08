@@ -500,6 +500,11 @@ place, draws everything again with its own; a page drawn while the package on
 disk is no longer the running engine's says so, with Restart Engine
 ([0057](decisions.md#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)).
 
+**A script's figure** is drawn by the package that drew it, through its
+`static/host.mjs` (`mountFigure`): the figure's model, its run's frames and what
+a re-run keeps -- what is hidden and picked -- are the package's; the script
+panel's `media/scriptView.js` passes the figure on and saves the picture.
+
 **The JupyterLab tab**
 ([0058](decisions.md#0058-a-scene-file-opens-in-jupyterlab-as-a-tab)): a
 `.magpy.json` opens as `SceneWidget(file, editable=True)` in a kernel of the
