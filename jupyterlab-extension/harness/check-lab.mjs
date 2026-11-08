@@ -301,8 +301,8 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   await inKernel('__view.variables = {"n": 6}');
   await wait(2000);
   check(
-    "and the view is read only",
-    (await inKernel("print(__view.editable)")) === "False",
+    "and the view is for looking only: no pencil, no handles",
+    (await inKernel("print(__view.editable)")) === "None",
   );
   check(
     "and an edit then writes nothing over it",
@@ -381,6 +381,42 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
       60000,
     )) && (await evaluate(`(${TAB}).context.model.dirty`)) === true,
   );
+
+  // a file that cannot be drawn says why, and draws once a readable one is
+  // reloaded
+  const NEWER = path.join(root, "newer.magpy.json");
+  const readable = fs.readFileSync(FILE, "utf8");
+  fs.writeFileSync(
+    NEWER,
+    JSON.stringify({ ...JSON.parse(readable), version: 99 }, null, 2) + "\n",
+  );
+  const OTHER = `[...jupyterapp.shell.widgets("main")].find((w) => w.context?.path === "newer.magpy.json")`;
+  await evaluate(
+    `jupyterapp.commands.execute("docmanager:open", { path: "newer.magpy.json" }).then(() => true)`,
+  );
+  check(
+    "a file of a newer studio opened says why it cannot be drawn",
+    await until(
+      async () =>
+        /newer magpylib-studio/.test(
+          await evaluate(`(${OTHER})?.content.node.innerText ?? ""`),
+        ),
+      90000,
+    ),
+  );
+  fs.writeFileSync(NEWER, readable);
+  await evaluate(`(${OTHER}).context.revert()`);
+  check(
+    "and draws once a readable one is reloaded",
+    await until(
+      () => evaluate(`!!(${OTHER}).node.querySelector("canvas")`),
+      60000,
+    ),
+  );
+  await evaluate(
+    `(() => { const t = ${OTHER}; t.context.model.dirty = false; t.close(); return true; })()`,
+  );
+  await evaluate(`jupyterapp.shell.activateById((${TAB}).id), true`);
 
   // the view follows the tab's height: the window made shorter, the view is
   // as tall as the tab again, and not as tall as it was
