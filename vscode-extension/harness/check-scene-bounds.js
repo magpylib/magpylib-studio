@@ -67,24 +67,21 @@ async function main() {
   };
   const THREE = await import("three");
   // The renderer is the package's, beside no node_modules: its `three` is
-  // the extension's, as the build finds it. `registerHooks` where Node has it
-  // (22.15 on), the older `register` where it does not.
+  // the extension's, as the build finds it. One hook, a module of its own:
+  // `registerHooks` takes it where Node has that (22.15 on), `register` where
+  // it does not.
   const here = pathToFileURL(path.join(EXT, "package.json")).href;
-  const toThree = (specifier, context, next) =>
-    /^three(\/|$)/.test(specifier)
-      ? next(specifier, { ...context, parentURL: here })
-      : next(specifier, context);
+  const hook =
+    "data:text/javascript," +
+    encodeURIComponent(`export function resolve(specifier, context, next) {
+      return /^three(\\/|$)/.test(specifier)
+        ? next(specifier, { ...context, parentURL: ${JSON.stringify(here)} })
+        : next(specifier, context);
+    }`);
   if (moduleApi.registerHooks) {
-    moduleApi.registerHooks({ resolve: toThree });
+    moduleApi.registerHooks({ resolve: (await import(hook)).resolve });
   } else {
-    // the same hook, as a module of its own, which `register` needs
-    const hook = `const here = ${JSON.stringify(here)};
-      export function resolve(specifier, context, next) {
-        return /^three(\\/|$)/.test(specifier)
-          ? next(specifier, { ...context, parentURL: here })
-          : next(specifier, context);
-      }`;
-    moduleApi.register("data:text/javascript," + encodeURIComponent(hook));
+    moduleApi.register(hook);
   }
   const { boundByFinitePoints, withPenLifts } = await import(
     pathToFileURL(path.join(REPO, "magpylib_studio", "static", "scene3d.mjs"))

@@ -20,7 +20,7 @@ import * as vscode from 'vscode';
  * `link-mode=symlink`). Under remote development the extension runs where the
  * engine does, and these load from there as the extension's own files do.
  */
-const FILES = [
+export const VIEW_FILES = [
   'widget.js',
   'widget.css',
   'host.mjs',
@@ -28,7 +28,7 @@ const FILES = [
   'inspector.mjs',
 ] as const;
 
-export type PackageFile = (typeof FILES)[number];
+export type PackageFile = (typeof VIEW_FILES)[number];
 
 export interface PackageView {
   /** The folder the engine or the figure named. */
@@ -51,7 +51,7 @@ export function packageView(dir: unknown): PackageView {
   }
   const real = new Map<PackageFile, string>();
   const stamps: string[] = [];
-  for (const file of FILES) {
+  for (const file of VIEW_FILES) {
     try {
       const path = realpathSync(join(dir, file));
       const { mtimeMs, size } = statSync(path);
@@ -68,6 +68,16 @@ export function packageView(dir: unknown): PackageView {
     roots: roots.map((path) => vscode.Uri.file(path)),
     uri: (webview, file) => webview.asWebviewUri(vscode.Uri.file(real.get(file)!)),
   };
+}
+
+/** Whether `view` is what is on disk still: its files where they were, as
+ *  they were written. Not, once the package was upgraded or rebuilt in place. */
+export function isCurrent(view: PackageView): boolean {
+  try {
+    return packageView(view.dir).key === view.key;
+  } catch {
+    return false;
+  }
 }
 
 /** A webview drawn with a package view: the page of each scene tab, side bar
@@ -95,13 +105,14 @@ export class PackagePage {
   /** Load the page `html` makes of `view`, or of none: a notice, or a figure
    *  that needs no view. It may load from the extension and the view. */
   load(view: PackageView | undefined, html: (view: PackageView | undefined) => string): void {
-    this.key = view?.key;
     const webview = this.webview();
     webview.options = {
       enableScripts: true,
       localResourceRoots: [this.extensionUri, ...(view?.roots ?? [])],
     };
     webview.html = html(view);
+    // said drawn once it is: a page that threw on the way is drawn again
+    this.key = view?.key;
   }
 }
 

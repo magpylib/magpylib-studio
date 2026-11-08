@@ -495,9 +495,9 @@ each folder a root the webview may load from (`src/packageView.ts`). A view is
 then always of its payload's version, which changes with every release and so is
 no protocol's business. A view is its files' real paths and the times they were
 written: an engine started in another interpreter, or on a package upgraded in
-place, draws everything again with its own, and the engine's view is watched, so
-a package upgraded under a running engine restarts it
-([0057](decisions.md#0057-the-host-glue-is-the-packages-and-the-view-is-watched)).
+place, draws everything again with its own; a page drawn while the package on
+disk is no longer the running engine's says so, with Restart Engine
+([0057](decisions.md#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)).
 
 **Field views**: `get_field` (summed B, H, J or M at points or along a sensor,
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D

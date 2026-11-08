@@ -52,9 +52,9 @@ export default [
   // `media/`, and the package's view code the extension loads from the
   // package as it is (decisions 0056 and 0057): the model of a hosted widget,
   // and the renderer the widget bundles. Those two are linted by a second
-  // run from the repo root (`npm run lint`): ESLint lints nothing outside the
-  // folder it is based in, and the package is beside this one. The package's
-  // other modules are checked by their build.
+  // run from the repo root (`harness/lint-package-view.mjs`): ESLint lints
+  // nothing outside the folder it is based in, and the package is beside this
+  // one. The package's other modules are checked by their build.
   ...[
     { files: ["media/**/*.js", "media/**/*.mjs"] },
     {

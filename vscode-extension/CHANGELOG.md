@@ -18,8 +18,9 @@ draw some things wrongly without a word, such as a uniform field. The extension
 now needs an engine of this release or newer and offers to install one; a
 script's figure from an older package says how to upgrade it there. The
 extension is smaller too, without three.js inside. Upgrading `magpylib-studio`
-while VS Code runs restarts the engine on the new version, and a scene tab says
-when the engine is starting, or why it cannot draw, and tries again.
+while VS Code runs is said, with a button to restart the engine on the new
+version, and a scene tab says when the engine is starting, or why it cannot
+draw, and tries again.
 
 </details>
 

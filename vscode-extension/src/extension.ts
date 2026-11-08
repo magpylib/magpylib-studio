@@ -24,7 +24,7 @@ import {
 } from './scenes';
 import { setTextFocus, tookTextFocus, undoTyping } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
-import { noticeHtml, PackagePage, PackageView, packageView } from './packageView';
+import { isCurrent, noticeHtml, PackagePage, PackageView, packageView } from './packageView';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
@@ -2001,7 +2001,6 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
   }
   engine = client;
   view = view!;
-  watchEngineView(view);
   // The running engine's view, whether or not another: what the watcher
   // compares with is this engine's
   const another = engineView?.key !== view.key;
@@ -2014,58 +2013,43 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
   return client;
 }
 
-/** Watches the running engine's view on disk. */
-let engineViewWatch: vscode.Disposable | undefined;
+/** The engine's view, said to be another on disk: once for each, so that a
+ *  page drawn again and again under the same upgrade says it once. */
+let toldChanged: string | undefined;
 
-/** When the files of the engine's view change under it -- the package
- *  upgraded in its interpreter -- the engine still running is of the old
- *  version, and a page loaded now would load the new files: a side bar view
- *  shown again, a tab reloaded. The engine is restarted on the package now
- *  there, as on a change of interpreter, and everything is drawn again with
- *  its view. Once the files have been still for two seconds: pip writes them
- *  one at a time. */
-function watchEngineView(view: PackageView): void {
-  engineViewWatch?.dispose();
-  let settle: ReturnType<typeof setTimeout> | undefined;
-  const changed = () => {
-    clearTimeout(settle);
-    settle = setTimeout(() => {
-      let now: string;
-      try {
-        now = packageView(view.dir).key;
-      } catch {
-        // Half removed, or half written: an engine started now would be
-        // refused, and stay so. The files still to come wake this again.
-        return;
-      }
-      if (now === view.key || engine === undefined || !engine.isRunning || engineView !== view) {
-        return;
-      }
-      vscode.window.setStatusBarMessage(
-        'Magpylib Studio: magpylib-studio changed on disk; restarting the engine on it',
-        4000,
-      );
-      engine.dispose();
-      refreshSurfaces(); // asks for the scene, which starts the new one
-    }, 2000);
-  };
-  // The folder the engine named as well as the files' own: an installer that
-  // links the files from its cache upgrades by pointing the links at another
-  // folder, and never touches the one they pointed at.
-  const folders = [...new Set([view.dir, ...view.roots.map((root) => root.fsPath)])];
-  const watchers = folders.map((folder) =>
-    vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(folder), '*'),
-    ),
-  );
-  for (const watcher of watchers) {
-    watcher.onDidChange(changed);
-    watcher.onDidCreate(changed);
-    watcher.onDidDelete(changed);
+/** The view a page is drawn with now: the running engine's. When the package
+ *  has changed on disk since the engine started -- upgraded in its
+ *  interpreter, or rebuilt in a development install -- the page loads the
+ *  files now there, against an engine of what was there: said, with Restart
+ *  Engine, the restart a person asks for. Not done on its own: a restart puts
+ *  every scene back without its undo history, and a file changing is no sign
+ *  that the package is whole again. */
+function viewToDraw(): PackageView | undefined {
+  const view = engineView;
+  if (!view || !engine?.isRunning || isCurrent(view)) {
+    return view;
   }
-  engineViewWatch = vscode.Disposable.from(...watchers, {
-    dispose: () => clearTimeout(settle),
-  });
+  let now: string | undefined;
+  try {
+    now = packageView(view.dir).key;
+  } catch {
+    now = 'not whole';
+  }
+  if (toldChanged !== now) {
+    toldChanged = now;
+    void vscode.window
+      .showWarningMessage(
+        'Magpylib Studio: magpylib-studio has changed on disk since the engine started. ' +
+          'Restart the engine to draw with it.',
+        'Restart Engine',
+      )
+      .then((choice) => {
+        if (choice) {
+          void vscode.commands.executeCommand('magpylib-studio.restartEngine');
+        }
+      });
+  }
+  return view;
 }
 
 /** The view the engine's scenes are drawn with, starting the engine when none
@@ -2094,7 +2078,7 @@ function pageOf(context: vscode.ExtensionContext, panel: vscode.WebviewPanel): P
 function drawScenePanel(
   context: vscode.ExtensionContext,
   panel: vscode.WebviewPanel,
-  view: PackageView | undefined = engineView,
+  view: PackageView | undefined = viewToDraw(),
 ): void {
   const page = pageOf(context, panel);
   const load = (shown: PackageView | undefined, notice = '') => {
@@ -3142,7 +3126,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       refreshLiveSurfaces();
     },
-    () => engineView,
+    viewToDraw,
   );
   variablesTree = variables;
 
@@ -3183,7 +3167,7 @@ export function activate(context: vscode.ExtensionContext): void {
       broadcastMutation();
     }),
     () => selectedObjectId,
-    () => engineView,
+    viewToDraw,
   );
 
   // Everything drawn with the package's view is drawn again with the engine's

@@ -65,7 +65,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
 | [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
 | [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
-| [0057](#0057-the-host-glue-is-the-packages-and-the-view-is-watched)                            | The host glue is the package's, and the view is watched      | accepted 2026-11-08                                                  |
+| [0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)                         | The host glue is the package's, and a changed view is said   | accepted 2026-11-08                                                  |
 
 ---
 
@@ -3005,7 +3005,7 @@ draw.
 
 ---
 
-## 0057. The host glue is the package's, and the view is watched
+## 0057. The host glue is the package's, and a changed view is said
 
 **Status:** accepted 2026-11-08, on Alex's word ("merged, follow up now"), after
 [0056](#0056-every-host-draws-with-the-packages-view) was merged; it finishes
@@ -3036,13 +3036,11 @@ shown again, or a tab reloaded, load the new files against the old engine.
   the build finds through `NODE_PATH`.
 - **A view is its files' real paths and the times they were written**, so an
   engine started on a package upgraded in place, or a script run again after
-  one, draws everything again with it. The engine's view is watched, the folder
-  the engine named as well as its files' own, since an installer that links them
-  from a cache upgrades by pointing the links elsewhere: upgraded under a
-  running engine -- once its files have been still for two seconds, and whole --
-  the engine is restarted on it, as on a change of interpreter. A script figure
-  whose view changed so is said out of date when shown again, until a run of the
-  script is drawn; saving the script does not clear it.
+  one, draws everything again with it. A page drawn while the package on disk is
+  no longer the running engine's -- upgraded in its interpreter, or rebuilt in a
+  development install -- says so, once for each change, with Restart Engine. A
+  script figure whose view changed so is said out of date when shown again,
+  until a run of the script is drawn; saving the script does not clear it.
 - **A tab says what it waits for**: the engine starting, at once, and why it
   cannot draw when it cannot; it tries again when an engine starts, is
   installed, or the interpreter changes -- not when it is looked at, as an
@@ -3063,7 +3061,10 @@ shown again, or a tab reloaded, load the new files against the old engine.
 - **Leaving the glue in the extension, the protocol bumped by hand when the
   model changes**: the model changes with the widget, and a rule kept by hand is
   what 0056 found had failed.
-- **Restarting the engine at once on any change**: pip writes a package one file
-  at a time, and an engine started halfway is refused as not whole.
+- **Restarting the engine on its own when the view's files change**, watched:
+  built and reviewed three times over. A restart puts every scene back without
+  its undo history, so a development install lost it at every rebuild; pip
+  writes a package one file at a time and may replace the folder watched, so the
+  restart came too early or never; and its message said a crash.
 - **Shipping the renderer's source in the wheel**: 380 KB nobody loads, as the
   bundle holds it.

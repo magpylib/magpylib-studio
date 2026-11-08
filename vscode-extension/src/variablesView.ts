@@ -111,6 +111,14 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
     webviewView.description = this.scene;
     this.page = new PackagePage(() => webviewView.webview, this.extensionUri);
     this.draw();
+    // Shown again, the page is loaded again from its HTML without a word to
+    // this: the files it loads are those on disk now, which `packageView`
+    // checks against the running engine's.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.draw();
+      }
+    });
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (tookTextFocus(message, webviewView.webview)) {
