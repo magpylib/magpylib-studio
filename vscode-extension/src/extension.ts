@@ -2002,10 +2002,15 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
   engine = client;
   view = view!;
   watchEngineView(view);
-  if (engineView?.key !== view.key) {
-    engineView = view;
+  // The running engine's view, whether or not another: what the watcher
+  // compares with is this engine's
+  const another = engineView?.key !== view.key;
+  engineView = view;
+  if (another) {
     engineViewChanged.fire(view);
   }
+  // a tab that could not be drawn is, now that an engine runs
+  drawUndrawn();
   return client;
 }
 
@@ -2025,11 +2030,13 @@ function watchEngineView(view: PackageView): void {
   const changed = () => {
     clearTimeout(settle);
     settle = setTimeout(() => {
-      let now: string | undefined;
+      let now: string;
       try {
         now = packageView(view.dir).key;
       } catch {
-        now = undefined; // half removed: the restart says what is missing
+        // Half removed, or half written: an engine started now would be
+        // refused, and stay so. The files still to come wake this again.
+        return;
       }
       if (now === view.key || engine === undefined || !engine.isRunning || engineView !== view) {
         return;
@@ -2042,8 +2049,14 @@ function watchEngineView(view: PackageView): void {
       refreshSurfaces(); // asks for the scene, which starts the new one
     }, 2000);
   };
-  const watchers = view.roots.map((root) =>
-    vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '*')),
+  // The folder the engine named as well as the files' own: an installer that
+  // links the files from its cache upgrades by pointing the links at another
+  // folder, and never touches the one they pointed at.
+  const folders = [...new Set([view.dir, ...view.roots.map((root) => root.fsPath)])];
+  const watchers = folders.map((folder) =>
+    vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(vscode.Uri.file(folder), '*'),
+    ),
   );
   for (const watcher of watchers) {
     watcher.onDidChange(changed);
@@ -2111,9 +2124,11 @@ function drawScenePanel(
   );
 }
 
-/** Draw the tabs no engine has drawn yet, which starts one for them: after an
- *  engine is installed, or the interpreter changed, a tab that said why it
- *  could not draw tries again. */
+/** Draw the tabs no engine has drawn yet, starting one for them when none
+ *  runs: after an engine is installed, the interpreter changed, or an engine
+ *  started for anything else, a tab that said why it could not draw tries
+ *  again. Not when a tab is looked at: an engine that cannot start says so
+ *  each time it is asked. */
 function drawUndrawn(): void {
   if (!activeContext) {
     return;
@@ -2211,12 +2226,6 @@ function adoptScenePanel(
   panel.iconPath = logoUri(context); // tabs render icons in full colour
   panel.webview.options = PANEL_OPTIONS(context);
   drawScenePanel(context, panel);
-  // a tab that could not be drawn tries again when it is looked at
-  panel.onDidChangeViewState(() => {
-    if (panel.visible && !pageOf(context, panel).drawn) {
-      drawScenePanel(context, panel);
-    }
-  });
   wireRpcRouter(panel.webview, () => Promise.resolve(engineFor(context, doc)));
   panel.webview.onDidReceiveMessage((message) => {
     if (tookTextFocus(message, panel.webview)) {

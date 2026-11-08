@@ -3036,19 +3036,27 @@ shown again, or a tab reloaded, load the new files against the old engine.
   the build finds through `NODE_PATH`.
 - **A view is its files' real paths and the times they were written**, so an
   engine started on a package upgraded in place, or a script run again after
-  one, draws everything again with it. The engine's view is watched: upgraded
-  under a running engine -- once its files have been still for two seconds --
+  one, draws everything again with it. The engine's view is watched, the folder
+  the engine named as well as its files' own, since an installer that links them
+  from a cache upgrades by pointing the links elsewhere: upgraded under a
+  running engine -- once its files have been still for two seconds, and whole --
   the engine is restarted on it, as on a change of interpreter. A script figure
-  whose view changed so is said out of date when shown again.
+  whose view changed so is said out of date when shown again, until a run of the
+  script is drawn; saving the script does not clear it.
 - **A tab says what it waits for**: the engine starting, at once, and why it
-  cannot draw when it cannot; it tries again when looked at, an engine installed
-  or the interpreter changed. The side bar does not start an engine to draw
-  itself; until one runs it says so.
+  cannot draw when it cannot; it tries again when an engine starts, is
+  installed, or the interpreter changes -- not when it is looked at, as an
+  engine that cannot start says so each time it is asked. The side bar does not
+  start an engine to draw itself; until one runs it says so.
 - **The payload's version covers what the panel reads around `body`**: `body` is
   read by the view the payload names, and never bumps it.
 - **The extension goes to the Marketplace once PyPI serves its engine**: the
-  release waits for this tag's `magpylib-studio` there, up to 30 minutes, so
-  Install the Engine always finds one the extension accepts.
+  release waits for this tag's `magpylib-studio` there, up to 30 minutes and
+  before it signs in to Azure, which a wait that long could outlast, so Install
+  the Engine always finds one the extension accepts.
+- **The view's own code is linted**: `host.mjs` and `scene3d.mjs`, which the
+  extension loads from the package as they are, by a second ESLint run from the
+  repo root, since ESLint lints nothing outside the folder it is based in.
 
 ### Rejected
 

@@ -29,9 +29,10 @@ const BUNDLES = ["widget.js", "panel.js"].map((name) =>
 );
 // The set the build hashes, the way it takes them: every module of the
 // widget's own and the renderer, by path from the repo root, sorted.
+// host.mjs is not one: a host loads it beside the bundle, which it imports.
 const SOURCES = fs
   .readdirSync(STATIC)
-  .filter((name) => name.endsWith(".mjs"))
+  .filter((name) => name.endsWith(".mjs") && name !== "host.mjs")
   .map((name) => `magpylib_studio/static/${name}`)
   .sort();
 const REBUILD =

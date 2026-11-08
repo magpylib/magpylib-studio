@@ -42,7 +42,12 @@ mkdir -p build
 # And what they were built with: a new three.js -- which the panel picks up
 # from node_modules as soon as it is installed -- or a new esbuild is a new
 # bundle as surely as an edit is.
-sources=(magpylib_studio/static/*.mjs)
+# host.mjs is not among them: a host loads it beside the bundle, which it
+# imports, and nothing bundles it.
+sources=()
+for file in magpylib_studio/static/*.mjs; do
+  [ "$file" = magpylib_studio/static/host.mjs ] || sources+=("$file")
+done
 digest="$(THREE="$version" ESBUILD="$ESBUILD" node -e '
 const fs = require("fs");
 const hash = require("crypto").createHash("sha256");

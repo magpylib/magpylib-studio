@@ -99,6 +99,7 @@ const host = {
 
 /** The package's view, once it has loaded; a pick told before is kept. */
 let view = null;
+let notLoaded = ""; // why it did not
 let pickedEarly;
 
 // --- keeping up with the engine ------------------------------------------------
@@ -126,7 +127,10 @@ async function refresh() {
 }
 
 async function drawScene() {
-  if (!view) return; // not loaded: it said why
+  if (!view) {
+    say(notLoaded); // said again: a switch of mode said "Loading…" over it
+    return;
+  }
   await view.load(() => !charting()); // switched while the engine was answering
   if (!charting()) say("");
 }
@@ -239,6 +243,7 @@ try {
   if (pickedEarly !== undefined) view.select(pickedEarly);
 } catch (error) {
   const text = `The 3D view could not load: ${error?.message || error}`;
+  notLoaded = text;
   say(text);
   vscodeApi.postMessage({ type: "notice", text });
 }

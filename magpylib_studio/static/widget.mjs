@@ -1,11 +1,12 @@
 /**
  * The studio's 3D view, in a notebook cell.
  *
- * The renderer is the one the VS Code panel uses -- `vscode-extension/media/
- * scene3d.mjs`, bundled in by `tools/build-widget.sh`. Being used from here
- * cost that file two lines: its API object is exported as well as put on
- * `window`, and it reads its three theme colours off the element it was hung
- * in rather than off `document.body`. This file is the host it was already
+ * The renderer is `scene3d.mjs`, beside this, bundled in by
+ * `tools/build-widget.sh`; every host draws with this bundle, loaded from the
+ * package (decisions 0056 and 0057). It was written for a page of its own, and
+ * being used from here cost it two lines: its API object is exported as well
+ * as put on `window`, and it reads its three theme colours off the element it
+ * was hung in rather than off `document.body`. This file is the host it was already
  * written to be dropped into: it makes an element, hands it a payload, and
  * reads the events the view dispatches back.
  *

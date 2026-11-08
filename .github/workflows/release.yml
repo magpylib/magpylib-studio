@@ -106,23 +106,12 @@ jobs:
           npx @vscode/vsce package --out "${{ github.workspace
           }}/magpylib-studio-${{ github.ref_name }}.vsix"
 
-      # Azure DevOps global tokens stop working on 1 December 2026, so
-      # there is no secret: the job signs in as the managed identity
-      # `magpylib-marketplace` (Azure resource group magpylib-release), a
-      # Contributor member of the magpylib publisher. Neither ID is a secret;
-      # marketplace-login.yml checks the same sign-in without publishing.
-      - name: Sign in to Azure
-        uses: azure/login@v2
-        with:
-          client-id: 022ba66b-5030-496e-af0f-864e452bc4e8
-          tenant-id: cf42a1c9-05bb-415e-a752-84a630d5f779
-          allow-no-subscriptions: true
-
       # The extension draws with the engine's view and refuses an engine of an
       # older protocol (decision 0056), offering to install one from PyPI. So
       # it goes out only once PyPI serves the engine of this tag, which cd.yml
       # publishes from the same push: up to 30 minutes, then the job fails and
-      # nothing is published.
+      # nothing is published. Before the sign-in below, which a wait this long
+      # could outlast.
       - name: Wait for the engine on PyPI
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -138,6 +127,18 @@ jobs:
           done
           echo "::error::magpylib-studio ${version} never reached PyPI; not publishing the extension"
           exit 1
+
+      # Azure DevOps global tokens stop working on 1 December 2026, so
+      # there is no secret: the job signs in as the managed identity
+      # `magpylib-marketplace` (Azure resource group magpylib-release), a
+      # Contributor member of the magpylib publisher. Neither ID is a secret;
+      # marketplace-login.yml checks the same sign-in without publishing.
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: 022ba66b-5030-496e-af0f-864e452bc4e8
+          tenant-id: cf42a1c9-05bb-415e-a752-84a630d5f779
+          allow-no-subscriptions: true
 
       # Gated on a clean tag for the same reason the version sync above is:
       # the Marketplace has no pre-release concept for a normal publish, and

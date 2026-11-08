@@ -69,6 +69,10 @@ interface View {
   panel: vscode.WebviewPanel;
   payload: ViewPayload;
   stale: boolean;
+  /** Behind the script's last run whatever its file says: a run it could not
+   *  draw, or a view that changed under it. Only a payload arriving clears
+   *  it -- not a save that leaves the file as it ran (`restate`). */
+  behind: boolean;
   /** The page, which knows the view that drew it: none for a plotly figure. */
   page: PackagePage;
 }
@@ -206,7 +210,7 @@ function html(
   <div id="stage">
     <div id="canvas"></div>
     <div id="overlay" hidden>
-      <span id="stale" title="The script has been saved since this figure was drawn">out of date</span>
+      <span id="stale" title="Not what the script draws now: changed since it ran, or run again where this could not draw it">out of date</span>
       <button id="rerun" title="Runs the script again, with the interpreter and directory it ran in before">
         <i class="codicon codicon-run"></i>Re-run
       </button>
@@ -293,9 +297,10 @@ function notDrawn(payload: ViewPayload, reason: string): void {
   );
 }
 
-/** Say that what `view` shows is not what its file drew now, as an edit to the
- *  script since is said. */
+/** Say that what `view` shows is behind the script's last run, as an edit to
+ *  the script since is said, and so until a run is drawn. */
 function markStale(view: View): void {
+  view.behind = true;
   if (view.stale) {
     return;
   }
@@ -340,6 +345,7 @@ function draw(
     // A payload is the script as it was when it ran, so one arriving is the
     // only thing that settles this.
     existing.stale = false;
+    existing.behind = false;
     existing.panel.title = panelTitle(payload);
     if (view && !existing.page.shows(view)) {
       // Run again in another interpreter, or after an upgrade: the page is
@@ -360,7 +366,7 @@ function draw(
     { enableScripts: true, localResourceRoots: [context.extensionUri] },
   );
   const page = new PackagePage(() => panel.webview, context.extensionUri);
-  views.set(key, { panel, payload, stale: false, page });
+  views.set(key, { panel, payload, stale: false, behind: false, page });
   page.load(view, (drawn) => html(context, panel.webview, drawn));
   // Hidden, the page is torn down, and shown again it loads its view's files
   // as they are now: a package upgraded since loads the new ones, under a
@@ -516,7 +522,7 @@ async function restate(uri: vscode.Uri): Promise<void> {
     // No recorded digest means a payload from before this existed. Falling
     // back to "a save is a change" keeps those behaving as they used to.
     const recorded = view.payload.digest;
-    const stale = recorded ? recorded !== digest : true;
+    const stale = (recorded ? recorded !== digest : true) || view.behind;
     if (stale === view.stale) {
       continue;
     }
