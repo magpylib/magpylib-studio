@@ -30,12 +30,14 @@ installed `magpylib-studio` package instead of a copy inside the extension, so a
 scene is always drawn by the view of the version that wrote it. Before, an
 extension and an engine of different versions could pass the version check and
 draw some things wrongly without a word, such as a uniform field. The extension
-now needs an engine of this release or newer and offers to install one; a
-script's figure from an older package says how to upgrade it there. The
-extension is smaller too, without three.js inside. Upgrading `magpylib-studio`
-while VS Code runs is said, with a button to restart the engine on the new
-version, and a scene tab says when the engine is starting, or why it cannot
-draw, and tries again.
+now needs an engine of this release or newer and offers to install one, as
+**Magpylib Studio: Install the Engine** does from the palette, and Restart
+Engine tries again an engine upgraded in a terminal; an extension of 0.15 or
+older calls this engine too new until it updates itself; a script's figure from
+an older package says how to upgrade it there. The extension is smaller too,
+without three.js inside. Upgrading `magpylib-studio` while VS Code runs is said,
+with a button to restart the engine on the new version, and a scene tab says
+when the engine is starting, or why it cannot draw, and tries again.
 
 </details>
 
@@ -46,6 +48,9 @@ Its winding pack is drawn across the turn, along the coil's axis and outward, as
 material-response 0.12 takes it in the polyline's own frame; the windings are
 the same
 ([magpylib-material-response#191](https://github.com/magpylib/magpylib-material-response/pull/191)).
+With an older material-response the gallery leaves the solved examples out, as
+it does when material-response is not installed, rather than offering one that
+cannot be drawn.
 
 </details>
 

@@ -8,6 +8,23 @@ from magpylib_studio.examples import EXAMPLES, GALLERY
 from magpylib_studio.session import MagpylibStudioSession
 
 
+def test_an_example_needs_a_version_it_can_draw_with(monkeypatch):
+    """A package older than an example needs is no use: the gallery leaves
+    the example out, as it does when the package is missing."""
+    from magpylib_studio import examples
+
+    need = ("json", "magpylib-material-response", "0.12")
+    version = {"value": "0.11.0"}
+    monkeypatch.setattr(
+        examples.importlib.metadata, "version", lambda _: version["value"]
+    )
+    assert not examples._installed(need)
+    version["value"] = "0.12.0.dev3"
+    assert examples._installed(need)
+    assert not examples._installed(("no_such_module_here", "x", "1"))
+    assert examples._installed("json")
+
+
 @pytest.mark.parametrize("key", list(EXAMPLES))
 def test_an_example_says_what_it_is_and_opens(key):
     """A title and a line for the gallery, a text for its docs page, and a
@@ -15,7 +32,7 @@ def test_an_example_says_what_it_is_and_opens(key):
     called plainly, is magpylib."""
     example = EXAMPLES[key]
     if not example.available:  # as the gallery leaves it out
-        pytest.skip(f"{key} needs {', '.join(example.needs)}")
+        pytest.skip(f"{key} needs {example.needs}")
     assert isinstance(example.scene, SceneFunction)
     assert example.scene._fn.__name__ == example.module
     assert example.title and example.summary and len(example.text) > 80

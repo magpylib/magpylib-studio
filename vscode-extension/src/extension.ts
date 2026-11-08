@@ -2103,7 +2103,9 @@ function drawScenePanel(
     (err: unknown) =>
       load(
         undefined,
-        `Magpylib Studio cannot draw this scene: ${err instanceof Error ? err.message : err}.`,
+        `Magpylib Studio cannot draw this scene: ${err instanceof Error ? err.message : err}. ` +
+          'Magpylib Studio: Install the Engine, from the command palette, installs one ' +
+          'this extension can use; Restart Engine tries the interpreter again.',
       ),
   );
 }
@@ -5910,6 +5912,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // A new engine is given every scene as it was a second after its last
     // edit, as after a crash.
     registerCommand('magpylib-studio.restartEngine', async () => {
+      // Asked again: an engine refused before -- too old for this extension
+      // -- may have been upgraded since, in a terminal.
+      refusedEngine = undefined;
       if (engine?.isRunning) {
         engineOutput?.appendLine('[restarting the engine, as asked]');
         restartAsked = true;
@@ -5918,6 +5923,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await getRawEngine(context).catch(() => undefined);
       refreshSurfaces();
     }),
+    // The refusal's own button, from the palette too: a toast once
+    // dismissed is gone, and an engine too old for this extension is what
+    // every upgrade from 0.15 meets.
+    registerCommand('magpylib-studio.installEngine', () => installEngine()),
     registerCommand('magpylib-studio.undo', () => undoRedo('undo')),
     registerCommand('magpylib-studio.redo', () => undoRedo('redo')),
     registerCommand('magpylib-studio.undoTyping', () => undoTyping('undo')),

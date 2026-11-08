@@ -18,8 +18,12 @@
  *   useVariant(name)       a variant used from the view's row of them
  *   say(text)              a word in the host's bar
  *
- * It is the extension's one contract with this file, and `rpc.PROTOCOL`
- * covers it: a change to `host` or to what `mountWidget` returns is a bump.
+ * And a script's figure, drawn in a host's panel with no python behind it
+ * (`mountFigure`): what a `widget` payload's body holds, read here too.
+ *
+ * These are the extension's one contract with this file, and `rpc.PROTOCOL`
+ * covers it: a change to `host`, or to what `mountWidget` and `mountFigure`
+ * take and return, is a bump.
  */
 import widget from "./widget.js";
 
@@ -246,6 +250,105 @@ export function mountWidget(el, host) {
     },
     resize(height) {
       take("height", height);
+    },
+  };
+}
+
+/** Each object's place in the legend -- its position and name at every level
+ *  down -- by its id. A script's ids are the objects' own, from the process
+ *  that drew them, so a re-run's are all new; the place is what carries over. */
+function placesIn(tree, above = "", places = new Map()) {
+  tree.forEach((node, i) => {
+    const place = `${above}/${i}:${node.label}`;
+    places.set(node.id, place);
+    placesIn(node.children || [], place, places);
+  });
+  return places;
+}
+
+/** `ids` in the tree `before`, as the ids of the same places in `after`.
+ *  One whose place is gone, or now holds something else, is dropped. */
+function carried(ids, before, after) {
+  const was = placesIn(before);
+  const now = new Map([...placesIn(after)].map(([id, place]) => [place, id]));
+  return ids.map((id) => now.get(was.get(id))).filter(Boolean);
+}
+
+/**
+ * Draw a script's figure in `el`: the body of a `widget` payload, whose state
+ * is the model and whose run is every frame of a run too big to carry as
+ * changes. There is no python behind it: the model is held here, and answers
+ * the view's asks for frames from the run.
+ *
+ * Returns `show(body, height)` -- the first figure, or a re-run's, in the view
+ * as the user left it -- `resize(height)` and `dispose()`, which lets the
+ * renderer go.
+ */
+export function mountFigure(el) {
+  let model = null;
+  let run = [];
+  let cleanup = null;
+
+  function localModel(state) {
+    const values = { ...state };
+    const listeners = {};
+    const emit = (event, value) =>
+      (listeners[event] || []).forEach((listener) => listener(value));
+    return {
+      get: (key) => values[key],
+      set(key, value) {
+        values[key] = value;
+        emit(`change:${key}`, value);
+      },
+      save_changes() {},
+      on: (event, listener) => (listeners[event] ||= []).push(listener),
+      off() {},
+      send(message) {
+        if (message.kind !== "frame" || !run.length) return;
+        const at = Math.max(0, Math.min(message.index, run.length - 1));
+        setTimeout(() =>
+          emit("msg:custom", {
+            kind: "frame",
+            ...run[at],
+            runId: message.runId,
+          }),
+        );
+      },
+    };
+  }
+
+  return {
+    show(body, height) {
+      const state = body.state || {};
+      run = body.run || [];
+      if (model) {
+        // A re-run: the script's new figure, in the view as the user left
+        // it. What was set here -- theme, axes, what is hidden and picked --
+        // was set by the user, not the script, and stays. Everything before
+        // the payload: the widget reads a new payload with the tree, run
+        // length and pace it belongs to.
+        const before = model.get("tree") || [];
+        const after = state.tree || [];
+        for (const key of ["hidden", "selected"]) {
+          model.set(key, carried(model.get(key) || [], before, after));
+        }
+        for (const key of ["tree", "frames", "duration", "repeat"]) {
+          model.set(key, state[key]);
+        }
+        model.set("payload", state.payload);
+        return;
+      }
+      model = localModel({ ...state, height });
+      cleanup = widget.render({ model, el }) || null;
+    },
+    resize(height) {
+      model?.set("height", height);
+    },
+    dispose() {
+      cleanup?.();
+      cleanup = null;
+      model = null;
+      run = [];
     },
   };
 }

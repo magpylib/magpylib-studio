@@ -80,6 +80,11 @@
         "category": "Magpylib Studio"
       },
       {
+        "command": "magpylib-studio.installEngine",
+        "title": "Install the Engine",
+        "category": "Magpylib Studio"
+      },
+      {
         "command": "magpylib-studio.refreshScene",
         "title": "Refresh Scene",
         "icon": "$(refresh)",
