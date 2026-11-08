@@ -5,8 +5,9 @@ import * as vscode from 'vscode';
 
 /**
  * The package's view, where an engine or a script's figure says it is: the
- * notebook widget's bundle and stylesheet, and the Variables and Inspector
- * panels the side bar mounts (docs/decisions.md, 0056).
+ * notebook widget's bundle and stylesheet, the model a scene tab runs it
+ * against (`host.mjs`), and the Variables and Inspector panels the side bar
+ * mounts (docs/decisions.md, 0056 and 0057).
  *
  * The extension carries no copy. The payload a view reads changes with every
  * release, and a copy shipped here drew the payloads of whatever engine pip
@@ -19,9 +20,15 @@ import * as vscode from 'vscode';
  * `link-mode=symlink`). Under remote development the extension runs where the
  * engine does, and these load from there as the extension's own files do.
  */
-const FILES = ['widget.js', 'widget.css', 'variables.mjs', 'inspector.mjs'] as const;
+export const VIEW_FILES = [
+  'widget.js',
+  'widget.css',
+  'host.mjs',
+  'variables.mjs',
+  'inspector.mjs',
+] as const;
 
-export type PackageFile = (typeof FILES)[number];
+export type PackageFile = (typeof VIEW_FILES)[number];
 
 export interface PackageView {
   /** The folder the engine or the figure named. */
@@ -44,7 +51,7 @@ export function packageView(dir: unknown): PackageView {
   }
   const real = new Map<PackageFile, string>();
   const stamps: string[] = [];
-  for (const file of FILES) {
+  for (const file of VIEW_FILES) {
     try {
       const path = realpathSync(join(dir, file));
       const { mtimeMs, size } = statSync(path);
@@ -63,21 +70,50 @@ export function packageView(dir: unknown): PackageView {
   };
 }
 
-/** Load `webview` with `view` -- `page` is its HTML -- or, with none, with
- *  `notice` in its place: a view waiting for an engine, or why there is none.
- *  The roots are the extension's and the view's. */
-export function showPage(
-  webview: vscode.Webview,
-  extensionUri: vscode.Uri,
-  view: PackageView | undefined,
-  page: (view: PackageView) => string,
-  notice: string,
-): void {
-  webview.options = {
-    enableScripts: true,
-    localResourceRoots: [extensionUri, ...(view?.roots ?? [])],
-  };
-  webview.html = view ? page(view) : noticeHtml(notice);
+/** Whether `view` is what is on disk still: its files where they were, as
+ *  they were written. Not, once the package was upgraded or rebuilt in place. */
+export function isCurrent(view: PackageView): boolean {
+  try {
+    return packageView(view.dir).key === view.key;
+  } catch {
+    return false;
+  }
+}
+
+/** A webview drawn with a package view: the page of each scene tab, side bar
+ *  view and script panel. It remembers which view drew it, so that what draws
+ *  it again only when that view is another asks here rather than keeping its
+ *  own record. */
+export class PackagePage {
+  private key: string | undefined;
+
+  constructor(
+    private readonly webview: () => vscode.Webview,
+    private readonly extensionUri: vscode.Uri,
+  ) {}
+
+  /** Whether `view` drew the page already. */
+  shows(view: PackageView): boolean {
+    return this.key === view.key;
+  }
+
+  /** Whether a view drew the page: not a notice, nor nothing yet. */
+  get drawn(): boolean {
+    return this.key !== undefined;
+  }
+
+  /** Load the page `html` makes of `view`, or of none: a notice, or a figure
+   *  that needs no view. It may load from the extension and the view. */
+  load(view: PackageView | undefined, html: (view: PackageView | undefined) => string): void {
+    const webview = this.webview();
+    webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.extensionUri, ...(view?.roots ?? [])],
+    };
+    webview.html = html(view);
+    // said drawn once it is: a page that threw on the way is drawn again
+    this.key = view?.key;
+  }
 }
 
 /** A page that says one thing, in the editor's own type: `text` is escaped,

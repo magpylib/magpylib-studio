@@ -24,7 +24,7 @@ import {
 } from './scenes';
 import { setTextFocus, tookTextFocus, undoTyping } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
-import { PackageView, packageView, showPage } from './packageView';
+import { isCurrent, noticeHtml, PackagePage, PackageView, packageView } from './packageView';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
@@ -1970,15 +1970,14 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
   let view: PackageView | undefined;
   if (!mismatch) {
     // An engine whose view is not there could serve its scenes and not draw
-    // one: refused like the rest, with the file it misses.
+    // one: refused like the rest, with the file it misses (`packageView`).
     try {
       view = packageView(said.answer?.static);
     } catch (err) {
       mismatch = err instanceof Error ? err.message : String(err);
     }
   }
-  if (mismatch || !view) {
-    mismatch ??= 'it did not say where its view is';
+  if (mismatch) {
     client.dispose();
     refusedEngine = { python: pythonPath, reason: mismatch };
     engineOutput.appendLine(`[engine refused: ${mismatch}]`);
@@ -2001,11 +2000,56 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
     throw new Error(`the engine in ${pythonPath} was refused: ${mismatch}`);
   }
   engine = client;
-  if (engineView?.key !== view.key) {
-    engineView = view;
+  view = view!;
+  // The running engine's view, whether or not another: what the watcher
+  // compares with is this engine's
+  const another = engineView?.key !== view.key;
+  engineView = view;
+  if (another) {
     engineViewChanged.fire(view);
   }
+  // a tab that could not be drawn is, now that an engine runs
+  drawUndrawn();
   return client;
+}
+
+/** The engine's view, said to be another on disk: once for each, so that a
+ *  page drawn again and again under the same upgrade says it once. */
+let toldChanged: string | undefined;
+
+/** The view a page is drawn with now: the running engine's. When the package
+ *  has changed on disk since the engine started -- upgraded in its
+ *  interpreter, or rebuilt in a development install -- the page loads the
+ *  files now there, against an engine of what was there: said, with Restart
+ *  Engine, the restart a person asks for. Not done on its own: a restart puts
+ *  every scene back without its undo history, and a file changing is no sign
+ *  that the package is whole again. */
+function viewToDraw(): PackageView | undefined {
+  const view = engineView;
+  if (!view || !engine?.isRunning || isCurrent(view)) {
+    return view;
+  }
+  let now: string | undefined;
+  try {
+    now = packageView(view.dir).key;
+  } catch {
+    now = 'not whole';
+  }
+  if (toldChanged !== now) {
+    toldChanged = now;
+    void vscode.window
+      .showWarningMessage(
+        'Magpylib Studio: magpylib-studio has changed on disk since the engine started. ' +
+          'Restart the engine to draw with it.',
+        'Restart Engine',
+      )
+      .then((choice) => {
+        if (choice) {
+          void vscode.commands.executeCommand('magpylib-studio.restartEngine');
+        }
+      });
+  }
+  return view;
 }
 
 /** The view the engine's scenes are drawn with, starting the engine when none
@@ -2015,10 +2059,18 @@ async function whenEngineView(context: vscode.ExtensionContext): Promise<Package
   return engineView!;
 }
 
-/** The view each scene's tab was drawn with (its `key`), so that it is drawn
- *  again only when the engine's is another. None for a tab still waiting for
- *  its engine, or whose engine could not start. */
-const drawnWith = new WeakMap<vscode.WebviewPanel, string>();
+/** Each scene tab's page, which knows the view that drew it: none for a tab
+ *  still waiting for its engine, or whose engine could not start. */
+const pages = new WeakMap<vscode.WebviewPanel, PackagePage>();
+
+function pageOf(context: vscode.ExtensionContext, panel: vscode.WebviewPanel): PackagePage {
+  let page = pages.get(panel);
+  if (!page) {
+    page = new PackagePage(() => panel.webview, context.extensionUri);
+    pages.set(panel, page);
+  }
+  return page;
+}
 
 /** Draw a scene's tab with the engine's view: once the engine has said where
  *  that is, and again whenever it is another (`engineViewChanged`). Meanwhile
@@ -2026,50 +2078,48 @@ const drawnWith = new WeakMap<vscode.WebviewPanel, string>();
 function drawScenePanel(
   context: vscode.ExtensionContext,
   panel: vscode.WebviewPanel,
-  view: PackageView | undefined = engineView,
+  view: PackageView | undefined = viewToDraw(),
 ): void {
-  const show = (shown: PackageView | undefined, notice = '') => {
+  const page = pageOf(context, panel);
+  const load = (shown: PackageView | undefined, notice = '') => {
     try {
-      showPage(
-        panel.webview,
-        context.extensionUri,
-        shown,
-        (page) => createWebviewHtml(context, panel.webview, page),
-        notice,
+      page.load(shown, (drawn) =>
+        drawn ? createWebviewHtml(context, panel.webview, drawn) : noticeHtml(notice),
       );
     } catch {
       // closed while the engine started
     }
   };
   if (view) {
-    if (drawnWith.get(panel) !== view.key) {
-      drawnWith.set(panel, view.key);
-      show(view);
+    if (!page.shows(view)) {
+      load(view);
     }
     return;
   }
   // said at once: the engine takes seconds to start, and an empty tab says nothing
-  show(undefined, 'Starting the engine…');
+  load(undefined, 'Starting the engine…');
   void whenEngineView(context).then(
     (shown) => drawScenePanel(context, panel, shown),
     (err: unknown) =>
-      show(
+      load(
         undefined,
         `Magpylib Studio cannot draw this scene: ${err instanceof Error ? err.message : err}.`,
       ),
   );
 }
 
-/** Draw the tabs no engine has drawn yet, which starts one for them: after an
- *  engine is installed, or the interpreter changed, a tab that said why it
- *  could not draw tries again. */
+/** Draw the tabs no engine has drawn yet, starting one for them when none
+ *  runs: after an engine is installed, the interpreter changed, or an engine
+ *  started for anything else, a tab that said why it could not draw tries
+ *  again. Not when a tab is looked at: an engine that cannot start says so
+ *  each time it is asked. */
 function drawUndrawn(): void {
   if (!activeContext) {
     return;
   }
   for (const doc of openScenes()) {
     for (const panel of doc.panels) {
-      if (!drawnWith.has(panel)) {
+      if (!pageOf(activeContext, panel).drawn) {
         drawScenePanel(activeContext, panel);
       }
     }
@@ -3076,7 +3126,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       refreshLiveSurfaces();
     },
-    () => engineView,
+    viewToDraw,
   );
   variablesTree = variables;
 
@@ -3117,7 +3167,7 @@ export function activate(context: vscode.ExtensionContext): void {
       broadcastMutation();
     }),
     () => selectedObjectId,
-    () => engineView,
+    viewToDraw,
   );
 
   // Everything drawn with the package's view is drawn again with the engine's
@@ -7077,9 +7127,11 @@ export function createWebviewHtml(
     ),
   );
   // The notebook widget draws the scene: the same view, controls and keys as
-  // a notebook cell and the script panel. It is the engine's package's
-  // (`packageView`), and loads its renderer from a blob -- hence `blob:` below.
-  const widgetUri = view.uri(webview, 'widget.js');
+  // a notebook cell and the script panel, run against the model the package
+  // holds for a host (`host.mjs`). Both are the engine's package's
+  // (`packageView`); the widget loads its renderer from a blob -- hence
+  // `blob:` below.
+  const hostUri = view.uri(webview, 'host.mjs');
   const widgetStyleUri = view.uri(webview, 'widget.css');
   return `<!DOCTYPE html>
 <html lang="en">
@@ -7092,7 +7144,7 @@ export function createWebviewHtml(
   <link rel="stylesheet" href="${styleUri}" />
   <script nonce="${nonce}" src="${plotlyUri}"></script>
 </head>
-<body data-widget="${widgetUri}">
+<body data-host="${hostUri}">
   <div id="view"></div>
   <div id="chart" hidden></div>
   <div id="bar">

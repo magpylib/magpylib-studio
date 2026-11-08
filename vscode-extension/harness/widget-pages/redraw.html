@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  The panel's own renderer, media/scene3d.mjs, drawing the quiver example,
+  The renderer, magpylib_studio/static/scene3d.mjs, drawing the quiver example,
   then drawing it again as each step of a drag does -- a resize by its grips
   most of all, which sends the scene back at every step -- and reading the
   canvas at once, before the next frame: a render that cleared it, the view
@@ -29,7 +29,7 @@
   <body>
     <div id="view"></div>
     <script type="module">
-      import { createScene3d } from "/media/scene3d.mjs";
+      import { createScene3d } from "/static/scene3d.mjs";
       const scene3d = createScene3d();
       const [before, after] = await (await fetch("/out/readings.json")).json();
       const el = document.getElementById("view");

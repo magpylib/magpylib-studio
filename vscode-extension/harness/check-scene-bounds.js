@@ -26,7 +26,9 @@
  */
 const { execFileSync } = require("child_process");
 const fs = require("fs");
+const moduleApi = require("module");
 const path = require("path");
+const { pathToFileURL } = require("url");
 
 const { enginePython } = require("./engine-python");
 
@@ -64,8 +66,27 @@ async function main() {
     }),
   };
   const THREE = await import("three");
-  const { boundByFinitePoints, withPenLifts } =
-    await import("../media/scene3d.mjs");
+  // The renderer is the package's, beside no node_modules: its `three` is
+  // the extension's, as the build finds it. One hook, a module of its own:
+  // `registerHooks` takes it where Node has that (22.15 on), `register` where
+  // it does not.
+  const here = pathToFileURL(path.join(EXT, "package.json")).href;
+  const hook =
+    "data:text/javascript," +
+    encodeURIComponent(`export function resolve(specifier, context, next) {
+      return /^three(\\/|$)/.test(specifier)
+        ? next(specifier, { ...context, parentURL: ${JSON.stringify(here)} })
+        : next(specifier, context);
+    }`);
+  if (moduleApi.registerHooks) {
+    moduleApi.registerHooks({ resolve: (await import(hook)).resolve });
+  } else {
+    moduleApi.register(hook);
+  }
+  const { boundByFinitePoints, withPenLifts } = await import(
+    pathToFileURL(path.join(REPO, "magpylib_studio", "static", "scene3d.mjs"))
+      .href
+  );
 
   const raw = execFileSync(python, ["-c", PAYLOADS], {
     cwd: REPO,

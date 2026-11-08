@@ -6,8 +6,9 @@
 // object without asking python for a new scene.
 //
 // Loaded as a module because three ships ESM only. `createScene3d` makes a
-// view; the first made is on window as `scene3d` as well, so the panel's own
-// script can drive it.
+// view; the first made is on window as `scene3d` as well, so a page's own
+// script can drive it. Bundled into the widget (`tools/build-widget.sh`),
+// which every host loads from the package: this source is not shipped.
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";

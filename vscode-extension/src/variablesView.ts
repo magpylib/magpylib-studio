@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import { setTextFocus, tookTextFocus } from './textFocus';
-import { PackageView, showPage } from './packageView';
+import { noticeHtml, PackagePage, PackageView } from './packageView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /** Calls from this panel that change the scene, not just what it displays. */
@@ -84,8 +84,8 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   private scene: string | undefined;
   private sceneKey: string | undefined;
   private ready = false;
-  /** The view the page was drawn with: none, before an engine said one. */
-  private drawnWith: string | undefined;
+  /** The page, and which view drew it. */
+  private page: PackagePage | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -109,8 +109,16 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
     webviewView.description = this.scene;
-    this.drawnWith = undefined;
+    this.page = new PackagePage(() => webviewView.webview, this.extensionUri);
     this.draw();
+    // Shown again, the page is loaded again from its HTML without a word to
+    // this: the files it loads are those on disk now, which `packageView`
+    // checks against the running engine's.
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible) {
+        this.draw();
+      }
+    });
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (tookTextFocus(message, webviewView.webview)) {
@@ -163,6 +171,7 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.onDidDispose(() => {
       this.view = undefined;
+      this.page = undefined;
       this.ready = false;
       setTextFocus(false);
     });
@@ -178,19 +187,14 @@ export class VariablesViewProvider implements vscode.WebviewViewProvider {
    *  already: when the view is shown, and when the engine's view is another
    *  (an engine started, one in another interpreter, a package upgraded). */
   draw(): void {
-    const webviewView = this.view;
+    const webview = this.view?.webview;
     const packageView = this.packageView();
-    if (!webviewView || (packageView && this.drawnWith === packageView.key)) {
+    if (!webview || !this.page || (packageView && this.page.shows(packageView))) {
       return;
     }
     this.ready = false;
-    this.drawnWith = packageView?.key;
-    showPage(
-      webviewView.webview,
-      this.extensionUri,
-      packageView,
-      (view) => this.html(webviewView.webview, view),
-      'Open a scene to see its variables.',
+    this.page.load(packageView, (view) =>
+      view ? this.html(webview, view) : noticeHtml('The variables of the scene in front show here once its engine runs.'),
     );
   }
 

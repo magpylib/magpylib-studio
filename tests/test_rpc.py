@@ -154,7 +154,14 @@ def test_the_engine_says_what_it_speaks():
     assert answer["result"]["document"] == DOC_VERSION
     assert "package" in answer["result"]
     view = pathlib.Path(answer["result"]["static"])
-    for name in ("widget.js", "widget.css", "variables.mjs", "inspector.mjs"):
+    host = (
+        pathlib.Path(__file__).parent.parent / "vscode-extension/src/packageView.ts"
+    ).read_text(encoding="utf-8")
+    files = re.search(r"VIEW_FILES = \[([^\]]*)\]", host)
+    assert files, "packageView.ts no longer lists the view's files"
+    names = re.findall(r"'([^']+)'", files.group(1))
+    assert "widget.js" in names
+    for name in names:
         assert (view / name).is_file(), name
     source = (
         pathlib.Path(__file__).parent.parent / "vscode-extension/src/extension.ts"

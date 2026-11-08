@@ -19,7 +19,7 @@ import {
   splitTerms,
   stopEngineForTest,
 } from '../extension';
-import { packageView } from '../packageView';
+import { isCurrent, packageView, VIEW_FILES } from '../packageView';
 import { bringToFront, frontScene, openScenes, SceneDocument } from '../scenes';
 import {
   isObject,
@@ -1758,13 +1758,14 @@ suite('magpylib-studio', () => {
     // in it; the view drawn from it must not, or the old bundle goes on
     // drawing the new engine's payloads.
     const dir = mkdtempSync(join(tmpdir(), 'view-'));
-    const files = ['widget.js', 'widget.css', 'variables.mjs', 'inspector.mjs'];
-    for (const file of files) {
+    for (const file of VIEW_FILES) {
       writeFileSync(join(dir, file), '// 0.15');
     }
     const before = packageView(dir);
     writeFileSync(join(dir, 'widget.js'), '// 0.16, longer');
+    assert.ok(!isCurrent(before), 'a view rewritten on disk is said not current');
     const after = packageView(dir);
+    assert.ok(isCurrent(after));
     assert.strictEqual(after.dir, before.dir);
     assert.notStrictEqual(after.key, before.key);
     rmSync(join(dir, 'inspector.mjs'));
