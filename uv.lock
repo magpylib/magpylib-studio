@@ -939,7 +939,7 @@ wheels = [
 
 [[package]]
 name = "magpylib-material-response"
-version = "0.10.2"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "loguru" },
@@ -949,9 +949,9 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/10/c1/644a1aaa8f59058598a2f9bf7e857ed9fcb8a7f2fde71a6f21919210df38/magpylib_material_response-0.10.2.tar.gz", hash = "sha256:455739957591f01bb21abe5df94772e6e0e0a3742360a840306b9e80ac186616", size = 2528233, upload-time = "2026-11-05T17:54:57.59Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/4d/67290f2c6d2ae283242a5bab211a92f41d705cc03bd96ccb4597384d363e/magpylib_material_response-0.12.0.tar.gz", hash = "sha256:9b0ff0a6ee5e216fa2e0ea3e9d0d31418bd28f48331eb0df4a53b2f87730d57c", size = 3593112, upload-time = "2026-11-08T13:47:02.302Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/94/b4f49f6e7fbbb0cd92523f2030043fbac061e34207c24ed3ac7491ade1aa/magpylib_material_response-0.10.2-py3-none-any.whl", hash = "sha256:d95de955207650a715a83c8199eeaa1f2dcf06d3335dfff0504dbf9b107da34c", size = 313659, upload-time = "2026-11-05T17:54:56.19Z" },
+    { url = "https://files.pythonhosted.org/packages/79/3e/1266c807d3f69b6bbbf739e6e9c6c612f790a52e7724c1f4cb31f90241e7/magpylib_material_response-0.12.0-py3-none-any.whl", hash = "sha256:15ac62a5784823efbbccc3a3766cfa6ecd1cbd98bfcf1589a710d69e94c5ad3f", size = 321902, upload-time = "2026-11-08T13:47:00.702Z" },
 ]
 
 [[package]]
@@ -1002,7 +1002,7 @@ provides-extras = ["dev", "widget"]
 
 [package.metadata.requires-dev]
 docs = [
-    { name = "magpylib-material-response", specifier = ">=0.10.0" },
+    { name = "magpylib-material-response", specifier = ">=0.12.0" },
     { name = "magpylib-studio", extras = ["widget"] },
     { name = "myst-nb", specifier = ">=1.4" },
     { name = "pydata-sphinx-theme" },
