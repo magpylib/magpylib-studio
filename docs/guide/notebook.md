@@ -337,10 +337,11 @@ notebook as it does for its own. Put one beside the view in an ipywidgets
 view's selection, revision and theme reach it. For a view with a scene of its
 own, as the toggles are.
 
-The view is `vscode-extension/media/scene3d.mjs` — the panel's own renderer —
-and the legend `magpylib_studio/static/legend.mjs`. `tools/build-widget.sh`
-bundles them with three.js into `magpylib_studio/static/widget.js`, which is
-committed so that installing the package needs no node; `npm run check:widget`
-fails the build when it no longer matches its sources.
+The view is `magpylib_studio/static/scene3d.mjs` — the renderer every host draws
+with — and the legend `magpylib_studio/static/legend.mjs`.
+`tools/build-widget.sh` bundles them with three.js into
+`magpylib_studio/static/widget.js`, which is committed so that installing the
+package needs no node; `npm run check:widget` fails the build when it no longer
+matches its sources.
 
 [aw]: https://anywidget.dev

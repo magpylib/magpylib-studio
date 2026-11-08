@@ -3,7 +3,7 @@ import { basename, extname } from 'path';
 
 import * as vscode from 'vscode';
 
-import { PackageView, packageView } from './packageView';
+import { PackagePage, PackageView, packageView } from './packageView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 /**
@@ -69,9 +69,8 @@ interface View {
   panel: vscode.WebviewPanel;
   payload: ViewPayload;
   stale: boolean;
-  /** The package view the page was drawn with (its `key`); none for a plotly
-   *  figure. */
-  drawnWith: string | undefined;
+  /** The page, which knows the view that drew it: none for a plotly figure. */
+  page: PackagePage;
 }
 
 const views = new Map<string, View>();
@@ -279,16 +278,30 @@ const refused = new Set<string>();
 
 /** Say that a figure from `payload.python` cannot be drawn, and what fixes it. */
 function notDrawn(payload: ViewPayload, reason: string): void {
-  const python = payload.python ?? 'the interpreter that ran it';
+  const python = payload.python;
   say(`not drawn: ${payload.script}: ${reason}`);
   if (refused.has(`${python}\0${reason}`)) {
     return;
   }
   refused.add(`${python}\0${reason}`);
   void vscode.window.showWarningMessage(
-    `Magpylib Studio: a figure from ${python} cannot be drawn: ${reason}. ` +
-      `Install magpylib-studio there again: "${python}" -m pip install --upgrade magpylib-studio`,
+    python
+      ? `Magpylib Studio: a figure from ${python} cannot be drawn: ${reason}. ` +
+          `Install magpylib-studio there again: "${python}" -m pip install --upgrade magpylib-studio`
+      : `Magpylib Studio: a figure cannot be drawn: ${reason}. Upgrade ` +
+          'magpylib-studio in the Python that ran the script.',
   );
+}
+
+/** Say that what `view` shows is not what its file drew now, as an edit to the
+ *  script since is said. */
+function markStale(view: View): void {
+  if (view.stale) {
+    return;
+  }
+  view.stale = true;
+  view.panel.title = panelTitle(view.payload, true);
+  void view.panel.webview.postMessage({ type: 'stale', stale: true });
 }
 
 /** Show `payload`, in the panel that file already owns or in a new one. */
@@ -315,28 +328,23 @@ function draw(
   }
   if (refusal) {
     notDrawn(payload, refusal);
-    if (existing && !existing.stale) {
+    if (existing) {
       // The script ran again and drew nothing here: what the panel shows is
-      // the run before, which it says as it says an edit since.
-      existing.stale = true;
-      existing.panel.title = panelTitle(existing.payload, true);
-      void existing.panel.webview.postMessage({ type: 'stale', stale: true });
+      // the run before.
+      markStale(existing);
     }
     return;
   }
-  const roots = [context.extensionUri, ...(view?.roots ?? [])];
   if (existing) {
     existing.payload = payload;
     // A payload is the script as it was when it ran, so one arriving is the
     // only thing that settles this.
     existing.stale = false;
     existing.panel.title = panelTitle(payload);
-    if (view && existing.drawnWith !== view.key) {
+    if (view && !existing.page.shows(view)) {
       // Run again in another interpreter, or after an upgrade: the page is
       // drawn anew with its view, and asks for the payload when it is ready.
-      existing.drawnWith = view.key;
-      existing.panel.webview.options = { enableScripts: true, localResourceRoots: roots };
-      existing.panel.webview.html = html(context, existing.panel.webview, view);
+      existing.page.load(view, (drawn) => html(context, existing.panel.webview, drawn));
       return;
     }
     void existing.panel.webview.postMessage({ type: 'view', payload, stale: false });
@@ -349,10 +357,29 @@ function draw(
     // still typing in, and a figure appearing is not a reason to take the
     // cursor away from it.
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-    { enableScripts: true, localResourceRoots: roots },
+    { enableScripts: true, localResourceRoots: [context.extensionUri] },
   );
-  views.set(key, { panel, payload, stale: false, drawnWith: view?.key });
-  panel.webview.html = html(context, panel.webview, view);
+  const page = new PackagePage(() => panel.webview, context.extensionUri);
+  views.set(key, { panel, payload, stale: false, page });
+  page.load(view, (drawn) => html(context, panel.webview, drawn));
+  // Hidden, the page is torn down, and shown again it loads its view's files
+  // as they are now: a package upgraded since loads the new ones, under a
+  // figure the old one drew. The figure is said out of date, to run again.
+  panel.onDidChangeViewState(() => {
+    const current = views.get(key);
+    if (!panel.visible || !current || current.payload.kind !== 'widget') {
+      return;
+    }
+    let now: PackageView | undefined;
+    try {
+      now = packageView(current.payload.static);
+    } catch {
+      now = undefined;
+    }
+    if (!now || !current.page.shows(now)) {
+      markStale(current);
+    }
+  });
   void noticeOnce(context, payload);
   panel.webview.onDidReceiveMessage((message: PageMessage) => {
     // The page asks when it is ready rather than being told when the panel is

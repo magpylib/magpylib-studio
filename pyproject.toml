@@ -75,6 +75,8 @@ build.hooks.vcs.version-file = "magpylib_studio/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["magpylib_studio"]
+# The renderer's source: bundled into static/widget.js, which is what ships.
+exclude = ["magpylib_studio/static/scene3d.mjs"]
 
 [tool.ruff.lint]
 # Pinned explicitly rather than left to ruff's defaults, which move: v0.15

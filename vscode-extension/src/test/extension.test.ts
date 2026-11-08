@@ -1758,7 +1758,7 @@ suite('magpylib-studio', () => {
     // in it; the view drawn from it must not, or the old bundle goes on
     // drawing the new engine's payloads.
     const dir = mkdtempSync(join(tmpdir(), 'view-'));
-    const files = ['widget.js', 'widget.css', 'variables.mjs', 'inspector.mjs'];
+    const files = ['widget.js', 'widget.css', 'host.mjs', 'variables.mjs', 'inspector.mjs'];
     for (const file of files) {
       writeFileSync(join(dir, file), '// 0.15');
     }

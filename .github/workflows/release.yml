@@ -118,6 +118,27 @@ jobs:
           tenant-id: cf42a1c9-05bb-415e-a752-84a630d5f779
           allow-no-subscriptions: true
 
+      # The extension draws with the engine's view and refuses an engine of an
+      # older protocol (decision 0056), offering to install one from PyPI. So
+      # it goes out only once PyPI serves the engine of this tag, which cd.yml
+      # publishes from the same push: up to 30 minutes, then the job fails and
+      # nothing is published.
+      - name: Wait for the engine on PyPI
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            exit 0
+          fi
+          for _ in $(seq 60); do
+            if curl -fsS "https://pypi.org/pypi/magpylib-studio/${version}/json" > /dev/null; then
+              echo "magpylib-studio ${version} is on PyPI"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::magpylib-studio ${version} never reached PyPI; not publishing the extension"
+          exit 1
+
       # Gated on a clean tag for the same reason the version sync above is:
       # the Marketplace has no pre-release concept for a normal publish, and
       # re-running this on an rc tag would just try to republish a version

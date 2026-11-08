@@ -1,6 +1,6 @@
-/* The Variables view's own dress: the rows are the package's
-   (`widget/widget.css`, linked beside this), styled in the editor's colours
-   since the editor's variables are on this page. */
+/* The Variables view's own dress: the rows are the package's (its
+   `widget.css`, loaded from the engine's package beside this), styled in the
+   editor's colours since the editor's variables are on this page. */
 body {
   margin: 0;
   padding: 4px 8px 8px;

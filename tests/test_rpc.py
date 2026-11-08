@@ -154,7 +154,13 @@ def test_the_engine_says_what_it_speaks():
     assert answer["result"]["document"] == DOC_VERSION
     assert "package" in answer["result"]
     view = pathlib.Path(answer["result"]["static"])
-    for name in ("widget.js", "widget.css", "variables.mjs", "inspector.mjs"):
+    for name in (
+        "widget.js",
+        "widget.css",
+        "host.mjs",
+        "variables.mjs",
+        "inspector.mjs",
+    ):
         assert (view / name).is_file(), name
     source = (
         pathlib.Path(__file__).parent.parent / "vscode-extension/src/extension.ts"

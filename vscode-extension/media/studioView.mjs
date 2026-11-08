@@ -1,6 +1,9 @@
 // The studio's 3D view: the notebook widget, the same view, controls and keys
 // as a notebook cell and the script panel (docs/decisions.md#0011-one-view), run against a
-// model this panel holds and an editor that goes through the extension host.
+// model the package holds for a host (`magpylib_studio/static/host.mjs`,
+// loaded from the engine's package: decision 0057) and an editor that goes
+// through the extension host. What is here is what only this panel can do: its
+// messages to the host, and the read-only chart.
 //
 // Through the host rather than straight to the engine, because an edit here is
 // more than the edit: the host refreshes the Scene tree, the Inspector, the
@@ -37,109 +40,19 @@ function say(text) {
   statusEl.title = text;
 }
 
-// --- the model the widget runs against ---------------------------------------
-// What anywidget hands a widget, held here. What the view sets and saves is
-// the user's: a selection is told to the sidebar, and hiding is an edit in the
-// studio -- saved and undoable -- so it is told to the host as one. What the
-// host says is taken in without being told back.
-const values = {
-  payload: {},
-  tree: [],
-  selected: [],
-  hidden: [],
-  // a view setting here too, not told to the host: docs/decisions.md#0031-the-legends-eye-fades-as-a-view-setting
-  faded: {},
-  // the colour bar's cut, and its one scale for all, view settings too:
-  // docs/decisions.md#0033-the-colour-bar-cuts-a-sensors-colours-as-a-view-setting
-  color_range: {},
-  color_shared: false,
-  axes: "cube",
-  flow: true, // a view setting, as a fade is: not told to the host
-  theme: "auto",
-  height: 400,
-  frames: 1,
-  duration: 5,
-  repeat: false,
-  editable: true,
-  standalone: true, // no kernel to write an HTML export
-  revision: 0,
-  last_edit: {},
-};
-const listeners = {};
-const emit = (event, value) =>
-  (listeners[event] || []).forEach((listener) => listener(value));
-/** Set what the host says, as a change the view hears but does not send. */
-function take(key, value) {
-  values[key] = value;
-  emit(`change:${key}`, value);
-}
-// what the host last heard from here
-const told = { selected: [], hidden: [], field_lines: false };
-// A sensor drawn as its parts -- its axes, pixels and field lines, listed
-// beneath it (`threejs.PARTS`) -- hides them one by one as the view's own
-// setting, as a fade is: no object of the document is a part. Hidden whole,
-// it is the sensor that is hidden, an edit as any object's is.
-const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
-let partsHidden = new Set();
-/** Each sensor in `tree` drawn whole as its parts -- its axes among them --
- *  and their ids; and, in `apart`, every part's id. */
-function partsIn(tree, into = new Map(), apart = new Set()) {
-  for (const node of tree) {
-    const children = node.children || [];
-    const parts = children.filter((child) => PART_KINDS.has(child.kind));
-    const ids = parts.map((part) => part.id);
-    for (const id of ids) apart.add(id);
-    if (parts.some((part) => part.kind === "Axes")) into.set(node.id, ids);
-    partsIn(children, into, apart);
-  }
-  return { whole: into, apart };
-}
-let inSidebar = null; // the object the sidebar shows
-
+// --- what the package's view asks of this panel --------------------------------
 let previewTaken = null; // settles the pose the host has not yet answered
 
-/** The view's own calls this panel answers: the grid of variants (#127) asks
- *  each variant's scene and which variant the scene is at, through the host
- *  to the engine, and uses one through the host, which brings every surface
- *  along, as the Variables view's choice does. The rest are the panel's
- *  sidebar's, and are never asked here. */
-const READS = new Set([
-  "variant_scene",
-  "get_variables",
-  "drop_variant_copies",
-]);
-function answerCall({ id, method, params }) {
-  const reply = (answer) => emit("msg:custom", { kind: "rpc", id, ...answer });
-  if (method === "use_variant") {
-    vscodeApi.postMessage({ type: "useVariant", name: params.name });
-    reply({ result: { ok: true } });
-  } else if (READS.has(method)) {
-    rpc(method, params).then(
-      (result) => reply({ result }),
-      (error) => reply({ error: { message: String(error.message || error) } }),
-    );
-  }
-}
-const model = {
-  get: (key) => values[key],
-  set: (key, value) => {
-    values[key] = value;
-    emit(`change:${key}`, value);
-  },
-  save_changes: tell,
-  on: (event, listener) => (listeners[event] ||= []).push(listener),
-  off() {},
-  send(message) {
-    if (message.kind === "frame") serveFrame(message);
-    else if (message.kind === "rpc") answerCall(message);
-  },
-  // the Scene tree is the studio's legend; the widget's is a button away
-  legendStartsClosed: true,
-  // Tab walks the scene's objects, as it did in this panel
-  tabWalks: true,
-  // the variants' row along the foot, for a click to use one -- through the
-  // host -- and a lift to show one beside the scene (#127)
-  showsVariants: true,
+const host = {
+  rpc,
+  say,
+  select: (objectId) =>
+    vscodeApi.postMessage({ type: "selectObject", objectId }),
+  // One message, so one step to undo.
+  setVisible: (hide, show) =>
+    vscodeApi.postMessage({ type: "setVisible", hide, show }),
+  setFieldLines: (on) => vscodeApi.postMessage({ type: "setFieldLines", on }),
+  useVariant: (name) => vscodeApi.postMessage({ type: "useVariant", name }),
   editor: {
     // the host opens the undo group; the view's own readout says what a drag
     // takes away from a variable, so the host is not asked to say it again
@@ -184,75 +97,9 @@ const model = {
   },
 };
 
-/** What the view saved, told to whoever it is for. */
-function tell() {
-  const selected = values.selected || [];
-  if (selected.join() !== told.selected.join()) {
-    told.selected = selected;
-    // The sidebar shows one object. A new first object is a pick to tell it;
-    // adding to a selection keeps the one it shows.
-    if (selected.length && selected[0] !== inSidebar) {
-      inSidebar = selected[0];
-      vscodeApi.postMessage({ type: "selectObject", objectId: inSidebar });
-    }
-  }
-  const asked = new Set(values.hidden || []);
-  const { whole, apart } = partsIn(values.tree || []);
-  const hidden = new Set([...asked].filter((id) => !apart.has(id)));
-  partsHidden = new Set([...asked].filter((id) => apart.has(id)));
-  for (const [sensor, ids] of whole) {
-    if (!ids.every((id) => asked.has(id))) continue;
-    hidden.add(sensor);
-    for (const id of ids) partsHidden.delete(id);
-  }
-  const was = new Set(told.hidden);
-  const hide = [...hidden].filter((id) => !was.has(id));
-  const show = [...was].filter((id) => !hidden.has(id));
-  told.hidden = [...hidden];
-  // One message, so one step to undo: showing only the selection can hide
-  // some objects and show another in the same keystroke.
-  if (hide.length || show.length) {
-    vscodeApi.postMessage({ type: "setVisible", hide, show });
-  }
-  // the lines are the document's too: an edit, saved and undoable
-  const lines = Boolean(values.field_lines);
-  if (lines !== told.field_lines) {
-    told.field_lines = lines;
-    vscodeApi.postMessage({ type: "setFieldLines", on: lines });
-  }
-}
-
-/** A step of the run, asked of the engine as the view asks it of a kernel. */
-async function serveFrame({ index, runId }) {
-  try {
-    const frame = await rpc("get_scene", { frame: index });
-    if (frame.duration) values.duration = frame.duration;
-    emit("msg:custom", { kind: "frame", ...frame, runId });
-  } catch (error) {
-    say(String(error.message || error));
-  }
-}
-
-/** How many steps the paths have: what the transport is drawn for, until the
- *  first frame says how many magpylib composed. */
-/** How many steps the scene's run has: one past the step its payload
- *  draws, the last (`step`), which counts every path -- `paths` leaves out
- *  those too long to drag, and a pattern's copies. */
-function framesOf(payload) {
-  if (payload.step !== undefined) return payload.step + 1;
-  const steps = Object.values(payload.paths || {}).map(
-    (path) => path.position.length,
-  );
-  return Math.max(1, ...steps);
-}
-
-function hiddenIn(tree, into = []) {
-  for (const node of tree) {
-    if (node.visible === false) into.push(node.id);
-    hiddenIn(node.children || [], into);
-  }
-  return into;
-}
+/** The package's view, once it has loaded; a pick told before is kept. */
+let view = null;
+let pickedEarly;
 
 // --- keeping up with the engine ------------------------------------------------
 /** Redraw for the newest state, never for a queue of stale ones: refreshes
@@ -279,34 +126,9 @@ async function refresh() {
 }
 
 async function drawScene() {
-  const [payload, tree, panel] = await Promise.all([
-    rpc("get_scene", {}),
-    rpc("object_tree", {}),
-    rpc("get_variables", {}),
-  ]);
-  if (charting()) return; // switched while the engine was answering
-  const hidden = hiddenIn(tree);
-  told.hidden = hidden;
-  // a sensor hidden as its parts, as the legend's eye hides it, and the
-  // parts hidden here where it is not
-  const { whole, apart } = partsIn(tree);
-  const off = [
-    ...hidden.flatMap((id) => whole.get(id) ?? [id]),
-    ...[...partsHidden].filter((id) => apart.has(id)),
-  ];
-  // the document's switch, which the engine's scene says (#45)
-  told.field_lines = Boolean(payload.field_lines);
-  take("tree", tree);
-  // the variants' names, for the grid of them; the Variables view uses them
-  const names = Object.keys(panel?.variants ?? {});
-  if (names.join("\n") !== (values.variants ?? []).join("\n")) {
-    take("variants", names);
-  }
-  take("hidden", off);
-  take("frames", framesOf(payload));
-  take("field_lines", told.field_lines);
-  take("payload", payload);
-  say("");
+  if (!view) return; // not loaded: it said why
+  await view.load(() => !charting()); // switched while the engine was answering
+  if (!charting()) say("");
 }
 
 // --- the chart ----------------------------------------------------------------
@@ -392,11 +214,9 @@ window.addEventListener("message", (event) => {
     previewTaken?.(message.scene ? { scene: message.scene } : undefined);
     previewTaken = null;
   } else if (message.type === "select") {
-    // the sidebar, or a pick told back: one object, and the set restarts
-    inSidebar = message.objectId || null;
-    const selected = inSidebar ? [inSidebar] : [];
-    told.selected = selected;
-    take("selected", selected);
+    // the sidebar, or a pick told back
+    if (view) view.select(message.objectId);
+    else pickedEarly = message.objectId;
   } else if (message.type === "refresh") {
     // after any edit anywhere: the Inspector, the tree, a slider, a drag
     refresh();
@@ -405,16 +225,18 @@ window.addEventListener("message", (event) => {
 
 // The widget fills the panel; its height is the model's, so it follows.
 new ResizeObserver(() => {
-  if (!viewEl.hidden && viewEl.clientHeight) {
-    take("height", Math.max(240, viewEl.clientHeight - 2));
+  if (view && !viewEl.hidden && viewEl.clientHeight) {
+    view.resize(Math.max(240, viewEl.clientHeight - 2));
   }
 }).observe(viewEl);
 
 // Said, not swallowed: a view that did not load is an empty panel otherwise,
 // with nothing to say why.
 try {
-  const widget = (await import(document.body.dataset.widget)).default;
-  widget.render({ model, el: viewEl });
+  const { mountWidget } = await import(document.body.dataset.host);
+  view = mountWidget(viewEl, host);
+  if (viewEl.clientHeight) view.resize(Math.max(240, viewEl.clientHeight - 2));
+  if (pickedEarly !== undefined) view.select(pickedEarly);
 } catch (error) {
   const text = `The 3D view could not load: ${error?.message || error}`;
   say(text);

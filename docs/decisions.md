@@ -65,6 +65,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
 | [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
 | [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
+| [0057](#0057-the-host-glue-is-the-packages-and-the-view-is-watched)                            | The host glue is the package's, and the view is watched      | accepted 2026-11-08                                                  |
 
 ---
 
@@ -3001,3 +3002,60 @@ draw.
   `vscode-extension/media/scene3d.mjs`, is left out of the extension: no webview
   there loads either raw. That source still sits in the extension's folder while
   the package builds it; moving it is a later change of layout alone.
+
+---
+
+## 0057. The host glue is the package's, and the view is watched
+
+**Status:** accepted 2026-11-08, on Alex's word ("merged, follow up now"), after
+[0056](#0056-every-host-draws-with-the-packages-view) was merged; it finishes
+what that one left, and the review of it found.
+
+### Context
+
+0056 had every VS Code view load the package's files, but the extension's
+`media/studioView.mjs` still built the widget's model: the frames of a run read
+off the payload, which children of a sensor are its parts, what the view's own
+`frame` and `rpc` messages ask. That is the widget's knowledge, of the payload's
+version, kept in the extension. And a view was known by its files at the moment
+the engine started: a package upgraded under a running engine had a side bar
+shown again, or a tab reloaded, load the new files against the old engine.
+
+### Decision
+
+- **The model is the package's.** `static/host.mjs` holds what anywidget holds
+  in a notebook, for a host with no kernel, and `mountWidget(el, host)` asks of
+  the host only what it alone can do: the engine's calls, an editor (0011), a
+  pick, hiding, the field lines' switch, a variant used, a word in its bar.
+  `media/studioView.mjs` is that host, and the read-only chart. The `host`
+  object and what `mountWidget` returns are the extension's one contract with
+  the view's code, which `rpc.PROTOCOL` covers; the side bar's `createVariables`
+  and `createInspector` take callbacks of the same kind.
+- **The renderer's source is the package's**, `static/scene3d.mjs`, bundled into
+  `widget.js` and left out of the wheel; three.js stays the extension's, which
+  the build finds through `NODE_PATH`.
+- **A view is its files' real paths and the times they were written**, so an
+  engine started on a package upgraded in place, or a script run again after
+  one, draws everything again with it. The engine's view is watched: upgraded
+  under a running engine -- once its files have been still for two seconds --
+  the engine is restarted on it, as on a change of interpreter. A script figure
+  whose view changed so is said out of date when shown again.
+- **A tab says what it waits for**: the engine starting, at once, and why it
+  cannot draw when it cannot; it tries again when looked at, an engine installed
+  or the interpreter changed. The side bar does not start an engine to draw
+  itself; until one runs it says so.
+- **The payload's version covers what the panel reads around `body`**: `body` is
+  read by the view the payload names, and never bumps it.
+- **The extension goes to the Marketplace once PyPI serves its engine**: the
+  release waits for this tag's `magpylib-studio` there, up to 30 minutes, so
+  Install the Engine always finds one the extension accepts.
+
+### Rejected
+
+- **Leaving the glue in the extension, the protocol bumped by hand when the
+  model changes**: the model changes with the widget, and a rule kept by hand is
+  what 0056 found had failed.
+- **Restarting the engine at once on any change**: pip writes a package one file
+  at a time, and an engine started halfway is refused as not whole.
+- **Shipping the renderer's source in the wheel**: 380 KB nobody loads, as the
+  bundle holds it.
