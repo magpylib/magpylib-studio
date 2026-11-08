@@ -39,6 +39,11 @@ shown.update(magnet.copy(position=(0.005, 0, 0)), probe)
   made again at every edit: read it again rather than keep an object from it.
 - `view.variables` holds a `@scene`'s values, and `view.set_variable(name, v)`
   sets one.
+- `view.document` is the scene as the text of a `.magpy.json`, what
+  `view.save(path)` writes; `view.take_document(text)` puts a file's scene in as
+  one step to undo, and `SceneWidget.from_document(text, base_dir=folder)` makes
+  an editable view of one. In JupyterLab a `.magpy.json` opens as this view in a
+  tab of its own, which saves the file itself.
 - `view.revision` counts the edits, and `view.last_edit` says what the last one
   was. In marimo, wrap the view as `mo.ui.anywidget(view)` and read it in
   another cell, which re-runs after each edit. In Jupyter, use
