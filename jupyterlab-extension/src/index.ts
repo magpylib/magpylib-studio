@@ -17,7 +17,12 @@
  * view's. The views share the widget's height: the last resized sets it.
  */
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
-import { ISessionContext, showErrorMessage } from '@jupyterlab/apputils';
+import {
+  ISessionContext,
+  ISessionContextDialogs,
+  showErrorMessage,
+  Toolbar,
+} from '@jupyterlab/apputils';
 import { PathExt } from '@jupyterlab/coreutils';
 import {
   ABCWidgetFactory,
@@ -344,6 +349,7 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
   constructor(
     options: DocumentRegistry.IWidgetFactoryOptions<SceneTab>,
     private readonly rendermime: IRenderMimeRegistry,
+    private readonly dialogs: ISessionContext.IDialogs | null,
   ) {
     super(options);
   }
@@ -353,6 +359,15 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
     content.addClass('mstudio-scene-tab');
     content.node.style.overflow = 'hidden';
     const tab = new SceneTab({ context, content });
+    // The scene's kernel, as a notebook's toolbar shows it: its name, which
+    // picks another -- one with magpylib-studio, where the default has none
+    // -- a restart, and whether it is busy. The scene is made again in it.
+    const { sessionContext } = context;
+    const dialogs = this.dialogs ?? undefined;
+    tab.toolbar.addItem('spacer', Toolbar.createSpacerItem());
+    tab.toolbar.addItem('restart', Toolbar.createRestartButton(sessionContext, dialogs));
+    tab.toolbar.addItem('kernelName', Toolbar.createKernelNameItem(sessionContext, dialogs));
+    tab.toolbar.addItem('kernelStatus', Toolbar.createKernelStatusItem(sessionContext));
     Scene.of(context, this.rendermime, viewHeight(content.node.clientHeight || 652))
       .then((scene) => scene.add(tab))
       .catch((err: unknown) => {
@@ -369,7 +384,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'Open a .magpy.json scene as a Magpylib Studio tab.',
   autoStart: true,
   requires: [IRenderMimeRegistry],
-  activate: (app: JupyterFrontEnd, rendermime: IRenderMimeRegistry) => {
+  optional: [ISessionContextDialogs],
+  activate: (
+    app: JupyterFrontEnd,
+    rendermime: IRenderMimeRegistry,
+    dialogs: ISessionContext.IDialogs | null,
+  ) => {
     app.docRegistry.addModelFactory(new SceneModelFactory());
     app.docRegistry.addFileType({
       name: FILE_TYPE,
@@ -392,6 +412,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
           shutdownOnClose: true, // the scene's kernel is the file's
         },
         rendermime,
+        dialogs,
       ),
     );
   },

@@ -346,9 +346,10 @@ its own started beside the file. An edit marks the tab unsaved, and ⌘S / ctrl-
 saves the file, which the VS Code studio opens as well. **File › Reload … from
 Disk** takes the file's version in as one step, which undo takes back.
 JupyterLab's autosave writes the file as it writes a notebook. Closing the tab
-stops its kernel. The tab's kernel is JupyterLab's default one, which needs
-`magpylib-studio[widget]`; **Open With › Editor** shows the file as text. How
-the tab is built is
+stops its kernel. The tab starts on JupyterLab's default kernel, which needs
+`magpylib-studio[widget]`; its toolbar names the kernel, picks another, and
+restarts it, and the scene, unsaved edits and all, is made again in it; **Open
+With › Editor** shows the file as text. How the tab is built is
 [decision 0058](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md#0058-a-scene-file-opens-in-jupyterlab-as-a-tab).
 
 The view is `magpylib_studio/static/scene3d.mjs` — the renderer every host draws
