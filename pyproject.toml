@@ -78,6 +78,13 @@ packages = ["magpylib_studio"]
 # The renderer's source: bundled into static/widget.js, which is what ships.
 exclude = ["magpylib_studio/static/scene3d.mjs"]
 
+# The JupyterLab scene tab, built and committed (`jupyterlab-extension/`): a
+# `.magpy.json` opens in JupyterLab as the editable widget in a tab of its own.
+# Where JupyterLab finds an extension a Python package installs.
+[tool.hatch.build.targets.wheel.shared-data]
+"jupyterlab-extension/labextension" = "share/jupyter/labextensions/magpylib-studio-jupyterlab"
+"jupyterlab-extension/install.json" = "share/jupyter/labextensions/magpylib-studio-jupyterlab/install.json"
+
 [tool.ruff.lint]
 # Pinned explicitly rather than left to ruff's defaults, which move: v0.15
 # reports nothing here and v0.16 reports eleven, so a monthly autoupdate of

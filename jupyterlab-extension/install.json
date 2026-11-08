@@ -1,0 +1,5 @@
+{
+  "packageManager": "python",
+  "packageName": "magpylib-studio",
+  "uninstallInstructions": "Use your Python package manager (pip, conda, uv) to uninstall magpylib-studio"
+}

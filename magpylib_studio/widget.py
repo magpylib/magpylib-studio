@@ -1441,9 +1441,61 @@ class SceneWidget(anywidget.AnyWidget):
     def save(self, file):
         """Write an editable view's scene as a ``.magpy.json`` document, as
         the VS Code studio saves one -- and opens."""
-        doc = self._editing("save").to_dict()
-        text = json.dumps(doc, indent=2) + "\n"
+        text = self._document(self._editing("save"))
         pathlib.Path(file).write_text(text, encoding="utf-8")
+
+    @property
+    def document(self):
+        """An editable view's scene as the text of a ``.magpy.json``
+        document: what `save` writes. A host that keeps the file itself -- the
+        JupyterLab scene tab -- reads it after each settled edit, which
+        `revision` counts."""
+        return self._document(self._editing("document"))
+
+    @staticmethod
+    def _document(session):
+        return json.dumps(session.to_dict(), indent=2) + "\n"
+
+    def take_document(self, text):
+        """Put the scene of a ``.magpy.json`` document's `text` in the view,
+        as one step that `undo` takes back: the file reverted, or changed on
+        disk. Returns whether the scene changed; the same scene written
+        another way -- other spacing, another order of keys -- is no change,
+        and no step. A document this package cannot read -- not a scene, or
+        written by a newer one -- is refused, and the scene stays as it was."""
+        session = self._editing("take_document")
+        scene = json.loads(text)
+        if scene == session.to_dict():
+            return False
+        # What the file holds, as the session reads it -- an older version
+        # migrated, a mesh's hash stamped -- may be the scene it has: then no
+        # step, and the steps to redo kept.
+        before = json.dumps(session.doc, sort_keys=True, default=str)
+        undo, redo = len(session._undo), list(session._redo)
+        result = session.replace_scene(scene, label="changed on disk")
+        if not result.get("ok"):
+            raise ValueError(f"take_document: {result.get('error')}")
+        if json.dumps(session.doc, sort_keys=True, default=str) == before:
+            del session._undo[undo:]
+            session._redo[:] = redo
+            return False
+        return self._show({"by": "replace"})
+
+    @classmethod
+    def from_document(cls, text, base_dir=None, **traits):
+        """An editable view of the scene a ``.magpy.json`` document's `text`
+        holds: what a host that keeps the file itself -- the JupyterLab scene
+        tab -- hands over rather than a path, saved or not. `base_dir` is the
+        folder the file is in, which a relative mesh path is relative to.
+        Undo starts here, as for any view."""
+        from magpylib_studio.build import Scene
+
+        session = _loaded(
+            lambda session: session.load_scene(json.loads(text), base_dir=base_dir),
+            [],
+            "the document",
+        )
+        return cls(Scene(session), editable=True, **traits)
 
     @traitlets.observe("variables")
     def _variables_assigned(self, change):

@@ -24,6 +24,7 @@ what is next is in [roadmap.md](roadmap.md)._
 | the notebook widget   | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `colorbar.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
 | the agent skill       | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                                               |
 | the VS Code extension | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks                             |
+| the JupyterLab tab    | `jupyterlab-extension/`                           | a `.magpy.json` as the editable widget in a tab of its own; built into `labextension/`, committed, installed by the wheel                                              |
 | the renderer          | `magpylib_studio/static/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use; bundled into `static/widget.js`, the source not shipped                                      |
 | tools                 | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                                     |
 | the agent evaluation  | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                                   |
@@ -498,6 +499,15 @@ written: an engine started in another interpreter, or on a package upgraded in
 place, draws everything again with its own; a page drawn while the package on
 disk is no longer the running engine's says so, with Restart Engine
 ([0057](decisions.md#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)).
+
+**The JupyterLab tab**
+([0058](decisions.md#0058-a-scene-file-opens-in-jupyterlab-as-a-tab)): a
+`.magpy.json` opens as `SceneWidget(file, editable=True)` in a kernel of the
+document's own, shown with the widget manager JupyterLab makes for a notebook.
+JupyterLab keeps the file: after each settled edit the kernel sends
+`view.document` over a comm into the tab's text model, and a text the model
+takes from disk goes back as `view.take_document(text)`, one step to undo.
+`npm run check` in `jupyterlab-extension/` drives it in a private JupyterLab.
 
 **Field views**: `get_field` (summed B, H, J or M at points or along a sensor,
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D
