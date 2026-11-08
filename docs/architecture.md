@@ -24,7 +24,7 @@ what is next is in [roadmap.md](roadmap.md)._
 | the notebook widget   | `magpylib_studio/widget.py`, `static/`            | `SceneWidget`, an anywidget; `static/widget.js` is the committed bundle of the renderer, `legend.mjs`, `colorbar.mjs`, `drag.mjs`, `variables.mjs` and `inspector.mjs` |
 | the agent skill       | `magpylib_studio/.agents/skills/magpylib-studio/` | `SKILL.md` and a reference generated from the builder's docstrings, shipped in the wheel                                                                               |
 | the VS Code extension | `vscode-extension/`                               | `src/extension.ts` the host, `engineClient.ts` the RPC client, one `.ts` per sidebar view, `media/` the webview scripts, `harness/` checks                             |
-| the renderer          | `vscode-extension/media/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use                                                                                               |
+| the renderer          | `magpylib_studio/static/scene3d.mjs`              | three.js; one node per studio id; handles; the keys table both hosts use; bundled into `static/widget.js`, the source not shipped                                      |
 | tools                 | `tools/`                                          | `build-widget.sh`, `check-package-alone.py`, `write-skill-reference.py`, `replay-magpylib-docs.py`                                                                     |
 | the agent evaluation  | `evals/`                                          | tasks with checkable targets, a runner for Claude Code headless, results kept in git                                                                                   |
 | tests                 | `tests/`, `vscode-extension/src/test/`            | the engine suite, the extension suite in a real Extension Development Host, browser checks of the widget                                                               |
@@ -474,13 +474,30 @@ so installing needs no node; `npm run check:widget` fails when it no longer
 matches its sources, and a CI job installs the wheel alone and runs an edit
 through a fake connection.
 
-**The studio panel draws the widget** ([0011](decisions.md#0011-one-view)):
-`media/studioView.mjs` holds a model (`payload`, the engine's `object_tree`,
-`selected`, `hidden`) and an editor that sends the drag's messages to the
+**The studio panel draws the widget** ([0011](decisions.md#0011-one-view)): the
+package's `static/host.mjs` holds the model a host with no kernel runs it
+against (`payload`, the engine's `object_tree`, `selected`, `hidden`), and
+`mountWidget(el, host)` takes from the host only what it alone can do -- the
+engine's calls, an editor, a pick, hiding, the field lines' switch, a variant
+used. `media/studioView.mjs` is that host: it sends the drag's messages to the
 extension host, which refreshes the tree, the Inspector, the field view, the
 history and the script tab, and marks the scene unsaved. In the studio hiding is
 an edit; in a notebook a view setting; the model decides. Fading is a view
 setting in both. Chart mode swaps in the read-only plotly figure.
+
+**The extension carries no view**
+([0056](decisions.md#0056-every-host-draws-with-the-packages-view)): the scene
+tabs, the script panel and the side bar's Variables and Inspector load
+`widget.js`, `widget.css`, `host.mjs`, `variables.mjs` and `inspector.mjs` from
+the package that wrote what they draw -- the engine's, which `version` names, or
+the one a script's figure names (`static`, payload 3) -- by their real paths,
+each folder a root the webview may load from (`src/packageView.ts`). A view is
+then always of its payload's version, which changes with every release and so is
+no protocol's business. A view is its files' real paths and the times they were
+written: an engine started in another interpreter, or on a package upgraded in
+place, draws everything again with its own; a page drawn while the package on
+disk is no longer the running engine's says so, with Restart Engine
+([0057](decisions.md#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)).
 
 **Field views**: `get_field` (summed B, H, J or M at points or along a sensor,
 with `skipped` and `warnings` inline), `get_field_figure` (magpylib's own 2D
@@ -607,9 +624,10 @@ of its own only on a connection that has never opened one by name -- the
 one-scene host, the "Try it" below; after an `open_session` it is refused
 (`SessionError`), so a call that forgot its scene fails rather than reading an
 empty one. `version` says the package's version, the protocol number
-(`rpc.PROTOCOL`, 2 since sessions) and the newest document version read. Every
-session resolves meshes through one cache per process, keyed by what the source
-read, so a part in two scenes is reoriented once.
+(`rpc.PROTOCOL`: 2 since sessions, 3 since it says where its view is), the
+newest document version read and the package's view (`static`). Every session
+resolves meshes through one cache per process, keyed by what the source read, so
+a part in two scenes is reoriented once.
 
 ```
 -> {"id": 3, "method": "open_session", "params": {"session": "4f2a9c", "path": "ring.magpy.json"}}

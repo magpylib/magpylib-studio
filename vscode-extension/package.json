@@ -1206,8 +1206,8 @@
   "scripts": {
     "vscode:prepublish": "npm run license && npm run compile",
     "license": "node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\"",
-    "compile": "tsc -p ./ && npm run lint && npm run check:webviews && npm run check:contributions && npm run check:scene && npm run check:drag && npm run check:units && npm run check:inspector-units && npm run check:messages && npm run check:widget && npm run copy:widget && npm run check:version",
-    "lint": "eslint src media",
+    "compile": "tsc -p ./ && npm run lint && npm run check:webviews && npm run check:contributions && npm run check:scene && npm run check:drag && npm run check:units && npm run check:inspector-units && npm run check:messages && npm run check:widget && npm run check:version",
+    "lint": "eslint src media && node harness/lint-package-view.mjs",
     "check:webviews": "node harness/check-webview-scripts.js",
     "check:contributions": "node harness/check-contributions.js",
     "check:scene": "node harness/check-scene-bounds.js",
@@ -1216,7 +1216,6 @@
     "check:inspector-units": "node harness/check-inspector-units.js",
     "check:messages": "node harness/check-messages.js",
     "check:widget": "node harness/check-widget.js",
-    "copy:widget": "node harness/copy-widget.js",
     "check:widget-browser": "node harness/check-widget-browser.mjs",
     "check:window": "node harness/check-window-life.mjs",
     "screenshot": "node harness/screenshot.mjs",
@@ -1231,8 +1230,7 @@
   "dependencies": {
     "@vscode/codicons": "^0.0.46-24",
     "@vscode/python-extension": "^1.0.6",
-    "plotly.js-dist-min": "^3.0.0",
-    "three": "^0.185.1"
+    "plotly.js-dist-min": "^3.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -1242,6 +1240,7 @@
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "eslint": "^10.8.0",
+    "three": "^0.185.1",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.65.0"
   }

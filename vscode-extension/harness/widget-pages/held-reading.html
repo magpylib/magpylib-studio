@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  The panel's own renderer, media/scene3d.mjs, drawing the studio's quiver
+  The renderer, magpylib_studio/static/scene3d.mjs, drawing the studio's quiver
   example, then drawing it again part-way through a drag: first with the
   sensor held -- its arrows are its own reading -- then with the magnet held.
   The drag itself is not needed for this: what a drag does to a redraw is the
@@ -30,7 +30,7 @@
     <div id="view"></div>
     <script type="module">
       import * as THREE from "three";
-      import { createScene3d } from "/media/scene3d.mjs";
+      import { createScene3d } from "/static/scene3d.mjs";
       const scene3d = createScene3d();
 
       const [before, after, whole, later] = await (

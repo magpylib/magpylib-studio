@@ -1,6 +1,6 @@
-/* The Inspector's own dress: the rows are the package's (`widget/widget.css`,
-   linked beside this), in the editor's colours since the editor's variables
-   are on this page. */
+/* The Inspector's own dress: the rows are the package's (its `widget.css`,
+   loaded from the engine's package beside this), in the editor's colours
+   since the editor's variables are on this page. */
 body {
   margin: 0;
   padding: 0 8px 8px;

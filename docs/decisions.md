@@ -64,6 +64,8 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0053](#0053-the-ruler-measures-features-in-every-pane)                                        | The ruler measures features, in every pane                   | accepted 2026-11-06                                                  |
 | [0054](#0054-a-goal-seek-moves-one-variable-to-a-reading)                                      | A goal seek moves one variable to a reading                  | accepted 2026-11-07                                                  |
 | [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
+| [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
+| [0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)                         | The host glue is the package's, and a changed view is said   | accepted 2026-11-08                                                  |
 
 ---
 
@@ -2929,3 +2931,140 @@ field over the run and not say where the view was, nor move it.
   a plot redrawn each time would fall behind the run it follows.
 - Counting in frames: the index would mean a row of `getB` only when magpylib
   kept every step.
+
+---
+
+## 0056. Every host draws with the package's view
+
+**Status:** accepted 2026-11-08, on Alex's word ("yes"). Builds on
+[0010](#0010-the-notebook-widget-edits-with-the-package-alone),
+[0011](#0011-one-view) and
+[0019](#0019-the-editors-panels-are-the-widgets-and-a-host-mounts-them).
+
+### Context
+
+The package is the product: its anywidget edits in any notebook, and the VS Code
+panels mount the same widget and panels, so studio is not locked into one
+editor. But the extension shipped a copy of that view, made at its build, and
+the engine it talked to was whatever pip had installed. The two are released
+together and installed apart. The payload between them changed with nearly every
+release -- since protocol 2 it gained `applied`, `colors`, `fields`, `name`,
+`partial` and the `pixels` kind -- and `rpc.PROTOCOL`, bumped by hand, did not
+move. A mismatched pair passed the check and drew wrongly without a word: a
+newer engine sends a uniform field as `fields`, which an older view does not
+draw.
+
+### Decision
+
+- **The extension carries no view.** The scene tabs and the side bar's Variables
+  and Inspector load the notebook widget's bundle and stylesheet and the two
+  panels from the engine's package, which `version` names (`static`); the script
+  panel from the package that drew the figure, which the figure names (payload
+  3). A view is then always of its payload's version, and the payload stays the
+  package's private business, unversioned.
+- **By real path.** VS Code refuses a file whose real path is outside every
+  root, and an installer may link a package's files from its cache; each file is
+  resolved, and its folder made a root. Under remote development the extension
+  runs where the engine does, and VS Code loads these as it loads the
+  extension's own files: one code path, read in its source.
+- **Protocol 3** says the engine names its view; the extension refuses an engine
+  before it, or one whose view is not whole, with Install the Engine. A figure
+  from an older package is refused by name, with the command that upgrades it in
+  that interpreter; a plotly figure, which needs no view, is drawn from any.
+- **Drawn again when the engine's view is another**: a view is its files' real
+  paths and the times they were written, so an engine started in another
+  interpreter, or on a package upgraded in place, redraws every tab and side bar
+  view with its own, and a script run again after an upgrade redraws its panel.
+  A tab says the engine is starting while it does, and why it cannot draw when
+  it cannot; installing an engine or changing the interpreter tries again. The
+  side bar does not start an engine to draw itself; until a scene opens it says
+  so.
+- **The payload's version covers what the panel reads around `body`**, the
+  envelope: `body` is read by the view the payload names, and never bumps it.
+
+### Rejected
+
+- **Release in lockstep, refusing an engine of another version**: closes the
+  gap, but asks everyone with a pinned engine to upgrade at each release, and
+  keeps a copy that has to be the same version as something installed apart.
+- **Bump the protocol whenever the payload changes**: it already failed, five
+  keys without a bump; a rule kept by hand is the gap.
+- **A public scene format, the view a library with bindings to other
+  languages**: magpylib's backend protocol already says what a scene draws; a
+  second format would be a second contract for the same picture, and the traces
+  are built in python, so another language could only replay them.
+
+### Consequences
+
+- A feature lands in the package first; the extension adds only what needs an
+  editor: files, saving and backups, the script tab, tabs, the side bar.
+- `three` is a build dependency of the extension now, and the renderer's source,
+  `vscode-extension/media/scene3d.mjs`, is left out of the extension: no webview
+  there loads either raw. That source still sits in the extension's folder while
+  the package builds it; moving it is a later change of layout alone.
+
+---
+
+## 0057. The host glue is the package's, and a changed view is said
+
+**Status:** accepted 2026-11-08, on Alex's word ("merged, follow up now"), after
+[0056](#0056-every-host-draws-with-the-packages-view) was merged; it finishes
+what that one left, and the review of it found.
+
+### Context
+
+0056 had every VS Code view load the package's files, but the extension's
+`media/studioView.mjs` still built the widget's model: the frames of a run read
+off the payload, which children of a sensor are its parts, what the view's own
+`frame` and `rpc` messages ask. That is the widget's knowledge, of the payload's
+version, kept in the extension. And a view was known by its files at the moment
+the engine started: a package upgraded under a running engine had a side bar
+shown again, or a tab reloaded, load the new files against the old engine.
+
+### Decision
+
+- **The model is the package's.** `static/host.mjs` holds what anywidget holds
+  in a notebook, for a host with no kernel, and `mountWidget(el, host)` asks of
+  the host only what it alone can do: the engine's calls, an editor (0011), a
+  pick, hiding, the field lines' switch, a variant used, a word in its bar.
+  `media/studioView.mjs` is that host, and the read-only chart. The `host`
+  object and what `mountWidget` returns are the extension's one contract with
+  the view's code, which `rpc.PROTOCOL` covers; the side bar's `createVariables`
+  and `createInspector` take callbacks of the same kind.
+- **The renderer's source is the package's**, `static/scene3d.mjs`, bundled into
+  `widget.js` and left out of the wheel; three.js stays the extension's, which
+  the build finds through `NODE_PATH`.
+- **A view is its files' real paths and the times they were written**, so an
+  engine started on a package upgraded in place, or a script run again after
+  one, draws everything again with it. A page drawn while the package on disk is
+  no longer the running engine's -- upgraded in its interpreter, or rebuilt in a
+  development install -- says so, once for each change, with Restart Engine. A
+  script figure whose view changed so is said out of date when shown again,
+  until a run of the script is drawn; saving the script does not clear it.
+- **A tab says what it waits for**: the engine starting, at once, and why it
+  cannot draw when it cannot; it tries again when an engine starts, is
+  installed, or the interpreter changes -- not when it is looked at, as an
+  engine that cannot start says so each time it is asked. The side bar does not
+  start an engine to draw itself; until one runs it says so.
+- **The payload's version covers what the panel reads around `body`**: `body` is
+  read by the view the payload names, and never bumps it.
+- **The extension goes to the Marketplace once PyPI serves its engine**: the
+  release waits for this tag's `magpylib-studio` there, up to 30 minutes and
+  before it signs in to Azure, which a wait that long could outlast, so Install
+  the Engine always finds one the extension accepts.
+- **The view's own code is linted**: `host.mjs` and `scene3d.mjs`, which the
+  extension loads from the package as they are, by a second ESLint run from the
+  repo root, since ESLint lints nothing outside the folder it is based in.
+
+### Rejected
+
+- **Leaving the glue in the extension, the protocol bumped by hand when the
+  model changes**: the model changes with the widget, and a rule kept by hand is
+  what 0056 found had failed.
+- **Restarting the engine on its own when the view's files change**, watched:
+  built and reviewed three times over. A restart puts every scene back without
+  its undo history, so a development install lost it at every rebuild; pip
+  writes a package one file at a time and may replace the folder watched, so the
+  restart came too early or never; and its message said a crash.
+- **Shipping the renderer's source in the wheel**: 380 KB nobody loads, as the
+  bundle holds it.

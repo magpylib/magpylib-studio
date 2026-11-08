@@ -49,8 +49,22 @@ export default [
   },
 
   // --- the webviews ------------------------------------------------------
-  {
-    files: ["media/**/*.js", "media/**/*.mjs"],
+  // `media/`, and the package's view code the extension loads from the
+  // package as it is (decisions 0056 and 0057): the model of a hosted widget,
+  // and the renderer the widget bundles. Those two are linted by a second
+  // run from the repo root (`harness/lint-package-view.mjs`): ESLint lints
+  // nothing outside the folder it is based in, and the package is beside this
+  // one. The package's other modules are checked by their build.
+  ...[
+    { files: ["media/**/*.js", "media/**/*.mjs"] },
+    {
+      files: [
+        "magpylib_studio/static/host.mjs",
+        "magpylib_studio/static/scene3d.mjs",
+      ],
+    },
+  ].map((where) => ({
+    ...where,
     languageOptions: {
       ecmaVersion: 2022,
       // .js here are classic scripts loaded by tag; .mjs are modules, which
@@ -78,5 +92,5 @@ export default [
       "no-unused-vars": ["error", { args: "none" }],
       eqeqeq: ["error", "smart"],
     },
-  },
+  })),
 ];

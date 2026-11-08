@@ -3,6 +3,8 @@ driven through `serve` as `python -m magpylib_studio` is."""
 
 import io
 import json
+import pathlib
+import re
 
 from magpylib_studio.rpc import PROTOCOL, Engine, serve
 from magpylib_studio.session import DOC_VERSION, MagpylibStudioSession
@@ -143,10 +145,30 @@ def test_a_name_is_used_once():
 
 
 def test_the_engine_says_what_it_speaks():
+    """And the extension speaks it: a bump it was not told of would have it
+    refuse every engine. The view the engine names is what the extension
+    draws its scenes with, and it carries no copy of its own: every file of it
+    has to be there."""
     (answer,) = ask({"method": "version"})
     assert answer["result"]["protocol"] == PROTOCOL
     assert answer["result"]["document"] == DOC_VERSION
     assert "package" in answer["result"]
+    view = pathlib.Path(answer["result"]["static"])
+    host = (
+        pathlib.Path(__file__).parent.parent / "vscode-extension/src/packageView.ts"
+    ).read_text(encoding="utf-8")
+    files = re.search(r"VIEW_FILES = \[([^\]]*)\]", host)
+    assert files, "packageView.ts no longer lists the view's files"
+    names = re.findall(r"'([^']+)'", files.group(1))
+    assert "widget.js" in names
+    for name in names:
+        assert (view / name).is_file(), name
+    source = (
+        pathlib.Path(__file__).parent.parent / "vscode-extension/src/extension.ts"
+    ).read_text(encoding="utf-8")
+    spoken = re.search(r"ENGINE_PROTOCOL = \{ min: (\d+), max: (\d+) \}", source)
+    assert spoken, "extension.ts no longer says which protocols it speaks"
+    assert int(spoken.group(1)) <= PROTOCOL <= int(spoken.group(2))
 
 
 def test_one_mesh_cache_for_every_session():

@@ -5,10 +5,9 @@
  *
  * `magpylib_studio/static/widget.js` is a build product and is committed --
  * a wheel is built by hatchling alone, and nobody installing magpylib-studio
- * should need node. What that costs is a way to go stale, and the way it goes
- * stale is not the widget's own file: it is `media/scene3d.mjs`, which the
- * panel loads directly and so shows an edit to immediately, while the widget
- * keeps whatever renderer it was last built with. Nothing would say so.
+ * should need node. What that costs is a way to go stale: an edit to one of
+ * its modules -- the renderer, `scene3d.mjs`, above all -- leaves the bundle
+ * on what it was last built with, and nothing would say so.
  *
  * `tools/build-widget.sh` stamps a hash of its sources into the banner --
  * and of the three.js and esbuild it built them with, since upgrading three
@@ -30,13 +29,12 @@ const BUNDLES = ["widget.js", "panel.js"].map((name) =>
 );
 // The set the build hashes, the way it takes them: every module of the
 // widget's own and the renderer, by path from the repo root, sorted.
-const SOURCES = [
-  ...fs
-    .readdirSync(STATIC)
-    .filter((name) => name.endsWith(".mjs"))
-    .map((name) => `magpylib_studio/static/${name}`),
-  "vscode-extension/media/scene3d.mjs",
-].sort();
+// host.mjs is not one: a host loads it beside the bundle, which it imports.
+const SOURCES = fs
+  .readdirSync(STATIC)
+  .filter((name) => name.endsWith(".mjs") && name !== "host.mjs")
+  .map((name) => `magpylib_studio/static/${name}`)
+  .sort();
 const REBUILD =
   "Run tools/build-widget.sh (needs npm install in vscode-extension/).";
 

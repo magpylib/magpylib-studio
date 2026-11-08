@@ -8,6 +8,23 @@ Python package it runs on. Open an entry for its details.
 ### Changed
 
 <details>
+<summary>The extension draws with the engine's own view</summary>
+
+The scene tabs, the side bar and the script panel load the view from the
+installed `magpylib-studio` package instead of a copy inside the extension, so a
+scene is always drawn by the view of the version that wrote it. Before, an
+extension and an engine of different versions could pass the version check and
+draw some things wrongly without a word, such as a uniform field. The extension
+now needs an engine of this release or newer and offers to install one; a
+script's figure from an older package says how to upgrade it there. The
+extension is smaller too, without three.js inside. Upgrading `magpylib-studio`
+while VS Code runs is said, with a button to restart the engine on the new
+version, and a scene tab says when the engine is starting, or why it cannot
+draw, and tries again.
+
+</details>
+
+<details>
 <summary>The U-core example needs material-response 0.12</summary>
 
 Its winding pack is drawn across the turn, along the coil's axis and outward, as
