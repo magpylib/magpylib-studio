@@ -69,7 +69,8 @@ interface View {
   panel: vscode.WebviewPanel;
   payload: ViewPayload;
   stale: boolean;
-  /** The package view the page was drawn with; none for a plotly figure. */
+  /** The package view the page was drawn with (its `key`); none for a plotly
+   *  figure. */
   drawnWith: string | undefined;
 }
 
@@ -296,29 +297,44 @@ function draw(
   key: string,
   payload: ViewPayload,
 ): void {
+  const existing = views.get(key);
   // A widget figure is drawn with the view of the package that drew it, which
-  // reads its payload whatever version that is (`packageView`).
+  // reads its payload whatever version that is (`packageView`). `scene` is
+  // what a package older than the widget-in-the-panel writes, and a widget
+  // figure before payload 3 names no view: this extension has none of its own.
   let view: PackageView | undefined;
-  if (payload.kind === 'widget') {
+  let refusal: string | undefined;
+  if (payload.kind === 'scene' || (payload.kind === 'widget' && payload.version < 3)) {
+    refusal = 'its magpylib-studio is older than this extension';
+  } else if (payload.kind === 'widget') {
     try {
       view = packageView(payload.static);
     } catch (err) {
-      notDrawn(payload, err instanceof Error ? err.message : String(err));
-      return;
+      refusal = err instanceof Error ? err.message : String(err);
     }
   }
+  if (refusal) {
+    notDrawn(payload, refusal);
+    if (existing && !existing.stale) {
+      // The script ran again and drew nothing here: what the panel shows is
+      // the run before, which it says as it says an edit since.
+      existing.stale = true;
+      existing.panel.title = panelTitle(existing.payload, true);
+      void existing.panel.webview.postMessage({ type: 'stale', stale: true });
+    }
+    return;
+  }
   const roots = [context.extensionUri, ...(view?.roots ?? [])];
-  const existing = views.get(key);
   if (existing) {
     existing.payload = payload;
     // A payload is the script as it was when it ran, so one arriving is the
     // only thing that settles this.
     existing.stale = false;
     existing.panel.title = panelTitle(payload);
-    if (view && existing.drawnWith !== view.dir) {
-      // Run again in another interpreter: the page is drawn anew with its
-      // view, and asks for the payload when it is ready.
-      existing.drawnWith = view.dir;
+    if (view && existing.drawnWith !== view.key) {
+      // Run again in another interpreter, or after an upgrade: the page is
+      // drawn anew with its view, and asks for the payload when it is ready.
+      existing.drawnWith = view.key;
       existing.panel.webview.options = { enableScripts: true, localResourceRoots: roots };
       existing.panel.webview.html = html(context, existing.panel.webview, view);
       return;
@@ -335,7 +351,7 @@ function draw(
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     { enableScripts: true, localResourceRoots: roots },
   );
-  views.set(key, { panel, payload, stale: false, drawnWith: view?.dir });
+  views.set(key, { panel, payload, stale: false, drawnWith: view?.key });
   panel.webview.html = html(context, panel.webview, view);
   void noticeOnce(context, payload);
   panel.webview.onDidReceiveMessage((message: PageMessage) => {
@@ -553,14 +569,9 @@ async function read(uri: vscode.Uri): Promise<ViewPayload | undefined> {
     );
     return undefined;
   }
-  // `scene` is what a package older than the widget-in-the-panel writes, and
-  // a widget figure before payload 3 names no view to draw it with: neither
-  // can be drawn by this extension, which carries no view of its own.
-  if (payload.kind === 'scene' || (payload.kind === 'widget' && payload.version < 3)) {
-    notDrawn(payload, 'its magpylib-studio is older than this extension');
-    return undefined;
-  }
-  if (!['plotly', 'widget'].includes(payload.kind)) {
+  // `scene`, an older package's, is `draw`'s to refuse, where the panel it
+  // would have gone to is known
+  if (!['plotly', 'scene', 'widget'].includes(payload.kind)) {
     say(`ignoring ${uri.fsPath}: unknown figure kind ${payload.kind}`);
     return undefined;
   }

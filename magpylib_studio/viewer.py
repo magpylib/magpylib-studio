@@ -34,11 +34,12 @@ import sys
 import time
 from pathlib import Path
 
-#: Bumped when the payload's shape changes. A panel that does not know a
-#: version says so rather than drawing part of it. 2 added the `widget` kind,
-#: which a panel reading only 1 would drop with a less helpful word. 3 says
-#: where this package's view is (`static`), which the panel draws a widget
-#: figure with: the view and the figure are then always of one version.
+#: Bumped when what the panel itself reads changes: the fields around `body`.
+#: A panel that does not know a version says so rather than drawing part of
+#: it. 2 added the `widget` kind, which a panel reading only 1 would drop with
+#: a less helpful word. 3 says where this package's view is (`static`), which
+#: the panel draws a widget figure with -- so `body`, which that view reads,
+#: changes with the package and never bumps this.
 PAYLOAD_VERSION = 3
 
 #: The package's view: the notebook widget's bundle and stylesheet, and the

@@ -2970,9 +2970,16 @@ draw.
   before it, or one whose view is not whole, with Install the Engine. A figure
   from an older package is refused by name, with the command that upgrades it in
   that interpreter; a plotly figure, which needs no view, is drawn from any.
-- **Drawn again when the engine's view is another**: an engine started in
-  another interpreter redraws every tab and side bar view with its own. The side
-  bar does not start an engine to draw itself; until a scene opens it says so.
+- **Drawn again when the engine's view is another**: a view is its files' real
+  paths and the times they were written, so an engine started in another
+  interpreter, or on a package upgraded in place, redraws every tab and side bar
+  view with its own, and a script run again after an upgrade redraws its panel.
+  A tab says the engine is starting while it does, and why it cannot draw when
+  it cannot; installing an engine or changing the interpreter tries again. The
+  side bar does not start an engine to draw itself; until a scene opens it says
+  so.
+- **The payload's version covers what the panel reads around `body`**, the
+  envelope: `body` is read by the view the payload names, and never bumps it.
 
 ### Rejected
 
@@ -2990,8 +2997,7 @@ draw.
 
 - A feature lands in the package first; the extension adds only what needs an
   editor: files, saving and backups, the script tab, tabs, the side bar.
-- `three` is a build dependency of the extension now, not shipped in it: no
-  extension webview loads the renderer raw.
-- The renderer's source, `vscode-extension/media/scene3d.mjs`, still sits in the
-  extension's folder while the package builds it; moving it is a later change of
-  layout alone.
+- `three` is a build dependency of the extension now, and the renderer's source,
+  `vscode-extension/media/scene3d.mjs`, is left out of the extension: no webview
+  there loads either raw. That source still sits in the extension's folder while
+  the package builds it; moving it is a later change of layout alone.

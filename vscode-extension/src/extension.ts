@@ -24,7 +24,7 @@ import {
 } from './scenes';
 import { setTextFocus, tookTextFocus, undoTyping } from './textFocus';
 import { mediaUri, nonce as webviewNonce } from './webview';
-import { PackageView, packageView } from './packageView';
+import { PackageView, packageView, showPage } from './packageView';
 import { Shown, Variable, VariableBounds, VariablesViewProvider } from './variablesView';
 import { InspectorViewProvider } from './inspectorView';
 import {
@@ -1576,6 +1576,7 @@ async function installEngineNow(): Promise<void> {
   cachedPython = undefined; // re-probe: the freshly configured path wins next
   refusedEngine = undefined;
   refreshSurfaces();
+  drawUndrawn();
 
   vscode.window
     .showInformationMessage('Magpylib Studio: engine installed.', 'Open Scene View')
@@ -2000,7 +2001,7 @@ async function startEngine(context: vscode.ExtensionContext): Promise<EngineClie
     throw new Error(`the engine in ${pythonPath} was refused: ${mismatch}`);
   }
   engine = client;
-  if (engineView?.dir !== view.dir) {
+  if (engineView?.key !== view.key) {
     engineView = view;
     engineViewChanged.fire(view);
   }
@@ -2014,60 +2015,65 @@ async function whenEngineView(context: vscode.ExtensionContext): Promise<Package
   return engineView!;
 }
 
-/** Which view each scene's tab was drawn with, so that it is drawn again only
- *  when the engine's is another. */
+/** The view each scene's tab was drawn with (its `key`), so that it is drawn
+ *  again only when the engine's is another. None for a tab still waiting for
+ *  its engine, or whose engine could not start. */
 const drawnWith = new WeakMap<vscode.WebviewPanel, string>();
 
 /** Draw a scene's tab with the engine's view: once the engine has said where
- *  that is, and again whenever it is another (`engineViewChanged`). Until then
- *  the tab is empty; when the engine cannot start, it says why. */
+ *  that is, and again whenever it is another (`engineViewChanged`). Meanwhile
+ *  the tab says the engine is starting, and when it cannot, why. */
 function drawScenePanel(
   context: vscode.ExtensionContext,
   panel: vscode.WebviewPanel,
   view: PackageView | undefined = engineView,
 ): void {
-  const draw = (shown: PackageView) => {
-    if (drawnWith.get(panel) === shown.dir) {
-      return;
-    }
-    drawnWith.set(panel, shown.dir);
+  const show = (shown: PackageView | undefined, notice = '') => {
     try {
-      panel.webview.options = {
-        ...PANEL_OPTIONS(context),
-        localResourceRoots: [context.extensionUri, ...shown.roots],
-      };
-      panel.webview.html = createWebviewHtml(context, panel.webview, shown);
+      showPage(
+        panel.webview,
+        context.extensionUri,
+        shown,
+        (page) => createWebviewHtml(context, panel.webview, page),
+        notice,
+      );
     } catch {
       // closed while the engine started
     }
   };
   if (view) {
-    draw(view);
+    if (drawnWith.get(panel) !== view.key) {
+      drawnWith.set(panel, view.key);
+      show(view);
+    }
     return;
   }
-  void whenEngineView(context).then(draw, (err: unknown) => {
-    try {
-      panel.webview.html = notDrawnHtml(err instanceof Error ? err.message : String(err));
-    } catch {
-      // closed while the engine started
-    }
-  });
+  // said at once: the engine takes seconds to start, and an empty tab says nothing
+  show(undefined, 'Starting the engine…');
+  void whenEngineView(context).then(
+    (shown) => drawScenePanel(context, panel, shown),
+    (err: unknown) =>
+      show(
+        undefined,
+        `Magpylib Studio cannot draw this scene: ${err instanceof Error ? err.message : err}.`,
+      ),
+  );
 }
 
-/** A tab that cannot be drawn: the engine did not start, and the message it
- *  gave is said where the scene would be. */
-function notDrawnHtml(reason: string): string {
-  const text = reason.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
-</head>
-<body style="font: var(--vscode-font-family); color: var(--vscode-descriptionForeground); padding: 1em;">
-  <p>Magpylib Studio cannot draw this scene: ${text}.</p>
-</body>
-</html>`;
+/** Draw the tabs no engine has drawn yet, which starts one for them: after an
+ *  engine is installed, or the interpreter changed, a tab that said why it
+ *  could not draw tries again. */
+function drawUndrawn(): void {
+  if (!activeContext) {
+    return;
+  }
+  for (const doc of openScenes()) {
+    for (const panel of doc.panels) {
+      if (!drawnWith.has(panel)) {
+        drawScenePanel(activeContext, panel);
+      }
+    }
+  }
 }
 
 /** The tree item a keyboard shortcut should act on (menus pass it directly).
@@ -3125,8 +3131,8 @@ export function activate(context: vscode.ExtensionContext): void {
           drawScenePanel(context, panel, view);
         }
       }
-      variables.redraw();
-      inspector?.redraw();
+      variables.draw();
+      inspector?.draw();
     }),
   );
 
@@ -5297,6 +5303,7 @@ export function activate(context: vscode.ExtensionContext): void {
         engine.dispose();
         refreshSurfaces(); // asks for the scene, which starts the new one
       }
+      drawUndrawn();
     }),
     // No retainContextWhenHidden: the guide calls it a last resort for good
     // reason (it keeps the whole webview running), and neither sidebar view

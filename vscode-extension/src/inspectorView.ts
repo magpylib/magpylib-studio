@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import { setTextFocus, tookTextFocus } from './textFocus';
-import { PackageView, waitingHtml } from './packageView';
+import { PackageView, showPage } from './packageView';
 import { mediaUri, nonce as webviewNonce } from './webview';
 
 const MUTATING = new Set([
@@ -117,27 +117,23 @@ export class InspectorViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Draw the page with the engine's view, unless it is drawn with it
-   *  already: called when the view is shown, and when the engine's view is
-   *  another (an engine started, or one in another interpreter). */
-  redraw(): void {
-    this.draw();
-  }
-
-  private draw(): void {
+   *  already: when the view is shown, and when the engine's view is another
+   *  (an engine started, one in another interpreter, a package upgraded). */
+  draw(): void {
     const webviewView = this.view;
     const packageView = this.packageView();
-    if (!webviewView || (packageView && this.drawnWith === packageView.dir)) {
+    if (!webviewView || (packageView && this.drawnWith === packageView.key)) {
       return;
     }
     this.ready = false;
-    this.drawnWith = packageView?.dir;
-    webviewView.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [this.extensionUri, ...(packageView?.roots ?? [])],
-    };
-    webviewView.webview.html = packageView
-      ? this.html(webviewView.webview, packageView)
-      : waitingHtml('Open a scene to see the properties of what is selected.');
+    this.drawnWith = packageView?.key;
+    showPage(
+      webviewView.webview,
+      this.extensionUri,
+      packageView,
+      (view) => this.html(webviewView.webview, view),
+      'Open a scene to see the properties of what is selected.',
+    );
   }
 
   private html(webview: vscode.Webview, packageView: PackageView): string {
