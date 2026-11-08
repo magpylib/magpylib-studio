@@ -267,10 +267,11 @@ def _packed(text):
 #: The arrays of a mesh a page holds once (`_compacted`).
 _SHARED = ("position", "index", "uv", "back_uv")
 #: The digits a page keeps of a mesh's coordinates, counted from its largest:
-#: past the seven of the float32 buffer the view draws, so a snap on a page
-#: still lands where the engine put it, and short of float64's noise --
+#: as many as the engine sends them with (`threejs.COORDINATE_DIGITS`), past
+#: the seven of the float32 buffer the view draws, so a snap on a page still
+#: lands where the engine put it, and short of float64's noise --
 #: ``0.08030000000000001`` for 0.0803 -- which compresses poorly.
-_POSITION_DIGITS = 12
+_POSITION_DIGITS = threejs.COORDINATE_DIGITS
 #: The decimals a page keeps of a mesh's colour coordinate: its place on a
 #: table of `threejs.LUT_SIZE` colours, forty times finer than a step.
 _UV_DECIMALS = 4
@@ -1480,6 +1481,24 @@ class SceneWidget(anywidget.AnyWidget):
             session._redo[:] = redo
             return False
         return self._show({"by": "replace"})
+
+    def moved(self, folder):
+        """Say the scene's file moved to `folder` -- absolute, or relative to
+        the folder it was in -- as a Save As or a rename moves it: each
+        relative mesh path is rewritten to name the same file from there, as
+        the VS Code studio does, and the view tells of it as of an edit, so a
+        host that keeps the file writes it again. No step to undo: the scene
+        is the same, spelled from elsewhere. Returns how many paths were
+        rewritten."""
+        session = self._editing("moved")
+        was = session._base_dir or os.getcwd()
+        result = session.set_base_dir(
+            os.path.normpath(os.path.join(was, folder)), rebase=True
+        )
+        if not result.get("ok", True):
+            raise ValueError(f"moved: {result.get('error')}")
+        self._show({"by": "moved"})
+        return result.get("rebased", 0)
 
     @classmethod
     def from_document(cls, text, base_dir=None, **traits):

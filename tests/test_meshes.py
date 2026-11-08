@@ -628,6 +628,51 @@ def test_a_refused_load_leaves_the_open_scene_where_it_was(cube_stl):
     assert session.list_objects()[0]["mesh"]["faces"] == 12  # still built
 
 
+def test_a_view_whose_file_moved_takes_its_meshes_with_it(cube_stl, tmp_path):
+    """The JupyterLab tab's Save As: told the folder the file moved to,
+    relative to where it was, the view rewrites the mesh path, draws on, and
+    tells of it as of an edit, so the tab writes the file again."""
+    import json
+
+    from magpylib_studio.widget import SceneWidget
+
+    session = MagpylibStudioSession()
+    session.set_base_dir(str(cube_stl.parent))
+    add_mesh(session, "rotor", {"from": "file", "path": "cube.stl", "scale": 0.001})
+    view = SceneWidget.from_document(
+        json.dumps(session.to_dict()), base_dir=str(cube_stl.parent)
+    )
+    (tmp_path / "scenes").mkdir()
+    revision = view.revision
+    assert view.moved("scenes") == 1
+    written = json.loads(view.document)["events"][0]["params"]["mesh_source"]["path"]
+    assert written == os.path.join("..", "cube.stl")
+    assert view.revision == revision + 1
+    assert not view.undo()  # the same scene, spelled from elsewhere
+    assert view.moved(".") == 0
+
+
+def test_a_move_whose_rebuild_fails_leaves_the_paths_as_they_were(
+    cube_stl, tmp_path, monkeypatch
+):
+    """Refused, all of it is put back: the folder, and the paths rewritten for
+    the new one, which would otherwise name files from neither."""
+    session = MagpylibStudioSession()
+    session.set_base_dir(str(cube_stl.parent))
+    add_mesh(session, "rotor", {"from": "file", "path": "cube.stl", "scale": 0.001})
+
+    def broken():
+        raise RuntimeError("no rebuild")
+
+    monkeypatch.setattr(session, "_build", broken)
+    result = session.set_base_dir(str(tmp_path / "scenes"), rebase=True)
+
+    assert result["ok"] is False
+    assert session._base_dir == str(cube_stl.parent)
+    written = session.to_dict()["events"][0]["params"]["mesh_source"]["path"]
+    assert written == "cube.stl"
+
+
 def test_a_document_that_moves_takes_its_meshes_with_it(cube_stl, tmp_path):
     """Save As into another folder. The relative path in the document still
     means the folder the scene came from, so leaving it alone breaks it —

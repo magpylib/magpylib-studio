@@ -21,6 +21,7 @@ from magpylib_studio.session import (
     _calls_for,
     _linspace_lit,
 )
+from magpylib_studio.threejs import COORDINATE_DIGITS
 
 # Small fixed scene for tests (sessions start empty by default).
 TEST_SCENE = {
@@ -971,9 +972,10 @@ def test_a_resizable_shape_scales_its_mesh_exactly(kind, params, attr, scale):
     grown = [v * scale for v in value] if isinstance(value, list) else value * scale
     session.set_param("o", attr, grown)
 
-    assert _drawn(session, "o") - anchor == pytest.approx(
-        (before - anchor) * scale, abs=1e-12
-    )
+    # to the digits a coordinate is sent with, which a snap lands on
+    after = _drawn(session, "o")
+    step = 2 * 10.0 ** (np.ceil(np.log10(np.abs(after).max())) - COORDINATE_DIGITS)
+    assert after - anchor == pytest.approx((before - anchor) * scale, abs=step)
 
 
 def test_a_cylinder_resizes_across_then_along():

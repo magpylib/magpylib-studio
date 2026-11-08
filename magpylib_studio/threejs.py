@@ -463,6 +463,14 @@ def _two_faced(position, index):
     return middle, [0, 1, 2], [3, 4, 5]
 
 
+#: The significant digits a coordinate is sent with, of its run's largest:
+#: what the view needs exact -- a snap commits the vertex it lands on, as it
+#: was sent, and faces meant to touch must touch -- and no more than a
+#: double's seventeen, which were most of a mesh's bytes. A saved page keeps
+#: as many (`widget._POSITION_DIGITS`).
+COORDINATE_DIGITS = 12
+
+
 def _json_coordinates(values):
     """A coordinate run as JSON can actually carry it.
 
@@ -478,9 +486,18 @@ def _json_coordinates(values):
     NaN back when it fills the buffer. Applied to meshes too, where a NaN
     would be a bug rather than a pen-lift: the cost when there is none to find
     is one pass, and the alternative is the same silent empty view.
+
+    Kept to `COORDINATE_DIGITS` significant digits of the run's largest
+    value, which a snap still lands on exactly, and shorter than a double's
+    seventeen digits, which were most of a mesh's bytes.
     """
     flat = np.asarray(values, dtype=float).ravel()
-    if not np.isnan(flat).any():  # the usual case, and the cheap one
+    finite = np.isfinite(flat)
+    whole = bool(finite.all())  # the usual case: no pen lift
+    largest = float(np.abs(flat if whole else flat[finite]).max(initial=0.0))
+    if largest > 0:
+        flat = np.round(flat, COORDINATE_DIGITS - math.ceil(math.log10(largest)))
+    if whole:
         return flat.tolist()
     return [None if value != value else value for value in flat.tolist()]
 

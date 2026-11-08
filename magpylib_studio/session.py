@@ -3446,7 +3446,11 @@ class MagpylibStudioSession:
         try:
             self._build()
         except Exception as e:  # noqa: BLE001 - a bad rebuild is a result
+            # all of it put back: the paths rewritten for the new folder too,
+            # or they would name files from neither
             self._base_dir = previous
+            if moved:
+                self._rebase_meshes(path, previous)
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
         return {"ok": True, **({"rebased": moved} if moved else {})}
 

@@ -14,14 +14,26 @@ With magpylib-studio installed where JupyterLab 4.4 or newer runs, a
 `.magpy.json` opens from the file browser as the editable view in a tab of its
 own, in a kernel started beside the file. Edits mark the tab unsaved, ⌘S saves
 the file, Reload from Disk takes the file's version in as one undo step, the
-view fills the tab, and its toolbar picks the kernel, as a notebook's does. In
-Python, `view.document` is the scene as the file's text,
-`view.take_document(text)` puts a file's scene in an editable view, and
-`SceneWidget.from_document(text)` makes one.
+view fills the tab, and its toolbar picks the kernel, as a notebook's does.
+Saved as, or renamed, into another folder, it takes its mesh files with it: a
+relative path is rewritten to name the same file from there, as the VS Code
+studio does (`view.moved(folder)` in Python). In Python, `view.document` is the
+scene as the file's text, `view.take_document(text)` puts a file's scene in an
+editable view, and `SceneWidget.from_document(text)` makes one.
 
 </details>
 
 ### Changed
+
+<details>
+<summary>Scenes are sent smaller</summary>
+
+A scene's coordinates are sent with twelve digits, which a snap still lands on
+exactly, not a double's seventeen, and the engine writes its answers without
+spaces: the every-kind example's first scene is 1.4 MB instead of 1.8 MB in VS
+Code, and others 2 to 20% smaller. What is drawn is the same.
+
+</details>
 
 <details>
 <summary>The extension draws with the engine's own view</summary>

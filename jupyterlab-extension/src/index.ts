@@ -54,14 +54,19 @@ class SceneModelFactory extends TextModelFactory {
  *  or not, so that a restarted kernel draws what the tab holds -- and the
  *  comm its document goes out on whenever an edit settles (`revision`). Its
  *  names are the file's (`name`): two files may share a kernel. A relative
- *  mesh path is relative to the folder the kernel started in, the file's. */
-function sceneCode(name: string, text: string, height: number): string {
+ *  mesh path is relative to `folder`, the folder the document's paths are
+ *  written from, as seen from the one the kernel started in. */
+function sceneCode(name: string, text: string, folder: string, height: number): string {
   return `
 import os as _os
 from comm import create_comm as _create_comm
 from magpylib_studio.widget import SceneWidget as _SceneWidget
 
-${name} = _SceneWidget.from_document(${JSON.stringify(text)}, base_dir=_os.getcwd(), height=${height})
+${name} = _SceneWidget.from_document(
+    ${JSON.stringify(text)},
+    base_dir=_os.path.normpath(_os.path.join(_os.getcwd(), ${JSON.stringify(folder)})),
+    height=${height},
+)
 ${name}_comm = _create_comm(target_name=${JSON.stringify(`${COMM}.${name}`)})
 ${name}.observe(lambda _change: ${name}_comm.send({"text": ${name}.document}), "revision")
 `;
@@ -133,6 +138,11 @@ class Scene {
   /** The kernel the scene was made in, and the file's session. */
   private kernelId: string | undefined;
   private sessionId: string | undefined;
+  /** The folder the kernel started in -- the file's then, which a restart
+   *  keeps -- and the one the document's relative mesh paths are written
+   *  from: the file's, until it is moved and they are not followed yet. */
+  private kernelDir: string;
+  private docDir: string;
 
   private constructor(
     private readonly context: DocumentRegistry.Context,
@@ -141,6 +151,7 @@ class Scene {
   ) {
     this.saved = canonical(context.model.toString());
     this.scene = context.model.toString();
+    this.kernelDir = this.docDir = PathExt.dirname(context.path);
   }
 
   /** The scene of `context`, started once for every view of the file. */
@@ -219,11 +230,16 @@ class Scene {
         kernel.registerCommTarget(`${COMM}.${this.name}`, (comm) => {
           comm.onMsg = (msg) => this.took((msg.content.data as { text?: string }).text);
         });
+        if (kernel.id !== this.kernelId) {
+          // started now, where the file is; a restart keeps the folder
+          this.kernelDir = PathExt.dirname(this.context.path);
+        }
         this.kernelId = kernel.id;
         this.sessionId = this.context.sessionContext.session?.id;
         const text = this.refused ? this.scene : this.context.model.toString();
+        const folder = PathExt.relative(this.kernelDir, this.docDir) || '.';
         try {
-          await run(kernel, sceneCode(this.name, text, this.height));
+          await run(kernel, sceneCode(this.name, text, folder, this.height));
         } catch (err) {
           this.alive = false;
           this.problem = `Magpylib Studio cannot draw this scene: ${
@@ -238,6 +254,8 @@ class Scene {
           await run(kernel, `${this.name}.editable = None`);
         }
         this.showAll();
+        // moved while there was no scene to follow it: followed now
+        await this.follow(kernel);
       });
     return this.booting;
   }
@@ -295,6 +313,9 @@ class Scene {
         this.saved = canonical(this.context.model.toString());
       }
     });
+    // Save As, or a rename, into another folder: a relative mesh path still
+    // names the old folder's file, and is rewritten to name it from the new.
+    this.context.pathChanged.connect(() => void this.moved());
   }
 
   /** A document from the kernel, after a settled edit. */
@@ -351,6 +372,45 @@ class Scene {
           'for looking only, and nothing is written over the file until it is reloaded ' +
           'with one this magpylib-studio can read.',
       );
+    }
+  }
+
+  /** The file moved: its relative mesh paths are rewritten to name the same
+   *  files from its new folder, once any boot is done. */
+  private async moved(): Promise<void> {
+    await this.booting.catch(() => undefined);
+    const kernel = this.context.sessionContext.session?.kernel;
+    if (kernel && this.alive && !this.refused) {
+      await this.follow(kernel);
+    }
+  }
+
+  /** Rewrite the document's relative mesh paths, written from `docDir`, to
+   *  name the same files from the file's folder now, and write the file
+   *  again: what was saved there names the old folder's. A scene that cannot
+   *  follow it says so, and keeps `docDir`, to follow at the next boot. */
+  private async follow(kernel: Kernel.IKernelConnection): Promise<void> {
+    const now = PathExt.dirname(this.context.path);
+    if (now === this.docDir || this.refused) {
+      return;
+    }
+    const clean = !this.context.model.dirty;
+    try {
+      await run(
+        kernel,
+        `${this.name}.moved(${JSON.stringify(PathExt.relative(this.docDir, now) || '.')})`,
+      );
+    } catch (err) {
+      void showErrorMessage(
+        "Magpylib Studio: the scene's mesh files were not followed to the new folder",
+        String(err instanceof Error ? err.message : err),
+      );
+      return;
+    }
+    this.docDir = now;
+    // what the move changed, and nothing else: written where it now is
+    if (clean && this.context.model.dirty) {
+      await this.context.save();
     }
   }
 
