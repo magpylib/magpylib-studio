@@ -168,6 +168,8 @@ try {
       return out.trim();
     })()`);
 
+  // a headless page has no focus, and JupyterLab's current tab follows focus
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Page.navigate", { url: `${LAB}/lab?reset` });
   await until(() => evaluate("!!window.jupyterapp"), 60000);
   await evaluate("jupyterapp.started.then(() => jupyterapp.restored)");
@@ -197,6 +199,10 @@ try {
     "opened, it is saved",
     (await evaluate(`(${TAB}).context.model.dirty`)) === false,
   );
+  check(
+    "no kernel is asked for",
+    (await evaluate(`document.querySelectorAll(".jp-Dialog").length`)) === 0,
+  );
 
   await inKernel('__mstudio.variables = {"n": 8}');
   check(
@@ -208,6 +214,16 @@ try {
   check(
     "saved, it is clean",
     (await evaluate(`(${TAB}).context.model.dirty`)) === false,
+  );
+  await inKernel('__mstudio.variables = {"n": 10}');
+  await until(() => evaluate(`(${TAB}).context.model.dirty`), 10000);
+  await inKernel("__mstudio.undo()");
+  check(
+    "an edit undone back to the file is clean again",
+    await until(
+      async () => !(await evaluate(`(${TAB}).context.model.dirty`)),
+      10000,
+    ),
   );
 
   python(`
@@ -228,6 +244,77 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
     "as one step to undo",
     (await inKernel('print(__mstudio.undo(), __mstudio.variables["n"])')) ===
       "True 8",
+  );
+
+  // a file of a newer studio is refused, and never written over
+  const kept = fs.readFileSync(FILE, "utf8");
+  fs.writeFileSync(
+    FILE,
+    JSON.stringify({ ...JSON.parse(kept), version: 99 }, null, 2) + "\n",
+  );
+  await evaluate(`(${TAB}).context.revert()`);
+  const dialog = () =>
+    evaluate(`document.querySelector(".jp-Dialog")?.innerText ?? ""`);
+  check(
+    "a file of a newer studio is refused, and said",
+    await until(async () => /not taken in/.test(await dialog()), 10000),
+  );
+  await evaluate(
+    `document.querySelector(".jp-Dialog .jp-mod-accept")?.click(), true`,
+  );
+  await inKernel('__mstudio.variables = {"n": 6}');
+  await wait(2000);
+  check(
+    "and an edit then writes nothing over it",
+    /"version": 99/.test(await evaluate(`(${TAB}).context.model.toString()`)),
+  );
+  fs.writeFileSync(FILE, kept);
+  await evaluate(`(${TAB}).context.revert()`);
+  await until(
+    async () => (await inKernel('print(__mstudio.variables["n"])')) === "16",
+    10000,
+  );
+
+  // a second view of the file shows the same scene
+  // New View for File, on the tab in front
+  await evaluate(`jupyterapp.shell.activateById((${TAB}).id), true`);
+  await evaluate(
+    `jupyterapp.commands.execute("docmanager:clone").then(() => true, () => false)`,
+  );
+  const views = `[...jupyterapp.shell.widgets("main")].filter((w) => w.context?.path === "halbach.magpy.json")`;
+  check(
+    "a second view of the file draws the scene too",
+    await until(
+      () =>
+        evaluate(
+          `${views}.length === 2 && ${views}.every((w) => !!w.node.querySelector("canvas"))`,
+        ),
+      30000,
+    ),
+  );
+  await evaluate(
+    `(() => { const [, second] = ${views}; second.close(); return true; })()`,
+  );
+  await inKernel('__mstudio.variables = {"n": 14}');
+  check(
+    "closed, the first view still keeps the file",
+    await until(() => evaluate(`(${TAB}).context.model.dirty`), 10000),
+  );
+
+  // a restarted kernel draws the scene again
+  await evaluate(
+    `(${TAB}).context.sessionContext.restartKernel().then(() => true)`,
+  );
+  check(
+    "a restarted kernel draws the scene again",
+    (await until(
+      async () => (await inKernel('print(__mstudio.variables["n"])')) !== "",
+      60000,
+    )) &&
+      (await until(
+        () => evaluate(`!!(${TAB}).node.querySelector("canvas")`),
+        30000,
+      )),
   );
 
   // the view follows the tab's height: the window made shorter, the view is

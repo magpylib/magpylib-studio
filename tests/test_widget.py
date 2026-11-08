@@ -1754,6 +1754,9 @@ def test_a_host_keeps_the_file_through_the_document(tmp_path):
     assert studio._session.get_history()["undo"][-1] == "changed on disk"
     assert studio.undo() and studio.document == edited
     assert not studio.take_document(edited)
+    steps = len(studio._session._undo)
+    assert not studio.take_document(json.dumps(json.loads(edited)))  # compact
+    assert len(studio._session._undo) == steps
 
     newer = json.loads(edited) | {"version": 99}
     with pytest.raises(ValueError, match="newer"):

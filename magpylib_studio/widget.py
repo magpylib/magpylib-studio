@@ -1441,7 +1441,8 @@ class SceneWidget(anywidget.AnyWidget):
     def save(self, file):
         """Write an editable view's scene as a ``.magpy.json`` document, as
         the VS Code studio saves one -- and opens."""
-        pathlib.Path(file).write_text(self.document, encoding="utf-8")
+        text = self._document(self._editing("save"))
+        pathlib.Path(file).write_text(text, encoding="utf-8")
 
     @property
     def document(self):
@@ -1449,19 +1450,24 @@ class SceneWidget(anywidget.AnyWidget):
         document: what `save` writes. A host that keeps the file itself -- the
         JupyterLab scene tab -- reads it after each settled edit, which
         `revision` counts."""
-        doc = self._editing("document").to_dict()
-        return json.dumps(doc, indent=2) + "\n"
+        return self._document(self._editing("document"))
+
+    @staticmethod
+    def _document(session):
+        return json.dumps(session.to_dict(), indent=2) + "\n"
 
     def take_document(self, text):
         """Put the scene of a ``.magpy.json`` document's `text` in the view,
         as one step that `undo` takes back: the file reverted, or changed on
-        disk. Returns whether the scene changed. A document this package
-        cannot read -- not a scene, or written by a newer one -- is refused,
-        and the scene stays as it was."""
+        disk. Returns whether the scene changed; the same scene written
+        another way -- other spacing, another order of keys -- is no change,
+        and no step. A document this package cannot read -- not a scene, or
+        written by a newer one -- is refused, and the scene stays as it was."""
         session = self._editing("take_document")
-        if text == self.document:
+        scene = json.loads(text)
+        if scene == session.to_dict():
             return False
-        result = session.replace_scene(json.loads(text), label="changed on disk")
+        result = session.replace_scene(scene, label="changed on disk")
         if not result.get("ok"):
             raise ValueError(f"take_document: {result.get('error')}")
         return self._show({"by": "replace"})

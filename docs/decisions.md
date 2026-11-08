@@ -3092,24 +3092,32 @@ autosave.
 ### Decision
 
 - **A tab is the notebook's editable widget in a kernel of the file's own.** The
-  extension (`jupyterlab-extension/`, 200 lines) runs
-  `SceneWidget(file, editable=True)` in the document's session, started on the
-  default kernel since a text file names none, and stopped with the tab; the
-  output is trusted, as a notebook's own are. The widget manager is the one
-  JupyterLab makes for a notebook (`registerWidgetManager`), shown the context
-  with a model that has no widget metadata to restore.
-- **JupyterLab keeps the file.** After each settled edit (`revision`) the kernel
-  sends `view.document`, the `.magpy.json` text, over a comm into JupyterLab's
-  text model, which marks the tab unsaved; Save writes it. A text the model
-  takes from elsewhere -- Reload from Disk -- goes back as
-  `view.take_document(text)`, one step to undo; one the package cannot read is
-  said, and the scene stays.
+  extension (`jupyterlab-extension/`) runs `SceneWidget(file, editable=True)` in
+  the document's session, which JupyterLab starts on the default kernel
+  (`autoStartDefault`: a text file names no language to pick one by) and stops
+  with the file; the output is trusted, as a notebook's own are. The widget
+  manager is the one JupyterLab makes for a notebook (`registerWidgetManager`),
+  shown the context with a model that has no widget metadata to restore.
+- **One scene per file.** A second view of it -- New View for File -- shows the
+  same widget; the kernel, the comm and the manager are the file's. A kernel
+  restarted, or another chosen, makes the scene again in every view.
+- **JupyterLab keeps the file**, in a text model of the tab's own name, so Open
+  With › Editor is another document and its keystrokes never reach the scene.
+  After each settled edit (`revision`) the kernel sends `view.document`, the
+  `.magpy.json` text, over a comm into the model; the tab is unsaved while its
+  scene differs from the file's -- an edit undone back is clean again -- and the
+  same scene written another way is no change. Save writes it. A text the model
+  takes from disk -- Reload from Disk -- goes back as
+  `view.take_document(text)`, one step to undo. One the package cannot read,
+  written by a newer studio, is said, and the tab then writes nothing over it
+  until a file it can read is reloaded.
 - **The view fills the tab**: its height is set from the tab's as it is resized.
 - **Shipped built in the wheel**, under `share/jupyter/labextensions/`, so
   installing needs no node, as `widget.js` is; a stamp of its sources, which
   `tests/test_labextension.py` recomputes, says when the build is stale.
   `npm run check` in `jupyterlab-extension/` drives a private JupyterLab in
-  headless Chrome through open, edit, save, reload, undo, resize and close.
+  headless Chrome through open, edit, save, undo, reload, a refused file, a
+  second view, a kernel restart, resize and close.
 
 ### Rejected
 
