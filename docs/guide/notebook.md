@@ -337,6 +337,20 @@ notebook as it does for its own. Put one beside the view in an ipywidgets
 view's selection, revision and theme reach it. For a view with a scene of its
 own, as the toggles are.
 
+## A scene file in JupyterLab
+
+With magpylib-studio installed where JupyterLab runs (JupyterLab 4.4 or newer),
+a `.magpy.json` opens from the file browser in a Magpylib Studio tab: the
+editable view above, with its legend, variables and object panel, in a kernel of
+its own started beside the file. An edit marks the tab unsaved, and ⌘S / ctrl-S
+saves the file, which the VS Code studio opens as well. **File › Reload … from
+Disk** takes the file's version in as one step, which undo takes back.
+JupyterLab's autosave writes the file as it writes a notebook. Closing the tab
+stops its kernel. The tab's kernel is JupyterLab's default one, which needs
+`magpylib-studio[widget]`; **Open With › Editor** shows the file as text. How
+the tab is built is
+[decision 0058](https://github.com/magpylib/magpylib-studio/blob/main/docs/decisions.md#0058-a-scene-file-opens-in-jupyterlab-as-a-tab).
+
 The view is `magpylib_studio/static/scene3d.mjs` — the renderer every host draws
 with — and the legend `magpylib_studio/static/legend.mjs`.
 `tools/build-widget.sh` bundles them with three.js into

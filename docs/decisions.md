@@ -66,6 +66,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0055](#0055-a-plot-follows-the-run-by-its-step)                                               | A plot follows the run by its step                           | accepted 2026-11-07                                                  |
 | [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
 | [0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)                         | The host glue is the package's, and a changed view is said   | accepted 2026-11-08                                                  |
+| [0058](#0058-a-scene-file-opens-in-jupyterlab-as-a-tab)                                        | A scene file opens in JupyterLab as a tab                    | accepted 2026-11-08                                                  |
 
 ---
 
@@ -3068,3 +3069,59 @@ shown again, or a tab reloaded, load the new files against the old engine.
   restart came too early or never; and its message said a crash.
 - **Shipping the renderer's source in the wheel**: 380 KB nobody loads, as the
   bundle holds it.
+
+---
+
+## 0058. A scene file opens in JupyterLab as a tab
+
+**Status:** accepted 2026-11-08, on Alex's word ("ok do what is best"), after a
+prototype answered whether JupyterLab is a cheap host now that the view, its
+model and its panels are the package's
+([0056](#0056-every-host-draws-with-the-packages-view),
+[0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)).
+
+### Context
+
+The widget edits in any notebook, but a scene file opened in JupyterLab was JSON
+text. Being able to edit outside VS Code was the reason for anywidget; a
+`.magpy.json` that opens as a studio tab is what an editor gives, and JupyterLab
+already has what the VS Code extension writes by hand around a document: the
+unsaved mark, Save, Revert, a check that the file changed since it was read,
+autosave.
+
+### Decision
+
+- **A tab is the notebook's editable widget in a kernel of the file's own.** The
+  extension (`jupyterlab-extension/`, 200 lines) runs
+  `SceneWidget(file, editable=True)` in the document's session, started on the
+  default kernel since a text file names none, and stopped with the tab; the
+  output is trusted, as a notebook's own are. The widget manager is the one
+  JupyterLab makes for a notebook (`registerWidgetManager`), shown the context
+  with a model that has no widget metadata to restore.
+- **JupyterLab keeps the file.** After each settled edit (`revision`) the kernel
+  sends `view.document`, the `.magpy.json` text, over a comm into JupyterLab's
+  text model, which marks the tab unsaved; Save writes it. A text the model
+  takes from elsewhere -- Reload from Disk -- goes back as
+  `view.take_document(text)`, one step to undo; one the package cannot read is
+  said, and the scene stays.
+- **The view fills the tab**: its height is set from the tab's as it is resized.
+- **Shipped built in the wheel**, under `share/jupyter/labextensions/`, so
+  installing needs no node, as `widget.js` is; a stamp of its sources, which
+  `tests/test_labextension.py` recomputes, says when the build is stale.
+  `npm run check` in `jupyterlab-extension/` drives a private JupyterLab in
+  headless Chrome through open, edit, save, reload, undo, resize and close.
+
+### Rejected
+
+- **Moving the document logic into the package first**: JupyterLab's document
+  model already does it; what a second host needed was two public methods.
+- **A console's widget manager**: the function that makes one is not exported.
+- **A package of its own**: two releases to keep in step for 24 KB, and the tab
+  is only useful with the package's widget, of its version.
+
+### Consequences
+
+- marimo has no extension point for a file type: there the widget in a cell
+  stays the studio.
+- Not in the tab: the script tab, the several-scenes side bar, the field and
+  history views, which are the VS Code shell's.
