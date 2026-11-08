@@ -158,11 +158,14 @@ try {
     return answer.result?.result?.value;
   };
   const TAB = `[...jupyterapp.shell.widgets("main")].find((w) => w.context?.path === "halbach.magpy.json")`;
+  // the scene's name in the kernel is the file's own: `__view` here
+  const FIND =
+    '__view = [v for k, v in list(globals().items()) if k.startswith("__mstudio_") and not k.endswith("_comm")][-1]\n';
   const inKernel = (code) =>
     evaluate(`(async () => {
       const kernel = (${TAB}).context.sessionContext.session.kernel;
       let out = "";
-      const future = kernel.requestExecute({ code: ${JSON.stringify(code)}, store_history: false });
+      const future = kernel.requestExecute({ code: ${JSON.stringify(FIND + code)}, store_history: false });
       future.onIOPub = (m) => { if (m.header.msg_type === "stream") out += m.content.text; };
       await future.done;
       return out.trim();
@@ -204,7 +207,7 @@ try {
     (await evaluate(`document.querySelectorAll(".jp-Dialog").length`)) === 0,
   );
 
-  await inKernel('__mstudio.variables = {"n": 8}');
+  await inKernel('__view.variables = {"n": 8}');
   check(
     "an edit marks it unsaved",
     await until(() => evaluate(`(${TAB}).context.model.dirty`), 10000),
@@ -215,9 +218,9 @@ try {
     "saved, it is clean",
     (await evaluate(`(${TAB}).context.model.dirty`)) === false,
   );
-  await inKernel('__mstudio.variables = {"n": 10}');
+  await inKernel('__view.variables = {"n": 10}');
   await until(() => evaluate(`(${TAB}).context.model.dirty`), 10000);
-  await inKernel("__mstudio.undo()");
+  await inKernel("__view.undo()");
   check(
     "an edit undone back to the file is clean again",
     await until(
@@ -236,13 +239,13 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   check(
     "the file changed on disk, Revert takes it in",
     await until(
-      async () => (await inKernel('print(__mstudio.variables["n"])')) === "16",
+      async () => (await inKernel('print(__view.variables["n"])')) === "16",
       10000,
     ),
   );
   check(
     "as one step to undo",
-    (await inKernel('print(__mstudio.undo(), __mstudio.variables["n"])')) ===
+    (await inKernel('print(__view.undo(), __view.variables["n"])')) ===
       "True 8",
   );
 
@@ -262,8 +265,12 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   await evaluate(
     `document.querySelector(".jp-Dialog .jp-mod-accept")?.click(), true`,
   );
-  await inKernel('__mstudio.variables = {"n": 6}');
+  await inKernel('__view.variables = {"n": 6}');
   await wait(2000);
+  check(
+    "and the view is read only",
+    (await inKernel("print(__view.editable)")) === "False",
+  );
   check(
     "and an edit then writes nothing over it",
     /"version": 99/.test(await evaluate(`(${TAB}).context.model.toString()`)),
@@ -271,8 +278,12 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   fs.writeFileSync(FILE, kept);
   await evaluate(`(${TAB}).context.revert()`);
   await until(
-    async () => (await inKernel('print(__mstudio.variables["n"])')) === "16",
+    async () => (await inKernel('print(__view.variables["n"])')) === "16",
     10000,
+  );
+  check(
+    "a file it can read makes it editable again",
+    (await inKernel("print(__view.editable)")) === "True",
   );
 
   // a second view of the file shows the same scene
@@ -295,7 +306,7 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   await evaluate(
     `(() => { const [, second] = ${views}; second.close(); return true; })()`,
   );
-  await inKernel('__mstudio.variables = {"n": 14}');
+  await inKernel('__view.variables = {"n": 14}');
   check(
     "closed, the first view still keeps the file",
     await until(() => evaluate(`(${TAB}).context.model.dirty`), 10000),
@@ -308,7 +319,7 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   check(
     "a restarted kernel draws the scene again",
     (await until(
-      async () => (await inKernel('print(__mstudio.variables["n"])')) !== "",
+      async () => (await inKernel('print(__view.variables["n"])')) !== "",
       60000,
     )) &&
       (await until(
@@ -316,12 +327,16 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
         30000,
       )),
   );
+  check(
+    "and keeps what the tab had unsaved",
+    (await inKernel('print(__view.variables["n"])')) === "14" &&
+      (await evaluate(`(${TAB}).context.model.dirty`)) === true,
+  );
 
   // the view follows the tab's height: the window made shorter, the view is
   // as tall as the tab again, and not as tall as it was
   const tabHeight = () => evaluate(`(${TAB}).content.node.clientHeight`);
-  const viewHeight = async () =>
-    Number(await inKernel("print(__mstudio.height)"));
+  const viewHeight = async () => Number(await inKernel("print(__view.height)"));
   const before = await viewHeight();
   const tabBefore = await tabHeight();
   // a headless window ignores its bounds: the page's viewport, and the resize

@@ -14,7 +14,7 @@
  *
  * One scene per file: a second view of it (New View for File) shows the same
  * widget, and the kernel, the comm and the manager are the file's, not a
- * view's.
+ * view's. The views share the widget's height: the last resized sets it.
  */
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
 import { ISessionContext, showErrorMessage } from '@jupyterlab/apputils';
@@ -45,16 +45,20 @@ class SceneModelFactory extends TextModelFactory {
   }
 }
 
-/** What the kernel runs for a file: the view, and the comm its document goes
- *  out on whenever an edit settles (`revision`). */
-function sceneCode(name: string, height: number): string {
+/** What the kernel runs for a file: the view of the tab's own text -- saved
+ *  or not, so that a restarted kernel draws what the tab holds -- and the
+ *  comm its document goes out on whenever an edit settles (`revision`). Its
+ *  names are the file's (`name`): two files may share a kernel. A relative
+ *  mesh path is relative to the folder the kernel started in, the file's. */
+function sceneCode(name: string, text: string, height: number): string {
   return `
+import os as _os
 from comm import create_comm as _create_comm
 from magpylib_studio.widget import SceneWidget as _SceneWidget
 
-__mstudio = _SceneWidget(${JSON.stringify(name)}, editable=True, height=${height})
-__mstudio_comm = _create_comm(target_name=${JSON.stringify(COMM)})
-__mstudio.observe(lambda _change: __mstudio_comm.send({"text": __mstudio.document}), "revision")
+${name} = _SceneWidget.from_document(${JSON.stringify(text)}, base_dir=_os.getcwd(), height=${height})
+${name}_comm = _create_comm(target_name=${JSON.stringify(`${COMM}.${name}`)})
+${name}.observe(lambda _change: ${name}_comm.send({"text": ${name}.document}), "revision")
 `;
 }
 
@@ -104,8 +108,14 @@ class Scene {
   private static readonly started = new WeakMap<DocumentRegistry.Context, Promise<Scene>>();
 
   private readonly views = new Set<{ tab: SceneTab; area: SimplifiedOutputArea }>();
-  /** The text last read or written: what the file holds, as far as the tab knows. */
+  /** The scene's name in the kernel: the file's own, as two may share one. */
+  private readonly name = `__mstudio_${Math.random().toString(36).slice(2, 10)}`;
+  /** What the file holds, as far as the tab knows -- the text last read or
+   *  written -- in the form a scene compares in (`canonical`). */
   private saved: string;
+  /** The text the scene in the kernel holds: what a boot starts from when the
+   *  model holds one it refused. */
+  private scene: string;
   /** Set while the model takes a document from the kernel. */
   private ours = false;
   /** A file this package could not read: the tab writes nothing over it. */
@@ -117,7 +127,8 @@ class Scene {
     private readonly context: DocumentRegistry.Context,
     private readonly rendermime: IRenderMimeRegistry,
   ) {
-    this.saved = context.model.toString();
+    this.saved = canonical(context.model.toString());
+    this.scene = context.model.toString();
   }
 
   /** The scene of `context`, started once for every view of the file. */
@@ -168,27 +179,40 @@ class Scene {
     const scene = new Scene(context, rendermime);
     scene.height = firstHeight;
     scene.watch(sessionContext);
-    await scene.boot();
+    // A scene that cannot be made yet -- a kernel without the package -- is
+    // said in the tab, and made when another kernel is chosen.
+    scene.boot().catch(() => undefined);
     return scene;
   }
 
   /** Make the scene in the kernel, and show it in every view: at the start,
    *  and again when the kernel is restarted or another is chosen, which
-   *  takes the scene with it. */
+   *  takes the scene with it. A boot that failed does not stop the next. */
   private boot(): Promise<void> {
-    this.booting = this.booting.then(async () => {
-      const kernel = this.context.sessionContext.session?.kernel;
-      if (!kernel) {
-        return;
-      }
-      kernel.registerCommTarget(COMM, (comm) => {
-        comm.onMsg = (msg) => this.took((msg.content.data as { text?: string }).text);
+    this.booting = this.booting
+      .catch(() => undefined)
+      .then(async () => {
+        const kernel = this.context.sessionContext.session?.kernel;
+        if (!kernel) {
+          return;
+        }
+        kernel.registerCommTarget(`${COMM}.${this.name}`, (comm) => {
+          comm.onMsg = (msg) => this.took((msg.content.data as { text?: string }).text);
+        });
+        const text = this.refused ? this.scene : this.context.model.toString();
+        try {
+          await run(kernel, sceneCode(this.name, text, this.height));
+          this.scene = text;
+          if (this.refused) {
+            await run(kernel, `${this.name}.editable = False`);
+          }
+        } finally {
+          // every view says what came of it: the scene, or the error
+          for (const view of this.views) {
+            await this.show(view.area);
+          }
+        }
       });
-      await run(kernel, sceneCode(PathExt.basename(this.context.path), this.height));
-      for (const view of this.views) {
-        await this.show(view.area);
-      }
-    });
     return this.booting;
   }
 
@@ -199,12 +223,12 @@ class Scene {
         restarting = true;
       } else if (status === 'idle' && restarting) {
         restarting = false;
-        this.boot().catch((err) => this.say(err));
+        this.boot().catch(() => undefined); // said in each view
       }
     });
     sessionContext.kernelChanged.connect((_, { newValue }) => {
       if (newValue) {
-        this.boot().catch((err) => this.say(err));
+        this.boot().catch(() => undefined); // said in each view
       }
     });
     // A text the model took from elsewhere -- Reload from Disk -- goes back to
@@ -216,7 +240,7 @@ class Scene {
     });
     this.context.saveState.connect((_, state) => {
       if (state === 'completed') {
-        this.saved = this.context.model.toString();
+        this.saved = canonical(this.context.model.toString());
       }
     });
   }
@@ -225,39 +249,49 @@ class Scene {
   private took(text: string | undefined): void {
     const { model } = this.context;
     if (typeof text !== 'string' || this.refused) {
-      return;
+      return; // refused, the view is read only: nothing is written over the file
     }
-    if (canonical(text) === canonical(model.toString())) {
+    this.scene = text;
+    const now = canonical(text);
+    if (now === canonical(model.toString())) {
       return; // the same scene, written another way: nothing to save
     }
     this.ours = true;
     try {
       model.fromString(text);
       // the tab's unsaved mark: off again when the edit is undone
-      model.dirty = canonical(text) !== canonical(this.saved);
+      model.dirty = now !== this.saved;
     } finally {
       this.ours = false;
     }
   }
 
-  /** A document from the file, for the scene. One this package cannot read
-   *  is said, and the tab then writes nothing over it: the file stays what
-   *  it is, and the scene what it was. */
+  /** A document from the file, for the scene, once any boot is done. One
+   *  this package cannot read is said, and the view is then read only, so
+   *  that nothing is written over the file -- it stays what it is, and the
+   *  scene what it was -- until a file it can read is reloaded. */
   private async give(text: string): Promise<void> {
-    this.saved = text;
+    this.saved = canonical(text);
+    await this.booting.catch(() => undefined);
     const kernel = this.context.sessionContext.session?.kernel;
     if (!kernel) {
       return;
     }
     try {
-      await run(kernel, `__mstudio.take_document(${JSON.stringify(text)})`);
-      this.refused = false;
+      await run(kernel, `${this.name}.take_document(${JSON.stringify(text)})`);
+      if (this.refused) {
+        this.refused = false;
+        await run(kernel, `${this.name}.editable = True`);
+      }
+      this.scene = text;
     } catch (err) {
       this.refused = true;
+      await run(kernel, `${this.name}.editable = False`).catch(() => undefined);
       void showErrorMessage(
         'Magpylib Studio: the file was not taken in',
-        `${err instanceof Error ? err.message : err}\n\nThe tab shows the scene it had, ` +
-          'and writes nothing over the file until it is reloaded with one it can read.',
+        `${err instanceof Error ? err.message : err}\n\nThe view shows the scene it had, ` +
+          'read only, and nothing is written over the file until it is reloaded with one ' +
+          'this magpylib-studio can read.',
       );
     }
   }
@@ -275,7 +309,7 @@ class Scene {
     this.views.add(view);
     tab.disposed.connect(() => this.views.delete(view));
     let sizing: ReturnType<typeof setTimeout> | undefined;
-    new ResizeObserver(() => {
+    const sized = new ResizeObserver(() => {
       clearTimeout(sizing);
       sizing = setTimeout(() => {
         const height = viewHeight(tab.content.node.clientHeight);
@@ -284,26 +318,24 @@ class Scene {
           return;
         }
         this.height = height;
-        run(kernel, `__mstudio.height = ${height}`).catch(() => undefined);
+        run(kernel, `${this.name}.height = ${height}`).catch(() => undefined);
       }, 150);
-    }).observe(tab.content.node);
-    await this.booting;
+    });
+    sized.observe(tab.content.node);
+    tab.disposed.connect(() => {
+      sized.disconnect();
+      clearTimeout(sizing);
+    });
+    await this.booting.catch(() => undefined);
     await this.show(area);
   }
 
   private async show(area: SimplifiedOutputArea): Promise<void> {
     area.model.clear();
     await OutputArea.execute(
-      'from IPython.display import display as _display\n_display(__mstudio)',
+      `from IPython.display import display as _display\n_display(${this.name})`,
       area,
       this.context.sessionContext,
-    );
-  }
-
-  private say(err: unknown): void {
-    void showErrorMessage(
-      'Magpylib Studio: the scene could not be drawn again',
-      String(err instanceof Error ? err.message : err),
     );
   }
 }

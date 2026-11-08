@@ -1467,10 +1467,35 @@ class SceneWidget(anywidget.AnyWidget):
         scene = json.loads(text)
         if scene == session.to_dict():
             return False
+        # What the file holds, as the session reads it -- an older version
+        # migrated, a mesh's hash stamped -- may be the scene it has: then no
+        # step, and the steps to redo kept.
+        before = json.dumps(session.doc, sort_keys=True, default=str)
+        undo, redo = len(session._undo), list(session._redo)
         result = session.replace_scene(scene, label="changed on disk")
         if not result.get("ok"):
             raise ValueError(f"take_document: {result.get('error')}")
+        if json.dumps(session.doc, sort_keys=True, default=str) == before:
+            del session._undo[undo:]
+            session._redo[:] = redo
+            return False
         return self._show({"by": "replace"})
+
+    @classmethod
+    def from_document(cls, text, base_dir=None, **traits):
+        """An editable view of the scene a ``.magpy.json`` document's `text`
+        holds: what a host that keeps the file itself -- the JupyterLab scene
+        tab -- hands over rather than a path, saved or not. `base_dir` is the
+        folder the file is in, which a relative mesh path is relative to.
+        Undo starts here, as for any view."""
+        from magpylib_studio.build import Scene
+
+        session = _loaded(
+            lambda session: session.load_scene(json.loads(text), base_dir=base_dir),
+            [],
+            "the document",
+        )
+        return cls(Scene(session), editable=True, **traits)
 
     @traitlets.observe("variables")
     def _variables_assigned(self, change):

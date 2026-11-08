@@ -1763,6 +1763,11 @@ def test_a_host_keeps_the_file_through_the_document(tmp_path):
         studio.take_document(json.dumps(newer))
     assert studio.document == edited
 
+    # a view of the text itself, saved or not: what the tab boots from
+    again = widget.SceneWidget.from_document(edited, base_dir=str(tmp_path))
+    assert again.document == edited
+    assert not again.undo()
+
 
 def test_a_scene_written_in_code_is_edited_as_it_is():
     """Its own session, not a copy: what a drag does is in the scene after."""

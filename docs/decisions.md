@@ -3092,15 +3092,19 @@ autosave.
 ### Decision
 
 - **A tab is the notebook's editable widget in a kernel of the file's own.** The
-  extension (`jupyterlab-extension/`) runs `SceneWidget(file, editable=True)` in
-  the document's session, which JupyterLab starts on the default kernel
-  (`autoStartDefault`: a text file names no language to pick one by) and stops
-  with the file; the output is trusted, as a notebook's own are. The widget
-  manager is the one JupyterLab makes for a notebook (`registerWidgetManager`),
-  shown the context with a model that has no widget metadata to restore.
+  extension (`jupyterlab-extension/`) runs
+  `SceneWidget.from_document(text, base_dir)` -- the tab's own text, saved or
+  not -- in the document's session, which JupyterLab starts on the default
+  kernel (`autoStartDefault`: a text file names no language to pick one by) and
+  stops with the file; the output is trusted, as a notebook's own are. The
+  widget manager is the one JupyterLab makes for a notebook
+  (`registerWidgetManager`), shown the context with a model that has no widget
+  metadata to restore.
 - **One scene per file.** A second view of it -- New View for File -- shows the
   same widget; the kernel, the comm and the manager are the file's. A kernel
-  restarted, or another chosen, makes the scene again in every view.
+  restarted, or another chosen, makes the scene again in every view, from the
+  tab's text, so what the tab had unsaved stays; the scene's names in the kernel
+  are the file's, as two files may share one.
 - **JupyterLab keeps the file**, in a text model of the tab's own name, so Open
   With › Editor is another document and its keystrokes never reach the scene.
   After each settled edit (`revision`) the kernel sends `view.document`, the
@@ -3109,8 +3113,8 @@ autosave.
   same scene written another way is no change. Save writes it. A text the model
   takes from disk -- Reload from Disk -- goes back as
   `view.take_document(text)`, one step to undo. One the package cannot read,
-  written by a newer studio, is said, and the tab then writes nothing over it
-  until a file it can read is reloaded.
+  written by a newer studio, is said, and the view is read only, writing nothing
+  over it, until a file it can read is reloaded.
 - **The view fills the tab**: its height is set from the tab's as it is resized.
 - **Shipped built in the wheel**, under `share/jupyter/labextensions/`, so
   installing needs no node, as `widget.js` is; a stamp of its sources, which
