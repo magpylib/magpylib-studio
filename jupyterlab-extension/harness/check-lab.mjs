@@ -418,6 +418,108 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   );
   await evaluate(`jupyterapp.shell.activateById((${TAB}).id), true`);
 
+  // a scene moved into another folder takes its mesh files with it
+  fs.writeFileSync(
+    path.join(root, "part.stl"),
+    [
+      "solid part",
+      ...[
+        [
+          [0, 0, 0],
+          [10, 0, 0],
+          [0, 10, 0],
+        ],
+        [
+          [0, 0, 0],
+          [0, 10, 0],
+          [0, 0, 10],
+        ],
+        [
+          [0, 0, 0],
+          [0, 0, 10],
+          [10, 0, 0],
+        ],
+        [
+          [10, 0, 0],
+          [0, 0, 10],
+          [0, 10, 0],
+        ],
+      ].map((t) =>
+        [
+          "facet normal 0 0 0",
+          " outer loop",
+          ...t.map((v) => `  vertex ${v.join(" ")}`),
+          " endloop",
+          "endfacet",
+        ].join("\n"),
+      ),
+      "endsolid part",
+    ].join("\n") + "\n",
+  );
+  python(`
+import json
+from magpylib_studio.session import MagpylibStudioSession
+s = MagpylibStudioSession(); s.set_base_dir(${JSON.stringify(root)})
+s.add_object("part", "magnet.TriangularMesh", params={"polarization": [0, 0, 1], "mesh_source": {"from": "file", "path": "part.stl", "scale": 0.001}})
+open(${JSON.stringify(path.join(root, "mesh.magpy.json"))}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\n")`);
+  const MESH = (where) =>
+    `[...jupyterapp.shell.widgets("main")].find((w) => w.context?.path === "${where}")`;
+  await evaluate(
+    `jupyterapp.commands.execute("docmanager:open", { path: "mesh.magpy.json" }).then(() => true)`,
+  );
+  await until(
+    () =>
+      evaluate(`!!(${MESH("mesh.magpy.json")})?.node.querySelector("canvas")`),
+    90000,
+  );
+  fs.mkdirSync(path.join(root, "moved"));
+  await evaluate(
+    `jupyterapp.serviceManager.contents.rename("mesh.magpy.json", "moved/mesh.magpy.json").then(() => true)`,
+  );
+  const meshPath = () => {
+    try {
+      const doc = JSON.parse(
+        fs.readFileSync(path.join(root, "moved", "mesh.magpy.json"), "utf8"),
+      );
+      return doc.events[0].params.mesh_source.path;
+    } catch {
+      return undefined;
+    }
+  };
+  check(
+    "a scene moved to another folder takes its mesh files with it",
+    await until(async () => meshPath() === "../part.stl", 20000),
+    `the file names ${meshPath()}`,
+  );
+  check(
+    "and is saved so, clean",
+    (await evaluate(
+      `(${MESH("moved/mesh.magpy.json")}).context.model.dirty`,
+    )) === false,
+  );
+  // the kernel restarted where it started: the moved file's meshes still found
+  await evaluate(
+    `(${MESH("moved/mesh.magpy.json")}).context.sessionContext.restartKernel().then(() => true)`,
+  );
+  await wait(3000);
+  check(
+    "and a restarted kernel still finds its meshes",
+    await until(
+      () =>
+        evaluate(
+          `!!(${MESH("moved/mesh.magpy.json")}).node.querySelector("canvas") && !/cannot draw/.test((${MESH("moved/mesh.magpy.json")}).content.node.innerText)`,
+        ),
+      60000,
+    ),
+    await evaluate(
+      `(${MESH("moved/mesh.magpy.json")}).content.node.innerText.slice(0, 300)`,
+    ),
+  );
+  await evaluate(
+    `(() => { const t = ${MESH("moved/mesh.magpy.json")}; t.context.model.dirty = false; t.close(); return true; })()`,
+  );
+  await evaluate(`jupyterapp.shell.activateById((${TAB}).id), true`);
+
   // the view follows the tab's height: the window made shorter, the view is
   // as tall as the tab again, and not as tall as it was
   const tabHeight = () => evaluate(`(${TAB}).content.node.clientHeight`);

@@ -314,11 +314,14 @@ def serve(session=None, inp=None, out=None):
                     {
                         "id": None,
                         "error": {"type": "JSONDecodeError", "message": str(e)},
-                    }
+                    },
+                    separators=(",", ":"),
                 )
                 + "\n"
             )
             out.flush()
             continue
-        out.write(json.dumps(engine.handle(request)) + "\n")
+        # no space after a separator: a scene is mostly numbers, and the
+        # space after each comma was a tenth of what crossed the pipe
+        out.write(json.dumps(engine.handle(request), separators=(",", ":")) + "\n")
         out.flush()
