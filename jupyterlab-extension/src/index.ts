@@ -17,7 +17,12 @@
  * view's. The views share the widget's height: the last resized sets it.
  */
 import { JupyterFrontEnd, JupyterFrontEndPlugin } from '@jupyterlab/application';
-import { ISessionContext, showErrorMessage } from '@jupyterlab/apputils';
+import {
+  ISessionContext,
+  ISessionContextDialogs,
+  showErrorMessage,
+  Toolbar,
+} from '@jupyterlab/apputils';
 import { PathExt } from '@jupyterlab/coreutils';
 import {
   ABCWidgetFactory,
@@ -27,7 +32,7 @@ import {
 } from '@jupyterlab/docregistry';
 import { OutputArea, OutputAreaModel, SimplifiedOutputArea } from '@jupyterlab/outputarea';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
-import { Kernel } from '@jupyterlab/services';
+import { Kernel, Session } from '@jupyterlab/services';
 import { registerWidgetManager } from '@jupyter-widgets/jupyterlab-manager';
 import { Panel } from '@lumino/widgets';
 
@@ -122,10 +127,17 @@ class Scene {
   private refused = false;
   private height = 640;
   private booting: Promise<void> = Promise.resolve();
+  /** Whether the scene is made in the kernel; when not, why (`problem`). */
+  private alive = false;
+  private problem = 'Starting the kernel…';
+  /** The kernel the scene was made in, and the file's session. */
+  private kernelId: string | undefined;
+  private sessionId: string | undefined;
 
   private constructor(
     private readonly context: DocumentRegistry.Context,
     private readonly rendermime: IRenderMimeRegistry,
+    private readonly sessions: Session.IManager,
   ) {
     this.saved = canonical(context.model.toString());
     this.scene = context.model.toString();
@@ -135,11 +147,12 @@ class Scene {
   static of(
     context: DocumentRegistry.Context,
     rendermime: IRenderMimeRegistry,
+    sessions: Session.IManager,
     firstHeight: number,
   ): Promise<Scene> {
     let scene = Scene.started.get(context);
     if (!scene) {
-      scene = Scene.start(context, rendermime, firstHeight);
+      scene = Scene.start(context, rendermime, sessions, firstHeight);
       Scene.started.set(context, scene);
     }
     return scene;
@@ -148,16 +161,16 @@ class Scene {
   private static async start(
     context: DocumentRegistry.Context,
     base: IRenderMimeRegistry,
+    sessions: Session.IManager,
     firstHeight: number,
   ): Promise<Scene> {
     await context.ready;
     // The document's own session, on the default kernel (`autoStartDefault`:
-    // a text file names no language to choose one by), stopped with the file.
+    // a text file names no language to choose one by). None started -- the
+    // dialog dismissed -- the tab says so, and one picked in its toolbar
+    // makes the scene.
     const { sessionContext } = context;
     await sessionContext.ready;
-    if (!sessionContext.session?.kernel) {
-      throw new Error('no kernel was started for the scene');
-    }
     // The widget manager JupyterLab makes for a notebook, with every
     // registered widget module. It reads saved widget state off the model's
     // metadata, which a text document has none of: it is shown a model with
@@ -176,7 +189,7 @@ class Scene {
     for (let i = 0; i < 100 && rendermime.getFactory(WIDGET_VIEW) === placeholder; i++) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    const scene = new Scene(context, rendermime);
+    const scene = new Scene(context, rendermime, sessions);
     scene.height = firstHeight;
     scene.watch(sessionContext);
     // A scene that cannot be made yet -- a kernel without the package -- is
@@ -187,33 +200,70 @@ class Scene {
 
   /** Make the scene in the kernel, and show it in every view: at the start,
    *  and again when the kernel is restarted or another is chosen, which
-   *  takes the scene with it. A boot that failed does not stop the next. */
+   *  takes the scene with it, or a file is reloaded where none could be made.
+   *  A boot that failed does not stop the next; why it failed is said in
+   *  every view. */
   private boot(): Promise<void> {
     this.booting = this.booting
       .catch(() => undefined)
       .then(async () => {
         const kernel = this.context.sessionContext.session?.kernel;
         if (!kernel) {
+          this.alive = false;
+          this.problem =
+            'No kernel runs this scene: pick one in the toolbar, with ' +
+            'magpylib-studio[widget] installed.';
+          this.showAll();
           return;
         }
         kernel.registerCommTarget(`${COMM}.${this.name}`, (comm) => {
           comm.onMsg = (msg) => this.took((msg.content.data as { text?: string }).text);
         });
+        this.kernelId = kernel.id;
+        this.sessionId = this.context.sessionContext.session?.id;
         const text = this.refused ? this.scene : this.context.model.toString();
         try {
           await run(kernel, sceneCode(this.name, text, this.height));
-          this.scene = text;
-          if (this.refused) {
-            await run(kernel, `${this.name}.editable = False`);
-          }
-        } finally {
-          // every view says what came of it: the scene, or the error
-          for (const view of this.views) {
-            await this.show(view.area);
-          }
+        } catch (err) {
+          this.alive = false;
+          this.problem = `Magpylib Studio cannot draw this scene: ${
+            err instanceof Error ? err.message : err
+          }`;
+          this.showAll();
+          throw err;
         }
+        this.alive = true;
+        this.scene = text;
+        if (this.refused) {
+          await run(kernel, `${this.name}.editable = None`);
+        }
+        this.showAll();
       });
     return this.booting;
+  }
+
+  /** Every view, as the scene is now: drawn, or why not. */
+  private showAll(): void {
+    for (const view of this.views) {
+      void this.show(view.area);
+    }
+  }
+
+  /** The last view closed: the file's kernel is stopped, unless another
+   *  session uses it -- one picked in the toolbar from a notebook, say,
+   *  which stopping would take from it. */
+  private async closed(): Promise<void> {
+    const { sessionId, kernelId } = this;
+    if (!sessionId) {
+      return;
+    }
+    await this.sessions.refreshRunning().catch(() => undefined);
+    const shared = [...this.sessions.running()].some(
+      (other) => other.id !== sessionId && other.kernel?.id === kernelId,
+    );
+    if (!shared) {
+      await this.sessions.shutdown(sessionId).catch(() => undefined);
+    }
   }
 
   private watch(sessionContext: ISessionContext): void {
@@ -226,8 +276,10 @@ class Scene {
         this.boot().catch(() => undefined); // said in each view
       }
     });
+    // Another kernel chosen; a restart, which says the same kernel again, is
+    // the status's to answer, so that the scene is made once.
     sessionContext.kernelChanged.connect((_, { newValue }) => {
-      if (newValue) {
+      if (newValue && newValue.id !== this.kernelId) {
         this.boot().catch(() => undefined); // said in each view
       }
     });
@@ -266,10 +318,11 @@ class Scene {
     }
   }
 
-  /** A document from the file, for the scene, once any boot is done. One
-   *  this package cannot read is said, and the view is then read only, so
-   *  that nothing is written over the file -- it stays what it is, and the
-   *  scene what it was -- until a file it can read is reloaded. */
+  /** A document from the file, for the scene, once any boot is done. Where
+   *  no scene could be made, it is made from this one. One this package
+   *  cannot read is said, and the view is then made for looking only -- no
+   *  pencil, no handles -- so that nothing is edited that could not be saved
+   *  over the file; a file it can read, reloaded, makes it anew. */
   private async give(text: string): Promise<void> {
     this.saved = canonical(text);
     await this.booting.catch(() => undefined);
@@ -277,21 +330,26 @@ class Scene {
     if (!kernel) {
       return;
     }
+    if (!this.alive) {
+      this.refused = false;
+      await this.boot().catch(() => undefined); // said in each view
+      return;
+    }
     try {
       await run(kernel, `${this.name}.take_document(${JSON.stringify(text)})`);
+      this.scene = text;
       if (this.refused) {
         this.refused = false;
-        await run(kernel, `${this.name}.editable = True`);
+        await this.boot();
       }
-      this.scene = text;
     } catch (err) {
       this.refused = true;
-      await run(kernel, `${this.name}.editable = False`).catch(() => undefined);
+      await run(kernel, `${this.name}.editable = None`).catch(() => undefined);
       void showErrorMessage(
         'Magpylib Studio: the file was not taken in',
         `${err instanceof Error ? err.message : err}\n\nThe view shows the scene it had, ` +
-          'read only, and nothing is written over the file until it is reloaded with one ' +
-          'this magpylib-studio can read.',
+          'for looking only, and nothing is written over the file until it is reloaded ' +
+          'with one this magpylib-studio can read.',
       );
     }
   }
@@ -307,7 +365,12 @@ class Scene {
     tab.content.addWidget(area);
     const view = { tab, area };
     this.views.add(view);
-    tab.disposed.connect(() => this.views.delete(view));
+    tab.disposed.connect(() => {
+      this.views.delete(view);
+      if (!this.views.size) {
+        void this.closed();
+      }
+    });
     let sizing: ReturnType<typeof setTimeout> | undefined;
     const sized = new ResizeObserver(() => {
       clearTimeout(sizing);
@@ -332,6 +395,10 @@ class Scene {
 
   private async show(area: SimplifiedOutputArea): Promise<void> {
     area.model.clear();
+    if (!this.alive) {
+      area.model.add({ output_type: 'stream', name: 'stderr', text: this.problem });
+      return;
+    }
     await OutputArea.execute(
       `from IPython.display import display as _display\n_display(${this.name})`,
       area,
@@ -344,6 +411,8 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
   constructor(
     options: DocumentRegistry.IWidgetFactoryOptions<SceneTab>,
     private readonly rendermime: IRenderMimeRegistry,
+    private readonly dialogs: ISessionContext.IDialogs | null,
+    private readonly sessions: Session.IManager,
   ) {
     super(options);
   }
@@ -353,7 +422,16 @@ class SceneFactory extends ABCWidgetFactory<SceneTab> {
     content.addClass('mstudio-scene-tab');
     content.node.style.overflow = 'hidden';
     const tab = new SceneTab({ context, content });
-    Scene.of(context, this.rendermime, viewHeight(content.node.clientHeight || 652))
+    // The scene's kernel, as a notebook's toolbar shows it: its name, which
+    // picks another -- one with magpylib-studio, where the default has none
+    // -- a restart, and whether it is busy. The scene is made again in it.
+    const { sessionContext } = context;
+    const dialogs = this.dialogs ?? undefined;
+    tab.toolbar.addItem('spacer', Toolbar.createSpacerItem());
+    tab.toolbar.addItem('restart', Toolbar.createRestartButton(sessionContext, dialogs));
+    tab.toolbar.addItem('kernelName', Toolbar.createKernelNameItem(sessionContext, dialogs));
+    tab.toolbar.addItem('kernelStatus', Toolbar.createKernelStatusItem(sessionContext));
+    Scene.of(context, this.rendermime, this.sessions, viewHeight(content.node.clientHeight || 652))
       .then((scene) => scene.add(tab))
       .catch((err: unknown) => {
         content.node.textContent = `Magpylib Studio cannot draw this scene: ${
@@ -369,7 +447,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'Open a .magpy.json scene as a Magpylib Studio tab.',
   autoStart: true,
   requires: [IRenderMimeRegistry],
-  activate: (app: JupyterFrontEnd, rendermime: IRenderMimeRegistry) => {
+  optional: [ISessionContextDialogs],
+  activate: (
+    app: JupyterFrontEnd,
+    rendermime: IRenderMimeRegistry,
+    dialogs: ISessionContext.IDialogs | null,
+  ) => {
     app.docRegistry.addModelFactory(new SceneModelFactory());
     app.docRegistry.addFileType({
       name: FILE_TYPE,
@@ -389,9 +472,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
           preferKernel: true,
           canStartKernel: true,
           autoStartDefault: true, // a text file names no language to pick one by
-          shutdownOnClose: true, // the scene's kernel is the file's
+          // stopped by the scene when its last view closes, unless shared
+          shutdownOnClose: false,
         },
         rendermime,
+        dialogs,
+        app.serviceManager.sessions,
       ),
     );
   },

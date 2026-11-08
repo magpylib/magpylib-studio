@@ -13,8 +13,9 @@ Python package it runs on. Open an entry for its details.
 With magpylib-studio installed where JupyterLab 4.4 or newer runs, a
 `.magpy.json` opens from the file browser as the editable view in a tab of its
 own, in a kernel started beside the file. Edits mark the tab unsaved, ⌘S saves
-the file, Reload from Disk takes the file's version in as one undo step, and the
-view fills the tab. In Python, `view.document` is the scene as the file's text,
+the file, Reload from Disk takes the file's version in as one undo step, the
+view fills the tab, and its toolbar picks the kernel, as a notebook's does. In
+Python, `view.document` is the scene as the file's text,
 `view.take_document(text)` puts a file's scene in an editable view, and
 `SceneWidget.from_document(text)` makes one.
 

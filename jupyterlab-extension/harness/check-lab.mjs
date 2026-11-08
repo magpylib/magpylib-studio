@@ -21,9 +21,42 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EXT = path.resolve(HERE, "..");
 const PY = process.env.JLAB_PYTHON;
-const CHROME =
-  process.env.CHROME ??
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+/** Chrome or Chromium: `CHROME`, else where each system keeps it. */
+function findChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  const candidates =
+    process.platform === "darwin"
+      ? [
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+      : [
+          "google-chrome",
+          "google-chrome-stable",
+          "chromium",
+          "chromium-browser",
+        ];
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate)) {
+      if (fs.existsSync(candidate)) return candidate;
+      continue;
+    }
+    try {
+      execFileSync("which", [candidate], { stdio: "ignore" });
+      return candidate;
+    } catch {
+      // not on PATH
+    }
+  }
+  return undefined;
+}
+const CHROME = findChrome();
+if (!CHROME) {
+  console.error(
+    "check-lab: no Chrome or Chromium found; set CHROME to name one",
+  );
+  process.exit(2);
+}
 if (!PY) {
   console.error(
     "check-lab: set JLAB_PYTHON to a python with jupyterlab and magpylib-studio[widget]",
@@ -268,8 +301,8 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
   await inKernel('__view.variables = {"n": 6}');
   await wait(2000);
   check(
-    "and the view is read only",
-    (await inKernel("print(__view.editable)")) === "False",
+    "and the view is for looking only: no pencil, no handles",
+    (await inKernel("print(__view.editable)")) === "None",
   );
   check(
     "and an edit then writes nothing over it",
@@ -332,6 +365,58 @@ open(${JSON.stringify(FILE)}, "w").write(json.dumps(s.to_dict(), indent=2) + "\\
     (await inKernel('print(__view.variables["n"])')) === "14" &&
       (await evaluate(`(${TAB}).context.model.dirty`)) === true,
   );
+
+  // the toolbar names the kernel and picks another: the scene is made again
+  check(
+    "the toolbar names the scene's kernel",
+    /Python/.test(await evaluate(`(${TAB}).toolbar.node.innerText`)),
+  );
+  await evaluate(
+    `(${TAB}).context.sessionContext.changeKernel({ name: "python3" }).then(() => true)`,
+  );
+  check(
+    "another kernel chosen draws the scene again, unsaved edits kept",
+    (await until(
+      async () => (await inKernel('print(__view.variables["n"])')) === "14",
+      60000,
+    )) && (await evaluate(`(${TAB}).context.model.dirty`)) === true,
+  );
+
+  // a file that cannot be drawn says why, and draws once a readable one is
+  // reloaded
+  const NEWER = path.join(root, "newer.magpy.json");
+  const readable = fs.readFileSync(FILE, "utf8");
+  fs.writeFileSync(
+    NEWER,
+    JSON.stringify({ ...JSON.parse(readable), version: 99 }, null, 2) + "\n",
+  );
+  const OTHER = `[...jupyterapp.shell.widgets("main")].find((w) => w.context?.path === "newer.magpy.json")`;
+  await evaluate(
+    `jupyterapp.commands.execute("docmanager:open", { path: "newer.magpy.json" }).then(() => true)`,
+  );
+  check(
+    "a file of a newer studio opened says why it cannot be drawn",
+    await until(
+      async () =>
+        /newer magpylib-studio/.test(
+          await evaluate(`(${OTHER})?.content.node.innerText ?? ""`),
+        ),
+      90000,
+    ),
+  );
+  fs.writeFileSync(NEWER, readable);
+  await evaluate(`(${OTHER}).context.revert()`);
+  check(
+    "and draws once a readable one is reloaded",
+    await until(
+      () => evaluate(`!!(${OTHER}).node.querySelector("canvas")`),
+      60000,
+    ),
+  );
+  await evaluate(
+    `(() => { const t = ${OTHER}; t.context.model.dirty = false; t.close(); return true; })()`,
+  );
+  await evaluate(`jupyterapp.shell.activateById((${TAB}).id), true`);
 
   // the view follows the tab's height: the window made shorter, the view is
   // as tall as the tab again, and not as tall as it was
