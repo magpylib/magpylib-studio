@@ -358,7 +358,19 @@
           },
           "then": {
             "required": ["rotvec"],
-            "properties": { "rotvec": { "$ref": "#/definitions/vector" } }
+            "properties": {
+              "rotvec": {
+                "description": "A rotation vector in degrees, or one for each step of a path.",
+                "anyOf": [
+                  { "$ref": "#/definitions/vector" },
+                  {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/definitions/vector" }
+                  }
+                ]
+              }
+            }
           }
         },
         {

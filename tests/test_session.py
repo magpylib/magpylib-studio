@@ -1841,7 +1841,11 @@ def test_every_example_builds_and_is_worth_opening():
     for name in EXAMPLES:
         assert s.load_example(name) == {"ok": True}, name
         assert s.list_objects(), name
-        assert np.abs(np.array(s.get_field()["values"])).max() > 0, name
+        # at its sensors; a scene without one, as a run of balls rolling is,
+        # still fields something
+        sensors = [o for o in s.list_objects() if o.get("type") == "Sensor"]
+        field = s.get_field() if sensors else s.get_field(points=[[0, 0, 0.01]])
+        assert np.abs(np.array(field["values"])).max() > 0, name
         assert s.get_variables()["variables"], name  # all of them parametric
         shown.update(e["op"] for e in s.get_events()["events"])
         json.dumps(s.to_dict())

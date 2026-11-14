@@ -5,6 +5,26 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>An example of magnet balls let go, and why none is pushed away</summary>
+
+The gallery's **Magnet balls, let go** drops eight or twelve balls at random on
+a table and plays what follows: they turn, roll and snap into a chain. The runs
+are worked out from the forces and torques between the balls, exact for spheres,
+with their weight and friction where they touch: the first time the example
+opens, some seconds, and from the user's cache after that. Its marimo notebook,
+`docs/notebooks/magnet_balls.py`, works a run out live for any number of balls,
+seed and friction, and says why none is pushed away: the push between two balls
+falls off faster with distance than the turn, so each has turned toward its
+neighbours before it could be pushed. A scene file's orientation step now takes
+a path of rotations in the published schema, as the studio already wrote. The
+gallery pictures fill their frame again, which they had stopped doing since the
+variant panes.
+
+</details>
+
 ## [0.16.0]
 
 ### Added

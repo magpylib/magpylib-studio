@@ -29,6 +29,7 @@ DRESS = """<style>
     border-radius: 0 !important;
   }
   .magpy-scene-stage { flex: 1; min-height: 0; }
+  .magpy-scene-panes { height: 100% !important; }
   .magpy-scene-view { height: 100% !important; }
   .magpy-scene-legend, .magpy-colorbar, .magpy-scene-tools,
   .magpy-scene-transport, .magpy-scene-counter, .magpy-scene-readout,
