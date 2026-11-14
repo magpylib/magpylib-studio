@@ -213,6 +213,12 @@ def _(friction, mb, mo, np):
     a clump, and now and then a ball snapping on knocks another loose,
     which rolls off: knocked, not pushed.
 
+    Which shape one seed makes turns on a hair: a little more friction, or
+    a finer step of the simulation, and the same balls can end as a chain
+    of seven and a ball alone rather than a chain of eight. What does not
+    change is the story -- chains, now and then a clump or a ring, and no
+    ball pushed away.
+
     Turn the friction down and the reach grows: the push beats the grip
     from farther off, before a ball has turned, and the balls slide into
     each other harder -- at 0.05 some seeds end in pieces. Turn it up and

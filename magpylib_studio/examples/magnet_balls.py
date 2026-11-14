@@ -40,10 +40,32 @@ class Run:
     magnetic: np.ndarray  # (f,)
 
 
+# A run is some ten thousand steps of a few balls each, so what a step costs
+# is numpy's per-call overhead, not arithmetic: these three do in plain
+# indexing what np.cross, np.linalg.norm and np.moveaxis do in general.
+
+
+def _cross(a, b):
+    """Cross products of vectors (..., 3)."""
+    return np.stack(
+        [
+            a[..., 1] * b[..., 2] - a[..., 2] * b[..., 1],
+            a[..., 2] * b[..., 0] - a[..., 0] * b[..., 2],
+            a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0],
+        ],
+        axis=-1,
+    )
+
+
+def _norm(a):
+    """Lengths of vectors (..., 3)."""
+    return np.sqrt(np.sum(a * a, axis=-1))
+
+
 def _qmul(a, b):
     """Hamilton products of quaternions (..., 4) written (w, x, y, z)."""
-    w1, x1, y1, z1 = np.moveaxis(a, -1, 0)
-    w2, x2, y2, z2 = np.moveaxis(b, -1, 0)
+    w1, x1, y1, z1 = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    w2, x2, y2, z2 = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
     return np.stack(
         [
             w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
@@ -58,8 +80,8 @@ def _qmul(a, b):
 def _turned(q, v):
     """`v` turned by the unit quaternions `q` (w, x, y, z)."""
     w, xyz = q[..., :1], q[..., 1:]
-    t = 2 * np.cross(xyz, v)
-    return v + w * t + np.cross(xyz, t)
+    t = 2 * _cross(xyz, v)
+    return v + w * t + _cross(xyz, t)
 
 
 def pull(positions, moments):
@@ -72,7 +94,7 @@ def pull(positions, moments):
     `getFT` gives, which the tests check -- and quick enough to call at every
     step of a run."""
     r = positions[None, :, :] - positions[:, None, :]  # r[i, j]: from i to j
-    d = np.linalg.norm(r, axis=-1)
+    d = _norm(r)
     np.fill_diagonal(d, np.inf)
     n = r / d[..., None]
     mi, mj = moments[:, None, :], moments[None, :, :]
@@ -86,7 +108,7 @@ def pull(positions, moments):
         * (mi * mj_n + mj * mi_n + n * mi_mj - 5 * n * mi_n * mj_n)
     )
     field = np.sum(MU0 / (4 * np.pi * d[..., None] ** 3) * (3 * n * mi_n - mi), axis=0)
-    return np.sum(on_j, axis=0), np.cross(moments, field), field
+    return np.sum(on_j, axis=0), _cross(moments, field), field
 
 
 def let_go(
@@ -121,11 +143,13 @@ def let_go(
     stiffness = 6e4  # N/m: sunk 0.07 mm under the 4 N two balls pull with
     log_e = np.log(restitution)
     damping = -2 * log_e * np.sqrt(stiffness * mass / 2) / np.hypot(np.pi, log_e)
-    dt = 0.15 * np.sqrt(mass / stiffness)
+    # some eleven steps across the time two balls are in a bounce: at seven
+    # (0.3), a run ends otherwise than at every finer step
+    dt = 0.2 * np.sqrt(mass / stiffness)
 
     # each ball's turn from +z to its pole, as a quaternion (w, x, y, z)
     z = np.array([0.0, 0.0, 1.0])
-    axis = np.cross(z, u)
+    axis = _cross(z, u)
     sin = np.linalg.norm(axis, axis=1)
     half = np.arctan2(sin, u @ z) / 2
     axis = np.where(
@@ -145,7 +169,7 @@ def let_go(
         force, torque, field = pull(x, m)
         # balls on balls
         r = x[None, :, :] - x[:, None, :]
-        d = np.linalg.norm(r, axis=-1)
+        d = _norm(r)
         np.fill_diagonal(d, np.inf)
         i, j = np.nonzero(np.triu(d < DIAMETER, 1))
         if len(i):
@@ -153,13 +177,13 @@ def let_go(
             dv = v[j] - v[i]
             vn = np.sum(dv * n, -1)
             fn = np.maximum(stiffness * (DIAMETER - d[i, j]) - damping * vn, 0)
-            slip = dv - vn[:, None] * n - np.cross(w[i] + w[j], n) * radius
+            slip = dv - vn[:, None] * n - _cross(w[i] + w[j], n) * radius
             ft = _friction(slip, friction * fn, mass / 4 / dt)
             on_j = fn[:, None] * n + ft
             np.add.at(force, j, on_j)
             np.add.at(force, i, -on_j)
-            np.add.at(torque, j, np.cross(-radius * n, ft))
-            np.add.at(torque, i, np.cross(radius * n, -ft))
+            np.add.at(torque, j, _cross(-radius * n, ft))
+            np.add.at(torque, i, _cross(radius * n, -ft))
             roll = w[j] - w[i]
             resist = _rolling(roll, rolling * fn * radius)
             np.add.at(torque, j, resist)
@@ -169,12 +193,12 @@ def let_go(
         on = x[:, 2] < radius
         if np.any(on):
             fn = np.maximum(stiffness * (radius - x[on, 2]) - damping * v[on, 2], 0)
-            slip = v[on] + np.cross(w[on], down)
+            slip = v[on] + _cross(w[on], down)
             slip[:, 2] = 0
             ft = _friction(slip, friction * fn, mass / 2 / dt)
             force[on, 2] += fn
             force[on] += ft
-            torque[on] += np.cross(down, ft) + _rolling(w[on], rolling * fn * radius)
+            torque[on] += _cross(down, ft) + _rolling(w[on], rolling * fn * radius)
         if step == sample[at]:
             record["times"].append(step * dt)
             record["positions"].append(_just_touching(x))
@@ -187,13 +211,13 @@ def let_go(
         v += force / mass * dt
         w += torque / inertia * dt
         x += v * dt
-        angle = np.linalg.norm(w, axis=1) * dt
+        angle = _norm(w) * dt
         spin = w * dt / np.maximum(angle, 1e-300)[:, None]
         dq = np.concatenate(
             [np.cos(angle / 2)[:, None], np.sin(angle / 2)[:, None] * spin], axis=1
         )
         q = _qmul(dq, q)
-        q /= np.linalg.norm(q, axis=1, keepdims=True)
+        q /= np.sqrt(np.sum(q * q, axis=1))[:, None]
     return Run(**{key: np.array(value) for key, value in record.items()})
 
 
@@ -201,7 +225,7 @@ def _friction(slip, most, stop):
     """Friction against `slip` (k, 3): at most `most` (Coulomb), and no more
     than stops it in one step (`stop` times its speed), so a ball at rest
     stays put rather than jittering."""
-    speed = np.linalg.norm(slip, axis=-1)
+    speed = _norm(slip)
     size = np.minimum(most, stop * speed)
     return -size[:, None] * slip / np.maximum(speed, 1e-12)[:, None]
 
@@ -209,7 +233,7 @@ def _friction(slip, most, stop):
 def _rolling(spin, most):
     """Rolling resistance against `spin` (k, 3), at most `most`, smoothed
     near rest."""
-    return -most[:, None] * spin / (np.linalg.norm(spin, axis=-1, keepdims=True) + 1e-2)
+    return -most[:, None] * spin / (_norm(spin)[:, None] + 1e-2)
 
 
 def _just_touching(x, rounds=500):
@@ -224,7 +248,7 @@ def _just_touching(x, rounds=500):
         low = x[:, 2] < radius + gap
         x[low, 2] = radius + 2 * gap
         r = x[None, :, :] - x[:, None, :]
-        d = np.linalg.norm(r, axis=-1)
+        d = _norm(r)
         np.fill_diagonal(d, np.inf)
         i, j = np.nonzero(np.triu(d < DIAMETER + gap, 1))
         if not len(i) and not np.any(low):
@@ -265,7 +289,8 @@ def scattered(count=8, seed=0, spread=0.03):
 
 #: What decides a run: the simulation and the start, as this module wrote
 #: them.
-_DECIDING = (_qmul, _turned, pull, let_go, _friction, _rolling, _just_touching)
+_DECIDING = (_cross, _norm, _qmul, _turned, pull, let_go, _friction, _rolling)
+_DECIDING += (_just_touching,)
 _DECIDING += (scattered,)
 
 
