@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "magpylib-studio[widget]>=0.16.0",
+#     "magpylib-studio[widget]>=0.17.0",
 #     "marimo",
 #     "plotly",
 # ]
