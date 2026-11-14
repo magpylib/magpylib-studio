@@ -25,6 +25,20 @@ variant panes.
 
 </details>
 
+### Fixed
+
+<details>
+<summary>A field reading that is no number no longer stalls a request</summary>
+
+magpylib reads NaN and inf where it gives no field, at a Dipole's own position
+for one. The engine wrote them as bare `NaN` and `Infinity`, which are not JSON,
+so VS Code dropped the reply and the request never came back
+([#164](https://github.com/magpylib/magpylib-studio/issues/164)). A reading is
+now `null`, and the engine writes every reply as strict JSON, any other NaN in
+it `null` too.
+
+</details>
+
 ## [0.16.0]
 
 ### Added

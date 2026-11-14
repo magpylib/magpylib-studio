@@ -279,3 +279,45 @@ def test_a_copy_goes_from_one_session_to_another():
         "gap": "gap_2",
     }
     assert engine._sessions["b"]._objs["r2_1"]  # its id was taken in b
+
+
+def test_a_reading_that_is_no_number_comes_back_as_null():
+    """magpylib reads NaN and inf at a Dipole's own position. Written as
+    bare `NaN` / `Infinity` they are not JSON, and the host dropped the line
+    and the request with it (#164): a reading is null, and so is any other
+    NaN a reply carries."""
+    from magpylib_studio.rpc import _line
+
+    def strict(line):
+        def refuse(token):
+            raise ValueError(f"not JSON: {token}")
+
+        return json.loads(line, parse_constant=refuse)
+
+    lines = [
+        json.dumps({"id": n, **r})
+        for n, r in enumerate(
+            (
+                {
+                    "method": "add_object",
+                    "params": {
+                        "object_id": "d",
+                        "type": "misc.Dipole",
+                        "params": {"moment": [0, 0, 1]},
+                    },
+                },
+                {"method": "get_field", "params": {"points": [[0, 0, 0], [0, 0, 1]]}},
+            ),
+            1,
+        )
+    ]
+    out = io.StringIO()
+    serve(inp=io.StringIO("\n".join(lines) + "\n"), out=out)
+    reading = strict(out.getvalue().splitlines()[-1])["result"]
+    assert reading["values"][0] == [None, None, None]
+    assert reading["magnitude"][0] is None
+    assert all(isinstance(v, float) for v in reading["values"][1])
+    assert strict(_line({"a": float("nan"), "b": [1.0, (float("-inf"),)]})) == {
+        "a": None,
+        "b": [1.0, [None]],
+    }
