@@ -400,6 +400,11 @@ function drawnFor(objectIds, payload) {
 }
 
 function render({ model, el }) {
+  // The element as it was before this view, which the view puts back when it
+  // is taken away (see the end): its classes and its style, less the height
+  // a view before it held for it.
+  el.style.removeProperty("min-height");
+  const was = { className: el.className, style: el.getAttribute("style") };
   el.classList.add("magpy-scene");
 
   // The renderer owns `view` -- it hangs its canvas there and watches its
@@ -3452,6 +3457,22 @@ function render({ model, el }) {
     grid.hide();
     lettingGo = false;
     release();
+    // Nothing left behind. A host may keep the element on the page after
+    // this -- marimo shows a cell's old output, faded, while it runs again
+    // -- and by then the widget's stylesheet has gone with its model: what
+    // was left was the view's bare HTML, its legend a list of names and its
+    // tools a row of loose icons. An empty element is the honest picture of
+    // a view that is gone. It keeps its height, so the page under it does
+    // not jump up while the next one is on its way.
+    // The element goes back as it was, too: a view drawn in it next must not
+    // open docked, dark or full screen because this one was.
+    if (isFullscreen()) document.exitFullscreen().catch(() => {});
+    const held = el.offsetHeight;
+    el.replaceChildren();
+    el.className = was.className;
+    if (was.style === null) el.removeAttribute("style");
+    else el.setAttribute("style", was.style);
+    if (held) el.style.minHeight = `${held}px`;
   };
 }
 
