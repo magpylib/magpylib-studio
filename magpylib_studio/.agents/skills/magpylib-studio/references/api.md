@@ -203,7 +203,9 @@ Total field of all sources, summed, at the given observers.
 
 Observers: explicit `points` [[x,y,z], ...] (m), else the sensor with
 `sensor_id`, else the first sensor in the scene (its whole path).
-Returns {"field", "unit", "points", "values", "magnitude"} in SI.
+Returns {"field", "unit", "points", "values", "magnitude"} in SI. A
+reading magpylib gives no number for -- at a Dipole's own position,
+say -- is None.
 
 ### `session.sweep(variable, values, sensor_id=None, points=None, field='B')`
 
