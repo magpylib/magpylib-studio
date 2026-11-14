@@ -147,6 +147,21 @@ export class EngineClient {
       response = JSON.parse(line);
     } catch {
       this.onStderr?.(`invalid JSON from engine: ${line}\n`);
+      // A reply that cannot be read is still the reply to a request, which
+      // would otherwise wait forever (#164). The engine writes the id first
+      // on every line, so it can be read off one that does not parse. A line
+      // with none is not taken for a reply: a stray print is not one.
+      const id = /^\{"id":(\d+)[,}]/.exec(line)?.[1];
+      const entry = id === undefined ? undefined : this.pending.get(Number(id));
+      if (entry) {
+        this.pending.delete(Number(id));
+        entry.reject(
+          new EngineError({
+            type: 'InvalidReply',
+            message: 'the engine replied with a line that is not JSON',
+          }),
+        );
+      }
       return;
     }
     if (response.id === null || response.id === undefined) {

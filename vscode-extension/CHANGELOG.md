@@ -28,6 +28,20 @@ variant panes.
 ### Fixed
 
 <details>
+<summary>A view taken away leaves nothing behind, and an unreadable reply fails its request</summary>
+
+A view that a notebook replaces -- marimo re-running the cell that made it --
+showed as bare HTML while the new one was on its way: its legend a list of
+names, its tools a row of loose icons, the widget's stylesheet having gone with
+its model. A view taken away now empties its element, which keeps its height
+until the next view is in, so the page does not jump. And a reply from the
+engine that VS Code cannot read now fails the request it answers, read off the
+id that leads the line, rather than leaving it to wait forever
+([#164](https://github.com/magpylib/magpylib-studio/issues/164)).
+
+</details>
+
+<details>
 <summary>A field reading that is no number no longer stalls a request</summary>
 
 magpylib reads NaN and inf where it gives no field, at a Dipole's own position
