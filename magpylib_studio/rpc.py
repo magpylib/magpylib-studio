@@ -19,6 +19,7 @@ magpylib_studio` and reads/writes its stdio.
 from __future__ import annotations
 
 import json
+import math
 import sys
 from importlib import metadata
 
@@ -321,7 +322,30 @@ def serve(session=None, inp=None, out=None):
             )
             out.flush()
             continue
-        # no space after a separator: a scene is mostly numbers, and the
-        # space after each comma was a tenth of what crossed the pipe
-        out.write(json.dumps(engine.handle(request), separators=(",", ":")) + "\n")
+        out.write(_line(engine.handle(request)) + "\n")
         out.flush()
+
+
+def _line(reply):
+    """A reply as one line of JSON, strictly: a NaN or inf anywhere in it --
+    which `json` would write as bare `NaN` or `Infinity`, which no JSON
+    reader takes, so the host would drop the line and the request with it
+    (#164) -- is null. Readings say so themselves (`session._wire`); this
+    is for whatever else might carry one."""
+    # no space after a separator: a scene is mostly numbers, and the space
+    # after each comma was a tenth of what crossed the pipe
+    try:
+        return json.dumps(reply, separators=(",", ":"), allow_nan=False)
+    except ValueError:
+        return json.dumps(_finite(reply), separators=(",", ":"), allow_nan=False)
+
+
+def _finite(value):
+    """`value` with every NaN and inf in it, however deep, made None."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value

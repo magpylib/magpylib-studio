@@ -437,10 +437,18 @@ def _wire(values, digits=6):
     Results only. Anything that goes *back* into the document — a position, a
     dimension, a transform — keeps every digit it came with, because that one
     is not a reading, it is the value itself.
+
+    A reading that is no number — magpylib's NaN at a Dipole's own position,
+    or on an edge it does not define the field on, and its inf — is None,
+    JSON's null: NaN and Infinity are not JSON, and a reply holding them is
+    one the host cannot read (#164).
     """
     array = np.asarray(values, dtype=float)
-    flat = [float(f"{value:.{digits}g}") for value in array.ravel()]
-    return np.asarray(flat).reshape(array.shape).tolist()
+    flat = [
+        float(f"{value:.{digits}g}") if np.isfinite(value) else None
+        for value in array.ravel()
+    ]
+    return np.asarray(flat, dtype=object).reshape(array.shape).tolist()
 
 
 def _field_sources():
@@ -4728,7 +4736,9 @@ class MagpylibStudioSession:
 
         Observers: explicit `points` [[x,y,z], ...] (m), else the sensor with
         `sensor_id`, else the first sensor in the scene (its whole path).
-        Returns {"field", "unit", "points", "values", "magnitude"} in SI.
+        Returns {"field", "unit", "points", "values", "magnitude"} in SI. A
+        reading magpylib gives no number for -- at a Dipole's own position,
+        say -- is None.
         """
         if field not in _FIELDS:
             raise ValueError(f"field must be one of {sorted(_FIELDS)}, got {field!r}")
