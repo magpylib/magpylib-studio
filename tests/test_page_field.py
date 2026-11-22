@@ -191,6 +191,18 @@ def _a_magnet_on_a_path():
     return [magnet, sheet]
 
 
+def _balls_and_a_dipole_beside_them():
+    # a sphere and a dipole, each turned and moved
+    magnet, sheet = _solved_apart()
+    ball = magpy.magnet.Sphere(
+        polarization=(0.3, -0.2, 1.0), diameter=0.008, position=(-0.02, 0.01, 0.01)
+    )
+    ball.rotate_from_rotvec((0.2, 0.5, -0.3))
+    dipole = magpy.misc.Dipole(moment=(0.1, 0.4, -0.2), position=(0.015, -0.012, 0.02))
+    dipole.rotate_from_rotvec((-0.4, 0.1, 0.6))
+    return [magnet, sheet, ball, dipole]
+
+
 def _a_coil_beside_them():
     # a wire's straight segments, the loop turned and moved
     magnet, sheet = _solved_apart()
@@ -213,6 +225,7 @@ def _a_coil_beside_them():
     "scene",
     [
         _a_coil_beside_them,
+        _balls_and_a_dipole_beside_them,
         _turned_about_three_axes,
         _a_turned_collection_with_a_turned_child,
         _a_magnet_on_a_path,
@@ -234,8 +247,16 @@ def test_the_page_computes_the_field_of_turned_and_moved_sources(
         warnings.simplefilter("ignore")
         field = fieldlines.page_field(sources, {"probe": probe})
     assert field is not None
-    points = np.random.default_rng(176).uniform(
-        (-0.04, -0.03, -0.02), (0.04, 0.03, 0.03), (300, 3)
+    rng = np.random.default_rng(176)
+    points = rng.uniform((-0.04, -0.03, -0.02), (0.04, 0.03, 0.03), (300, 3))
+    # and some within each ball, which few of those would hit
+    balls = [x for x in sources if isinstance(x, magpy.magnet.Sphere)]
+    points = np.vstack(
+        [points]
+        + [
+            ball.position + rng.uniform(-0.25, 0.25, (10, 3)) * ball.diameter
+            for ball in balls
+        ]
     )
     tolerances = [0, 1e-6, 1e-3]
     asked = [
@@ -248,7 +269,12 @@ def test_the_page_computes_the_field_of_turned_and_moved_sources(
         for kind in ("B", "H")
     ]
     answers = _in_node(tmp_path, {"fields": asked})
-    for kind, at_each in zip(("B", "H"), answers, strict=True):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        within = fieldlines.inside(sources, points)
+    np.testing.assert_array_equal(np.asarray(answers[0]["inside"], bool), within)
+    for kind, answer in zip(("B", "H"), answers, strict=True):
+        at_each = answer["fields"]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # observers inside the solved part
             want = fieldlines.field(sources, points, kind)

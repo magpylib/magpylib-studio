@@ -809,7 +809,13 @@ def page_field(sources, sensors):
     return page_field_why(sources, sensors)[0]
 
 
-def page_field_why(sources, sensors, currents=True):
+#: The kernels a page computes some sources with that not every build of
+#: material-response's has, all of API 1: a page sends those sources only
+#: where the kernels it carries have them (`page_kernels`).
+PAGE_KERNELS = frozenset({"polyline_field", "sphere_field", "dipole_field"})
+
+
+def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
     step, each in its own frame as the compiled kernels take it -- a
@@ -818,18 +824,37 @@ def page_field_why(sources, sensors, currents=True):
     `ChargeSheet.from_triangles` takes them -- each sensor's pixels in its
     own frame, and the rules `_field_lines` draws by. `sensors` are
     ``{key: sensor}``; those on a path are left out, whose pose a drag
-    writes at every step. Wires only with `currents`: kernels that compute
-    them (`page_kernels`).
+    writes at every step. Wires, balls and dipoles only where `computes`
+    names their kernels (`PAGE_KERNELS`).
 
     ``(field, None)``, or ``(None, why)`` where a source is of a kind the
     kernels do not compute, more magnets and wire segments than
     `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
-    cuboids, sheets, wires, unknown = [], [], [], []
+    cuboids, sheets, wires, balls, dipoles, unknown = [], [], [], [], [], []
     for source in sources:
         source = at_step(source)
-        if currents and isinstance(source, magpy.current.Polyline):
+        if "sphere_field" in computes and isinstance(source, magpy.magnet.Sphere):
+            balls.append(
+                {
+                    "diameter": float(np.ravel(source.diameter)[-1]),
+                    "polarization": np.asarray(
+                        source.polarization, dtype=float
+                    ).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif "dipole_field" in computes and isinstance(source, magpy.misc.Dipole):
+            dipoles.append(
+                {
+                    "moment": np.asarray(source.moment, dtype=float).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif "polyline_field" in computes and isinstance(
+            source, magpy.current.Polyline
+        ):
             # a straight segment between each two vertices, in its own frame
             wires.append(
                 {
@@ -862,14 +887,11 @@ def page_field_why(sources, sensors, currents=True):
             unknown.append(_kind_named(source))
     if unknown:
         kinds = ", ".join(sorted(set(unknown)))
-        computed = (
-            "magnets, wires and solved sheets"
-            if currents
-            else "magnets and solved sheets"
-        )
-        return None, f"it computes {computed}, not {kinds}"
+        return None, f"it does not compute {kinds}"
     segments = sum(len(wire["vertices"]) - 1 for wire in wires)
-    if len(cuboids) + segments / SEGMENTS_PER_CUBOID > PAGE_CUBOIDS:
+    # a ball or a dipole costs no more than a segment
+    cheap = segments + len(balls) + len(dipoles)
+    if len(cuboids) + cheap / SEGMENTS_PER_CUBOID > PAGE_CUBOIDS:
         return None, (
             f"{len(cuboids)} magnets and {segments} wire segments, more than "
             "it computes at the pace of a drag"
@@ -902,6 +924,8 @@ def page_field_why(sources, sensors, currents=True):
         "cuboids": cuboids,
         "sheets": sheets,
         "wires": wires,
+        "balls": balls,
+        "dipoles": dipoles,
         "sensors": moved,
     }
     return field, None

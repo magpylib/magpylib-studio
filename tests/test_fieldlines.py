@@ -652,7 +652,7 @@ def test_a_page_computes_no_more_than_it_can_drag_past(made_of):
 @pytest.mark.parametrize(
     ("scene", "said"),
     [
-        ("coil", "not currents (Polyline)"),
+        ("coil", "does not compute currents (Polyline)"),
         ("sensor on a path", "its sensors move on a path"),
     ],
 )

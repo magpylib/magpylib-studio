@@ -32,11 +32,14 @@ if (kernels.api_version() !== KERNELS_API) {
 const asked = JSON.parse(readFileSync(casesPath, "utf8"));
 if (asked.fields) {
   // the field alone: each scene's sources at `points`, as `kind`, at each
-  // tolerance
+  // tolerance -- and which of the points are inside a body
   const answers = asked.fields.map(({ field, points, kind, tolerances }) => {
     const ready = prepared(kernels, field);
     const at = Float64Array.from(points);
-    return tolerances.map((t) => Array.from(fieldAt(ready, at, kind, t)));
+    return {
+      fields: tolerances.map((t) => Array.from(fieldAt(ready, at, kind, t))),
+      inside: Array.from(insideAt(ready, at)),
+    };
   });
   writeFileSync(answersPath, JSON.stringify(answers));
   process.exit(0);

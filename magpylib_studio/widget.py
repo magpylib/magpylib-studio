@@ -523,9 +523,14 @@ def _page_field_why(session):
     from magpylib_studio import fieldlines
 
     kernels = fieldlines.page_kernels()
-    # kernels without wires are kernels of before they had them: the same API
-    currents = kernels is not None and "polyline_field" in kernels[0]
-    field, why = session.page_field_why(currents=currents)
+    # kernels of before they had wires or balls speak the same API: what
+    # they have is what their glue exports
+    computes = frozenset(
+        name
+        for name in fieldlines.PAGE_KERNELS
+        if kernels is not None and f"function {name}(" in kernels[0]
+    )
+    field, why = session.page_field_why(computes)
     if field is not None and kernels is None:
         return None, "material-response's compiled field kernels were not found"
     return field, why

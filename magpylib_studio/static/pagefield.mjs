@@ -304,9 +304,13 @@ export function prepared(kernels, field) {
     kernels,
     sheets,
     body: Float64Array.from(corners),
-    centres: [...field.cuboids, ...(field.wires ?? []), ...field.sheets].map(
-      (s) => s.position,
-    ),
+    centres: [
+      ...field.cuboids,
+      ...(field.wires ?? []),
+      ...(field.balls ?? []),
+      ...(field.dipoles ?? []),
+      ...field.sheets,
+    ].map((s) => s.position),
   };
 }
 
@@ -340,8 +344,8 @@ function addTurned(source, local, sum, scale) {
 }
 
 /** B, or H, of the scene's sources at `points` (flat, the world's): the
- *  magnets' from the kernels' cuboid, the wires' from their straight
- *  segments, the sheets' H times mu0 for B. */
+ *  magnets' from the kernels' cuboid and sphere, the wires' from their
+ *  straight segments, the dipoles', the sheets' H times mu0 for B. */
 export function fieldAt(ready, points, kind, tolerance) {
   const { kernels, field } = ready;
   const sum = new Float64Array(points.length);
@@ -371,6 +375,25 @@ export function fieldAt(ready, points, kind, tolerance) {
     }
     addTurned(w, wire, sum, 1);
   }
+  for (const b of field.balls ?? []) {
+    const local = kernels.sphere_field(
+      kind,
+      intoFrame(b, points),
+      Float64Array.of(b.diameter),
+      Float64Array.from(b.polarization),
+    );
+    addTurned(b, local, sum, 1);
+  }
+  // infinite at a dipole itself, which `addTurned` leaves out, as
+  // `fieldlines.field` takes it for nothing
+  for (const d of field.dipoles ?? []) {
+    const local = kernels.dipole_field(
+      kind,
+      intoFrame(d, points),
+      Float64Array.from(d.moment),
+    );
+    addTurned(d, local, sum, 1);
+  }
   for (const s of ready.sheets) {
     const h = s.built.h(intoFrame(s, points), tolerance);
     addTurned(s, h, sum, kind === "H" ? 1 : field.mu0);
@@ -397,6 +420,16 @@ export function insideAt(ready, points) {
           hit = false;
       }
       if (hit) within[i] = 1;
+    }
+  }
+  // a ball as magpylib's sphere has it: within half its diameter
+  for (const b of ready.field.balls ?? []) {
+    if (!b.polarization.some((v) => v !== 0)) continue;
+    const radius = Math.abs(b.diameter) / 2;
+    const local = intoFrame(b, points);
+    for (let i = 0; i < n; i++) {
+      const [x, y, z] = [local[3 * i], local[3 * i + 1], local[3 * i + 2]];
+      if (Math.sqrt(x * x + y * y + z * z) <= radius) within[i] = 1;
     }
   }
   if (ready.body.length) insideMesh(points, ready.body, within);
