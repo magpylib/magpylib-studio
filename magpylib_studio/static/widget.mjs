@@ -34,6 +34,8 @@ import {
   surroundings,
 } from "./theme.mjs";
 import { QUANTITY, createVariables } from "./variables.mjs";
+// A saved page's own editor for its sensors (#176), made by the page.
+export { pageEditor } from "./pagefield.mjs";
 
 /** What the views of this build share on the page: the renderer's module,
  *  imported once -- see "Why the renderer arrives as a string" above. Keyed
@@ -1683,6 +1685,21 @@ function render({ model, el }) {
   function editKey(event) {
     if (event.altKey) return false;
     const key = event.key.toLowerCase();
+    if (!editable() && pageMoves) {
+      // a page's sensors: W moves, E turns, Cmd/Ctrl+Z undoes a drag
+      if ((event.metaKey || event.ctrlKey) && key === "z") {
+        settle(event.shiftKey ? pageMoves.redo() : pageMoves.undo());
+        return true;
+      }
+      const mode = HANDLE_KEYS[key];
+      if (event.metaKey || event.ctrlKey || event.shiftKey || !movable()) {
+        return false;
+      }
+      if (mode !== "translate" && mode !== "rotate") return false;
+      handles = mode;
+      api.setGizmoMode(gizmoFor(handles));
+      return true;
+    }
     if (!editable()) {
       // A handle key on a view that offers the pencil does what the pencil
       // does, and comes up in that mode: pressing W means "move it", and a
@@ -2354,6 +2371,8 @@ function render({ model, el }) {
     const moved = index !== shown;
     shown = index;
     if (moved) redrawGrid();
+    // a page's sensor moves on the scene's own step alone (`movable`)
+    if (moved && pageMoves && drawing()) api.setGizmoMode(gizmoFor(handles));
     scrub.value = String(index);
     showStep();
     asideColorBar();
@@ -2385,6 +2404,7 @@ function render({ model, el }) {
     setIcon(play, playing ? "pause" : "play");
     name(play, playing ? "Pause (space)" : "Play the path (space)");
     asideColorBar();
+    if (pageMoves && drawing()) api.setGizmoMode(gizmoFor(handles));
     if (!playing) return;
     // Restart from the top when play is pressed at the end of the run, rather
     // than finishing immediately.
@@ -2502,6 +2522,31 @@ function render({ model, el }) {
     Boolean(model.get("editable")) &&
     (model.editor !== undefined || !model.get("standalone"));
   let handles = "translate"; // what the user asked the handles to do
+  // A saved page that draws a dragged sensor's lines itself (#176,
+  // `pagefield.mjs`): handles for those sensors alone, to move and turn,
+  // and everything else read only -- no inspector, panels or pencil, which
+  // need a python behind them.
+  const pageMoves = model.pageEditor;
+  // Only on the step the scene is drawn at: the page holds its sources
+  // there, and a frame of a run shows them elsewhere.
+  const movable = () =>
+    !editable() &&
+    !playing &&
+    (frames() < 2 || shown === drawnStep()) &&
+    Boolean(
+      pageMoves?.movable(model.get("selected") || [], model.get("payload")),
+    );
+  const handlesOut = () => editable() || movable();
+  /** The handles `mode` puts out here: as asked where the view edits, a
+   *  move or a turn on a page's movable sensor, else none. */
+  const gizmoFor = (mode) =>
+    editable()
+      ? mode
+      : movable()
+        ? mode === "rotate"
+          ? "rotate"
+          : "translate"
+        : "none";
   let inEffect = "translate"; // what they do: a resize may not be possible
   let snapping = false;
   let along = null; // the one axis a drag is held to, or null for all
@@ -2514,7 +2559,8 @@ function render({ model, el }) {
    *  whenever the selection changes. */
   function setHandles(mode, { asked = false } = {}) {
     handles = mode;
-    inEffect = drawing() && editable() ? api.setGizmoMode(mode) : mode;
+    inEffect =
+      drawing() && handlesOut() ? api.setGizmoMode(gizmoFor(mode)) : mode;
     for (const [its, button] of Object.entries(modeButtons)) {
       pressed(button, inEffect === its);
     }
@@ -2596,7 +2642,7 @@ function render({ model, el }) {
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
-    if (!editable() && drawing()) api.setGizmoMode("none");
+    if (!editable() && drawing()) api.setGizmoMode(gizmoFor(handles));
     keepCorner(); // the column came, went, or changed its height
   }
 
@@ -3072,29 +3118,33 @@ function render({ model, el }) {
     },
   };
 
+  // the page's own editor, for a sensor it moves (`pageMoves`)
+  const dragEditor = () => (editable() ? editor : pageMoves);
   const stopDrags = watchDrags(view, {
-    drawing: () => drawing() && editable(),
+    drawing: () => drawing() && handlesOut(),
     begin({ objectIds, mode }) {
       dragActive = true;
       if (!inspectorEl.hidden) showReadout(); // the numbers, for the drag
       stopPlaying(); // the pointer is the one being asked
-      editor.begin({ objectIds, mode }).catch(() => {});
+      dragEditor()
+        .begin({ objectIds, mode })
+        .catch(() => {});
     },
     showPose,
-    preview: (pose, options) => editor.preview(pose.edits, options),
-    scene: () => editor.scene(),
+    preview: (pose, options) => dragEditor().preview(pose.edits, options),
+    scene: () => dragEditor().scene(),
     render(payload, { keep }) {
       if (drawing()) api.render(view, payload, { keep });
     },
     commit(pose) {
       dragActive = false;
       if (!inspectorEl.hidden) showReadout(); // and away again
-      settle(editor.commit(pose.edits));
+      settle(dragEditor().commit(pose.edits));
     },
     cancel() {
       dragActive = false;
       if (!inspectorEl.hidden) showReadout();
-      settle(editor.cancel());
+      settle(dragEditor().cancel());
     },
   });
 
@@ -3283,7 +3333,9 @@ function render({ model, el }) {
     if (now.has("faded")) api.setFades(model.get("faded") || {});
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
-      if (editable()) setHandles(handles); // what was asked, for the new one
+      if (editable())
+        setHandles(handles); // what was asked, for the new one
+      else if (pageMoves) api.setGizmoMode(gizmoFor(handles));
     }
   }
 
@@ -3334,7 +3386,7 @@ function render({ model, el }) {
     // nor a backdrop to find. (Dressing wears the backdrops too.)
     dressTheme();
     // Read only, unless the objects are a session's.
-    api.setGizmoMode(editable() ? handles : "none");
+    api.setGizmoMode(gizmoFor(handles));
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away.
     api.setHidden(model.get("hidden") || []);

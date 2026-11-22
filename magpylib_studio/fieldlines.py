@@ -35,6 +35,7 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 
 import base64
 import collections
+import contextlib
 import copy
 import functools
 import hashlib
@@ -42,6 +43,7 @@ import os
 import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import magpylib as magpy
 import numpy as np
@@ -121,11 +123,16 @@ def frame_of(seeds):
     it. The seeds' spread gives no direction where they are a square grid
     -- the SVD's two are any two at right angles -- and a grid turned 45°
     by chance put its points on a meshed core's plane of symmetry, along the
-    edges of its cells."""
+    edges of its cells.
+
+    The normal points the way its largest component is positive: the SVD's
+    sign is LAPACK's to pick, and the other one lays the grid mirrored -- by
+    up to a step -- which a saved page, laying it again for a dragged
+    sensor, could not follow (#176, `normalOf` in `pagefield.mjs`)."""
     if len(seeds) >= 3:
         _, spread, axes = np.linalg.svd(seeds - seeds.mean(axis=0))
         if spread[1] > 1e-3 * spread[0] and spread[2] <= 1e-6 * spread[0]:
-            normal = axes[2]
+            normal = axes[2] * np.sign(axes[2][np.argmax(np.abs(axes[2]))])
             world = np.eye(3)[np.argmin(np.abs(np.eye(3) @ normal))]
             across = world - (world @ normal) * normal
             across /= np.linalg.norm(across)
@@ -141,12 +148,18 @@ def spacing_of(seeds, grid):
     step = grid["step"]
     plane = grid["shape"][2] == 1
     finest = max(grid["shape"][:2]) * step / 30 if plane else np.inf
+    own = _apart(seeds)
+    return float(min(4 * step if own is None else own, finest))
+
+
+def _apart(seeds):
+    """The seeds' own spacing, the median distance to the nearest one; None
+    for fewer than two, or all in one place."""
     if len(seeds) < 2:
-        return float(min(4 * step, finest))
+        return None
     distance, _ = cKDTree(seeds).query(seeds, k=2)
     apart = distance[:, 1][distance[:, 1] > 0]
-    own = float(np.median(apart)) if len(apart) else 4 * step
-    return float(min(own, finest))
+    return float(np.median(apart)) if len(apart) else None
 
 
 def grid_around(sources, seeds, points, flat=None, every_step=False):
@@ -770,6 +783,139 @@ def _inside_cuboids(cuboids, points):
     return within
 
 
+#: The tolerance of material-response's compiled sheet kernel a saved page
+#: computes with (#176): coarse while a sensor is dragged, fine once it is
+#: let go. On the solved plate's 664 faces, 2,500 points take 7 ms at 1e-3
+#: and 8,000 take 51 ms at 1e-6, against 237 ms exact; the error against
+#: |H| is 3e-6 and 3e-9, finer than the 16 bits a live view sends.
+PAGE_TOLERANCE = {"drag": 1e-3, "rest": 1e-6}
+
+
+def page_field(sources, sensors):
+    """What a saved page needs to draw `sensors`' lines again where they are
+    dragged, with no python behind it (#176): the sources at their last
+    step, each in its own frame as the compiled kernels take it -- a
+    magnet's dimension and polarization, a solved sheet's triangles,
+    charges, centre and far distance -- each sensor's pixels in its own
+    frame, and the rules `_field_lines` draws by. `sensors` are
+    ``{key: sensor}``; those on a path are left out, whose pose a drag
+    writes at every step.
+
+    None where a source is of a kind the kernels do not compute, or no
+    sensor is left: the page's lines then stay as they were drawn."""
+    cuboids, sheets = [], []
+    for source in sources:
+        source = at_step(source)
+        if _cuboid(source):
+            cuboids.append(
+                {
+                    "dimension": np.asarray(source.dimension, dtype=float).tolist(),
+                    "polarization": np.asarray(
+                        source.polarization, dtype=float
+                    ).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif _charge_sheet(source) and hasattr(source, "_V"):
+            far = float(source._far_from)
+            sheets.append(
+                {
+                    # its arrays held once on a page (`widget._Shared`)
+                    "kind": "fieldsheet",
+                    "triangles": _float64(source._V),
+                    "charges": _float64(source._c),
+                    "center": np.asarray(source._center, dtype=float).tolist(),
+                    "far_from": far if np.isfinite(far) else None,
+                    **_pose(source),
+                }
+            )
+        else:
+            return None
+    moved = {
+        key: _page_sensor(sensor)
+        for key, sensor in sensors.items()
+        if sensor._get_path_len() == 1 and kind_of(sensor) is not None
+    }
+    if not moved:
+        return None
+    return {
+        "mu0": float(magpy.mu_0),
+        "rules": {
+            "rest_points": REST_POINTS,
+            "drag_points": DRAG_POINTS,
+            "probe_points": PROBE_POINTS,
+            "held_margin": HELD_MARGIN,
+            "rest_margin": REST_MARGIN,
+            "across": ACROSS,
+            "surface": _SURFACE,
+            "max_seeds": MAX_SEEDS,
+            "tolerance": PAGE_TOLERANCE,
+        },
+        "cuboids": cuboids,
+        "sheets": sheets,
+        "sensors": moved,
+    }
+
+
+def _page_sensor(sensor):
+    """A sensor as a page drags it: its pixels in its own frame and its
+    pose, and what a rigid move leaves as it is -- the normal of the plane
+    its pixels lie in, in its own frame (`frame_of`), or None, and their own
+    spacing (`_apart`) -- so the page need not find them again."""
+    seeds = seeds_of(sensor)
+    axes, planar = frame_of(seeds)
+    turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat())[-1])
+    return {
+        "kind": kind_of(sensor),
+        "pixels": np.asarray(sensor.pixel, dtype=float).reshape(-1, 3).tolist(),
+        "normal": turn.inv().apply(axes[2]).tolist() if planar else None,
+        "apart": _apart(seeds),
+        **_pose(sensor),
+    }
+
+
+def _pose(obj):
+    """`obj`'s position and orientation at its last step, the orientation as
+    scipy's quaternion (x, y, z, w)."""
+    return {
+        "position": np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist(),
+        "orientation": np.atleast_2d(obj.orientation.as_quat())[-1].tolist(),
+    }
+
+
+def _float64(values):
+    """`values` as little-endian float64, in base64: every bit kept, which the
+    page's field must match python's to."""
+    raw = np.ascontiguousarray(values, dtype="<f8").tobytes()
+    return base64.b64encode(raw).decode("ascii")
+
+
+#: Where the compiled kernels are, as wasm-pack builds them: a folder with
+#: ``mmr_kernels.js`` and ``mmr_kernels_bg.wasm``. Read when a page is written.
+KERNELS_VARIABLE = "MAGPYLIB_STUDIO_KERNELS"
+
+
+def page_kernels():
+    """material-response's compiled field kernels for a page (#176): its glue
+    module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
+    they are not to be had. From the folder `KERNELS_VARIABLE` names, else
+    from material-response's package. A prototype: how they reach studio for
+    good is open (magpylib-material-response#215)."""
+    from importlib import resources
+
+    folders = []
+    named = os.environ.get(KERNELS_VARIABLE)
+    if named:
+        folders.append(Path(named).expanduser())
+    with contextlib.suppress(ModuleNotFoundError):
+        folders.append(resources.files("magpylib_material_response") / "kernels")
+    for folder in folders:
+        glue, wasm = folder / "mmr_kernels.js", folder / "mmr_kernels_bg.wasm"
+        if glue.is_file() and wasm.is_file():
+            return glue.read_text(encoding="utf-8"), wasm.read_bytes()
+    return None
+
+
 def colours(sensor, readings):
     """The table a line of `sensor` is coloured from: colours for |field|
     evenly from the least to the most its pixels read, as its arrows are
@@ -837,7 +983,12 @@ def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
     from magpylib_studio.threejs import part_id
 
     lut, levels = colours(sensor, readings)
-    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
+    # nearest first, equals in the pixels' order: a grid of pixels is all
+    # ties, which numpy's default sort leaves in any order, and a saved page
+    # dragging the sensor orders them again (#176) -- to a picometre, so
+    # rounding does not part them
+    away = np.rint(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1) * 1e12)
+    order = np.argsort(away, kind="stable")
     starts = seeds[order][:MAX_SEEDS]
     return {
         "kind": "fieldlines",

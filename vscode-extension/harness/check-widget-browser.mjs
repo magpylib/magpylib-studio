@@ -632,6 +632,177 @@ async function savedLines(port, base) {
   });
 }
 
+/** A saved page drags a sensor past a solved plate and draws its lines
+ *  again itself, from material-response's compiled kernels (#176). On the
+ *  scene's own step only: a frame of its run has no handles. The handles'
+ *  own events, a step at a time, the probe's node carried as they carry it
+ *  -- a move, then a turn -- and each release's lines the live view's for
+ *  the same pose, to the 16 bits they are sent in; mid-drag and after, a
+ *  line starts at the probe's middle pixel, where the probe is drawn. Not
+ *  checked where the page was written without the kernels. */
+async function pageDrag(port, base, expected) {
+  await check(
+    "a saved page drags a sensor and draws its lines again",
+    async () => {
+      if (!expected) {
+        console.log(
+          "      (no compiled kernels to write the page with: not checked)",
+        );
+        return null;
+      }
+      const tab = await openTab(port);
+      try {
+        await tab.navigate(`${base}/out/page-drag.html`);
+        const ready = await tab.until(
+          `return window.scene3d?.byObjectId.size && window.magpyPageEditor`,
+          30_000,
+        );
+        if (!ready)
+          return thrown(tab) || "the page never drew, or has no editor";
+        await tab.evaluate(`
+        const view = ${VIEW};
+        window.fire = (type, detail) => view.dispatchEvent(new CustomEvent(type, { detail }));
+        window.pause = (ms = 60) => new Promise((done) => setTimeout(done, ms));
+        // what the handles hold, as "id:mode", or null
+        window.held = () => {
+          let root = window.scene3d.byObjectId.get("probe");
+          while (root.parent) root = root.parent;
+          const helper = root.children.find((c) => c.isTransformControlsRoot);
+          const on = helper?.controls.object;
+          return on ? on.userData.objectId + ":" + helper.controls.mode : null;
+        };
+        // how near a probe's line comes to starting at world point p
+        window.nearest = (p) => {
+          let best = Infinity;
+          window.scene3d.byObjectId.get("probe").traverse((part) => {
+            if (!part.isLineSegments2) return;
+            part.updateWorldMatrix(true, false);
+            const e = part.matrixWorld.elements;
+            const a = part.geometry.attributes.instanceStart.data.array;
+            for (let i = 0; i < a.length; i += 3) {
+              const x = e[0] * a[i] + e[4] * a[i + 1] + e[8] * a[i + 2] + e[12];
+              const y = e[1] * a[i] + e[5] * a[i + 1] + e[9] * a[i + 2] + e[13];
+              const z = e[2] * a[i] + e[6] * a[i + 1] + e[10] * a[i + 2] + e[14];
+              best = Math.min(best, Math.hypot(x - p[0], y - p[1], z - p[2]));
+            }
+          });
+          return best;
+        };
+        return 1;`);
+        const scrubTo = (step) =>
+          tab.evaluate(
+            `const s = document.querySelector(".magpy-scene-scrub"); s.value = ${step}; s.dispatchEvent(new Event("input")); await window.pause(300); return 1`,
+          );
+        // a frame of the run: no handles; the scene's own step: the probe's
+        await scrubTo(0);
+        const onFrame = await tab.evaluate(
+          `fire("objectpick", { objectId: "probe", adding: false }); await pause(); return held()`,
+        );
+        if (onFrame !== null)
+          return `handles on a frame of the run: ${onFrame}`;
+        await scrubTo(expected.frames - 1);
+        const onStep = await tab.evaluate(`
+        fire("objectpick", { objectId: "magnet", adding: false });
+        await pause();
+        const onMagnet = held();
+        fire("objectpick", { objectId: "probe", adding: false });
+        await pause();
+        return { onMagnet, onProbe: held() };`);
+        if (onStep.onMagnet !== null || onStep.onProbe !== "probe:translate") {
+          return `handles on the magnet: ${onStep.onMagnet}, on the probe: ${onStep.onProbe}`;
+        }
+        const decode = (item) => {
+          const raw = Buffer.from(item.values, "base64");
+          const out = new Float64Array(raw.length / 2);
+          for (let i = 0; i < out.length; i++)
+            out[i] = raw.readInt16LE(2 * i) * item.scale;
+          return out;
+        };
+        const far = (a, b) => Math.max(...a.map((v, k) => Math.abs(v - b[k])));
+        let at = [0, 0, 0.004];
+        for (const { edit, lines: want } of expected.drags) {
+          const mode = edit.position ? "translate" : "rotate";
+          const said = await tab.evaluate(`
+          const edit = ${JSON.stringify(edit)};
+          const from = ${JSON.stringify(at)};
+          const node = window.scene3d.byObjectId.get("probe");
+          const start = node.position.toArray();
+          fire("dragstart", { objectIds: ["probe"], mode: "${mode}", redrawn: false });
+          const steps = 30;
+          let last = null;
+          for (let i = 1; i <= steps; i++) {
+            const step = {};
+            if (edit.position) {
+              step.position = from.map((v, k) => v + ((edit.position[k] - v) * i) / steps);
+              node.position.set(...start.map((v, k) => v + step.position[k] - from[k]));
+            } else {
+              step.orientation = edit.orientation.map((v) => (v * i) / steps);
+              const degrees = Math.hypot(...step.orientation); // as the view writes it
+              const half = (degrees * Math.PI) / 360;
+              const s = Math.sin(half) / degrees;
+              node.quaternion.set(...step.orientation.map((v) => v * s), Math.cos(half));
+            }
+            node.updateMatrixWorld(true);
+            last = step;
+            fire("objecttransform", { preview: true, edits: [{ objectId: "probe", ...step }] });
+            await new Promise((done) => requestAnimationFrame(() => setTimeout(done, 5)));
+          }
+          await pause(200); // the last preview drawn
+          const midDrag = nearest(edit.position ?? from);
+          fire("objecttransform", { preview: false, edits: [{ objectId: "probe", ...last }] });
+          await pause(300);
+          return {
+            took: window.magpyPageEditor.took.slice(0, steps),
+            midDrag,
+            after: nearest(edit.position ?? from),
+            lines: window.magpyPageEditor.lines("probe"),
+          };`);
+          if (edit.position) at = edit.position;
+          const took = [...said.took].sort((a, b) => a - b);
+          console.log(
+            `      ${mode}: ${took.length} previews, median ${took[Math.floor(took.length / 2)]?.toFixed(1)} ms, ` +
+              `longest ${took.at(-1)?.toFixed(1)} ms`,
+          );
+          if (!(said.midDrag < 1e-6))
+            return `${mode}: mid-drag, no line starts at the probe (${said.midDrag} m off)`;
+          if (!(said.after < 1e-6))
+            return `${mode}: let go, no line starts at the probe (${said.after} m off)`;
+          const got = said.lines;
+          if (JSON.stringify(got.shape) !== JSON.stringify(want.shape)) {
+            return `${mode}: a grid of ${got.shape}, python's ${want.shape}`;
+          }
+          if (
+            far(got.origin, want.origin) > 1e-12 ||
+            far(got.axes, want.axes) > 1e-12 ||
+            Math.abs(got.step - want.step) > 1e-15
+          ) {
+            return `${mode}: the grid at ${got.origin} by ${got.step}, python's at ${want.origin} by ${want.step}`;
+          }
+          const [page, live] = [decode(got), decode(want)];
+          let worst = 0;
+          for (let i = 0; i < page.length; i++)
+            worst = Math.max(worst, Math.abs(page[i] - live[i]));
+          const quantum = Math.max(got.scale, want.scale);
+          if (worst > 2 * quantum) {
+            return `${mode}: the field off python's by ${(worst / quantum).toFixed(1)} of its 16-bit steps`;
+          }
+          if (got.inside !== want.inside)
+            return `${mode}: inside a body at other points than python's`;
+          if (
+            got.seeds.length !== want.seeds.length ||
+            far(got.seeds, want.seeds) > 1e-9
+          ) {
+            return `${mode}: the lines start elsewhere than python's`;
+          }
+        }
+        return thrown(tab);
+      } finally {
+        await tab.close();
+      }
+    },
+  );
+}
+
 /** A sensor whose pixels are hidden is its field lines, and a click on one
  *  picks it -- but not where a magnet is behind the line: the magnet takes
  *  that click, as it would from a faded object. */
@@ -5632,6 +5803,7 @@ try {
   await themeMidRun(browser.port, base);
   await barOverTransport(browser.port, base);
   await savedRunVariants(browser.port, base);
+  await pageDrag(browser.port, base, expected.page_drag);
   await staleFrame(browser.port, base);
   await stepTrait(browser.port, base);
   await silent(browser.port, base);
