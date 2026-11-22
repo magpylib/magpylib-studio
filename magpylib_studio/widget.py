@@ -149,7 +149,7 @@ const SHARED = ["position", "index", "uv", "back_uv"];
       if (typeof value[key] === "number") value[key] = arrays[value[key]];
     }
   } else if (value.kind === "fieldsheet") {
-    for (const key of ["triangles", "charges"]) {
+    for (const key of ["triangles", "charge_densities"]) {
       if (typeof value[key] === "number") value[key] = arrays[value[key]];
     }
   } else {
@@ -348,7 +348,10 @@ class _Shared:
                 # are the same at every step, the charges where it stood still
                 return {
                     **value,
-                    **{k: self._place(value[k]) for k in ("triangles", "charges")},
+                    **{
+                        k: self._place(value[k])
+                        for k in ("triangles", "charge_densities")
+                    },
                 }
             return {key: self.compacted(v) for key, v in value.items()}
         if isinstance(value, list):

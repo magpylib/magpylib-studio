@@ -280,11 +280,9 @@ export function keepsTo(along, within, across) {
 export function prepared(kernels, field) {
   const sheets = field.sheets.map((s) => ({
     ...s,
-    built: new kernels.Sheet(
+    built: new kernels.ChargeSheet(
       float64s(s.triangles),
-      float64s(s.charges),
-      Float64Array.from(s.center),
-      s.far_from ?? Infinity,
+      float64s(s.charge_densities),
     ),
   }));
   // `_inside_sheets`: every sheet's triangles in the world, as one body --
@@ -344,16 +342,14 @@ function addTurned(source, local, sum, scale) {
 export function fieldAt(ready, points, kind, tolerance) {
   const { kernels, field } = ready;
   const sum = new Float64Array(points.length);
-  const n = points.length / 3;
   for (const c of field.cuboids) {
-    const dimension = new Float64Array(points.length);
-    const polarization = new Float64Array(points.length);
-    for (let i = 0; i < n; i++) {
-      dimension.set(c.dimension, 3 * i);
-      polarization.set(c.polarization, 3 * i);
-    }
-    const kernel = kind === "H" ? kernels.cuboid_h : kernels.cuboid_b;
-    addTurned(c, kernel(intoFrame(c, points), dimension, polarization), sum, 1);
+    const local = kernels.cuboid_field(
+      kind,
+      intoFrame(c, points),
+      Float64Array.from(c.dimension),
+      Float64Array.from(c.polarization),
+    );
+    addTurned(c, local, sum, 1);
   }
   for (const s of ready.sheets) {
     const h = s.built.h(intoFrame(s, points), tolerance);
@@ -647,6 +643,11 @@ function pixelsAt(item, sensor, pose, carry, turned, sources, tolerance) {
 
 // --- the editor --------------------------------------------------------------
 
+/** The version of material-response's kernel API this page is written
+ *  against (`api_version()` in its `wasm.rs`): kernels of another are not
+ *  used, and the page's lines stay as they were saved. */
+export const KERNELS_API = 2;
+
 /** What a page drags its sensors with, for the view (`widget.mjs`), as a
  *  python session's editor answers it: `begin`, `preview`, `commit`,
  *  `cancel`, `scene`, `undo`, `redo` -- and `movable`, which sensors of the
@@ -659,6 +660,11 @@ export async function pageEditor(model, { glue, wasm }) {
   const kernels = await import(url);
   const bytes = Uint8Array.from(atob(wasm), (c) => c.charCodeAt(0));
   await kernels.default({ module_or_path: bytes });
+  if (kernels.api_version?.() !== KERNELS_API) {
+    throw new Error(
+      `the field kernels speak API ${kernels.api_version?.()}, the page ${KERNELS_API}`,
+    );
+  }
 
   const readied = new WeakMap(); // page_field -> its sources made ready
   const rests = new WeakMap(); // payload -> { key: { grid, along, within, seeds } }

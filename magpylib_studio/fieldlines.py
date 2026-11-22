@@ -795,8 +795,9 @@ def page_field(sources, sensors):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
     step, each in its own frame as the compiled kernels take it -- a
-    magnet's dimension and polarization, a solved sheet's triangles,
-    charges, centre and far distance -- each sensor's pixels in its own
+    magnet's dimension and polarization, a solved sheet's triangles and the
+    charge density at their corners, as `ChargeSheet.from_triangles` takes
+    them -- each sensor's pixels in its own
     frame, and the rules `_field_lines` draws by. `sensors` are
     ``{key: sensor}``; those on a path are left out, whose pose a drag
     writes at every step.
@@ -816,16 +817,13 @@ def page_field(sources, sensors):
                     **_pose(source),
                 }
             )
-        elif _charge_sheet(source) and hasattr(source, "_V"):
-            far = float(source._far_from)
+        elif _charge_sheet(source) and hasattr(source, "charge_densities"):
             sheets.append(
                 {
                     # its arrays held once on a page (`widget._Shared`)
                     "kind": "fieldsheet",
-                    "triangles": _float64(source._V),
-                    "charges": _float64(source._c),
-                    "center": np.asarray(source._center, dtype=float).tolist(),
-                    "far_from": far if np.isfinite(far) else None,
+                    "triangles": _float64(source.triangles),
+                    "charge_densities": _float64(source.charge_densities),
                     **_pose(source),
                 }
             )

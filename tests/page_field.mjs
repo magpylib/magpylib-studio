@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import {
+  KERNELS_API,
   fieldAt,
   frameOf,
   gridAround,
@@ -23,6 +24,11 @@ const kernels = await import(pathToFileURL(`${folder}/mmr_kernels.js`).href);
 await kernels.default({
   module_or_path: readFileSync(`${folder}/mmr_kernels_bg.wasm`),
 });
+if (kernels.api_version() !== KERNELS_API) {
+  throw new Error(
+    `kernels of API ${kernels.api_version()}, the page's ${KERNELS_API}`,
+  );
+}
 const { field, key, cases } = JSON.parse(readFileSync(casesPath, "utf8"));
 const ready = prepared(kernels, field);
 const sensor = field.sensors[key];
