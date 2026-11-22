@@ -1862,6 +1862,50 @@
   cursor: default;
 }
 
+/* A word that acts, in the chips' material, the same wherever one is: the
+   step it asks for filled in the view's blue (Save), the one that takes
+   nothing (Cancel) in the error colour. */
+.magpy-vars-chip.magpy-primary {
+  color: #ffffff;
+  background: var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+}
+
+.magpy-vars-chip.magpy-primary:not(:disabled):hover,
+.magpy-vars-chip.magpy-primary:focus-visible {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 85%, #000000);
+}
+
+.magpy-vars-chip.magpy-cancel {
+  color: var(--vscode-errorForeground, #d13438);
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-errorForeground, #d13438) 45%,
+    transparent
+  );
+}
+
+.magpy-vars-chip.magpy-cancel:not(:disabled):hover,
+.magpy-vars-chip.magpy-cancel:focus-visible {
+  border-color: var(--vscode-errorForeground, #d13438);
+}
+
+/* A choice that is on or off: a box to tick, its words beside it. */
+.magpy-scene-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.magpy-scene-check input {
+  margin: 0;
+  accent-color: var(--vscode-focusBorder);
+  cursor: pointer;
+}
+
 .magpy-vars-chip.on {
   color: var(--vscode-focusBorder);
   background: color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);

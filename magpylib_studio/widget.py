@@ -1961,7 +1961,15 @@ class SceneWidget(anywidget.AnyWidget):
                 progress.done()
                 return done.value
 
-    def _saving(self, limit=None, variants=True, page=False, run=True, steps=None):
+    def _saving(
+        self,
+        limit=None,
+        variants=True,
+        page=False,
+        run=True,
+        steps=None,
+        draggable=True,
+    ):
         """What a saved page holds: the model's state as it is now, and --
         for a run the payload does not carry as motion and changes -- every
         frame of it, which the page answers for itself. Past `limit`, when
@@ -2007,7 +2015,9 @@ class SceneWidget(anywidget.AnyWidget):
         )
         state["step"] = self.step  # where the page opens
         self._page_why = None
-        if page and session is not None:
+        # a page's sensors dragged in it, unless the export said only to show
+        self._page_drags = page and draggable
+        if self._page_drags and session is not None:
             # its sensors dragged in the page, lines computed there (#176) --
             # or why not, which the view's export says (`_export_more`)
             field, self._page_why = _page_field_why(session)
@@ -2067,14 +2077,16 @@ class SceneWidget(anywidget.AnyWidget):
             state["frames"] = 1
         saved = {"state": state, "run": run}
         if names:
+            # each variant's sensors dragged in the page, as the scene's
+            drags = getattr(self, "_page_drags", page)
             drawn = yield from _drawing_ahead(
-                copy(), names, state["payload"], runs=runs, keep=keep, page=page
+                copy(), names, state["payload"], runs=runs, keep=keep, page=drags
             )
             if limit is not None and _weigher(page)(drawn) > limit:
                 # their runs left out first, as the scene's own is
                 drawn = _finished(
                     _drawing_ahead(
-                        copy(), names, state["payload"], runs=False, page=page
+                        copy(), names, state["payload"], runs=False, page=drags
                     )
                 )
             if limit is not None and _weigher(page)(drawn) > limit:
@@ -2171,6 +2183,8 @@ class SceneWidget(anywidget.AnyWidget):
                     variants=variants,
                     page=True,  # a page: its sensors dragged in it (#176)
                     run=bool(content.get("run", True)),
+                    # unless the foot asked for one that only shows
+                    draggable=bool(content.get("editable", True)),
                     steps=content.get("steps"),
                 )
             except Exception as e:

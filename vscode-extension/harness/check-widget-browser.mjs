@@ -702,15 +702,42 @@ async function pageDrag(port, base, expected) {
           return `handles on a frame of the run: ${onFrame}`;
         await scrubTo(expected.frames - 1);
         const onStep = await tab.evaluate(`
+        fire("objectpick", { objectId: "probe", adding: false });
+        await pause();
+        const beforePencil = held();
+        ${tool("Edit")}.click();
+        await pause();
+        // which of the column's buttons are out, by the start of their titles
+        const out = (name) => {
+          const b = [...document.querySelectorAll(".magpy-icon")].find((x) => x.title.startsWith(name));
+          return Boolean(b && !b.hidden && b.offsetParent);
+        };
+        const column = ["Move", "Turn", "Resize", "Aim", "Back to where"].map((n) => [n, out(n)]);
         fire("objectpick", { objectId: "magnet", adding: false });
         await pause();
         const onMagnet = held();
         fire("objectpick", { objectId: "probe", adding: false });
         await pause();
-        return { onMagnet, onProbe: held() };`);
+        return { beforePencil, column: Object.fromEntries(column), onMagnet, onProbe: held() };`);
+        if (onStep.beforePencil !== null) {
+          return `handles before the pencil: ${onStep.beforePencil}`;
+        }
+        const offered = onStep.column;
+        if (
+          !offered.Move ||
+          !offered.Turn ||
+          offered.Resize ||
+          offered.Aim ||
+          !offered["Back to where"]
+        ) {
+          return `the column offers ${JSON.stringify(offered)}`;
+        }
         if (onStep.onMagnet !== null || onStep.onProbe !== "probe:translate") {
           return `handles on the magnet: ${onStep.onMagnet}, on the probe: ${onStep.onProbe}`;
         }
+        const saved = await tab.evaluate(
+          `return window.magpyPageEditor.lines("probe").origin`,
+        );
         const decode = (item) => {
           const raw = Buffer.from(item.values, "base64");
           const out = new Float64Array(raw.length / 2);
@@ -795,6 +822,14 @@ async function pageDrag(port, base, expected) {
             return `${mode}: the lines start elsewhere than python's`;
           }
         }
+        // reset: the lines as saved, back in one step
+        const reset = await tab.evaluate(`
+          [...document.querySelectorAll(".magpy-icon")].find((b) => b.title.startsWith("Back to where")).click();
+          await pause(300);
+          return window.magpyPageEditor.lines("probe").origin;`);
+        if (JSON.stringify(reset) !== JSON.stringify(saved)) {
+          return `reset left the lines at ${reset}, saved at ${saved}`;
+        }
         return thrown(tab);
       } finally {
         await tab.close();
@@ -825,6 +860,7 @@ async function pageArrows(port, base, expected) {
       const got = await tab.evaluate(`
         const view = ${VIEW};
         const fire = (type, detail) => view.dispatchEvent(new CustomEvent(type, { detail }));
+        ${tool("Edit")}.click();
         fire("objectpick", { objectId: "probe", adding: false });
         await new Promise((done) => setTimeout(done, 60));
         const edit = ${JSON.stringify(expected.edit)};

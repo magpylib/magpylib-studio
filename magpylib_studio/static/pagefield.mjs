@@ -760,8 +760,12 @@ export async function pageEditor(model, { glue, wasm }) {
   // A scene the page did not draw itself -- a variant clicked -- is not one
   // its drags can be taken back into.
   let mine = null;
+  // the scene as the page drew it before any drag: as saved, or as the
+  // variant last clicked -- what reset goes back to
+  let origin = model.get("payload");
   model.on("change:payload", (payload) => {
     if (payload === mine) return;
+    origin = payload;
     undone.length = 0;
     redone.length = 0;
   });
@@ -1101,6 +1105,15 @@ export async function pageEditor(model, { glue, wasm }) {
       return Promise.resolve({ ok: true });
     },
     scene: () => Promise.resolve(model.get("payload")),
+    /** Back to the scene before any drag, in one step undo takes back. */
+    reset() {
+      const now = model.get("payload");
+      if (now === origin) return Promise.resolve({ ok: true });
+      undone.push(now);
+      redone.length = 0;
+      show(origin);
+      return Promise.resolve({ ok: true });
+    },
     undo() {
       if (!undone.length)
         return Promise.resolve({ ok: false, error: "Nothing to undo" });

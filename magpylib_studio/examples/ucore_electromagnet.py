@@ -43,6 +43,9 @@ def _windings():
     return move_grid_along_polyline(turn, pack)
 
 
+#: The windings drawn in copper, the colour of the wire they stand for.
+COPPER = "#b87333"
+
 WINDINGS = _windings()
 
 
@@ -98,7 +101,19 @@ def ucore_electromagnet(
     drawn as its field lines.
     """
     coil = magpy.Collection(
-        *(magpy.current.Polyline(current=current, vertices=v) for v in WINDINGS),
+        *(
+            magpy.current.Polyline(
+                current=current,
+                vertices=v,
+                # copper, and drawn as a wire is: twice magpylib's line
+                style={
+                    "label": f"winding {n}",
+                    "color": COPPER,
+                    "line_width": 4,
+                },
+            )
+            for n, v in enumerate(WINDINGS, start=1)
+        ),
         style_label="coil",
     )
     probe = magpy.Sensor(

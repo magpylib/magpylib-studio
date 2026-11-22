@@ -693,3 +693,23 @@ def test_the_views_export_says_why_its_sensors_cannot_be_dragged(
     while sent[-1]["kind"] != "export":
         view._on_message(view, {"kind": "export-more", "job": 1}, None)
     assert said in sent[-1]["note"]
+
+
+@pytest.mark.parametrize("editable", [True, False])
+def test_the_views_export_makes_a_page_editable_or_not(editable, monkeypatch):
+    # #176: the foot's choice -- a page whose sensors can be dragged carries
+    # what that takes; one that only shows, none of it
+    monkeypatch.setattr(fieldlines, "page_kernels", lambda: ("glue", b"wasm"))
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
+    sensor.style.update(pixel={"size": 0, "field": {"source": "B"}})
+    view = SceneWidget(magnet, sensor, field_lines=True)
+    sent = []
+    view.send = lambda message, *_, **__: sent.append(message)
+    monkeypatch.setattr(SceneWidget, "_EXPORT_PIECE", 60)
+    ask = {"kind": "export", "job": 1, "editable": editable}
+    view._on_message(view, ask, None)
+    while sent[-1]["kind"] != "export":
+        view._on_message(view, {"kind": "export-more", "job": 1}, None)
+    page = sent[-1]["html"]
+    assert ('id="magpy-kernels"></script>' not in page) is editable
