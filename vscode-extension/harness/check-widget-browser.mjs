@@ -803,6 +803,60 @@ async function pageDrag(port, base, expected) {
   );
 }
 
+/** A saved page drags a probe drawn as cones (#176): where it is let go its
+ *  pixels stand where the live view's do, turned along the field they read
+ *  there, by as much. Not checked without the kernels. */
+async function pageArrows(port, base, expected) {
+  await check("a saved page turns a dragged sensor's arrows", async () => {
+    if (!expected) {
+      console.log(
+        "      (no compiled kernels to write the page with: not checked)",
+      );
+      return null;
+    }
+    const tab = await openTab(port);
+    try {
+      await tab.navigate(`${base}/out/page-drag-arrows.html`);
+      const ready = await tab.until(
+        `return window.scene3d?.byObjectId.size && window.magpyPageEditor`,
+        30_000,
+      );
+      if (!ready) return thrown(tab) || "the page never drew, or has no editor";
+      const got = await tab.evaluate(`
+        const view = ${VIEW};
+        const fire = (type, detail) => view.dispatchEvent(new CustomEvent(type, { detail }));
+        fire("objectpick", { objectId: "probe", adding: false });
+        await new Promise((done) => setTimeout(done, 60));
+        const edit = ${JSON.stringify(expected.edit)};
+        fire("dragstart", { objectIds: ["probe"], mode: "translate", redrawn: false });
+        fire("objecttransform", { preview: true, edits: [{ objectId: "probe", ...edit }] });
+        await new Promise((done) => setTimeout(done, 100));
+        fire("objecttransform", { preview: false, edits: [{ objectId: "probe", ...edit }] });
+        await new Promise((done) => setTimeout(done, 300));
+        return window.magpyPageEditor.pixels("probe");`);
+      const want = expected.pixels;
+      if (!got) return "the page drew no pixels for the probe";
+      const far = (a, b) => Math.max(...a.map((v, k) => Math.abs(v - b[k])));
+      if (
+        got.origins.length !== want.origins.length ||
+        far(got.origins, want.origins) > 1e-9
+      ) {
+        return "the pixels stand elsewhere than the live view's";
+      }
+      if (far(got.vectors, want.vectors) > 2e-6) {
+        return `turned off the live view's by ${far(got.vectors, want.vectors)}`;
+      }
+      const off = Math.max(
+        ...got.norms.map((v, k) => Math.abs(v - want.norms[k]) / want.norms[k]),
+      );
+      if (off > 1e-6) return `|field| off the live view's by ${off} of it`;
+      return thrown(tab);
+    } finally {
+      await tab.close();
+    }
+  });
+}
+
 /** A sensor whose pixels are hidden is its field lines, and a click on one
  *  picks it -- but not where a magnet is behind the line: the magnet takes
  *  that click, as it would from a faded object. */
@@ -5804,6 +5858,7 @@ try {
   await barOverTransport(browser.port, base);
   await savedRunVariants(browser.port, base);
   await pageDrag(browser.port, base, expected.page_drag);
+  await pageArrows(browser.port, base, expected.page_drag?.arrows);
   await staleFrame(browser.port, base);
   await stepTrait(browser.port, base);
   await silent(browser.port, base);

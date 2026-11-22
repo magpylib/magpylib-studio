@@ -834,7 +834,9 @@ def page_field(sources, sensors):
     moved = {
         key: _page_sensor(sensor)
         for key, sensor in sensors.items()
-        if sensor._get_path_len() == 1 and kind_of(sensor) is not None
+        if sensor._get_path_len() == 1
+        and kind_of(sensor) is not None
+        and _redrawn_in_page(sensor)
     }
     if not moved:
         return None
@@ -857,6 +859,33 @@ def page_field(sources, sensors):
     }
 
 
+#: The pixel shapes a page draws again where their sensor is dragged: those
+#: the view draws itself from data (`threejs._pixels_payload`), turned by
+#: the field, or cubes.
+_PAGE_SYMBOLS = ("cone", "arrow3d", "none")
+
+
+def _redrawn_in_page(sensor):
+    """Whether a page can draw `sensor`'s pixels again where it drags it
+    (#176): none drawn, or drawn as data the view turns and colours itself,
+    each the same size whatever it reads, every one shown. Its arrows are
+    then the field at the pixels and the colour table the page carries, as
+    its lines are; sizes scaled by the field, hidden null readings and 2D
+    symbols are magpylib's to draw, and such a sensor stays where it is."""
+    from magpylib._src.style import get_style
+
+    style = get_style(sensor, magpy.defaults).pixel
+    if not style.size:
+        return True
+    field = style.field
+    return (
+        style.symbol == "cube"
+        and field.symbol in _PAGE_SYMBOLS
+        and field.sizescaling == "uniform"
+        and bool(field.shownull)
+    )
+
+
 def _page_sensor(sensor):
     """A sensor as a page drags it: its pixels in its own frame and its
     pose, and what a rigid move leaves as it is -- the normal of the plane
@@ -865,8 +894,11 @@ def _page_sensor(sensor):
     seeds = seeds_of(sensor)
     axes, planar = frame_of(seeds)
     turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat())[-1])
+    source = sensor.style.pixel.field.source
     return {
         "kind": kind_of(sensor),
+        # the axes of its own the field is read along, as `readings` reads it
+        "components": source[1:] or "xyz",
         "pixels": np.asarray(sensor.pixel, dtype=float).reshape(-1, 3).tolist(),
         "normal": turn.inv().apply(axes[2]).tolist() if planar else None,
         "apart": _apart(seeds),

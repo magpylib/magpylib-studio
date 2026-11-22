@@ -586,6 +586,65 @@ function decodedItem(item) {
   return { grid, along, within };
 }
 
+// --- a dragged sensor's pixels ----------------------------------------------
+
+/** A ``pixels`` item (`threejs._pixels_payload`) of a sensor moved to
+ *  `pose`: its pixels carried there (`carry`, turned by `turned`), each
+ *  turned along the field it now reads -- the sensor's components of it,
+ *  as `fieldlines.readings` reads them -- and coloured by its |field| from
+ *  the sensor's colour table, as the view colours a cut of it
+ *  (`tableColour` in scene3d.mjs). Sizes stay: a page drags only sensors
+ *  whose pixels are one size whatever they read (`_redrawn_in_page`). */
+function pixelsAt(item, sensor, pose, carry, turned, sources, tolerance) {
+  const n = item.origins.length / 3;
+  const origins = new Array(3 * n);
+  for (let i = 0; i < n; i++) {
+    const p = carry(item.origins.slice(3 * i, 3 * i + 3));
+    origins[3 * i] = p[0];
+    origins[3 * i + 1] = p[1];
+    origins[3 * i + 2] = p[2];
+  }
+  const world = fieldAt(
+    sources,
+    Float64Array.from(origins),
+    sensor.kind,
+    tolerance,
+  );
+  const kept = [0, 1, 2].map((k) => sensor.components.includes("xyz"[k]));
+  const norms = new Array(n);
+  const vectors = new Array(3 * n);
+  for (let i = 0; i < n; i++) {
+    let v = [world[3 * i], world[3 * i + 1], world[3 * i + 2]];
+    if (!kept.every(Boolean)) {
+      const own = turn(pose.orientation, v, true).map((c, k) =>
+        kept[k] ? c : 0,
+      );
+      v = turn(pose.orientation, own);
+    }
+    const size = Math.hypot(v[0], v[1], v[2]);
+    norms[i] = size;
+    for (let k = 0; k < 3; k++) vectors[3 * i + k] = size > 0 ? v[k] / size : 0;
+  }
+  const moved = { ...item, origins };
+  if (item.turn) moved.turn = product(turned, item.turn);
+  if (item.glyph?.anchor)
+    moved.glyph = { ...item.glyph, anchor: carry(item.glyph.anchor) };
+  if (item.vectors) moved.vectors = vectors;
+  if (item.scale) {
+    const { lut, levels } = item.scale;
+    const [low, high] = levels;
+    const own = (i) =>
+      Array.isArray(item.colors) ? item.colors[i] : item.colors;
+    moved.norms = norms;
+    moved.colors = norms.map((norm, i) => {
+      if (!(norm > 0)) return own(i);
+      const t = high > low ? (norm - low) / (high - low) : 0.5;
+      return lut[Math.round(Math.min(Math.max(t, 0), 1) * (lut.length - 1))];
+    });
+  }
+  return moved;
+}
+
 // --- the editor --------------------------------------------------------------
 
 /** What a page drags its sensors with, for the view (`widget.mjs`), as a
@@ -697,7 +756,11 @@ export async function pageEditor(model, { glue, wasm }) {
 
   /** `payload` with sensor `key` moved from its pose there to `pose`, and its
    *  lines `item`: each of its drawings carried rigidly, its pose said. */
-  function movedPayload(payload, key, sensor, pose, item) {
+  /** `payload` with sensor `key` moved from its pose there to `pose`, and
+   *  its lines `item`: each of its drawings carried rigidly, its pixels
+   *  reading the field where they now are (`pixelsAt`, from `sources` at
+   *  `tolerance`), its pose said. */
+  function movedPayload(payload, key, sensor, pose, item, sources, tolerance) {
     const from = sensor;
     const turned = product(pose.orientation, [
       -from.orientation[0],
@@ -724,6 +787,9 @@ export async function pageEditor(model, { glue, wasm }) {
       out[name] = value.map((i) => {
         if (i?.object_id !== key) return i;
         if (name === "fieldlines") return item;
+        if (name === "pixels") {
+          return pixelsAt(i, sensor, pose, carry, turned, sources, tolerance);
+        }
         const moved = { ...i };
         if (Array.isArray(i.position) && typeof i.position[0] === "number") {
           const p = new Array(i.position.length);
@@ -768,6 +834,9 @@ export async function pageEditor(model, { glue, wasm }) {
   return {
     /** Sensor `key`'s lines as drawn now: the item, as python's. */
     lines: (key) => savedItem(model.get("payload"), key),
+    /** Sensor `key`'s pixels as drawn now, the ``pixels`` item. */
+    pixels: (key) =>
+      (model.get("payload").pixels || []).find((i) => i.object_id === key),
     /** How long each preview took to work out, in ms, the last first. */
     took: [],
     /** Whether the page can move what `selected` names in `payload`. */
@@ -826,7 +895,15 @@ export async function pageEditor(model, { glue, wasm }) {
         seeds,
       );
       const scene = {
-        ...movedPayload(payload, key, sensor, pose, item),
+        ...movedPayload(
+          payload,
+          key,
+          sensor,
+          pose,
+          item,
+          sources,
+          rules.tolerance.drag,
+        ),
         partial: [key],
       };
       return { ok: true, scene };
@@ -914,7 +991,15 @@ export async function pageEditor(model, { glue, wasm }) {
         got.within,
         seeds,
       );
-      const next = movedPayload(payload, key, sensor, pose, item);
+      const next = movedPayload(
+        payload,
+        key,
+        sensor,
+        pose,
+        item,
+        sources,
+        rules.tolerance.rest,
+      );
       rests.set(next, { [key]: { ...got, seeds } });
       undone.push(payload);
       redone.length = 0;

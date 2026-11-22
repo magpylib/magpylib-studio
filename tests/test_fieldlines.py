@@ -597,3 +597,27 @@ def test_a_kept_matrix_keeps_no_sheet_alive(monkeypatch):
     del sheets
     gc.collect()
     assert gone() is None
+
+
+@pytest.mark.parametrize(
+    ("pixel", "moved"),
+    [
+        ({"size": 0}, True),  # lines alone
+        ({}, True),  # cones, one size, colours from the table
+        ({"field": {"symbol": "arrow3d"}}, True),
+        ({"field": {"sizescaling": "linear"}}, False),  # sized by the field
+        ({"field": {"shownull": False}}, False),  # some pixels left out
+        ({"field": {"symbol": "arrow"}}, False),  # a 2D symbol: magpylib's
+        ({"symbol": "o"}, False),
+    ],
+)
+def test_a_page_moves_only_sensors_whose_pixels_it_draws_again(pixel, moved):
+    # #176: a sensor dragged on a saved page has its pixels redrawn by the
+    # page, so only those it can draw as the view does are offered
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
+    sensor.style.update(
+        pixel={**pixel, "field": {"source": "B", **pixel.get("field", {})}}
+    )
+    field = fieldlines.page_field([magnet], {"probe": sensor})
+    assert (field is not None and "probe" in field["sensors"]) is moved
