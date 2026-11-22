@@ -285,30 +285,44 @@ export function prepared(kernels, field) {
       float64s(s.charge_densities),
     ),
   }));
-  // `_inside_sheets`: every sheet's triangles in the world, as one body --
-  // parts solved together leave out the faces they share
-  const corners = [];
-  for (const s of field.sheets) {
+  /** `s`'s triangles in the world, flat. */
+  const inWorld = (s) => {
     const local = float64s(s.triangles);
+    const out = new Float64Array(local.length);
     for (let i = 0; i < local.length; i += 3) {
       const v = turn(s.orientation, [local[i], local[i + 1], local[i + 2]]);
-      corners.push(
-        v[0] + s.position[0],
-        v[1] + s.position[1],
-        v[2] + s.position[2],
-      );
+      for (let k = 0; k < 3; k++) out[i + k] = v[k] + s.position[k];
     }
-  }
+    return out;
+  };
+  // `_inside_sheets`: every sheet's triangles in the world, as one body --
+  // parts solved together leave out the faces they share
+  const body = new Float64Array(
+    field.sheets.flatMap((s) => Array.from(inWorld(s))),
+  );
+  // a magnet of triangles: a sheet of its face charge, and its own body
+  const meshes = (field.meshes ?? []).map((m) => ({
+    ...m,
+    built: new kernels.ChargeSheet(
+      float64s(m.triangles),
+      float64s(m.charge_densities),
+    ),
+    body: m.closed && m.polarization.some((v) => v !== 0) ? inWorld(m) : null,
+    // J in the world, which B inside it adds to mu0 H
+    J: turn(m.orientation, m.polarization),
+  }));
   return {
     field,
     kernels,
     sheets,
-    body: Float64Array.from(corners),
+    meshes,
+    body,
     centres: [
       ...field.cuboids,
       ...(field.wires ?? []),
       ...(field.balls ?? []),
       ...(field.dipoles ?? []),
+      ...(field.meshes ?? []),
       ...field.sheets,
     ].map((s) => s.position),
   };
@@ -398,6 +412,19 @@ export function fieldAt(ready, points, kind, tolerance) {
     const h = s.built.h(intoFrame(s, points), tolerance);
     addTurned(s, h, sum, kind === "H" ? 1 : field.mu0);
   }
+  // a magnet of triangles: its face charge's H, which B is mu0 times
+  // outside it and J more inside, as magpylib gives it
+  for (const m of ready.meshes) {
+    const h = m.built.h(intoFrame(m, points), tolerance);
+    addTurned(m, h, sum, kind === "H" ? 1 : field.mu0);
+    if (kind !== "B" || !m.body) continue;
+    const within = new Uint8Array(points.length / 3);
+    insideMesh(points, m.body, within);
+    for (let i = 0; i < within.length; i++) {
+      if (!within[i]) continue;
+      for (let k = 0; k < 3; k++) sum[3 * i + k] += m.J[k];
+    }
+  }
   return sum;
 }
 
@@ -433,6 +460,8 @@ export function insideAt(ready, points) {
     }
   }
   if (ready.body.length) insideMesh(points, ready.body, within);
+  // each magnet of triangles on its own: a closed one has an inside
+  for (const m of ready.meshes) if (m.body) insideMesh(points, m.body, within);
   return within;
 }
 

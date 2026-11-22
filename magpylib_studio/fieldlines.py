@@ -832,10 +832,13 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
-    cuboids, sheets, wires, balls, dipoles, unknown = [], [], [], [], [], []
+    cuboids, sheets, wires, balls, dipoles, meshes, unknown = ([] for _ in range(7))
     for source in sources:
         source = at_step(source)
-        if "sphere_field" in computes and isinstance(source, magpy.magnet.Sphere):
+        charged = _charged_faces(source)
+        if charged is not None:
+            meshes.append(charged)
+        elif "sphere_field" in computes and isinstance(source, magpy.magnet.Sphere):
             balls.append(
                 {
                     "diameter": float(np.ravel(source.diameter)[-1]),
@@ -926,9 +929,47 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
         "wires": wires,
         "balls": balls,
         "dipoles": dipoles,
+        "meshes": meshes,
         "sensors": moved,
     }
     return field, None
+
+
+def _charged_faces(source):
+    """A magnet made of triangles -- a `TriangularMesh`, a `Tetrahedron`, a
+    `Triangle` -- as a page computes it (#176): a sheet of the charge J·n/mu0
+    on each face, n its own normal as magpylib orients it, through
+    material-response's sheet kernel, whose H it is everywhere, the body's
+    inside too; B inside adds J, so its polarization comes along, and
+    whether the faces close round a body, which only then has an inside.
+    None for anything else, or a magnet with no polarization."""
+    if getattr(source, "polarization", None) is None:
+        return None
+    if isinstance(source, magpy.magnet.TriangularMesh):
+        faces, closed = np.asarray(source.mesh, dtype=float), not source.status_open
+    elif isinstance(source, magpy.magnet.Tetrahedron):
+        from magpylib._src.fields.field_BH_tetrahedron import _check_chirality
+
+        v = _check_chirality(np.array(source.vertices, dtype=float)[None])[0]
+        faces = v[[(0, 2, 1), (0, 1, 3), (1, 2, 3), (0, 3, 2)]]
+        closed = True
+    elif isinstance(source, magpy.misc.Triangle):
+        faces, closed = np.asarray(source.vertices, dtype=float)[None], False
+    else:
+        return None
+    normal = np.cross(faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 0])
+    normal /= np.linalg.norm(normal, axis=1, keepdims=True)
+    polarization = np.asarray(source.polarization, dtype=float)
+    charge = normal @ polarization / magpy.mu_0
+    return {
+        # its arrays held once on a page, as a solved sheet's
+        "kind": "fieldsheet",
+        "triangles": _float64(faces),
+        "charge_densities": _float64(np.repeat(charge[:, None], 3, axis=1)),
+        "polarization": polarization.tolist(),
+        "closed": bool(closed),
+        **_pose(source),
+    }
 
 
 def _kind_named(source):
