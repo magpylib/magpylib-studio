@@ -646,7 +646,7 @@ function pixelsAt(item, sensor, pose, carry, turned, sources, tolerance) {
 /** The version of material-response's kernel API this page is written
  *  against (`api_version()` in its `wasm.rs`): kernels of another are not
  *  used, and the page's lines stay as they were saved. */
-export const KERNELS_API = 2;
+export const KERNELS_API = 1;
 
 /** What a page drags its sensors with, for the view (`widget.mjs`), as a
  *  python session's editor answers it: `begin`, `preview`, `commit`,
