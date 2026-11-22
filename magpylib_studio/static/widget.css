@@ -663,6 +663,45 @@
   opacity: 0.75;
 }
 
+/* What computes the field, a dot on the pencil (#176): python, the page
+   itself, nothing (lines as saved), or kernels that failed to load. */
+.magpy-icon[data-computes] {
+  position: relative;
+}
+
+/* greyed, its dot kept clear: it says why */
+.magpy-icon.magpy-greyed > * {
+  opacity: 0.4;
+}
+
+.magpy-icon[data-computes]::after {
+  content: "";
+  position: absolute;
+  /* bottom right, clear of the pencil's two ends, its eraser top right */
+  bottom: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--magpy-computes);
+}
+
+.magpy-icon[data-computes="python"] {
+  --magpy-computes: var(--vscode-focusBorder);
+}
+
+.magpy-icon[data-computes="page"] {
+  --magpy-computes: #2da44e;
+}
+
+.magpy-icon[data-computes="saved"] {
+  --magpy-computes: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.magpy-icon[data-computes="failed"] {
+  --magpy-computes: var(--vscode-errorForeground, #d13438);
+}
+
 .magpy-icon:hover {
   opacity: 1;
   background: color-mix(in srgb, currentColor 10%, transparent);
@@ -906,6 +945,30 @@
 .magpy-choosing .magpy-scene-variants .magpy-vars-chip.magpy-left-out {
   opacity: 0.45;
   text-decoration: line-through;
+}
+
+/* While the export asks, each variant's chip says whether the page keeps
+   it: a tick in a cell of its own, ruled off at its left, empty for one
+   left out -- and not the fill of the variant on screen, which read as the
+   one choice. */
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip::before {
+  content: "\2713";
+  display: inline-block;
+  width: 1em;
+  margin: 0 5px 0 -3px;
+  padding-right: 4px;
+  border-right: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  text-align: center;
+}
+
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip.magpy-left-out::before {
+  content: "\00a0"; /* the cell kept, and its rule, with no tick in it */
+}
+
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip.on {
+  color: inherit;
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
 }
 
 .magpy-scene-counter {

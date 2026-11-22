@@ -259,6 +259,11 @@ const NO_EDIT_ANSWER =
 const PART_STYLE = { Axes: "arrows", Pixels: "pixel", FieldLines: "pixel" };
 
 /** The keys that pick the handles, as the studio's panel has them. */
+/** The pencil's title where python edits the scene. */
+const EDIT_TITLE =
+  "Edit — move, turn, resize and aim the objects, with undo, in a studio " +
+  "session in the kernel; the field from python. Again to put the handles away";
+
 const HANDLE_KEYS = {
   w: "translate",
   e: "rotate",
@@ -481,31 +486,31 @@ function render({ model, el }) {
   // session, as `editable=True` does when the view is made; a view of a
   // session has one already. Shown only where there is something to edit
   // and a python to keep the edits -- see `showEditing`.
-  const editButton = iconButton(
-    "edit",
-    "Edit — move, turn, resize and aim the objects, with undo, in a studio " +
-      "session in the kernel; again to put the handles away",
-    () => {
-      if (pageMoves && !editable()) {
-        // a saved page's sensors, moved and turned by the page itself (#176)
-        pageEditing = !pageEditing;
-        notify(
-          pageEditing
-            ? "Editing — pick a sensor: W moves, E turns; Q puts the handles away"
-            : "Handles away — the moves stay; the pencil brings them back",
-        );
-        dressEditing();
-        return;
-      }
-      const out = !editable();
+  const editButton = iconButton("edit", EDIT_TITLE, () => {
+    const blocked = pageBlocked();
+    if (blocked) {
+      notify(blocked); // a page that cannot: why, rather than nothing
+      return;
+    }
+    if (pageMoves && !editable()) {
+      // a saved page's sensors, moved and turned by the page itself (#176)
+      pageEditing = !pageEditing;
       notify(
-        out
-          ? "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away"
-          : "Handles away — the edits stay; the pencil brings them back",
+        pageEditing
+          ? "Editing — pick a sensor: W moves, E turns; Q puts the handles away"
+          : "Handles away — the moves stay; the pencil brings them back",
       );
-      commit("editable", out);
-    },
-  );
+      dressEditing();
+      return;
+    }
+    const out = !editable();
+    notify(
+      out
+        ? "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away"
+        : "Handles away — the edits stay; the pencil brings them back",
+    );
+    commit("editable", out);
+  });
   // The scene's variables as a panel over the view: a slider each, and the
   // scene following as one is dragged (`variables.mjs`, the same rows as the
   // studio's Variables view). With the handles, since moving a variable is an
@@ -2771,11 +2776,48 @@ function render({ model, el }) {
   function showEditing() {
     editButton.hidden =
       !pageMoves &&
+      !pageBlocked() &&
       (model.get("editable") === null || // made for looking only
         model.editor !== undefined ||
         Boolean(model.get("standalone")) ||
         !(model.get("tree") || []).length);
     pressed(editButton, editing());
+    showComputes();
+  }
+
+  /** Why a saved page that draws field lines cannot move its sensors --
+   *  saved to only show, sources it does not compute, kernels that did not
+   *  load -- or null: its pencil then shows greyed, and says so (#176). */
+  function pageBlocked() {
+    if (pageMoves || !model.get("standalone")) return null;
+    if (model.pageFailure) {
+      return `Field lines as saved: the page's field kernels did not load (${model.pageFailure})`;
+    }
+    const why = model.get("page_why");
+    return why ? `Field lines as saved: ${why}` : null;
+  }
+
+  /** What computes the field, a dot on the pencil and a line in its
+   *  title: python behind the view, the page itself, nothing -- the lines
+   *  as saved -- or kernels that failed to load. */
+  function showComputes() {
+    const blocked = pageBlocked();
+    const state = blocked
+      ? model.pageFailure
+        ? "failed"
+        : "saved"
+      : pageMoves && model.get("standalone")
+        ? "page"
+        : "python";
+    editButton.dataset.computes = state;
+    editButton.classList.toggle("magpy-greyed", Boolean(blocked));
+    name(
+      editButton,
+      blocked ??
+        (state === "page"
+          ? "Edit — move and turn the sensors; their field lines are computed in this page (WebAssembly). Again to put the handles away"
+          : EDIT_TITLE),
+    );
   }
 
   // Each view numbers its own calls, under a name of its own: python answers

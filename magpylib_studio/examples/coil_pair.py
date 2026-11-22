@@ -3,6 +3,7 @@ from typing import Annotated
 import magpylib as magpy
 
 from magpylib_studio import Bounds, Count, Length, duplicate_along, grid, scene
+from magpylib_studio.examples.copper import COPPERS
 
 TITLE = "Helmholtz coil pair"
 
@@ -38,9 +39,10 @@ def coil_pair(
     """
     pitch = 0.002
     pair = magpy.Collection(style_label="coil pair")
-    for name, current, centre in (
-        ("lower", lower, -spacing / 2),
-        ("upper", upper, spacing / 2),
+    # two coils the colour cycle would tell apart: two shades of copper
+    for name, current, centre, colour in (
+        ("lower", lower, -spacing / 2, COPPERS[0]),
+        ("upper", upper, spacing / 2, COPPERS[1]),
     ):
         coil = magpy.Collection(style_label=f"{name} coil")
         pair.add(coil)
@@ -49,6 +51,7 @@ def coil_pair(
             diameter=2 * radius,
             position=(0, 0, centre - (turns - 1) * pitch / 2),
             style_label=f"{name} loop",
+            style_color=colour,
         )
         coil.add(loop)
         duplicate_along(loop, count=turns, step=(0, 0, pitch))

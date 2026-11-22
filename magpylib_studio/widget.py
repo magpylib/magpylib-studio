@@ -265,6 +265,8 @@ if (document.getElementById("magpy-kernels").textContent.trim()) {
     window.magpyPageEditor = model.pageEditor; // as window.scene3d, for a look in
   } catch (error) {
     console.warn("magpylib-studio: the field kernels did not load", error);
+    // said on the page's pencil, greyed (`showComputes` in widget.mjs)
+    model.pageFailure = String(error?.message ?? error);
   }
 }
 bundle.default.render({ model, el: document.getElementById("magpy-root") });
@@ -2023,6 +2025,11 @@ class SceneWidget(anywidget.AnyWidget):
             field, self._page_why = _page_field_why(session)
             if field is not None:
                 state["payload"] = {**state["payload"], "page_field": field}
+        elif page and session is not None and session.field_lines:
+            self._page_why = "it was saved to only show"
+        if page and self._page_why:
+            # for the page's pencil to say, greyed (`showComputes`)
+            state["page_why"] = self._page_why
         if not run:
             state["frames"] = 1  # the step drawn, still
         pieces = self._steps(state, frames, step, names, copy, limit, page, keep)

@@ -4,6 +4,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import Bounds, Count, Length, derived, sampled, scene, tau
+from magpylib_studio.examples.copper import COPPER
 
 TITLE = "Helical winding"
 
@@ -40,6 +41,7 @@ def helical_winding(
             count=round(per_turn * turns) + 1,
         ),
         style_label="Helical winding",
+        style_color=COPPER,
     )
     sensor = magpy.Sensor(
         position=np.linspace((0.0, 0.0, -0.02), (0.0, 0.0, 0.02), 25),

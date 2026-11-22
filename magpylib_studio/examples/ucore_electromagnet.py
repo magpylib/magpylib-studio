@@ -10,6 +10,7 @@ from magpylib_material_response.polyline import (
 )
 
 from magpylib_studio import Bounds, Count, grid, scene
+from magpylib_studio.examples.copper import COPPER
 
 TITLE = "U-core electromagnet, solved"
 
@@ -42,9 +43,6 @@ def _windings():
     pack = np.array([(x, 0.0011) for x in (np.arange(4) - 1.5) * 0.0044])
     return move_grid_along_polyline(turn, pack)
 
-
-#: The windings drawn in copper, the colour of the wire they stand for.
-COPPER = "#b87333"
 
 WINDINGS = _windings()
 
