@@ -510,15 +510,22 @@ def _finished(steps):
 
 
 def _page_field(session):
+    """`_page_field_why`'s field alone."""
+    return _page_field_why(session)[0]
+
+
+def _page_field_why(session):
     """What a page's scene carries for a sensor dragged in it (#176,
-    `page_field`): only where the page can carry the compiled kernels too,
-    which material-response releases do not ship yet -- without them, bytes
-    the page could not use."""
+    `page_field_why`), and why it carries nothing where it draws lines: only
+    where the page can carry the compiled kernels too, which
+    material-response releases do not ship yet -- without them, bytes the
+    page could not use."""
     from magpylib_studio import fieldlines
 
-    if fieldlines.page_kernels() is None:
-        return None
-    return session.page_field()
+    field, why = session.page_field_why()
+    if field is not None and fieldlines.page_kernels() is None:
+        return None, "material-response's compiled field kernels were not found"
+    return field, why
 
 
 def _drawing_ahead(copy, names, payload, runs=True, keep=None, page=False):
@@ -1991,9 +1998,11 @@ class SceneWidget(anywidget.AnyWidget):
             measurements=self.measurements,
         )
         state["step"] = self.step  # where the page opens
+        self._page_why = None
         if page and session is not None:
-            # its sensors dragged in the page, lines computed there (#176)
-            field = _page_field(session)
+            # its sensors dragged in the page, lines computed there (#176) --
+            # or why not, which the view's export says (`_export_more`)
+            field, self._page_why = _page_field_why(session)
             if field is not None:
                 state["payload"] = {**state["payload"], "page_field": field}
         if not run:
@@ -2209,6 +2218,8 @@ class SceneWidget(anywidget.AnyWidget):
                         "html": page,
                         "filename": EXPORT_NAME,
                         "job": job,
+                        # why its sensors cannot be dragged in it, if so
+                        "note": getattr(self, "_page_why", None),
                     }
                 )
                 return

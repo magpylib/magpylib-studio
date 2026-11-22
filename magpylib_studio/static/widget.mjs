@@ -3459,9 +3459,12 @@ function render({ model, el }) {
   draw();
 
   /** Hand the browser the file python wrote, as a download. */
-  function download({ html, filename }) {
+  function download({ html, filename, note }) {
     const href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     save(href, filename);
+    // why its field lines cannot follow a sensor dragged in it (#176)
+    if (note)
+      notify(`Saved ${filename}: its sensors cannot be dragged, ${note}`);
     setTimeout(() => URL.revokeObjectURL(href), 60_000);
   }
 

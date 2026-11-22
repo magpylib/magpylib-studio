@@ -801,6 +801,11 @@ PAGE_CUBOIDS = 100
 
 
 def page_field(sources, sensors):
+    """`page_field_why`'s field alone."""
+    return page_field_why(sources, sensors)[0]
+
+
+def page_field_why(sources, sensors):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
     step, each in its own frame as the compiled kernels take it -- a
@@ -811,10 +816,11 @@ def page_field(sources, sensors):
     ``{key: sensor}``; those on a path are left out, whose pose a drag
     writes at every step.
 
-    None where a source is of a kind the kernels do not compute, there are
-    more magnets than `PAGE_CUBOIDS`, or no sensor is left: the page's lines
-    then stay as they were drawn."""
-    cuboids, sheets = [], []
+    ``(field, None)``, or ``(None, why)`` where a source is of a kind the
+    kernels do not compute, there are more magnets than `PAGE_CUBOIDS`, or no
+    sensor is left: the page's lines then stay as they were drawn, and `why`
+    says so in a few words, for the view to say after its export."""
+    cuboids, sheets, unknown = [], [], []
     for source in sources:
         source = at_step(source)
         if _cuboid(source):
@@ -838,9 +844,15 @@ def page_field(sources, sensors):
                 }
             )
         else:
-            return None
-        if len(cuboids) > PAGE_CUBOIDS:
-            return None
+            unknown.append(_kind_named(source))
+    if unknown:
+        kinds = ", ".join(sorted(set(unknown)))
+        return None, f"it computes magnets and solved sheets, not {kinds}"
+    if len(cuboids) > PAGE_CUBOIDS:
+        return None, (
+            f"{len(cuboids)} magnets, more than the {PAGE_CUBOIDS} it computes "
+            "at the pace of a drag"
+        )
     moved = {
         key: _page_sensor(sensor)
         for key, sensor in sensors.items()
@@ -849,8 +861,11 @@ def page_field(sources, sensors):
         and _redrawn_in_page(sensor)
     }
     if not moved:
-        return None
-    return {
+        return None, (
+            "its sensors move on a path, or draw pixels sized by the field, "
+            "hide null readings or use a 2D symbol"
+        )
+    field = {
         "mu0": float(magpy.mu_0),
         "rules": {
             "rest_points": REST_POINTS,
@@ -867,6 +882,16 @@ def page_field(sources, sensors):
         "sheets": sheets,
         "sensors": moved,
     }
+    return field, None
+
+
+def _kind_named(source):
+    """`source`'s kind as a reader names it: a current's wire as currents
+    are, ``currents (Polyline)``, a magnet by its class."""
+    name = type(source).__name__
+    if isinstance(source, magpy.current.Polyline | magpy.current.Circle):
+        return f"currents ({name})"
+    return name
 
 
 #: The pixel shapes a page draws again where their sensor is dragged: those

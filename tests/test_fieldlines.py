@@ -635,3 +635,36 @@ def test_a_page_computes_no_more_magnets_than_it_can_drag_past():
     ]
     assert fieldlines.page_field(cells[:-1], {"probe": sensor}) is not None
     assert fieldlines.page_field(cells, {"probe": sensor}) is None
+
+
+@pytest.mark.parametrize(
+    ("scene", "said"),
+    [
+        ("coil", "not currents (Polyline)"),
+        ("sensor on a path", "its sensors move on a path"),
+    ],
+)
+def test_the_views_export_says_why_its_sensors_cannot_be_dragged(
+    scene, said, monkeypatch
+):
+    # #176: a page whose lines the page cannot compute keeps them as drawn,
+    # and the view's export says why, with the file
+    magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
+    sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
+    sensor.style.update(pixel={"size": 0, "field": {"source": "B"}})
+    if scene == "coil":
+        sources = [
+            magnet,
+            magpy.current.Polyline(current=1, vertices=[(0, 0, 0), (0.01, 0, 0)]),
+        ]
+    else:
+        sources = [magnet]
+        sensor.move(np.linspace((0, 0, 0), (0.01, 0, 0), 3), start=0)
+    view = SceneWidget(*sources, sensor, field_lines=True)
+    sent = []
+    view.send = lambda message, *_, **__: sent.append(message)
+    monkeypatch.setattr(SceneWidget, "_EXPORT_PIECE", 60)
+    view._on_message(view, {"kind": "export", "job": 1}, None)
+    while sent[-1]["kind"] != "export":
+        view._on_message(view, {"kind": "export-more", "job": 1}, None)
+    assert said in sent[-1]["note"]
