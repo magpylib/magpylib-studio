@@ -29,7 +29,19 @@ if (kernels.api_version() !== KERNELS_API) {
     `kernels of API ${kernels.api_version()}, the page's ${KERNELS_API}`,
   );
 }
-const { field, key, cases } = JSON.parse(readFileSync(casesPath, "utf8"));
+const asked = JSON.parse(readFileSync(casesPath, "utf8"));
+if (asked.fields) {
+  // the field alone: each scene's sources at `points`, as `kind`, at each
+  // tolerance
+  const answers = asked.fields.map(({ field, points, kind, tolerances }) => {
+    const ready = prepared(kernels, field);
+    const at = Float64Array.from(points);
+    return tolerances.map((t) => Array.from(fieldAt(ready, at, kind, t)));
+  });
+  writeFileSync(answersPath, JSON.stringify(answers));
+  process.exit(0);
+}
+const { field, key, cases } = asked;
 const ready = prepared(kernels, field);
 const sensor = field.sensors[key];
 

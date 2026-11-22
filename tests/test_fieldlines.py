@@ -621,3 +621,17 @@ def test_a_page_moves_only_sensors_whose_pixels_it_draws_again(pixel, moved):
     )
     field = fieldlines.page_field([magnet], {"probe": sensor})
     assert (field is not None and "probe" in field["sensors"]) is moved
+
+
+def test_a_page_computes_no_more_magnets_than_it_can_drag_past():
+    # #176: past `PAGE_CUBOIDS` a page's lines stay as saved
+    sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
+    sensor.style.pixel.field.source = "B"
+    cells = [
+        magpy.magnet.Cuboid(
+            polarization=(0, 0, 1), dimension=(0.001,) * 3, position=(0.001 * i, 0, 0)
+        )
+        for i in range(fieldlines.PAGE_CUBOIDS + 1)
+    ]
+    assert fieldlines.page_field(cells[:-1], {"probe": sensor}) is not None
+    assert fieldlines.page_field(cells, {"probe": sensor}) is None

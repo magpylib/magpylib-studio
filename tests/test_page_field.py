@@ -14,6 +14,7 @@ import subprocess
 import warnings
 from pathlib import Path
 
+import magpylib as magpy
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
@@ -36,6 +37,28 @@ POSES = {
     "off its plane": ((0, 0.004, 0), None, False),
     "turned": ((0.002, 0, 0), (0, 0, 0.5), None),
 }
+
+
+def _in_node(folder, asked):
+    """What `page_field.mjs` answers to `asked`, run by node on the kernels
+    written to `folder`."""
+    glue, wasm = KERNELS
+    (folder / "mmr_kernels.js").write_text(glue, encoding="utf-8")
+    (folder / "mmr_kernels_bg.wasm").write_bytes(wasm)
+    (folder / "cases.json").write_text(json.dumps(asked))
+    node = shutil.which("node")
+    subprocess.run(  # noqa: S603 - node on our own driver and files
+        [
+            node,
+            str(DRIVER),
+            str(folder),
+            str(folder / "cases.json"),
+            str(folder / "answers.json"),
+        ],
+        check=True,
+        timeout=120,
+    )
+    return json.loads((folder / "answers.json").read_text())
 
 
 def _plate():
@@ -95,19 +118,7 @@ def test_the_page_lays_grids_and_computes_the_field_as_python(tmp_path, monkeypa
             }
         )
 
-    glue, wasm = KERNELS
-    (tmp_path / "mmr_kernels.js").write_text(glue, encoding="utf-8")
-    (tmp_path / "mmr_kernels_bg.wasm").write_bytes(wasm)
-    asked = tmp_path / "cases.json"
-    asked.write_text(json.dumps({"field": field, "key": key, "cases": cases}))
-    answered = tmp_path / "answers.json"
-    node = shutil.which("node")
-    subprocess.run(  # noqa: S603 - node on our own driver and files
-        [node, str(DRIVER), str(tmp_path), str(asked), str(answered)],
-        check=True,
-        timeout=120,
-    )
-    answers = json.loads(answered.read_text())
+    answers = _in_node(tmp_path, {"field": field, "key": key, "cases": cases})
 
     for want, got in zip(expected, answers, strict=True):
         name = want["name"]
@@ -141,3 +152,93 @@ def test_the_page_lays_grids_and_computes_the_field_as_python(tmp_path, monkeypa
                 got["slid"]["grid"]["origin"], slid["origin"], atol=1e-15
             )
             np.testing.assert_array_equal(got["slid"]["was"], was, err_msg=name)
+
+
+def _solved_apart():
+    """The plate example's magnet and solved sheets, apart: fresh copies."""
+    from magpylib_material_response.face_charge import ChargeSheet
+
+    from magpylib_studio.examples.solved_plate_run import _solved
+
+    solved = _solved()
+    (sheet,) = [s for s in solved.sources_all if isinstance(s, ChargeSheet)]
+    (magnet,) = [s for s in solved.sources_all if not isinstance(s, ChargeSheet)]
+    return magnet, sheet
+
+
+def _turned_about_three_axes():
+    # a sheet moved and turned after its solve, the magnet turned too
+    magnet, sheet = _solved_apart()
+    magnet.rotate_from_rotvec((0.3, -0.5, 0.7), anchor=None)
+    sheet.move((0.003, -0.002, 0.001)).rotate_from_rotvec((-0.2, 0.4, 0.1))
+    return [magnet, sheet]
+
+
+def _a_turned_collection_with_a_turned_child():
+    magnet, sheet = _solved_apart()
+    magnet.rotate_from_rotvec((0.1, 0.2, -0.4), anchor=None)
+    together = magpy.Collection(magnet, sheet, override_parent=True)
+    together.rotate_from_rotvec((0.5, -0.1, 0.3), anchor=(0.01, 0, 0)).move(
+        (0, 0.004, -0.002)
+    )
+    return [together]
+
+
+def _a_magnet_on_a_path():
+    # a page draws a source at its last step
+    magnet, sheet = _solved_apart()
+    magnet.move(np.linspace((0, 0, 0), (0.02, 0.005, 0.003), 5), start=0)
+    return [magnet, sheet]
+
+
+@pytest.mark.parametrize(
+    "scene",
+    [
+        _turned_about_three_axes,
+        _a_turned_collection_with_a_turned_child,
+        _a_magnet_on_a_path,
+    ],
+)
+def test_the_page_computes_the_field_of_turned_and_moved_sources(
+    scene, tmp_path, monkeypatch
+):
+    # #176, from MR's review: frames, collections and paths, B and H, at each
+    # tolerance -- to the kernels' agreement at 0, and at 1e-6 and 1e-3 within
+    # a thousandth of the tolerance of the largest field on the points (1.5e-10
+    # and 1.9e-7 measured)
+    monkeypatch.setattr(fieldlines, "MATRIX_MEMORY", 0)
+    objects = scene()
+    sources = fieldlines.sources_of(objects)
+    probe = magpy.Sensor(pixel=[(0, 0, 0), (0.001, 0, 0), (0, 0, 0.001)])
+    probe.style.pixel.field.source = "B"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        field = fieldlines.page_field(sources, {"probe": probe})
+    assert field is not None
+    points = np.random.default_rng(176).uniform(
+        (-0.04, -0.03, -0.02), (0.04, 0.03, 0.03), (300, 3)
+    )
+    tolerances = [0, 1e-6, 1e-3]
+    asked = [
+        {
+            "field": field,
+            "points": points.ravel().tolist(),
+            "kind": kind,
+            "tolerances": tolerances,
+        }
+        for kind in ("B", "H")
+    ]
+    answers = _in_node(tmp_path, {"fields": asked})
+    for kind, at_each in zip(("B", "H"), answers, strict=True):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # observers inside the solved part
+            want = fieldlines.field(sources, points, kind)
+        size = np.linalg.norm(want, axis=1)
+        for tolerance, got in zip(tolerances, at_each, strict=True):
+            error = np.linalg.norm(np.reshape(got, (-1, 3)) - want, axis=1)
+            allowed = 1e-10 * size + (1e-12 + tolerance / 1000) * size.max()
+            assert np.all(error <= allowed), (
+                kind,
+                tolerance,
+                float((error / size.max()).max()),
+            )

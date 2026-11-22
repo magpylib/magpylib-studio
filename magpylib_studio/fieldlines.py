@@ -791,6 +791,15 @@ def _inside_cuboids(cuboids, points):
 PAGE_TOLERANCE = {"drag": 1e-3, "rest": 1e-6}
 
 
+#: The most magnets a saved page computes the field of itself (#176): the
+#: compiled cuboid takes about 215 ns a point in a browser (M4, 2026-11-22),
+#: so a hundred of them cost 60 ms on a dragged sensor's new grid of 2,500
+#: points and 200 ms on the 8,000 of the grid it is let go on. A body meshed
+#: into thousands of cells would freeze the drag: such a page keeps its
+#: lines as saved.
+PAGE_CUBOIDS = 100
+
+
 def page_field(sources, sensors):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
@@ -802,8 +811,9 @@ def page_field(sources, sensors):
     ``{key: sensor}``; those on a path are left out, whose pose a drag
     writes at every step.
 
-    None where a source is of a kind the kernels do not compute, or no
-    sensor is left: the page's lines then stay as they were drawn."""
+    None where a source is of a kind the kernels do not compute, there are
+    more magnets than `PAGE_CUBOIDS`, or no sensor is left: the page's lines
+    then stay as they were drawn."""
     cuboids, sheets = [], []
     for source in sources:
         source = at_step(source)
@@ -828,6 +838,8 @@ def page_field(sources, sensors):
                 }
             )
         else:
+            return None
+        if len(cuboids) > PAGE_CUBOIDS:
             return None
     moved = {
         key: _page_sensor(sensor)
