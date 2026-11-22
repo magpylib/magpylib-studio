@@ -623,10 +623,10 @@ def test_a_page_moves_only_sensors_whose_pixels_it_draws_again(pixel, moved):
     assert (field is not None and "probe" in field["sensors"]) is moved
 
 
-@pytest.mark.parametrize("made_of", ["magnets", "a wire"])
+@pytest.mark.parametrize("made_of", ["magnets", "a wire", "tetrahedra"])
 def test_a_page_computes_no_more_than_it_can_drag_past(made_of):
-    # #176: past `PAGE_CUBOIDS` -- magnets, and a sixteenth of the wire
-    # segments -- a page's lines stay as saved
+    # #176: past `PAGE_CUBOIDS` -- magnets, a sixteenth of the wire segments
+    # and a fortieth of the triangles -- a page's lines stay as saved
     sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
     sensor.style.pixel.field.source = "B"
 
@@ -639,6 +639,17 @@ def test_a_page_computes_no_more_than_it_can_drag_past(made_of):
                     position=(0.001 * i, 0, 0),
                 )
                 for i in range(n)
+            ]
+        if made_of == "tetrahedra":  # four faces each
+            corners = 0.001 * np.array(
+                [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1)]
+            )
+            each = fieldlines.TRIANGLES_PER_CUBOID // 4
+            return [
+                magpy.magnet.Tetrahedron(
+                    polarization=(0, 0, 1), vertices=corners, position=(0.003 * i, 0, 0)
+                )
+                for i in range(n * each)
             ]
         segments = n * fieldlines.SEGMENTS_PER_CUBOID
         vertices = [(0.0001 * i, 0, 0) for i in range(segments + 1)]

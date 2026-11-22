@@ -802,6 +802,11 @@ PAGE_CUBOIDS = 100
 #: segment takes about 13 ns a point against the cuboid's 215, so the
 #: magnets and a sixteenth of the segments share `PAGE_CUBOIDS`.
 SEGMENTS_PER_CUBOID = 16
+#: And how many triangles, of a solved sheet or a magnet of triangles: one
+#: takes 4.3 ns a point at a drag's tolerance and 9.2 at the release's, on the
+#: solved plate's 664 (M4, 2026-11-22). Forty a magnet: a page of triangles
+#: alone, 4,000 of them, costs 45 ms on a drag's new grid and 300 at its end.
+TRIANGLES_PER_CUBOID = 40
 
 
 def page_field(sources, sensors):
@@ -828,7 +833,7 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     names their kernels (`PAGE_KERNELS`).
 
     ``(field, None)``, or ``(None, why)`` where a source is of a kind the
-    kernels do not compute, more magnets and wire segments than
+    kernels do not compute, more magnets, wire segments and triangles than
     `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
@@ -892,12 +897,24 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
         kinds = ", ".join(sorted(set(unknown)))
         return None, f"it does not compute {kinds}"
     segments = sum(len(wire["vertices"]) - 1 for wire in wires)
+    triangles = sum(
+        len(base64.b64decode(s["triangles"])) // 72 for s in (*sheets, *meshes)
+    )
     # a ball or a dipole costs no more than a segment
     cheap = segments + len(balls) + len(dipoles)
-    if len(cuboids) + cheap / SEGMENTS_PER_CUBOID > PAGE_CUBOIDS:
+    cost = len(cuboids) + cheap / SEGMENTS_PER_CUBOID + triangles / TRIANGLES_PER_CUBOID
+    if cost > PAGE_CUBOIDS:
+        counted = [
+            f"{n} {name}"
+            for n, name in (
+                (len(cuboids), "magnets"),
+                (segments, "wire segments"),
+                (triangles, "triangles"),
+            )
+            if n
+        ]
         return None, (
-            f"{len(cuboids)} magnets and {segments} wire segments, more than "
-            "it computes at the pace of a drag"
+            f"{', '.join(counted)}: more than it computes at the pace of a drag"
         )
     moved = {
         key: _page_sensor(sensor)
