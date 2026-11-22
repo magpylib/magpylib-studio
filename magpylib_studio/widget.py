@@ -522,8 +522,11 @@ def _page_field_why(session):
     page could not use."""
     from magpylib_studio import fieldlines
 
-    field, why = session.page_field_why()
-    if field is not None and fieldlines.page_kernels() is None:
+    kernels = fieldlines.page_kernels()
+    # kernels without wires are kernels of before they had them: the same API
+    currents = kernels is not None and "polyline_field" in kernels[0]
+    field, why = session.page_field_why(currents=currents)
+    if field is not None and kernels is None:
         return None, "material-response's compiled field kernels were not found"
     return field, why
 

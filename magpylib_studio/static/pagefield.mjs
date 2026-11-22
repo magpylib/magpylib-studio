@@ -304,7 +304,9 @@ export function prepared(kernels, field) {
     kernels,
     sheets,
     body: Float64Array.from(corners),
-    centres: [...field.cuboids, ...field.sheets].map((s) => s.position),
+    centres: [...field.cuboids, ...(field.wires ?? []), ...field.sheets].map(
+      (s) => s.position,
+    ),
   };
 }
 
@@ -338,7 +340,8 @@ function addTurned(source, local, sum, scale) {
 }
 
 /** B, or H, of the scene's sources at `points` (flat, the world's): the
- *  magnets' from the kernels' cuboid, the sheets' H times mu0 for B. */
+ *  magnets' from the kernels' cuboid, the wires' from their straight
+ *  segments, the sheets' H times mu0 for B. */
 export function fieldAt(ready, points, kind, tolerance) {
   const { kernels, field } = ready;
   const sum = new Float64Array(points.length);
@@ -350,6 +353,23 @@ export function fieldAt(ready, points, kind, tolerance) {
       Float64Array.from(c.polarization),
     );
     addTurned(c, local, sum, 1);
+  }
+  // a wire: a straight segment between each two vertices, in its frame
+  for (const w of field.wires ?? []) {
+    const local = intoFrame(w, points);
+    const wire = new Float64Array(points.length);
+    const current = Float64Array.of(w.current);
+    for (let i = 1; i < w.vertices.length; i++) {
+      const part = kernels.polyline_field(
+        kind,
+        local,
+        Float64Array.from(w.vertices[i - 1]),
+        Float64Array.from(w.vertices[i]),
+        current,
+      );
+      for (let k = 0; k < part.length; k++) wire[k] += part[k];
+    }
+    addTurned(w, wire, sum, 1);
   }
   for (const s of ready.sheets) {
     const h = s.built.h(intoFrame(s, points), tolerance);

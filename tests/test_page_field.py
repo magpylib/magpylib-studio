@@ -191,9 +191,28 @@ def _a_magnet_on_a_path():
     return [magnet, sheet]
 
 
+def _a_coil_beside_them():
+    # a wire's straight segments, the loop turned and moved
+    magnet, sheet = _solved_apart()
+    loop = magpy.current.Polyline(
+        current=5,
+        vertices=[
+            (-0.01, -0.01, 0),
+            (0.01, -0.01, 0),
+            (0.01, 0.01, 0),
+            (-0.01, 0.01, 0),
+            (-0.01, -0.01, 0),
+        ],
+        position=(0.005, -0.004, 0.012),
+    )
+    loop.rotate_from_rotvec((0.4, -0.3, 0.2))
+    return [magnet, sheet, loop]
+
+
 @pytest.mark.parametrize(
     "scene",
     [
+        _a_coil_beside_them,
         _turned_about_three_axes,
         _a_turned_collection_with_a_turned_child,
         _a_magnet_on_a_path,

@@ -623,18 +623,30 @@ def test_a_page_moves_only_sensors_whose_pixels_it_draws_again(pixel, moved):
     assert (field is not None and "probe" in field["sensors"]) is moved
 
 
-def test_a_page_computes_no_more_magnets_than_it_can_drag_past():
-    # #176: past `PAGE_CUBOIDS` a page's lines stay as saved
+@pytest.mark.parametrize("made_of", ["magnets", "a wire"])
+def test_a_page_computes_no_more_than_it_can_drag_past(made_of):
+    # #176: past `PAGE_CUBOIDS` -- magnets, and a sixteenth of the wire
+    # segments -- a page's lines stay as saved
     sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
     sensor.style.pixel.field.source = "B"
-    cells = [
-        magpy.magnet.Cuboid(
-            polarization=(0, 0, 1), dimension=(0.001,) * 3, position=(0.001 * i, 0, 0)
-        )
-        for i in range(fieldlines.PAGE_CUBOIDS + 1)
-    ]
-    assert fieldlines.page_field(cells[:-1], {"probe": sensor}) is not None
-    assert fieldlines.page_field(cells, {"probe": sensor}) is None
+
+    def scene(n):  # as much as `n` magnets cost
+        if made_of == "magnets":
+            return [
+                magpy.magnet.Cuboid(
+                    polarization=(0, 0, 1),
+                    dimension=(0.001,) * 3,
+                    position=(0.001 * i, 0, 0),
+                )
+                for i in range(n)
+            ]
+        segments = n * fieldlines.SEGMENTS_PER_CUBOID
+        vertices = [(0.0001 * i, 0, 0) for i in range(segments + 1)]
+        return [magpy.current.Polyline(current=1, vertices=vertices)]
+
+    limit = fieldlines.PAGE_CUBOIDS
+    assert fieldlines.page_field(scene(limit), {"probe": sensor}) is not None
+    assert fieldlines.page_field(scene(limit + 1), {"probe": sensor}) is None
 
 
 @pytest.mark.parametrize(
@@ -660,6 +672,8 @@ def test_the_views_export_says_why_its_sensors_cannot_be_dragged(
     else:
         sources = [magnet]
         sensor.move(np.linspace((0, 0, 0), (0.01, 0, 0), 3), start=0)
+    # kernels without wires, or none: the coil is not computed either way
+    monkeypatch.setattr(fieldlines, "page_kernels", lambda: None)
     view = SceneWidget(*sources, sensor, field_lines=True)
     sent = []
     view.send = lambda message, *_, **__: sent.append(message)

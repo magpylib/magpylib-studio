@@ -4367,10 +4367,11 @@ class MagpylibStudioSession:
         """`page_field_why`'s field alone."""
         return self.page_field_why()[0]
 
-    def page_field_why(self):
+    def page_field_why(self, currents=True):
         """What a saved page needs to draw the field lines again for a
         sensor dragged in it (#176), the scene as it stands, and why it has
-        nothing: see `fieldlines.page_field_why`. ``(None, None)`` where the
+        nothing: see `fieldlines.page_field_why`, wires with `currents`.
+        ``(None, None)`` where the
         view draws no lines, which leaves nothing to say."""
         from magpylib_studio import fieldlines
 
@@ -4384,7 +4385,9 @@ class MagpylibStudioSession:
         }
         if not sensors:
             return None, None
-        return fieldlines.page_field_why(fieldlines.sources_of(self.scene), sensors)
+        return fieldlines.page_field_why(
+            fieldlines.sources_of(self.scene), sensors, currents=currents
+        )
 
     def _run_readings(self):
         """What the sensors whose pixels are drawn read along a run whose

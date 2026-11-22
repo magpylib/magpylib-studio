@@ -798,6 +798,10 @@ PAGE_TOLERANCE = {"drag": 1e-3, "rest": 1e-6}
 #: into thousands of cells would freeze the drag: such a page keeps its
 #: lines as saved.
 PAGE_CUBOIDS = 100
+#: How many straight wire segments cost a page what one magnet does: a
+#: segment takes about 13 ns a point against the cuboid's 215, so the
+#: magnets and a sixteenth of the segments share `PAGE_CUBOIDS`.
+SEGMENTS_PER_CUBOID = 16
 
 
 def page_field(sources, sensors):
@@ -805,25 +809,36 @@ def page_field(sources, sensors):
     return page_field_why(sources, sensors)[0]
 
 
-def page_field_why(sources, sensors):
+def page_field_why(sources, sensors, currents=True):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
     step, each in its own frame as the compiled kernels take it -- a
-    magnet's dimension and polarization, a solved sheet's triangles and the
-    charge density at their corners, as `ChargeSheet.from_triangles` takes
-    them -- each sensor's pixels in its own
-    frame, and the rules `_field_lines` draws by. `sensors` are
+    magnet's dimension and polarization, a wire's vertices and current, a
+    solved sheet's triangles and the charge density at their corners, as
+    `ChargeSheet.from_triangles` takes them -- each sensor's pixels in its
+    own frame, and the rules `_field_lines` draws by. `sensors` are
     ``{key: sensor}``; those on a path are left out, whose pose a drag
-    writes at every step.
+    writes at every step. Wires only with `currents`: kernels that compute
+    them (`page_kernels`).
 
     ``(field, None)``, or ``(None, why)`` where a source is of a kind the
-    kernels do not compute, there are more magnets than `PAGE_CUBOIDS`, or no
+    kernels do not compute, more magnets and wire segments than
+    `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
-    cuboids, sheets, unknown = [], [], []
+    cuboids, sheets, wires, unknown = [], [], [], []
     for source in sources:
         source = at_step(source)
-        if _cuboid(source):
+        if currents and isinstance(source, magpy.current.Polyline):
+            # a straight segment between each two vertices, in its own frame
+            wires.append(
+                {
+                    "vertices": np.asarray(source.vertices, dtype=float).tolist(),
+                    "current": float(np.ravel(source.current)[-1]),
+                    **_pose(source),
+                }
+            )
+        elif _cuboid(source):
             cuboids.append(
                 {
                     "dimension": np.asarray(source.dimension, dtype=float).tolist(),
@@ -847,11 +862,17 @@ def page_field_why(sources, sensors):
             unknown.append(_kind_named(source))
     if unknown:
         kinds = ", ".join(sorted(set(unknown)))
-        return None, f"it computes magnets and solved sheets, not {kinds}"
-    if len(cuboids) > PAGE_CUBOIDS:
+        computed = (
+            "magnets, wires and solved sheets"
+            if currents
+            else "magnets and solved sheets"
+        )
+        return None, f"it computes {computed}, not {kinds}"
+    segments = sum(len(wire["vertices"]) - 1 for wire in wires)
+    if len(cuboids) + segments / SEGMENTS_PER_CUBOID > PAGE_CUBOIDS:
         return None, (
-            f"{len(cuboids)} magnets, more than the {PAGE_CUBOIDS} it computes "
-            "at the pace of a drag"
+            f"{len(cuboids)} magnets and {segments} wire segments, more than "
+            "it computes at the pace of a drag"
         )
     moved = {
         key: _page_sensor(sensor)
@@ -880,6 +901,7 @@ def page_field_why(sources, sensors):
         },
         "cuboids": cuboids,
         "sheets": sheets,
+        "wires": wires,
         "sensors": moved,
     }
     return field, None
