@@ -1031,7 +1031,7 @@ function render({ model, el }) {
   editableChip.className = "magpy-scene-check";
   const editableBox = document.createElement("input");
   editableBox.type = "checkbox";
-  editableChip.append(editableBox, "Editable sensors");
+  editableChip.append(editableBox, "Editable");
   editableBox.addEventListener("change", () => {
     choosing.editable = editableBox.checked;
     describeChoice();
