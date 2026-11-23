@@ -947,7 +947,7 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     triangles = sum(
         len(base64.b64decode(s["triangles"])) // 72 for s in (*sheets, *meshes)
     )
-    # a ball or a dipole costs no more than a segment, a ring two
+    # a ball or a dipole costs no more than a segment, a ring two, a cylinder seven
     cheap = (
         segments
         + SEGMENTS_PER_RING * len(rings)
