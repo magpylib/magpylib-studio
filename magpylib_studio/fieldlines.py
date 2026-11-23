@@ -35,7 +35,6 @@ it (`holds`) -- see `MagpylibStudioSession._field_lines`.
 
 import base64
 import collections
-import contextlib
 import copy
 import functools
 import hashlib
@@ -817,7 +816,12 @@ def page_field(sources, sensors):
 #: The kernels a page computes some sources with that not every build of
 #: material-response's has, all of API 1: a page sends those sources only
 #: where the kernels it carries have them (`page_kernels`).
-PAGE_KERNELS = frozenset({"polyline_field", "sphere_field", "dipole_field"})
+PAGE_KERNELS = frozenset(
+    {"polyline_field", "circle_field", "sphere_field", "dipole_field"}
+)
+#: How many wire segments a ring costs a page: about 21 ns a point (MR's
+#: `circle_field`, 8,000 points in 0.17 ms) against a segment's 13.
+SEGMENTS_PER_RING = 2
 
 
 def page_field_why(sources, sensors, computes=PAGE_KERNELS):
@@ -829,17 +833,27 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     `ChargeSheet.from_triangles` takes them -- each sensor's pixels in its
     own frame, and the rules `_field_lines` draws by. `sensors` are
     ``{key: sensor}``; those on a path are left out, whose pose a drag
-    writes at every step. Wires, balls and dipoles only where `computes`
-    names their kernels (`PAGE_KERNELS`).
+    writes at every step. Wires, rings, balls and dipoles only where
+    `computes` names their kernels (`PAGE_KERNELS`).
 
     ``(field, None)``, or ``(None, why)`` where a source is of a kind the
     kernels do not compute, more magnets, wire segments and triangles than
     `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
-    cuboids, sheets, wires, balls, dipoles, meshes, unknown = ([] for _ in range(7))
+    cuboids, sheets, wires, rings, balls, dipoles, meshes, unknown = (
+        [] for _ in range(8)
+    )
     for source in sources:
         source = at_step(source)
+        if (
+            isinstance(source, magpy.magnet.TriangularMesh)
+            and source.status_open is True
+        ):
+            # magpylib ray-tests an open mesh's inside all the same, which a
+            # page, testing closed ones alone, would not match
+            unknown.append("open TriangularMesh")
+            continue
         charged = _charged_faces(source)
         if charged is not None:
             meshes.append(charged)
@@ -867,6 +881,15 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
             wires.append(
                 {
                     "vertices": np.asarray(source.vertices, dtype=float).tolist(),
+                    "current": float(np.ravel(source.current)[-1]),
+                    **_pose(source),
+                }
+            )
+        elif "circle_field" in computes and isinstance(source, magpy.current.Circle):
+            # a loop in its own z = 0 plane, round its own origin
+            rings.append(
+                {
+                    "diameter": float(np.ravel(source.diameter)[-1]),
                     "current": float(np.ravel(source.current)[-1]),
                     **_pose(source),
                 }
@@ -900,8 +923,8 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     triangles = sum(
         len(base64.b64decode(s["triangles"])) // 72 for s in (*sheets, *meshes)
     )
-    # a ball or a dipole costs no more than a segment
-    cheap = segments + len(balls) + len(dipoles)
+    # a ball or a dipole costs no more than a segment, a ring two
+    cheap = segments + SEGMENTS_PER_RING * len(rings) + len(balls) + len(dipoles)
     cost = len(cuboids) + cheap / SEGMENTS_PER_CUBOID + triangles / TRIANGLES_PER_CUBOID
     if cost > PAGE_CUBOIDS:
         counted = [
@@ -909,6 +932,7 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
             for n, name in (
                 (len(cuboids), "magnets"),
                 (segments, "wire segments"),
+                (len(rings), "rings"),
                 (triangles, "triangles"),
             )
             if n
@@ -944,6 +968,7 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
         "cuboids": cuboids,
         "sheets": sheets,
         "wires": wires,
+        "rings": rings,
         "balls": balls,
         "dipoles": dipoles,
         "meshes": meshes,
@@ -1066,25 +1091,50 @@ def _float64(values):
 KERNELS_VARIABLE = "MAGPYLIB_STUDIO_KERNELS"
 
 
-def page_kernels():
-    """material-response's compiled field kernels for a page (#176): its glue
-    module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
-    they are not to be had. From the folder `KERNELS_VARIABLE` names, else
-    from material-response's package. A prototype: how they reach studio for
-    good is open (magpylib-material-response#215)."""
-    from importlib import resources
+def kernel_files():
+    """Where material-response's compiled field kernels are for a page
+    (#176): its glue module and its WebAssembly, ``(js, wasm)`` paths, or
+    None where they are not to be had. From the folder `KERNELS_VARIABLE`
+    names, else from material-response's package -- found, not imported:
+    a package that fails to import leaves a page without kernels, not
+    unsaved."""
+    import importlib.util
 
     folders = []
     named = os.environ.get(KERNELS_VARIABLE)
     if named:
         folders.append(Path(named).expanduser())
-    with contextlib.suppress(ModuleNotFoundError):
-        folders.append(resources.files("magpylib_material_response") / "kernels")
+    try:
+        spec = importlib.util.find_spec("magpylib_material_response")
+    except (ImportError, ValueError):
+        spec = None
+    if spec is not None and spec.origin:
+        folders.append(Path(spec.origin).parent / "kernels")
     for folder in folders:
         glue, wasm = folder / "mmr_kernels.js", folder / "mmr_kernels_bg.wasm"
         if glue.is_file() and wasm.is_file():
-            return glue.read_text(encoding="utf-8"), wasm.read_bytes()
+            return glue, wasm
     return None
+
+
+def page_kernels():
+    """material-response's compiled field kernels for a page (#176): its glue
+    module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
+    they are not to be had (`kernel_files`). Read once while the files stay
+    as they are. A prototype: how they reach studio for good is open
+    (magpylib-material-response#215)."""
+    files = kernel_files()
+    if files is None:
+        return None
+    return _kernels_read(
+        *((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+    )
+
+
+@functools.lru_cache(maxsize=2)
+def _kernels_read(glue, wasm):
+    """`page_kernels`' files read, each ``(path, mtime, size)``."""
+    return Path(glue[0]).read_text(encoding="utf-8"), Path(wasm[0]).read_bytes()
 
 
 def colours(sensor, readings):

@@ -275,16 +275,24 @@ export function keepsTo(along, within, across) {
 // --- the field, and what is inside a body ------------------------------------
 
 /** The sources of `field` (a scene's `page_field`) made ready to compute:
- *  each sheet built once into the kernels' `Sheet`, the sheets' triangles
- *  in the world for the inside test, and the centres `gridAround` reads. */
-export function prepared(kernels, field) {
-  const sheets = field.sheets.map((s) => ({
-    ...s,
-    built: new kernels.ChargeSheet(
-      float64s(s.triangles),
-      float64s(s.charge_densities),
-    ),
-  }));
+ *  each sheet built into the kernels' `ChargeSheet`, the sheets' triangles
+ *  in the world for the inside test, and the centres `gridAround` reads.
+ *  A sheet already built for another scene -- the same sheet, carried by a
+ *  drag's next payload, or a variant's -- is taken from `built`, a
+ *  WeakMap from sheet to `ChargeSheet`, where given. */
+export function prepared(kernels, field, built = null) {
+  const make = (s) => {
+    let sheet = built?.get(s);
+    if (!sheet) {
+      sheet = new kernels.ChargeSheet(
+        float64s(s.triangles),
+        float64s(s.charge_densities),
+      );
+      built?.set(s, sheet);
+    }
+    return sheet;
+  };
+  const sheets = field.sheets.map((s) => ({ ...s, built: make(s) }));
   /** `s`'s triangles in the world, flat. */
   const inWorld = (s) => {
     const local = float64s(s.triangles);
@@ -303,10 +311,7 @@ export function prepared(kernels, field) {
   // a magnet of triangles: a sheet of its face charge, and its own body
   const meshes = (field.meshes ?? []).map((m) => ({
     ...m,
-    built: new kernels.ChargeSheet(
-      float64s(m.triangles),
-      float64s(m.charge_densities),
-    ),
+    built: make(m),
     body: m.closed && m.polarization.some((v) => v !== 0) ? inWorld(m) : null,
     // J in the world, which B inside it adds to mu0 H
     J: turn(m.orientation, m.polarization),
@@ -320,6 +325,7 @@ export function prepared(kernels, field) {
     centres: [
       ...field.cuboids,
       ...(field.wires ?? []),
+      ...(field.rings ?? []),
       ...(field.balls ?? []),
       ...(field.dipoles ?? []),
       ...(field.meshes ?? []),
@@ -359,7 +365,8 @@ function addTurned(source, local, sum, scale) {
 
 /** B, or H, of the scene's sources at `points` (flat, the world's): the
  *  magnets' from the kernels' cuboid and sphere, the wires' from their
- *  straight segments, the dipoles', the sheets' H times mu0 for B. */
+ *  straight segments, the rings', the dipoles', the sheets' H times mu0
+ *  for B. */
 export function fieldAt(ready, points, kind, tolerance) {
   const { kernels, field } = ready;
   const sum = new Float64Array(points.length);
@@ -388,6 +395,16 @@ export function fieldAt(ready, points, kind, tolerance) {
       for (let k = 0; k < part.length; k++) wire[k] += part[k];
     }
     addTurned(w, wire, sum, 1);
+  }
+  // a ring: a loop in its own z = 0 plane, round its own origin
+  for (const r of field.rings ?? []) {
+    const local = kernels.circle_field(
+      kind,
+      intoFrame(r, points),
+      Float64Array.of(r.diameter),
+      Float64Array.of(r.current),
+    );
+    addTurned(r, local, sum, 1);
   }
   for (const b of field.balls ?? []) {
     const local = kernels.sphere_field(
@@ -748,10 +765,15 @@ export async function pageEditor(model, { glue, wasm }) {
     );
   }
 
+  // Each drag's payload carries a new `page_field` -- its sensor moved --
+  // round the same sheets: built once, not once a drag (`prepared`).
+  const built = new WeakMap(); // sheet -> its ChargeSheet
   const readied = new WeakMap(); // page_field -> its sources made ready
   const rests = new WeakMap(); // payload -> { key: { grid, along, within, seeds } }
   const ready = (field) => {
-    if (!readied.has(field)) readied.set(field, prepared(kernels, field));
+    if (!readied.has(field)) {
+      readied.set(field, prepared(kernels, field, built));
+    }
     return readied.get(field);
   };
   const undone = [];
@@ -846,8 +868,6 @@ export async function pageEditor(model, { glue, wasm }) {
     return got;
   }
 
-  /** `payload` with sensor `key` moved from its pose there to `pose`, and its
-   *  lines `item`: each of its drawings carried rigidly, its pose said. */
   /** `payload` with sensor `key` moved from its pose there to `pose`, and
    *  its lines `item`: each of its drawings carried rigidly, its pixels
    *  reading the field where they now are (`pixelsAt`, from `sources` at
@@ -883,14 +903,19 @@ export async function pageEditor(model, { glue, wasm }) {
           return pixelsAt(i, sensor, pose, carry, turned, sources, tolerance);
         }
         const moved = { ...i };
-        if (Array.isArray(i.position) && typeof i.position[0] === "number") {
+        if (
+          Array.isArray(i.position) &&
+          i.position.length % 3 === 0 &&
+          i.position.some((c) => typeof c === "number")
+        ) {
           const p = new Array(i.position.length);
           for (let n = 0; n < p.length; n += 3) {
-            const v = carry([
-              i.position[n],
-              i.position[n + 1],
-              i.position[n + 2],
-            ]);
+            const at = [i.position[n], i.position[n + 1], i.position[n + 2]];
+            if (at.some((c) => typeof c !== "number")) {
+              p[n] = p[n + 1] = p[n + 2] = null; // a pen lift, kept
+              continue;
+            }
+            const v = carry(at);
             p[n] = v[0];
             p[n + 1] = v[1];
             p[n + 2] = v[2];
@@ -1014,6 +1039,14 @@ export async function pageEditor(model, { glue, wasm }) {
       const seeds = seedsAt(sensor, pose);
       const { rules } = field;
       const rest = restOf(payload, key, sensor);
+      if (!rest) {
+        // no lines of its own to draw again: the page's `movable` says so
+        // before a drag, a scene changed under one may not
+        return Promise.resolve({
+          ok: false,
+          error: "this sensor has no field lines to draw again",
+        });
+      }
       let got;
       if (holds(rest.grid, seeds, rules.rest_margin)) {
         got = rest;

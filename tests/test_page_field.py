@@ -246,10 +246,23 @@ def _a_coil_beside_them():
     return [magnet, sheet, loop]
 
 
+def _a_ring_beside_them():
+    # a ring turned and moved, where the kernels have rings (MR #217)
+    if "function circle_field(" not in KERNELS[0]:
+        pytest.skip("the kernels have no rings")
+    magnet, sheet = _solved_apart()
+    ring = magpy.current.Circle(
+        current=-3, diameter=0.012, position=(-0.01, 0.008, -0.006)
+    )
+    ring.rotate_from_rotvec((-0.3, 0.6, 0.1))
+    return [magnet, sheet, ring]
+
+
 @pytest.mark.parametrize(
     "scene",
     [
         _a_coil_beside_them,
+        _a_ring_beside_them,
         _balls_and_a_dipole_beside_them,
         _triangle_magnets_beside_them,
         _turned_about_three_axes,

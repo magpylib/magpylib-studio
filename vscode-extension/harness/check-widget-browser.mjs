@@ -720,7 +720,16 @@ async function pageDrag(port, base, expected) {
         await pause();
         // the legend's pencils: on what the page moves, its probe, alone
         const movableRows = [...document.querySelectorAll(".magpy-legend-row.movable .magpy-legend-label")].map((l) => l.textContent);
-        return { beforePencil, column: Object.fromEntries(column), movableRows, onMagnet, onProbe: held() };`);
+        const onProbe = held();
+        // E turns, and the column's Turn says so; W moves again
+        const key = (k) => document.querySelector(".magpy-scene-stage").dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+        const pressedNow = () => [...document.querySelectorAll(".magpy-icon")].filter((b) => b.getAttribute("aria-pressed") === "true" && /^(Move|Turn)/.test(b.title)).map((b) => b.title.split(" ")[0]);
+        key("e");
+        await pause();
+        const turnKey = [held(), pressedNow()];
+        key("w");
+        await pause();
+        return { beforePencil, column: Object.fromEntries(column), movableRows, onMagnet, onProbe, turnKey, moveKey: [held(), pressedNow()] };`);
         if (onStep.beforePencil !== null) {
           return `handles before the pencil: ${onStep.beforePencil}`;
         }
@@ -739,6 +748,16 @@ async function pageDrag(port, base, expected) {
         }
         if (onStep.onMagnet !== null || onStep.onProbe !== "probe:translate") {
           return `handles on the magnet: ${onStep.onMagnet}, on the probe: ${onStep.onProbe}`;
+        }
+        const keyed = JSON.stringify([onStep.turnKey, onStep.moveKey]);
+        if (
+          keyed !==
+          JSON.stringify([
+            ["probe:rotate", ["Turn"]],
+            ["probe:translate", ["Move"]],
+          ])
+        ) {
+          return `E, then W: handles and buttons ${keyed}`;
         }
         const saved = await tab.evaluate(
           `return window.magpyPageEditor.lines("probe").origin`,

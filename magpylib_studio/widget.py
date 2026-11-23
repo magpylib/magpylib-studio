@@ -524,18 +524,21 @@ def _page_field_why(session):
     page could not use."""
     from magpylib_studio import fieldlines
 
+    if not session.field_lines:
+        return None, None  # no lines, nothing to draw again
     kernels = fieldlines.page_kernels()
+    if kernels is None:
+        field, why = session.page_field_why(fieldlines.PAGE_KERNELS)
+        if field is None and why is None:
+            return None, None  # no sensor to drag
+        # whatever the scene holds, the page could compute none of it
+        return None, "material-response's compiled field kernels were not found"
     # kernels of before they had wires or balls speak the same API: what
     # they have is what their glue exports
     computes = frozenset(
-        name
-        for name in fieldlines.PAGE_KERNELS
-        if kernels is not None and f"function {name}(" in kernels[0]
+        name for name in fieldlines.PAGE_KERNELS if f"function {name}(" in kernels[0]
     )
-    field, why = session.page_field_why(computes)
-    if field is not None and kernels is None:
-        return None, "material-response's compiled field kernels were not found"
-    return field, why
+    return session.page_field_why(computes)
 
 
 def _drawing_ahead(copy, names, payload, runs=True, keep=None, page=False):
@@ -913,6 +916,10 @@ class SceneWidget(anywidget.AnyWidget):
     #: Its switch in the view is the eye on each sensor's field lines, a row
     #: beneath it in the legend: one shown turns them on, all hidden off.
     field_lines = traitlets.Bool(False).tag(sync=True)
+    #: Whether a page saved from the view can carry material-response's
+    #: field kernels (`fieldlines.kernel_files`), for its sensors to be
+    #: dragged in it (#176): where not, the export does not offer it.
+    _page_kernels = traitlets.Bool(False).tag(sync=True)
     #: The panel an editable view opens with, docked beside it:
     #: ``"variables"``, a slider per variable, or ``"object"``, the
     #: selection's properties. None, the default, opens neither: the toggles
@@ -1029,6 +1036,9 @@ class SceneWidget(anywidget.AnyWidget):
             if key in traits
         }
         super().__init__(**traits)
+        from magpylib_studio import fieldlines
+
+        self._page_kernels = fieldlines.kernel_files() is not None
         #: The captured run, kept only when there is one that motion cannot
         #: play -- see `_adopt`. Every frame holds every trace of the scene
         #: as computed at that step, so this is the megabytes the payload
@@ -2016,30 +2026,36 @@ class SceneWidget(anywidget.AnyWidget):
             measurements=self.measurements,
         )
         state["step"] = self.step  # where the page opens
-        self._page_why = None
+        why = None
         # a page's sensors dragged in it, unless the export said only to show
-        self._page_drags = page and draggable
-        if self._page_drags and session is not None:
+        drags = page and draggable
+        if drags and session is not None:
             # its sensors dragged in the page, lines computed there (#176) --
             # or why not, which the view's export says (`_export_more`)
-            field, self._page_why = _page_field_why(session)
+            field, why = _page_field_why(session)
             if field is not None:
                 state["payload"] = {**state["payload"], "page_field": field}
         elif page and session is not None and session.field_lines:
-            self._page_why = "it was saved to only show"
-        if page and self._page_why:
-            # for the page's pencil to say, greyed (`showComputes`)
-            state["page_why"] = self._page_why
+            why = "it was saved to only show"
+        if page and why:
+            # for the page's pencil to say, greyed (`showComputes`), and the
+            # view's export (`_export_more`)
+            state["page_why"] = why
         if not run:
             state["frames"] = 1  # the step drawn, still
-        pieces = self._steps(state, frames, step, names, copy, limit, page, keep)
+        pieces = self._steps(
+            state, frames, step, names, copy, limit, page, keep, drags=drags
+        )
         return total, pieces
 
-    def _steps(self, state, frames, step, names, copy, limit, page=False, keep=None):
+    def _steps(
+        self, state, frames, step, names, copy, limit, page=False, keep=None, drags=None
+    ):
         """The steps of `_saving`, from the view's `state` as it was asked
         for, its session's `copy` and the rest. One frame is the step on
         screen alone, its variants' with no run either; `keep`, the stretch
-        of steps kept, the rest not drawn."""
+        of steps kept, the rest not drawn; `drags`, whether a variant's
+        sensors are dragged in the page, as a `page`'s are unless said."""
         runs = frames > 1 or self.frames <= 1
         if self._scene is not None and frames <= 1 < self.frames:
             run = []
@@ -2085,7 +2101,8 @@ class SceneWidget(anywidget.AnyWidget):
         saved = {"state": state, "run": run}
         if names:
             # each variant's sensors dragged in the page, as the scene's
-            drags = getattr(self, "_page_drags", page)
+            if drags is None:
+                drags = page
             drawn = yield from _drawing_ahead(
                 copy(), names, state["payload"], runs=runs, keep=keep, page=drags
             )
@@ -2248,7 +2265,7 @@ class SceneWidget(anywidget.AnyWidget):
                         "filename": EXPORT_NAME,
                         "job": job,
                         # why its sensors cannot be dragged in it, if so
-                        "note": getattr(self, "_page_why", None),
+                        "note": saved["state"].get("page_why"),
                     }
                 )
                 return

@@ -637,9 +637,12 @@ function render({ model, el }) {
       } else saveAs({ run: true, variants: true });
     },
   );
-  /** Whether the view draws field lines: a page of them can be saved with
-   *  its sensors draggable (#176), which the foot asks. */
-  const linesDrawn = () => Boolean(model.get("payload")?.fieldlines?.length);
+  /** Whether the view draws field lines and the page can carry the field
+   *  kernels: a page of them can be saved with its sensors draggable
+   *  (#176), which the foot asks. */
+  const linesDrawn = () =>
+    Boolean(model.get("_page_kernels")) &&
+    Boolean(model.get("payload")?.fieldlines?.length);
   function saveAs(choice) {
     exportJob = `${viewTag}-${++exports}`;
     showWriting({ text: "Writing…", done: 0, total: 0, job: exportJob });
@@ -1766,7 +1769,10 @@ function render({ model, el }) {
           "Editing — pick a sensor: W moves, E turns; Q puts the handles away",
         );
         dressEditing();
-      } else api.setGizmoMode(gizmoFor(handles));
+      } else {
+        setHandles(mode); // the Move/Turn buttons follow the key
+        if (drawing()) api.setGizmoMode(gizmoFor(mode));
+      }
       return true;
     }
     if (!editable()) {

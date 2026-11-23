@@ -664,7 +664,14 @@ def test_a_page_computes_no_more_than_it_can_drag_past(made_of):
     ("scene", "said"),
     [
         ("coil", "does not compute currents (Polyline)"),
+        pytest.param(
+            "open mesh",
+            "does not compute open TriangularMesh",
+            # magpylib warns of it, rightly, at each step that copies it
+            marks=pytest.mark.filterwarnings("ignore:Open mesh"),
+        ),
         ("sensor on a path", "its sensors move on a path"),
+        ("no kernels", "kernels were not found"),
     ],
 )
 def test_the_views_export_says_why_its_sensors_cannot_be_dragged(
@@ -675,16 +682,25 @@ def test_the_views_export_says_why_its_sensors_cannot_be_dragged(
     magnet = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
     sensor = magpy.Sensor(pixel=[(0, 0, 0.01), (0.01, 0, 0.01), (0, 0.01, 0.01)])
     sensor.style.update(pixel={"size": 0, "field": {"source": "B"}})
+    sources = [magnet]
     if scene == "coil":
-        sources = [
-            magnet,
-            magpy.current.Polyline(current=1, vertices=[(0, 0, 0), (0.01, 0, 0)]),
-        ]
-    else:
-        sources = [magnet]
+        sources.append(
+            magpy.current.Polyline(current=1, vertices=[(0, 0, 0), (0.01, 0, 0)])
+        )
+    elif scene == "open mesh":
+        sources.append(
+            magpy.magnet.TriangularMesh(
+                polarization=(0, 0, 1),
+                vertices=[(0, 0, 0), (0.01, 0, 0), (0, 0.01, 0), (0, 0, 0.01)],
+                faces=[(0, 1, 2), (0, 1, 3)],
+                position=(0.03, 0, 0),
+            )
+        )
+    elif scene == "sensor on a path":
         sensor.move(np.linspace((0, 0, 0), (0.01, 0, 0), 3), start=0)
-    # kernels without wires, or none: the coil is not computed either way
-    monkeypatch.setattr(fieldlines, "page_kernels", lambda: None)
+    # kernels without wires, or none at all
+    kernels = None if scene == "no kernels" else ("function cuboid_field(", b"")
+    monkeypatch.setattr(fieldlines, "page_kernels", lambda: kernels)
     view = SceneWidget(*sources, sensor, field_lines=True)
     sent = []
     view.send = lambda message, *_, **__: sent.append(message)
