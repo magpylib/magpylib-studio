@@ -1142,6 +1142,37 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E");
 }
 
+/* The pencil of a row the view can move (#176): drawn as the eye is, and
+   only on such a row -- under the pointer, or on every one while editing
+   is on, in the view's blue, which says what editing acts on. */
+.magpy-legend-pen {
+  display: none;
+  flex: none;
+  margin-left: 2px;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  opacity: 0;
+  background-color: currentColor;
+  -webkit-mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.5 2.5l2 2-8 8h-2v-2z'/%3E%3Cpath d='M10 4l2 2'/%3E%3C/svg%3E");
+  mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.5 2.5l2 2-8 8h-2v-2z'/%3E%3Cpath d='M10 4l2 2'/%3E%3C/svg%3E");
+}
+
+.magpy-legend-row.movable > .magpy-legend-pen {
+  display: block;
+}
+
+.magpy-legend-row.movable:hover > .magpy-legend-pen {
+  opacity: 0.55;
+}
+
+.magpy-legend-editing .magpy-legend-row.movable > .magpy-legend-pen {
+  opacity: 1;
+  background-color: var(--vscode-focusBorder);
+}
+
 .magpy-legend-row:hover > .magpy-legend-eye {
   opacity: 0.55;
 }

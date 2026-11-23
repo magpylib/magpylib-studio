@@ -1325,6 +1325,22 @@ function render({ model, el }) {
     // How far apart two selected objects are, which only a session can say.
     onMeasure: (a, b) => (editable() ? call("get_gap", { a, b }) : null),
     canEdit: () => editable(),
+    // what the view can move, a pencil on its row (#176): a page's sensors
+    // it draws the lines of, or, where python edits, every object it poses
+    movable: (id) => {
+      const payload = model.get("payload");
+      if (pageMoves) return pageMoves.movable([id], payload);
+      return (editable() || editHere()) && Boolean(payload?.anchors?.[id]);
+    },
+    editing: () => editing(),
+    onEdit(id) {
+      commit("selected", [id]);
+      if (editing()) return;
+      if (pageMoves) {
+        pageEditing = true;
+        dressEditing();
+      } else commit("editable", true);
+    },
   });
   // The colour bar of a sensor the field colours, and its cut: a view
   // setting, drawn at every step of a drag and the model told at its end,
@@ -2574,6 +2590,14 @@ function render({ model, el }) {
   const editable = () =>
     Boolean(model.get("editable")) &&
     (model.editor !== undefined || !model.get("standalone"));
+  /** Whether the pencil can bring python's editing out: a view of named
+   *  objects with a python behind it -- not one made for looking only, a
+   *  saved page, or the studio's panel, where the view is the editor. */
+  const editHere = () =>
+    model.get("editable") !== null &&
+    model.editor === undefined &&
+    !model.get("standalone") &&
+    (model.get("tree") || []).length > 0;
   let handles = "translate"; // what the user asked the handles to do
   // A saved page that draws a dragged sensor's lines itself (#176,
   // `pagefield.mjs`): handles for those sensors alone, to move and turn,
@@ -2774,15 +2798,10 @@ function render({ model, el }) {
   }
 
   function showEditing() {
-    editButton.hidden =
-      !pageMoves &&
-      !pageBlocked() &&
-      (model.get("editable") === null || // made for looking only
-        model.editor !== undefined ||
-        Boolean(model.get("standalone")) ||
-        !(model.get("tree") || []).length);
+    editButton.hidden = !pageMoves && !pageBlocked() && !editHere();
     pressed(editButton, editing());
     showComputes();
+    legend.sync(stateOf()); // its pencils: what editing acts on, or not
   }
 
   /** Why a saved page that draws field lines cannot move its sensors --

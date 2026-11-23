@@ -718,7 +718,9 @@ async function pageDrag(port, base, expected) {
         const onMagnet = held();
         fire("objectpick", { objectId: "probe", adding: false });
         await pause();
-        return { beforePencil, column: Object.fromEntries(column), onMagnet, onProbe: held() };`);
+        // the legend's pencils: on what the page moves, its probe, alone
+        const movableRows = [...document.querySelectorAll(".magpy-legend-row.movable .magpy-legend-label")].map((l) => l.textContent);
+        return { beforePencil, column: Object.fromEntries(column), movableRows, onMagnet, onProbe: held() };`);
         if (onStep.beforePencil !== null) {
           return `handles before the pencil: ${onStep.beforePencil}`;
         }
@@ -731,6 +733,9 @@ async function pageDrag(port, base, expected) {
           !offered["Back to where"]
         ) {
           return `the column offers ${JSON.stringify(offered)}`;
+        }
+        if (JSON.stringify(onStep.movableRows) !== JSON.stringify(["probe"])) {
+          return `the legend's pencils on ${JSON.stringify(onStep.movableRows)}`;
         }
         if (onStep.onMagnet !== null || onStep.onProbe !== "probe:translate") {
           return `handles on the magnet: ${onStep.onMagnet}, on the probe: ${onStep.onProbe}`;
