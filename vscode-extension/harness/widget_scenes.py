@@ -759,7 +759,72 @@ def main(out):
 
     rows = [obj.style.label for obj in [stack, *stack.children_all, probe]]
     expected = {"camera": CAMERA, "rows": rows, "small_span": span}
+    expected["page_drag"] = page_drag(out)
     (out / "expected.json").write_text(json.dumps(expected))
+
+
+#: How `page-drag.html`'s probe is dragged, from (0, 0, 4) mm: along its
+#: plane, past the room its grid at rest leaves it, so the release slides
+#: the grid -- then turned about z, off any plane the field keeps to.
+PAGE_DRAGS = [
+    {"position": [0.009, 0.0, 0.007]},
+    {"orientation": [0.0, 0.0, 30.0]},  # degrees, as the view writes it
+]
+
+
+def page_drag(out):
+    """``page-drag.html`` -- the solved plate example with its run, whose
+    probe the page drags and draws the lines of itself (#176) -- and, after
+    each of `PAGE_DRAGS` in turn, the lines a live view draws, for the
+    page's to match. None, and no page, where material-response or its
+    compiled kernels are not to be had."""
+    from magpylib_studio import fieldlines
+
+    if fieldlines.page_kernels() is None:
+        return None
+    try:
+        from magpylib_studio.examples.solved_plate_run import solved_plate_run
+    except ImportError:
+        return None
+    view = SceneWidget(solved_plate_run.build(), field_lines=True)
+    view.write_html(out / "page-drag.html", variants=False)
+    session = view._session
+    drags = []
+    for edit in PAGE_DRAGS:
+        session.begin_interaction()
+        session.apply_edits([{"objectId": "probe", **edit}])
+        session.end_interaction()
+        (lines,) = [
+            item
+            for item in session.get_scene()["fieldlines"]
+            if item["object_id"] == "probe"
+        ]
+        drags.append({"edit": edit, "lines": lines})
+    return {"frames": view.frames, "drags": drags, "arrows": page_arrows(out)}
+
+
+def page_arrows(out):
+    """``page-drag-arrows.html`` -- a probe drawn as cones beside the plate
+    solved once, which the page turns and colours again where it is dragged
+    -- and the pixels a live view draws with it moved by `PAGE_DRAGS`' first."""
+    from magpylib_studio import grid
+    from magpylib_studio.examples.solved_plate_run import _solved
+
+    probe = magpy.Sensor(
+        position=(0, 0, 0.004),
+        pixel=grid(0.02, 5, plane="xz"),
+        style={"label": "probe", "pixel": {"field": {"source": "B"}}},
+    )
+    view = SceneWidget(_solved(), probe, field_lines=True)
+    view.write_html(out / "page-drag-arrows.html")
+    session = view._session
+    session.begin_interaction()
+    session.apply_edits([{"objectId": "probe", **PAGE_DRAGS[0]}])
+    session.end_interaction()
+    (pixels,) = [
+        item for item in session.get_scene()["pixels"] if item["object_id"] == "probe"
+    ]
+    return {"edit": PAGE_DRAGS[0], "pixels": pixels}
 
 
 if __name__ == "__main__":

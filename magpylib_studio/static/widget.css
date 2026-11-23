@@ -663,6 +663,45 @@
   opacity: 0.75;
 }
 
+/* What computes the field, a dot on the pencil (#176): python, the page
+   itself, nothing (lines as saved), or kernels that failed to load. */
+.magpy-icon[data-computes] {
+  position: relative;
+}
+
+/* greyed, its dot kept clear: it says why */
+.magpy-icon.magpy-greyed > * {
+  opacity: 0.4;
+}
+
+.magpy-icon[data-computes]::after {
+  content: "";
+  position: absolute;
+  /* bottom right, clear of the pencil's two ends, its eraser top right */
+  bottom: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--magpy-computes);
+}
+
+.magpy-icon[data-computes="python"] {
+  --magpy-computes: var(--vscode-focusBorder);
+}
+
+.magpy-icon[data-computes="page"] {
+  --magpy-computes: #2da44e;
+}
+
+.magpy-icon[data-computes="saved"] {
+  --magpy-computes: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.magpy-icon[data-computes="failed"] {
+  --magpy-computes: var(--vscode-errorForeground, #d13438);
+}
+
 .magpy-icon:hover {
   opacity: 1;
   background: color-mix(in srgb, currentColor 10%, transparent);
@@ -908,6 +947,30 @@
   text-decoration: line-through;
 }
 
+/* While the export asks, each variant's chip says whether the page keeps
+   it: a tick in a cell of its own, ruled off at its left, empty for one
+   left out -- and not the fill of the variant on screen, which read as the
+   one choice. */
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip::before {
+  content: "\2713";
+  display: inline-block;
+  width: 1em;
+  margin: 0 5px 0 -3px;
+  padding-right: 4px;
+  border-right: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  text-align: center;
+}
+
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip.magpy-left-out::before {
+  content: "\00a0"; /* the cell kept, and its rule, with no tick in it */
+}
+
+.magpy-choosing .magpy-scene-variants .magpy-vars-chip.on {
+  color: inherit;
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+}
+
 .magpy-scene-counter {
   flex: none;
   min-width: 4.5em;
@@ -1077,6 +1140,37 @@
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E");
   mask: no-repeat center / 12px
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 8Q8 2 14.5 8Q8 14 1.5 8z'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E");
+}
+
+/* The pencil of a row the view can move (#176): drawn as the eye is, and
+   only on such a row -- under the pointer, or on every one while editing
+   is on, in the view's blue, which says what editing acts on. */
+.magpy-legend-pen {
+  display: none;
+  flex: none;
+  margin-left: 2px;
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
+  opacity: 0;
+  background-color: currentColor;
+  -webkit-mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.5 2.5l2 2-8 8h-2v-2z'/%3E%3Cpath d='M10 4l2 2'/%3E%3C/svg%3E");
+  mask: no-repeat center / 12px
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.5 2.5l2 2-8 8h-2v-2z'/%3E%3Cpath d='M10 4l2 2'/%3E%3C/svg%3E");
+}
+
+.magpy-legend-row.movable > .magpy-legend-pen {
+  display: block;
+}
+
+.magpy-legend-row.movable:hover > .magpy-legend-pen {
+  opacity: 0.55;
+}
+
+.magpy-legend-editing .magpy-legend-row.movable > .magpy-legend-pen {
+  opacity: 1;
+  background-color: var(--vscode-focusBorder);
 }
 
 .magpy-legend-row:hover > .magpy-legend-eye {
@@ -1860,6 +1954,50 @@
 .magpy-vars-chip:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* A word that acts, in the chips' material, the same wherever one is: the
+   step it asks for filled in the view's blue (Save), the one that takes
+   nothing (Cancel) in the error colour. */
+.magpy-vars-chip.magpy-primary {
+  color: #ffffff;
+  background: var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+}
+
+.magpy-vars-chip.magpy-primary:not(:disabled):hover,
+.magpy-vars-chip.magpy-primary:focus-visible {
+  background: color-mix(in srgb, var(--vscode-focusBorder) 85%, #000000);
+}
+
+.magpy-vars-chip.magpy-cancel {
+  color: var(--vscode-errorForeground, #d13438);
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-errorForeground, #d13438) 45%,
+    transparent
+  );
+}
+
+.magpy-vars-chip.magpy-cancel:not(:disabled):hover,
+.magpy-vars-chip.magpy-cancel:focus-visible {
+  border-color: var(--vscode-errorForeground, #d13438);
+}
+
+/* A choice that is on or off: a box to tick, its words beside it. */
+.magpy-scene-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.magpy-scene-check input {
+  margin: 0;
+  accent-color: var(--vscode-focusBorder);
+  cursor: pointer;
 }
 
 .magpy-vars-chip.on {

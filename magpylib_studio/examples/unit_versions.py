@@ -4,6 +4,7 @@ from typing import Annotated
 import magpylib as magpy
 
 from magpylib_studio import Bounds, Length, choose, duplicate_along, grid, scene
+from magpylib_studio.examples.copper import COPPER
 
 TITLE = "Two versions of a unit"
 
@@ -69,7 +70,11 @@ def unit_versions(
     versions.add("v2", core2, inlay2, notch)
     duplicate_along(piece2, count=3, step=(0.014, 0, 0))
     coil = magpy.current.Circle(
-        current=current, diameter=0.05, position=(0, 0, -0.016), style_label="coil"
+        current=current,
+        diameter=0.05,
+        position=(0, 0, -0.016),
+        style_label="coil",
+        style_color=COPPER,
     )
     probe = magpy.Sensor(
         pixel=grid(0.04, 11, plane="xz"),

@@ -4,6 +4,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import Bounds, Count, Length, derived, duplicate_along, scene
+from magpylib_studio.examples.copper import COPPER
 
 TITLE = "Solenoid"
 
@@ -33,6 +34,7 @@ def solenoid(
         diameter=2 * coil_radius,
         position=(0, 0, -height / 2),
         style_label="Turn",
+        style_color=COPPER,
     )
     coil.add(turn)
     sensor = magpy.Sensor(

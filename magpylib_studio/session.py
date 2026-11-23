@@ -4363,6 +4363,35 @@ class MagpylibStudioSession:
             )
         return items
 
+    def page_field(self):
+        """`page_field_why`'s field alone."""
+        return self.page_field_why()[0]
+
+    def page_field_why(self, computes=None):
+        """What a saved page needs to draw the field lines again for a
+        sensor dragged in it (#176), the scene as it stands, and why it has
+        nothing: see `fieldlines.page_field_why`, with the kernels
+        `computes` names, all of them for None.
+        ``(None, None)`` where the
+        view draws no lines, which leaves nothing to say."""
+        from magpylib_studio import fieldlines
+
+        if not self.field_lines:
+            return None, None
+        key_of = self._names_of_objects()
+        sensors = {
+            key_of[id(s)]: s
+            for s in fieldlines.sensors_of(self.scene)
+            if id(s) in key_of
+        }
+        if not sensors:
+            return None, None
+        return fieldlines.page_field_why(
+            fieldlines.sources_of(self.scene),
+            sensors,
+            fieldlines.PAGE_KERNELS if computes is None else computes,
+        )
+
     def _run_readings(self):
         """What the sensors whose pixels are drawn read along a run whose
         sheets are solved at each step (`_frame_sheets`), as

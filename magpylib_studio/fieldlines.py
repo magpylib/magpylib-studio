@@ -42,6 +42,7 @@ import os
 import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import magpylib as magpy
 import numpy as np
@@ -121,11 +122,16 @@ def frame_of(seeds):
     it. The seeds' spread gives no direction where they are a square grid
     -- the SVD's two are any two at right angles -- and a grid turned 45°
     by chance put its points on a meshed core's plane of symmetry, along the
-    edges of its cells."""
+    edges of its cells.
+
+    The normal points the way its largest component is positive: the SVD's
+    sign is LAPACK's to pick, and the other one lays the grid mirrored -- by
+    up to a step -- which a saved page, laying it again for a dragged
+    sensor, could not follow (#176, `normalOf` in `pagefield.mjs`)."""
     if len(seeds) >= 3:
         _, spread, axes = np.linalg.svd(seeds - seeds.mean(axis=0))
         if spread[1] > 1e-3 * spread[0] and spread[2] <= 1e-6 * spread[0]:
-            normal = axes[2]
+            normal = axes[2] * np.sign(axes[2][np.argmax(np.abs(axes[2]))])
             world = np.eye(3)[np.argmin(np.abs(np.eye(3) @ normal))]
             across = world - (world @ normal) * normal
             across /= np.linalg.norm(across)
@@ -141,12 +147,18 @@ def spacing_of(seeds, grid):
     step = grid["step"]
     plane = grid["shape"][2] == 1
     finest = max(grid["shape"][:2]) * step / 30 if plane else np.inf
+    own = _apart(seeds)
+    return float(min(4 * step if own is None else own, finest))
+
+
+def _apart(seeds):
+    """The seeds' own spacing, the median distance to the nearest one; None
+    for fewer than two, or all in one place."""
     if len(seeds) < 2:
-        return float(min(4 * step, finest))
+        return None
     distance, _ = cKDTree(seeds).query(seeds, k=2)
     apart = distance[:, 1][distance[:, 1] > 0]
-    own = float(np.median(apart)) if len(apart) else 4 * step
-    return float(min(own, finest))
+    return float(np.median(apart)) if len(apart) else None
 
 
 def grid_around(sources, seeds, points, flat=None, every_step=False):
@@ -770,6 +782,361 @@ def _inside_cuboids(cuboids, points):
     return within
 
 
+#: The tolerance of material-response's compiled sheet kernel a saved page
+#: computes with (#176): coarse while a sensor is dragged, fine once it is
+#: let go. On the solved plate's 664 faces, 2,500 points take 7 ms at 1e-3
+#: and 8,000 take 51 ms at 1e-6, against 237 ms exact; the error against
+#: |H| is 3e-6 and 3e-9, finer than the 16 bits a live view sends.
+PAGE_TOLERANCE = {"drag": 1e-3, "rest": 1e-6}
+
+
+#: The most magnets a saved page computes the field of itself (#176): the
+#: compiled cuboid takes about 215 ns a point in a browser (M4, 2026-11-22),
+#: so a hundred of them cost 60 ms on a dragged sensor's new grid of 2,500
+#: points and 200 ms on the 8,000 of the grid it is let go on. A body meshed
+#: into thousands of cells would freeze the drag: such a page keeps its
+#: lines as saved.
+PAGE_CUBOIDS = 100
+#: How many straight wire segments cost a page what one magnet does: a
+#: segment takes about 13 ns a point against the cuboid's 215, so the
+#: magnets and a sixteenth of the segments share `PAGE_CUBOIDS`.
+SEGMENTS_PER_CUBOID = 16
+#: And how many triangles, of a solved sheet or a magnet of triangles: one
+#: takes 4.3 ns a point at a drag's tolerance and 9.2 at the release's, on the
+#: solved plate's 664 (M4, 2026-11-22). Forty a magnet: a page of triangles
+#: alone, 4,000 of them, costs 45 ms on a drag's new grid and 300 at its end.
+TRIANGLES_PER_CUBOID = 40
+
+
+def page_field(sources, sensors):
+    """`page_field_why`'s field alone."""
+    return page_field_why(sources, sensors)[0]
+
+
+#: The kernels a page computes some sources with that not every build of
+#: material-response's has, all of API 1: a page sends those sources only
+#: where the kernels it carries have them (`page_kernels`).
+PAGE_KERNELS = frozenset(
+    {"polyline_field", "circle_field", "sphere_field", "dipole_field"}
+)
+#: How many wire segments a ring costs a page: about 21 ns a point (MR's
+#: `circle_field`, 8,000 points in 0.17 ms) against a segment's 13.
+SEGMENTS_PER_RING = 2
+
+
+def page_field_why(sources, sensors, computes=PAGE_KERNELS):
+    """What a saved page needs to draw `sensors`' lines again where they are
+    dragged, with no python behind it (#176): the sources at their last
+    step, each in its own frame as the compiled kernels take it -- a
+    magnet's dimension and polarization, a wire's vertices and current, a
+    solved sheet's triangles and the charge density at their corners, as
+    `ChargeSheet.from_triangles` takes them -- each sensor's pixels in its
+    own frame, and the rules `_field_lines` draws by. `sensors` are
+    ``{key: sensor}``; those on a path are left out, whose pose a drag
+    writes at every step. Wires, rings, balls and dipoles only where
+    `computes` names their kernels (`PAGE_KERNELS`).
+
+    ``(field, None)``, or ``(None, why)`` where a source is of a kind the
+    kernels do not compute, more magnets, wire segments and triangles than
+    `PAGE_CUBOIDS` allows, or no
+    sensor is left: the page's lines then stay as they were drawn, and `why`
+    says so in a few words, for the view to say after its export."""
+    cuboids, sheets, wires, rings, balls, dipoles, meshes, unknown = (
+        [] for _ in range(8)
+    )
+    for source in sources:
+        source = at_step(source)
+        if (
+            isinstance(source, magpy.magnet.TriangularMesh)
+            and source.status_open is True
+        ):
+            # magpylib ray-tests an open mesh's inside all the same, which a
+            # page, testing closed ones alone, would not match
+            unknown.append("open TriangularMesh")
+            continue
+        charged = _charged_faces(source)
+        if charged is not None:
+            meshes.append(charged)
+        elif "sphere_field" in computes and isinstance(source, magpy.magnet.Sphere):
+            balls.append(
+                {
+                    "diameter": float(np.ravel(source.diameter)[-1]),
+                    "polarization": np.asarray(
+                        source.polarization, dtype=float
+                    ).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif "dipole_field" in computes and isinstance(source, magpy.misc.Dipole):
+            dipoles.append(
+                {
+                    "moment": np.asarray(source.moment, dtype=float).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif "polyline_field" in computes and isinstance(
+            source, magpy.current.Polyline
+        ):
+            # a straight segment between each two vertices, in its own frame
+            wires.append(
+                {
+                    "vertices": np.asarray(source.vertices, dtype=float).tolist(),
+                    "current": float(np.ravel(source.current)[-1]),
+                    **_pose(source),
+                }
+            )
+        elif "circle_field" in computes and isinstance(source, magpy.current.Circle):
+            # a loop in its own z = 0 plane, round its own origin
+            rings.append(
+                {
+                    "diameter": float(np.ravel(source.diameter)[-1]),
+                    "current": float(np.ravel(source.current)[-1]),
+                    **_pose(source),
+                }
+            )
+        elif _cuboid(source):
+            cuboids.append(
+                {
+                    "dimension": np.asarray(source.dimension, dtype=float).tolist(),
+                    "polarization": np.asarray(
+                        source.polarization, dtype=float
+                    ).tolist(),
+                    **_pose(source),
+                }
+            )
+        elif _charge_sheet(source) and hasattr(source, "charge_densities"):
+            sheets.append(
+                {
+                    # its arrays held once on a page (`widget._Shared`)
+                    "kind": "fieldsheet",
+                    "triangles": _float64(source.triangles),
+                    "charge_densities": _float64(source.charge_densities),
+                    **_pose(source),
+                }
+            )
+        else:
+            unknown.append(_kind_named(source))
+    if unknown:
+        kinds = ", ".join(sorted(set(unknown)))
+        return None, f"it does not compute {kinds}"
+    segments = sum(len(wire["vertices"]) - 1 for wire in wires)
+    triangles = sum(
+        len(base64.b64decode(s["triangles"])) // 72 for s in (*sheets, *meshes)
+    )
+    # a ball or a dipole costs no more than a segment, a ring two
+    cheap = segments + SEGMENTS_PER_RING * len(rings) + len(balls) + len(dipoles)
+    cost = len(cuboids) + cheap / SEGMENTS_PER_CUBOID + triangles / TRIANGLES_PER_CUBOID
+    if cost > PAGE_CUBOIDS:
+        counted = [
+            f"{n} {name}"
+            for n, name in (
+                (len(cuboids), "magnets"),
+                (segments, "wire segments"),
+                (len(rings), "rings"),
+                (triangles, "triangles"),
+            )
+            if n
+        ]
+        return None, (
+            f"{', '.join(counted)}: more than it computes at the pace of a drag"
+        )
+    moved = {
+        key: _page_sensor(sensor)
+        for key, sensor in sensors.items()
+        if sensor._get_path_len() == 1
+        and kind_of(sensor) is not None
+        and _redrawn_in_page(sensor)
+    }
+    if not moved:
+        return None, (
+            "its sensors move on a path, or draw pixels sized by the field, "
+            "hide null readings or use a 2D symbol"
+        )
+    field = {
+        "mu0": float(magpy.mu_0),
+        "rules": {
+            "rest_points": REST_POINTS,
+            "drag_points": DRAG_POINTS,
+            "probe_points": PROBE_POINTS,
+            "held_margin": HELD_MARGIN,
+            "rest_margin": REST_MARGIN,
+            "across": ACROSS,
+            "surface": _SURFACE,
+            "max_seeds": MAX_SEEDS,
+            "tolerance": PAGE_TOLERANCE,
+        },
+        "cuboids": cuboids,
+        "sheets": sheets,
+        "wires": wires,
+        "rings": rings,
+        "balls": balls,
+        "dipoles": dipoles,
+        "meshes": meshes,
+        "sensors": moved,
+    }
+    return field, None
+
+
+def _charged_faces(source):
+    """A magnet made of triangles -- a `TriangularMesh`, a `Tetrahedron`, a
+    `Triangle` -- as a page computes it (#176): a sheet of the charge J·n/mu0
+    on each face, n its own normal as magpylib orients it, through
+    material-response's sheet kernel, whose H it is everywhere, the body's
+    inside too; B inside adds J, so its polarization comes along, and
+    whether the faces close round a body, which only then has an inside.
+    None for anything else, or a magnet with no polarization."""
+    if getattr(source, "polarization", None) is None:
+        return None
+    if isinstance(source, magpy.magnet.TriangularMesh):
+        faces, closed = np.asarray(source.mesh, dtype=float), not source.status_open
+    elif isinstance(source, magpy.magnet.Tetrahedron):
+        from magpylib._src.fields.field_BH_tetrahedron import _check_chirality
+
+        v = _check_chirality(np.array(source.vertices, dtype=float)[None])[0]
+        faces = v[[(0, 2, 1), (0, 1, 3), (1, 2, 3), (0, 3, 2)]]
+        closed = True
+    elif isinstance(source, magpy.misc.Triangle):
+        faces, closed = np.asarray(source.vertices, dtype=float)[None], False
+    else:
+        return None
+    normal = np.cross(faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 0])
+    normal /= np.linalg.norm(normal, axis=1, keepdims=True)
+    polarization = np.asarray(source.polarization, dtype=float)
+    charge = normal @ polarization / magpy.mu_0
+    return {
+        # its arrays held once on a page, as a solved sheet's
+        "kind": "fieldsheet",
+        "triangles": _float64(faces),
+        "charge_densities": _float64(np.repeat(charge[:, None], 3, axis=1)),
+        "polarization": polarization.tolist(),
+        "closed": bool(closed),
+        **_pose(source),
+    }
+
+
+def _kind_named(source):
+    """`source`'s kind as a reader names it: a current's wire as currents
+    are, ``currents (Polyline)``, a magnet by its class."""
+    name = type(source).__name__
+    if isinstance(source, magpy.current.Polyline | magpy.current.Circle):
+        return f"currents ({name})"
+    return name
+
+
+#: The pixel shapes a page draws again where their sensor is dragged: those
+#: the view draws itself from data (`threejs._pixels_payload`), turned by
+#: the field, or cubes.
+_PAGE_SYMBOLS = ("cone", "arrow3d", "none")
+
+
+def _redrawn_in_page(sensor):
+    """Whether a page can draw `sensor`'s pixels again where it drags it
+    (#176): none drawn, or drawn as data the view turns and colours itself,
+    each the same size whatever it reads, every one shown. Its arrows are
+    then the field at the pixels and the colour table the page carries, as
+    its lines are; sizes scaled by the field, hidden null readings and 2D
+    symbols are magpylib's to draw, and such a sensor stays where it is."""
+    from magpylib._src.style import get_style
+
+    style = get_style(sensor, magpy.defaults).pixel
+    if not style.size:
+        return True
+    field = style.field
+    return (
+        style.symbol == "cube"
+        and field.symbol in _PAGE_SYMBOLS
+        and field.sizescaling == "uniform"
+        and bool(field.shownull)
+    )
+
+
+def _page_sensor(sensor):
+    """A sensor as a page drags it: its pixels in its own frame and its
+    pose, and what a rigid move leaves as it is -- the normal of the plane
+    its pixels lie in, in its own frame (`frame_of`), or None, and their own
+    spacing (`_apart`) -- so the page need not find them again."""
+    seeds = seeds_of(sensor)
+    axes, planar = frame_of(seeds)
+    turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat())[-1])
+    source = sensor.style.pixel.field.source
+    return {
+        "kind": kind_of(sensor),
+        # the axes of its own the field is read along, as `readings` reads it
+        "components": source[1:] or "xyz",
+        "pixels": np.asarray(sensor.pixel, dtype=float).reshape(-1, 3).tolist(),
+        "normal": turn.inv().apply(axes[2]).tolist() if planar else None,
+        "apart": _apart(seeds),
+        **_pose(sensor),
+    }
+
+
+def _pose(obj):
+    """`obj`'s position and orientation at its last step, the orientation as
+    scipy's quaternion (x, y, z, w)."""
+    return {
+        "position": np.atleast_2d(np.asarray(obj.position, dtype=float))[-1].tolist(),
+        "orientation": np.atleast_2d(obj.orientation.as_quat())[-1].tolist(),
+    }
+
+
+def _float64(values):
+    """`values` as little-endian float64, in base64: every bit kept, which the
+    page's field must match python's to."""
+    raw = np.ascontiguousarray(values, dtype="<f8").tobytes()
+    return base64.b64encode(raw).decode("ascii")
+
+
+#: Where the compiled kernels are, as wasm-pack builds them: a folder with
+#: ``mmr_kernels.js`` and ``mmr_kernels_bg.wasm``. Read when a page is written.
+KERNELS_VARIABLE = "MAGPYLIB_STUDIO_KERNELS"
+
+
+def kernel_files():
+    """Where material-response's compiled field kernels are for a page
+    (#176): its glue module and its WebAssembly, ``(js, wasm)`` paths, or
+    None where they are not to be had. From the folder `KERNELS_VARIABLE`
+    names, else from material-response's package -- found, not imported:
+    a package that fails to import leaves a page without kernels, not
+    unsaved."""
+    import importlib.util
+
+    folders = []
+    named = os.environ.get(KERNELS_VARIABLE)
+    if named:
+        folders.append(Path(named).expanduser())
+    try:
+        spec = importlib.util.find_spec("magpylib_material_response")
+    except (ImportError, ValueError):
+        spec = None
+    if spec is not None and spec.origin:
+        folders.append(Path(spec.origin).parent / "kernels")
+    for folder in folders:
+        glue, wasm = folder / "mmr_kernels.js", folder / "mmr_kernels_bg.wasm"
+        if glue.is_file() and wasm.is_file():
+            return glue, wasm
+    return None
+
+
+def page_kernels():
+    """material-response's compiled field kernels for a page (#176): its glue
+    module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
+    they are not to be had (`kernel_files`). Read once while the files stay
+    as they are. A prototype: how they reach studio for good is open
+    (magpylib-material-response#215)."""
+    files = kernel_files()
+    if files is None:
+        return None
+    return _kernels_read(
+        *((str(f), f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+    )
+
+
+@functools.lru_cache(maxsize=2)
+def _kernels_read(glue, wasm):
+    """`page_kernels`' files read, each ``(path, mtime, size)``."""
+    return Path(glue[0]).read_text(encoding="utf-8"), Path(wasm[0]).read_bytes()
+
+
 def colours(sensor, readings):
     """The table a line of `sensor` is coloured from: colours for |field|
     evenly from the least to the most its pixels read, as its arrows are
@@ -837,7 +1204,12 @@ def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
     from magpylib_studio.threejs import part_id
 
     lut, levels = colours(sensor, readings)
-    order = np.argsort(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1))
+    # nearest first, equals in the pixels' order: a grid of pixels is all
+    # ties, which numpy's default sort leaves in any order, and a saved page
+    # dragging the sensor orders them again (#176) -- to a picometre, so
+    # rounding does not part them
+    away = np.rint(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1) * 1e12)
+    order = np.argsort(away, kind="stable")
     starts = seeds[order][:MAX_SEEDS]
     return {
         "kind": "fieldlines",

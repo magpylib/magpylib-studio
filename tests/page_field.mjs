@@ -1,0 +1,68 @@
+// The page's side of tests/test_page_field.py (#176): what a saved page
+// works out for a dragged sensor, by `magpylib_studio/static/pagefield.mjs`,
+// for the python test to hold against `fieldlines.py`.
+//
+//   node tests/page_field.mjs <kernels folder> <cases.json> <answers.json>
+import { readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+import {
+  KERNELS_API,
+  fieldAt,
+  frameOf,
+  gridAround,
+  holds,
+  insideAt,
+  pointsOf,
+  prepared,
+  seedsAt,
+  slide,
+} from "../magpylib_studio/static/pagefield.mjs";
+
+const [folder, casesPath, answersPath] = process.argv.slice(2);
+const kernels = await import(pathToFileURL(`${folder}/mmr_kernels.js`).href);
+await kernels.default({
+  module_or_path: readFileSync(`${folder}/mmr_kernels_bg.wasm`),
+});
+if (kernels.api_version() !== KERNELS_API) {
+  throw new Error(
+    `kernels of API ${kernels.api_version()}, the page's ${KERNELS_API}`,
+  );
+}
+const asked = JSON.parse(readFileSync(casesPath, "utf8"));
+if (asked.fields) {
+  // the field alone: each scene's sources at `points`, as `kind`, at each
+  // tolerance -- and which of the points are inside a body
+  const answers = asked.fields.map(({ field, points, kind, tolerances }) => {
+    const ready = prepared(kernels, field);
+    const at = Float64Array.from(points);
+    return {
+      fields: tolerances.map((t) => Array.from(fieldAt(ready, at, kind, t))),
+      inside: Array.from(insideAt(ready, at)),
+    };
+  });
+  writeFileSync(answersPath, JSON.stringify(answers));
+  process.exit(0);
+}
+const { field, key, cases } = asked;
+const ready = prepared(kernels, field);
+const sensor = field.sensors[key];
+
+const answers = cases.map(({ pose, points, flat, from }) => {
+  const seeds = seedsAt(sensor, pose);
+  const frame = flat === false ? frameOf({}, pose) : frameOf(sensor, pose);
+  const grid = gridAround(ready.centres, seeds, points, frame);
+  const at = pointsOf(grid);
+  const answer = {
+    seeds,
+    grid,
+    points: Array.from(at),
+    inside: Array.from(insideAt(ready, at)),
+    field: Array.from(fieldAt(ready, at, sensor.kind, 0)),
+    holds: holds(grid, seedsAt(sensor, from), field.rules.held_margin),
+  };
+  const slid = slide(grid, seeds, seedsAt(sensor, from));
+  answer.slid = slid && { grid: slid[0], was: Array.from(slid[1]) };
+  return answer;
+});
+writeFileSync(answersPath, JSON.stringify(answers));

@@ -251,7 +251,19 @@ function part(className, title) {
 
 export function createLegend(
   container,
-  { onSelect, onHide, onFade, onFrame, onHint, onIntend, onMeasure, canEdit },
+  {
+    onSelect,
+    onHide,
+    onFade,
+    onFrame,
+    onHint,
+    onIntend,
+    onMeasure,
+    canEdit,
+    movable,
+    editing,
+    onEdit,
+  },
 ) {
   let order = []; // every node, in tree order
   let roots = []; // the nodes at the top of the tree
@@ -593,6 +605,20 @@ export function createLegend(
       stale.setAttribute("role", "img");
       stale.setAttribute("aria-label", "solved for another arrangement");
       row.append(stale);
+    }
+    // What the view can move, a pencil before the eye: on the row under the
+    // pointer, and on every such row while editing is on -- the cue to what
+    // editing acts on. A click turns editing on with this one selected.
+    if (!isPart(node)) {
+      const pen = part(
+        "magpy-legend-pen",
+        "Edit: move and turn it -- turns editing on with it selected",
+      );
+      pen.addEventListener("click", (event) => {
+        event.stopPropagation();
+        onEdit?.(node.id);
+      });
+      row.append(pen);
     }
     // At the end of the row, as Figma's layers and VS Code's trees put a
     // row's actions: most of the time it is not showing, and a column kept
@@ -954,6 +980,7 @@ export function createLegend(
    *  when some of it is -- which is how a folded collection says that what
    *  was picked in the view, or hidden, is inside it. */
   function paint() {
+    container.classList.toggle("magpy-legend-editing", Boolean(editing?.()));
     const chosen = new Set(drawnOf(selected));
     for (const node of order) {
       const mine = leaves.get(node.id);
@@ -964,6 +991,7 @@ export function createLegend(
       const all = (n, of) => of.length > 0 && n === of.length;
       const some = (n, of) => n > 0 && n < of.length;
       row.classList.toggle("selected", all(picked, mine));
+      row.classList.toggle("movable", Boolean(movable?.(node.id)));
       row.classList.toggle("partial", some(picked, mine));
       row.classList.toggle("off", all(gone, seen));
       row.classList.toggle("mixed", some(gone, seen));

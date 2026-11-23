@@ -34,6 +34,8 @@ import {
   surroundings,
 } from "./theme.mjs";
 import { QUANTITY, createVariables } from "./variables.mjs";
+// A saved page's own editor for its sensors (#176), made by the page.
+export { pageEditor } from "./pagefield.mjs";
 
 /** What the views of this build share on the page: the renderer's module,
  *  imported once -- see "Why the renderer arrives as a string" above. Keyed
@@ -257,6 +259,11 @@ const NO_EDIT_ANSWER =
 const PART_STYLE = { Axes: "arrows", Pixels: "pixel", FieldLines: "pixel" };
 
 /** The keys that pick the handles, as the studio's panel has them. */
+/** The pencil's title where python edits the scene. */
+const EDIT_TITLE =
+  "Edit — move, turn, resize and aim the objects, with undo, in a studio " +
+  "session in the kernel; the field from python. Again to put the handles away";
+
 const HANDLE_KEYS = {
   w: "translate",
   e: "rotate",
@@ -479,20 +486,31 @@ function render({ model, el }) {
   // session, as `editable=True` does when the view is made; a view of a
   // session has one already. Shown only where there is something to edit
   // and a python to keep the edits -- see `showEditing`.
-  const editButton = iconButton(
-    "edit",
-    "Edit — move, turn, resize and aim the objects, with undo, in a studio " +
-      "session in the kernel; again to put the handles away",
-    () => {
-      const out = !editable();
+  const editButton = iconButton("edit", EDIT_TITLE, () => {
+    const blocked = pageBlocked();
+    if (blocked) {
+      notify(blocked); // a page that cannot: why, rather than nothing
+      return;
+    }
+    if (pageMoves && !editable()) {
+      // a saved page's sensors, moved and turned by the page itself (#176)
+      pageEditing = !pageEditing;
       notify(
-        out
-          ? "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away"
-          : "Handles away — the edits stay; the pencil brings them back",
+        pageEditing
+          ? "Editing — pick a sensor: W moves, E turns; Q puts the handles away"
+          : "Handles away — the moves stay; the pencil brings them back",
       );
-      commit("editable", out);
-    },
-  );
+      dressEditing();
+      return;
+    }
+    const out = !editable();
+    notify(
+      out
+        ? "Editing — W moves, E turns, R resizes, P aims; Q puts the handles away"
+        : "Handles away — the edits stay; the pencil brings them back",
+    );
+    commit("editable", out);
+  });
   // The scene's variables as a panel over the view: a slider each, and the
   // scene following as one is dragged (`variables.mjs`, the same rows as the
   // studio's Variables view). With the handles, since moving a variable is an
@@ -610,11 +628,21 @@ function render({ model, el }) {
       // Nothing to choose, one click; a run or variants to leave out, the
       // foot asks first, everything kept (`startChoosing`).
       if (choosing) stopChoosing();
-      else if (frames() > 1 || (model.get("variants") || []).length) {
+      else if (
+        frames() > 1 ||
+        (model.get("variants") || []).length ||
+        linesDrawn()
+      ) {
         startChoosing();
       } else saveAs({ run: true, variants: true });
     },
   );
+  /** Whether the view draws field lines and the page can carry the field
+   *  kernels: a page of them can be saved with its sensors draggable
+   *  (#176), which the foot asks. */
+  const linesDrawn = () =>
+    Boolean(model.get("_page_kernels")) &&
+    Boolean(model.get("payload")?.fieldlines?.length);
   function saveAs(choice) {
     exportJob = `${viewTag}-${++exports}`;
     showWriting({ text: "Writing…", done: 0, total: 0, job: exportJob });
@@ -627,6 +655,7 @@ function render({ model, el }) {
       run: choice.run,
       steps: choice.steps,
       variants: choice.variants,
+      editable: choice.editable ?? true,
     });
   }
   // The view's own export, named: python writes one a piece at a time, this
@@ -727,10 +756,10 @@ function render({ model, el }) {
   };
   const spaceButton = iconButton("world", "", () => toggleSpace());
   const undoButton = iconButton("undo", "Undo (⌘Z / Ctrl+Z)", () =>
-    settle(editor.undo()),
+    settle(editsBy().undo()),
   );
   const redoButton = iconButton("redo", "Redo (⇧⌘Z / Ctrl+Shift+Z)", () =>
-    settle(editor.redo()),
+    settle(editsBy().redo()),
   );
   // Every edit since this view's editing started, taken back in one step --
   // which undo takes back in turn. A host's own editor may have no such
@@ -738,7 +767,7 @@ function render({ model, el }) {
   const resetButton = iconButton(
     "revert",
     "Back to where editing started — one step, which undo takes back",
-    () => editor.reset && settle(editor.reset()),
+    () => editsBy().reset && settle(editsBy().reset()),
   );
   const rule = () => {
     const line = document.createElement("div");
@@ -922,7 +951,7 @@ function render({ model, el }) {
   // a word, in the variants' material, rather than an icon to puzzle out
   const stopButton = document.createElement("button");
   stopButton.type = "button";
-  stopButton.className = "magpy-vars-chip";
+  stopButton.className = "magpy-vars-chip magpy-cancel";
   stopButton.textContent = "Cancel";
   stopButton.title = "Stop writing the file";
   stopButton.addEventListener("click", () => {
@@ -973,30 +1002,45 @@ function render({ model, el }) {
   const chooseText = document.createElement("span");
   const saveButton = document.createElement("button");
   saveButton.type = "button";
-  saveButton.className = "magpy-vars-chip";
+  saveButton.className = "magpy-vars-chip magpy-primary";
   saveButton.textContent = "Save";
   saveButton.title = "Write the page with what is kept";
   saveButton.addEventListener("click", () => {
     const { first, last, out } = choosing;
     const names = (model.get("variants") || []).filter((n) => !out.has(n));
     const run = frames() > 1;
+    const { editable: draggable } = choosing;
     stopChoosing();
     saveAs({
       run: true,
       steps: run ? [first, last] : null,
       variants: names.length ? names : false,
+      editable: draggable,
     });
   });
   const cancelChoice = document.createElement("button");
   cancelChoice.type = "button";
-  cancelChoice.className = "magpy-vars-chip";
+  cancelChoice.className = "magpy-vars-chip magpy-cancel";
   cancelChoice.textContent = "Cancel";
   cancelChoice.title = "Save nothing";
   cancelChoice.addEventListener("click", () => stopChoosing());
-  choose.append(chooseText, saveButton, cancelChoice);
+  // Whether the page lets its sensors be dragged, their lines drawn again
+  // by the page itself (#176): pressed, it does, at the cost of the sources
+  // and the field kernels in the file, a hundred kilobytes or so.
+  const editableChip = document.createElement("label");
+  editableChip.className = "magpy-scene-check";
+  const editableBox = document.createElement("input");
+  editableBox.type = "checkbox";
+  editableChip.append(editableBox, "Editable");
+  editableBox.addEventListener("change", () => {
+    choosing.editable = editableBox.checked;
+    describeChoice();
+  });
+  choose.append(chooseText, editableChip, saveButton, cancelChoice);
   function startChoosing() {
     const last = Math.max(frames() - 1, 0);
-    choosing = { first: 0, last, out: new Set() };
+    choosing = { first: 0, last, out: new Set(), editable: true };
+    editableChip.hidden = !linesDrawn();
     for (const end of [trimFrom, trimTo]) end.max = String(last);
     trimFrom.value = "0";
     trimTo.value = String(last);
@@ -1041,7 +1085,12 @@ function render({ model, el }) {
     if (names.length) {
       said.push(`${names.length - out.size} of ${names.length} variants`);
     }
+    if (!said.length) said.push("the scene");
     chooseText.textContent = `Save ${said.join(", ")}`;
+    editableBox.checked = choosing.editable;
+    editableChip.title = choosing.editable
+      ? "Sensors can be dragged in the page, their field lines drawn again -- click for a page that only shows"
+      : "The page only shows -- click to let its sensors be dragged";
     for (const chip of variantsEl.querySelectorAll(".magpy-vars-chip")) {
       chip.classList.toggle("magpy-left-out", out.has(chip.textContent));
       chip.title = out.has(chip.textContent)
@@ -1279,6 +1328,22 @@ function render({ model, el }) {
     // How far apart two selected objects are, which only a session can say.
     onMeasure: (a, b) => (editable() ? call("get_gap", { a, b }) : null),
     canEdit: () => editable(),
+    // what the view can move, a pencil on its row (#176): a page's sensors
+    // it draws the lines of, or, where python edits, every object it poses
+    movable: (id) => {
+      const payload = model.get("payload");
+      if (pageMoves) return pageMoves.movable([id], payload);
+      return (editable() || editHere()) && Boolean(payload?.anchors?.[id]);
+    },
+    editing: () => editing(),
+    onEdit(id) {
+      commit("selected", [id]);
+      if (editing()) return;
+      if (pageMoves) {
+        pageEditing = true;
+        dressEditing();
+      } else commit("editable", true);
+    },
   });
   // The colour bar of a sensor the field colours, and its cut: a view
   // setting, drawn at every step of a drag and the model told at its end,
@@ -1683,6 +1748,33 @@ function render({ model, el }) {
   function editKey(event) {
     if (event.altKey) return false;
     const key = event.key.toLowerCase();
+    if (!editable() && pageMoves) {
+      // a page's sensors: W moves, E turns, Cmd/Ctrl+Z undoes a drag
+      if ((event.metaKey || event.ctrlKey) && key === "z") {
+        settle(event.shiftKey ? pageMoves.redo() : pageMoves.undo());
+        return true;
+      }
+      const mode = HANDLE_KEYS[key];
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return false;
+      if (mode === "none" && pageEditing) {
+        pageEditing = false; // Q: the handles away, as the pencil puts them
+        dressEditing();
+        return true;
+      }
+      if (mode !== "translate" && mode !== "rotate") return false;
+      handles = mode;
+      if (!pageEditing) {
+        pageEditing = true;
+        notify(
+          "Editing — pick a sensor: W moves, E turns; Q puts the handles away",
+        );
+        dressEditing();
+      } else {
+        setHandles(mode); // the Move/Turn buttons follow the key
+        if (drawing()) api.setGizmoMode(gizmoFor(mode));
+      }
+      return true;
+    }
     if (!editable()) {
       // A handle key on a view that offers the pencil does what the pencil
       // does, and comes up in that mode: pressing W means "move it", and a
@@ -2354,6 +2446,8 @@ function render({ model, el }) {
     const moved = index !== shown;
     shown = index;
     if (moved) redrawGrid();
+    // a page's sensor moves on the scene's own step alone (`movable`)
+    if (moved && pageMoves && drawing()) api.setGizmoMode(gizmoFor(handles));
     scrub.value = String(index);
     showStep();
     asideColorBar();
@@ -2385,6 +2479,7 @@ function render({ model, el }) {
     setIcon(play, playing ? "pause" : "play");
     name(play, playing ? "Pause (space)" : "Play the path (space)");
     asideColorBar();
+    if (pageMoves && drawing()) api.setGizmoMode(gizmoFor(handles));
     if (!playing) return;
     // Restart from the top when play is pressed at the end of the run, rather
     // than finishing immediately.
@@ -2501,7 +2596,47 @@ function render({ model, el }) {
   const editable = () =>
     Boolean(model.get("editable")) &&
     (model.editor !== undefined || !model.get("standalone"));
+  /** Whether the pencil can bring python's editing out: a view of named
+   *  objects with a python behind it -- not one made for looking only, a
+   *  saved page, or the studio's panel, where the view is the editor. */
+  const editHere = () =>
+    model.get("editable") !== null &&
+    model.editor === undefined &&
+    !model.get("standalone") &&
+    (model.get("tree") || []).length > 0;
   let handles = "translate"; // what the user asked the handles to do
+  // A saved page that draws a dragged sensor's lines itself (#176,
+  // `pagefield.mjs`): handles for those sensors alone, to move and turn,
+  // and everything else read only -- no inspector, panels or pencil, which
+  // need a python behind them.
+  const pageMoves = model.pageEditor;
+  // the page's pencil, pressed: its sensors' handles come out
+  let pageEditing = false;
+  /** Whether the edit column is out: the view's editing, or the page's. */
+  const editing = () => editable() || (Boolean(pageMoves) && pageEditing);
+  /** Whose undo, redo and reset the column's buttons are. */
+  const editsBy = () => (editable() || !pageMoves ? editor : pageMoves);
+  // Only on the step the scene is drawn at: the page holds its sources
+  // there, and a frame of a run shows them elsewhere.
+  const movable = () =>
+    !editable() &&
+    pageEditing &&
+    !playing &&
+    (frames() < 2 || shown === drawnStep()) &&
+    Boolean(
+      pageMoves?.movable(model.get("selected") || [], model.get("payload")),
+    );
+  const handlesOut = () => editable() || movable();
+  /** The handles `mode` puts out here: as asked where the view edits, a
+   *  move or a turn on a page's movable sensor, else none. */
+  const gizmoFor = (mode) =>
+    editable()
+      ? mode
+      : movable()
+        ? mode === "rotate"
+          ? "rotate"
+          : "translate"
+        : "none";
   let inEffect = "translate"; // what they do: a resize may not be possible
   let snapping = false;
   let along = null; // the one axis a drag is held to, or null for all
@@ -2514,7 +2649,8 @@ function render({ model, el }) {
    *  whenever the selection changes. */
   function setHandles(mode, { asked = false } = {}) {
     handles = mode;
-    inEffect = drawing() && editable() ? api.setGizmoMode(mode) : mode;
+    inEffect =
+      drawing() && handlesOut() ? api.setGizmoMode(gizmoFor(mode)) : mode;
     for (const [its, button] of Object.entries(modeButtons)) {
       pressed(button, inEffect === its);
     }
@@ -2585,18 +2721,22 @@ function render({ model, el }) {
   }
 
   function dressEditing() {
-    editBar.hidden = !editable();
+    editBar.hidden = !editing();
     grid.relabel(); // the scene's tag wears the pencil, or not
-    resetButton.hidden = !editor.reset;
+    resetButton.hidden = !editsBy().reset;
+    // a page moves and turns sensors, no more: no resize, no aim (#176)
+    const onPage = !editable() && Boolean(pageMoves);
+    modeButtons.scale.hidden = modeButtons.polarization.hidden = onPage;
     // The panels go with the handles, on the column that goes with them.
-    // Not in the studio panel, whose host shows them in its sidebar.
-    panelToggles.hidden = model.editor !== undefined;
+    // Not in the studio panel, whose host shows them in its sidebar, nor on
+    // a page, with no python to show them.
+    panelToggles.hidden = model.editor !== undefined || onPage;
     if (!editable() && !variablesEl.hidden) showVariables(false);
     if (!editable() && !inspectorEl.hidden) showInspector(false);
     showEditing();
     if (!keyList.hidden) showKeys(true);
     setHandles(handles);
-    if (!editable() && drawing()) api.setGizmoMode("none");
+    if (!editable() && drawing()) api.setGizmoMode(gizmoFor(handles));
     keepCorner(); // the column came, went, or changed its height
   }
 
@@ -2664,12 +2804,45 @@ function render({ model, el }) {
   }
 
   function showEditing() {
-    editButton.hidden =
-      model.get("editable") === null || // made for looking only
-      model.editor !== undefined ||
-      Boolean(model.get("standalone")) ||
-      !(model.get("tree") || []).length;
-    pressed(editButton, editable());
+    editButton.hidden = !pageMoves && !pageBlocked() && !editHere();
+    pressed(editButton, editing());
+    showComputes();
+    legend.sync(stateOf()); // its pencils: what editing acts on, or not
+  }
+
+  /** Why a saved page that draws field lines cannot move its sensors --
+   *  saved to only show, sources it does not compute, kernels that did not
+   *  load -- or null: its pencil then shows greyed, and says so (#176). */
+  function pageBlocked() {
+    if (pageMoves || !model.get("standalone")) return null;
+    if (model.pageFailure) {
+      return `Field lines as saved: the page's field kernels did not load (${model.pageFailure})`;
+    }
+    const why = model.get("page_why");
+    return why ? `Field lines as saved: ${why}` : null;
+  }
+
+  /** What computes the field, a dot on the pencil and a line in its
+   *  title: python behind the view, the page itself, nothing -- the lines
+   *  as saved -- or kernels that failed to load. */
+  function showComputes() {
+    const blocked = pageBlocked();
+    const state = blocked
+      ? model.pageFailure
+        ? "failed"
+        : "saved"
+      : pageMoves && model.get("standalone")
+        ? "page"
+        : "python";
+    editButton.dataset.computes = state;
+    editButton.classList.toggle("magpy-greyed", Boolean(blocked));
+    name(
+      editButton,
+      blocked ??
+        (state === "page"
+          ? "Edit — move and turn the sensors; their field lines are computed in this page (WebAssembly). Again to put the handles away"
+          : EDIT_TITLE),
+    );
   }
 
   // Each view numbers its own calls, under a name of its own: python answers
@@ -3072,29 +3245,33 @@ function render({ model, el }) {
     },
   };
 
+  // the page's own editor, for a sensor it moves (`pageMoves`)
+  const dragEditor = () => (editable() ? editor : pageMoves);
   const stopDrags = watchDrags(view, {
-    drawing: () => drawing() && editable(),
+    drawing: () => drawing() && handlesOut(),
     begin({ objectIds, mode }) {
       dragActive = true;
       if (!inspectorEl.hidden) showReadout(); // the numbers, for the drag
       stopPlaying(); // the pointer is the one being asked
-      editor.begin({ objectIds, mode }).catch(() => {});
+      dragEditor()
+        .begin({ objectIds, mode })
+        .catch(() => {});
     },
     showPose,
-    preview: (pose, options) => editor.preview(pose.edits, options),
-    scene: () => editor.scene(),
+    preview: (pose, options) => dragEditor().preview(pose.edits, options),
+    scene: () => dragEditor().scene(),
     render(payload, { keep }) {
       if (drawing()) api.render(view, payload, { keep });
     },
     commit(pose) {
       dragActive = false;
       if (!inspectorEl.hidden) showReadout(); // and away again
-      settle(editor.commit(pose.edits));
+      settle(dragEditor().commit(pose.edits));
     },
     cancel() {
       dragActive = false;
       if (!inspectorEl.hidden) showReadout();
-      settle(editor.cancel());
+      settle(dragEditor().cancel());
     },
   });
 
@@ -3283,7 +3460,9 @@ function render({ model, el }) {
     if (now.has("faded")) api.setFades(model.get("faded") || {});
     if (now.has("selected")) {
       api.highlight(model.get("selected") || []);
-      if (editable()) setHandles(handles); // what was asked, for the new one
+      if (editable())
+        setHandles(handles); // what was asked, for the new one
+      else if (pageMoves) api.setGizmoMode(gizmoFor(handles));
     }
   }
 
@@ -3334,7 +3513,7 @@ function render({ model, el }) {
     // nor a backdrop to find. (Dressing wears the backdrops too.)
     dressTheme();
     // Read only, unless the objects are a session's.
-    api.setGizmoMode(editable() ? handles : "none");
+    api.setGizmoMode(gizmoFor(handles));
     // Before the render, so nodes are built hidden rather than drawn and then
     // taken away.
     api.setHidden(model.get("hidden") || []);
@@ -3407,9 +3586,12 @@ function render({ model, el }) {
   draw();
 
   /** Hand the browser the file python wrote, as a download. */
-  function download({ html, filename }) {
+  function download({ html, filename, note }) {
     const href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
     save(href, filename);
+    // why its field lines cannot follow a sensor dragged in it (#176)
+    if (note)
+      notify(`Saved ${filename}: its sensors cannot be dragged, ${note}`);
     setTimeout(() => URL.revokeObjectURL(href), 60_000);
   }
 

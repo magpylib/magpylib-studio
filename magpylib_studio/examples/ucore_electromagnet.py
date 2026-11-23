@@ -10,6 +10,7 @@ from magpylib_material_response.polyline import (
 )
 
 from magpylib_studio import Bounds, Count, grid, scene
+from magpylib_studio.examples.copper import COPPER
 
 TITLE = "U-core electromagnet, solved"
 
@@ -98,7 +99,19 @@ def ucore_electromagnet(
     drawn as its field lines.
     """
     coil = magpy.Collection(
-        *(magpy.current.Polyline(current=current, vertices=v) for v in WINDINGS),
+        *(
+            magpy.current.Polyline(
+                current=current,
+                vertices=v,
+                # copper, and drawn as a wire is: twice magpylib's line
+                style={
+                    "label": f"winding {n}",
+                    "color": COPPER,
+                    "line_width": 4,
+                },
+            )
+            for n, v in enumerate(WINDINGS, start=1)
+        ),
         style_label="coil",
     )
     probe = magpy.Sensor(

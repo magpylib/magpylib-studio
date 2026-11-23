@@ -4,6 +4,7 @@ import magpylib as magpy
 import numpy as np
 
 from magpylib_studio import Length, scene
+from magpylib_studio.examples.copper import COPPERS
 
 TITLE = "Every kind of object"
 
@@ -62,7 +63,10 @@ def every_kind(radius: Annotated[float, Length(0.03, 0.08)] = 0.037):
     strip = np.empty((320, 3))
     strip[0::2], strip[1::2] = _band(round_twice, 0), _band(round_twice, 0.36)
     moebius = magpy.current.TriangleStrip(
-        current=20, vertices=strip * 16 * MM, style_label="TriangleStrip - Möbius band"
+        current=20,
+        vertices=strip * 16 * MM,
+        style_label="TriangleStrip - Möbius band",
+        style_color=COPPERS[0],
     )
     moebius.rotate_from_angax(-51, "z", anchor=0)
 
@@ -91,15 +95,22 @@ def every_kind(radius: Annotated[float, Length(0.03, 0.08)] = 0.037):
             polarization=(0, 0, 1),
             vertices=np.array([(-5, -4, 0), (5, -4, 0), (0, 5, 0)]) * 1.3 * MM,
         ),
-        "loop": lambda p: magpy.current.Circle(current=10, diameter=13 * MM),
+        # the currents, each its own shade of copper
+        "loop": lambda p: magpy.current.Circle(
+            current=10, diameter=13 * MM, style_color=COPPERS[1]
+        ),
         "sheet": lambda p: magpy.current.TriangleSheet(
-            current_densities=sheet_current, vertices=sheet, faces=sheet_faces
+            current_densities=sheet_current,
+            vertices=sheet,
+            faces=sheet_faces,
+            style_color=COPPERS[2],
         ),
         "wire": lambda p: magpy.current.Polyline(
             current=10,
             vertices=np.array([(-6, -4, 0), (-2, 4, 0), (2, -4, 0), (6, 4, 0)])
             * 1.3
             * MM,
+            style_color=COPPERS[3],
         ),
         "dipole": lambda p: magpy.misc.Dipole(
             moment=0.4 * np.array(p), style_size=12 * MM, style_sizemode="absolute"
