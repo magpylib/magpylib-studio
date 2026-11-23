@@ -324,6 +324,7 @@ export function prepared(kernels, field, built = null) {
     body,
     centres: [
       ...field.cuboids,
+      ...(field.cylinders ?? []),
       ...(field.wires ?? []),
       ...(field.rings ?? []),
       ...(field.balls ?? []),
@@ -372,6 +373,16 @@ export function fieldAt(ready, points, kind, tolerance) {
   const sum = new Float64Array(points.length);
   for (const c of field.cuboids) {
     const local = kernels.cuboid_field(
+      kind,
+      intoFrame(c, points),
+      Float64Array.from(c.dimension),
+      Float64Array.from(c.polarization),
+    );
+    addTurned(c, local, sum, 1);
+  }
+  // a cylinder round its own z axis
+  for (const c of field.cylinders ?? []) {
+    const local = kernels.cylinder_field(
       kind,
       intoFrame(c, points),
       Float64Array.from(c.dimension),
@@ -464,6 +475,22 @@ export function insideAt(ready, points) {
           hit = false;
       }
       if (hit) within[i] = 1;
+    }
+  }
+  // a cylinder as magpylib's has it: within its hull and between its bases,
+  // in units of its radius
+  for (const c of ready.field.cylinders ?? []) {
+    if (!c.polarization.some((v) => v !== 0)) continue;
+    const radius = c.dimension[0] / 2;
+    const half = c.dimension[1] / 2 / radius;
+    const local = intoFrame(c, points);
+    for (let i = 0; i < n; i++) {
+      const [x, y, z] = [local[3 * i], local[3 * i + 1], local[3 * i + 2]];
+      if (
+        Math.sqrt(x * x + y * y) / radius <= 1 &&
+        Math.abs(z / radius) <= half
+      )
+        within[i] = 1;
     }
   }
   // a ball as magpylib's sphere has it: within half its diameter

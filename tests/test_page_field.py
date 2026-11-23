@@ -191,6 +191,20 @@ def _a_magnet_on_a_path():
     return [magnet, sheet]
 
 
+def _a_cylinder_beside_them():
+    # a cylinder magnet turned and moved, where the kernels have cylinders
+    if "function cylinder_field(" not in KERNELS[0]:
+        pytest.skip("the kernels have no cylinders")
+    magnet, sheet = _solved_apart()
+    cylinder = magpy.magnet.Cylinder(
+        polarization=(0.3, -0.5, 0.9),
+        dimension=(0.008, 0.005),
+        position=(-0.012, -0.006, 0.01),
+    )
+    cylinder.rotate_from_rotvec((0.5, -0.2, 0.7))
+    return [magnet, sheet, cylinder]
+
+
 def _balls_and_a_dipole_beside_them():
     # a sphere and a dipole, each turned and moved
     magnet, sheet = _solved_apart()
@@ -263,6 +277,7 @@ def _a_ring_beside_them():
     [
         _a_coil_beside_them,
         _a_ring_beside_them,
+        _a_cylinder_beside_them,
         _balls_and_a_dipole_beside_them,
         _triangle_magnets_beside_them,
         _turned_about_three_axes,
@@ -296,6 +311,14 @@ def test_the_page_computes_the_field_of_turned_and_moved_sources(
             x.position + rng.uniform(-0.25, 0.25, (10, 3)) * x.diameter
             for x in sources
             if isinstance(x, magpy.magnet.Sphere)
+        ]
+        + [
+            x.position
+            + x.orientation.apply(
+                rng.uniform(-0.6, 0.6, (10, 3)) * x.dimension[[0, 0, 1]]
+            )
+            for x in sources
+            if isinstance(x, magpy.magnet.Cylinder)
         ]
         + [
             x.position + rng.uniform(-0.001, 0.001, (10, 3))

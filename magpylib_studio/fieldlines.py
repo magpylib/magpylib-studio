@@ -817,11 +817,20 @@ def page_field(sources, sensors):
 #: material-response's has, all of API 1: a page sends those sources only
 #: where the kernels it carries have them (`page_kernels`).
 PAGE_KERNELS = frozenset(
-    {"polyline_field", "circle_field", "sphere_field", "dipole_field"}
+    {
+        "polyline_field",
+        "circle_field",
+        "sphere_field",
+        "dipole_field",
+        "cylinder_field",
+    }
 )
 #: How many wire segments a ring costs a page: about 21 ns a point (MR's
 #: `circle_field`, 8,000 points in 0.17 ms) against a segment's 13.
 SEGMENTS_PER_RING = 2
+#: And a cylinder magnet: about 89 ns a point (MR's `cylinder_field`, 8,000
+#: points in 0.71 ms), less than half the cuboid's 215.
+SEGMENTS_PER_CYLINDER = 7
 
 
 def page_field_why(sources, sensors, computes=PAGE_KERNELS):
@@ -841,8 +850,8 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     `PAGE_CUBOIDS` allows, or no
     sensor is left: the page's lines then stay as they were drawn, and `why`
     says so in a few words, for the view to say after its export."""
-    cuboids, sheets, wires, rings, balls, dipoles, meshes, unknown = (
-        [] for _ in range(8)
+    cuboids, cylinders, sheets, wires, rings, balls, dipoles, meshes, unknown = (
+        [] for _ in range(9)
     )
     for source in sources:
         source = at_step(source)
@@ -894,6 +903,21 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
                     **_pose(source),
                 }
             )
+        elif (
+            "cylinder_field" in computes
+            and isinstance(source, magpy.magnet.Cylinder)
+            and source.polarization is not None
+        ):
+            # round its own z axis, centred on its own origin
+            cylinders.append(
+                {
+                    "dimension": np.asarray(source.dimension, dtype=float).tolist(),
+                    "polarization": np.asarray(
+                        source.polarization, dtype=float
+                    ).tolist(),
+                    **_pose(source),
+                }
+            )
         elif _cuboid(source):
             cuboids.append(
                 {
@@ -923,14 +947,21 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     triangles = sum(
         len(base64.b64decode(s["triangles"])) // 72 for s in (*sheets, *meshes)
     )
-    # a ball or a dipole costs no more than a segment, a ring two
-    cheap = segments + SEGMENTS_PER_RING * len(rings) + len(balls) + len(dipoles)
+    # a ball or a dipole costs no more than a segment, a ring two, a cylinder seven
+    cheap = (
+        segments
+        + SEGMENTS_PER_RING * len(rings)
+        + SEGMENTS_PER_CYLINDER * len(cylinders)
+        + len(balls)
+        + len(dipoles)
+    )
     cost = len(cuboids) + cheap / SEGMENTS_PER_CUBOID + triangles / TRIANGLES_PER_CUBOID
     if cost > PAGE_CUBOIDS:
         counted = [
             f"{n} {name}"
             for n, name in (
                 (len(cuboids), "magnets"),
+                (len(cylinders), "cylinders"),
                 (segments, "wire segments"),
                 (len(rings), "rings"),
                 (triangles, "triangles"),
@@ -966,6 +997,7 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
             "tolerance": PAGE_TOLERANCE,
         },
         "cuboids": cuboids,
+        "cylinders": cylinders,
         "sheets": sheets,
         "wires": wires,
         "rings": rings,
