@@ -89,6 +89,11 @@ function swatchesOf(payload) {
     if (!swatches.has(key)) {
       swatches.set(key, swatchOf(item, payload.luts || []));
     }
+    // its map in the lines' table, from the least field to the most across,
+    // as the map's own icon fills
+    if (item.kind === "fieldlines") {
+      swatches.set(`${item.object_id}/map`, gradientOfColours(item.lut));
+    }
   }
   return swatches;
 }
