@@ -661,8 +661,13 @@ function itemOf(saved, sensor, rules, grid, along, within, seeds) {
   const finest = isFlat(grid)
     ? (Math.max(grid.shape[0], grid.shape[1]) * grid.step) / 30
     : Infinity;
+  // what the engine laid for where the sensor stood -- a set region, a box
+  // grid's map plane, the map's span -- is not the page's to move with it:
+  // the page lays the rule's grid
+  const kept = { ...saved };
+  for (const key of ["region", "map_field", "map_levels"]) delete kept[key];
   return {
-    ...saved,
+    ...kept,
     ...encoded(grid, along, within),
     seeds: order.flatMap(([, i]) =>
       seeds[i].map((v) => Math.round(v * 1e9) / 1e9),

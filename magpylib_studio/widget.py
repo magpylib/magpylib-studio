@@ -2091,12 +2091,22 @@ class SceneWidget(anywidget.AnyWidget):
                     scene = None  # drawn from the payload, or cut
                 else:
                     if source is None and seen is not None:
-                        now = (live._animated, live.field_lines, live.field_map)
-                        if now[0] is not seen[0] or now[1] != seen[1]:
+                        now = (
+                            live._animated,
+                            live.field_lines,
+                            live.field_map,
+                            live.field_regions,
+                        )
+                        if now[0] is not seen[0] or now[1:] != seen[1:]:
                             source = copy()
                     scene = (source or live).get_scene(frame=i)
                     if seen is None:
-                        seen = (live._animated, live.field_lines, live.field_map)
+                        seen = (
+                            live._animated,
+                            live.field_lines,
+                            live.field_map,
+                            live.field_regions,
+                        )
                     yield None
                 run.append(scene)
                 if limit is not None:

@@ -44,7 +44,7 @@ box, the opposite face staying put, ⌥ both.
 | 2     | map: `field_map` switch, host glue, texture from the flat grid                          | built          |
 | 3     | box: 6 grips, a plane sample for the map                                                | built          |
 | 4     | runs and saved pages honour a set region                                                | todo           |
-| 5     | decision record, changelog, guide, harness check, bundles                               | todo           |
+| 5     | decision record (0059 written), changelog, guide, harness check, bundles                | todo           |
 
 ## Known gaps until slice 4
 
@@ -73,6 +73,27 @@ box, the opposite face staying put, ⌥ both.
 - 2026-11-24: the colour bar spans what the pixels read; on the coil pair the
   map saturated everywhere but the middle. Alex: the bar spans what the map
   shows. With the map on, the sensor's levels widen to the map's 1st–99th
-  percentile of |B| (`map_levels`), and pixels, lines and map restretch with
-  it: coil pair 2.42–3.12 → 1.79–5.26 mT.
+  percentile of |B| (`map_levels`), and pixels, lines and map restretch with it:
+  coil pair 2.42–3.12 → 1.79–5.26 mT.
+- 2026-11-24: branch review. Fixed:
+  - a saved page dragged kept the old region and map plane;
+  - a run's last frame kept lines from before a map switch or region edit;
+  - a run export missed map and region changes made while it ran;
+  - a region beside a pose in one `apply_edits` went half through;
+  - a grid's kind was not redone when the pixels left the region's plane;
+  - white ink on box lines;
+  - the map's name.
+
+- 2026-11-24: Alex: "fix all".
+  - A set region keeps its field as the rule's grid does: in a gesture a grid
+    1.5 times the region, fixed in the world while it covers it; at rest a
+    step's room round it, slid on release.
+  - The map's plane does the same, and with the lines off it is all that is
+    computed.
+  - Code cites decision 0059 rather than this plan.
+
+  A sensor dragged past 1,000 still cuboids (`dragperf/drag.py` in the session
+  scratchpad): 390–700 → 50 ms a frame, 1–1.9 s → 0.2–0.45 s to let go. The
+  rule's grid alone: 45 ms.
+
 - Open: the pointer cursor over the outline did not show in the headless run.

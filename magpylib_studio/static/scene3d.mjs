@@ -1063,7 +1063,7 @@ export function createScene3d() {
   let gripPressed = false; // a press on a grip or a dot, which no pick may take
   const MOST_GRIPS = 6;
 
-  // A sensor's field region (docs/plans/field-region.md): the box its field
+  // A sensor's field region (docs/decisions.md#0059-a-sensors-field-region-and-map): the box its field
   // lines run in, as its item says -- set on the sensor, or the rule's -- by
   // sensor id; and the sensor whose region has the grips, picked by a click
   // on the region's outline, which shows while the sensor is selected. Its
@@ -4958,15 +4958,17 @@ export function createScene3d() {
       cssColor("--vscode-editor-background", "#1e1e1e"),
     ).getHexString();
     // Over the sensor's map the lines are one ink, which the map's colours
-    // would otherwise swallow: white, on the map rather than on the page.
-    const lut = item.map
-      ? [new THREE.Color("#ffffff")]
-      : item.lut.map(
-          (colour) =>
-            new THREE.Color(
-              legible(new THREE.Color(colour).getHexString(), paper),
-            ),
-        );
+    // would otherwise swallow: white, on the map rather than on the page --
+    // where the lines lie in the map's plane; lines through a box leave it.
+    const lut =
+      item.map && flat
+        ? [new THREE.Color("#ffffff")]
+        : item.lut.map(
+            (colour) =>
+              new THREE.Color(
+                legible(new THREE.Color(colour).getHexString(), paper),
+              ),
+          );
 
     // Everything below in grid units, along the grid's axes: a step of half a
     // cell, and positions turned back into the world only when written.
@@ -5337,7 +5339,7 @@ export function createScene3d() {
     return group;
   }
 
-  /** A sensor's field map (docs/plans/field-region.md): |field| on the plane
+  /** A sensor's field map (docs/decisions.md#0059-a-sensors-field-region-and-map): |field| on the plane
    *  of its lines' grid, coloured from its table -- the pixels', so the colour
    *  bar says what a colour is, and cuts it as it cuts theirs -- seen through
    *  inside a magnet and past a region set on the sensor. A box's grid is
@@ -7610,7 +7612,7 @@ void main() {
         ...item,
         kind: "fieldmap",
         part,
-        name: `${item.label ?? "Sensor"} field map`,
+        name: item.name.replace(/field lines$/, "field map"),
       },
     ];
   }

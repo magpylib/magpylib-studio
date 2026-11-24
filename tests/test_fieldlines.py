@@ -434,6 +434,10 @@ def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
     assert session.get_scene(frame=-1)["fieldlines"]
     run = view._saved()["run"]
     assert all(frame is None or frame["fieldlines"] for frame in run)
+    # a region set once the run's lines were drawn is the last frame's too
+    (item,) = last["fieldlines"]
+    session.set_field_region(item["object_id"], _widened(item, 1.5))
+    assert session.get_scene(frame=7)["fieldlines"][0]["region"]["set"]
 
     from magpylib_studio import threejs
 
@@ -766,7 +770,8 @@ def test_a_set_region_is_where_the_lines_run(tmp_path):
     assert len(session.get_history()["undo"]) == 1
     (item,) = session.get_scene()["fieldlines"]
     sides = item["step"] * (np.asarray(item["shape"]) - 1)
-    assert sides[0] >= item["region"]["size"][0] > sides[0] - item["step"]
+    # with a step's room on each side for a sensor let go a little way off
+    assert sides[0] >= item["region"]["size"][0] > sides[0] - 3 * item["step"]
 
     # turned and moved with the sensor
     session.apply_edits([{"objectId": "probe", "position": [0.003, 0, 0.002]}])
@@ -776,6 +781,15 @@ def test_a_set_region_is_where_the_lines_run(tmp_path):
         [0.003, 0, 0.002],
         atol=1e-12,
     )
+
+    # dragged alone: a region beside a pose is refused, and nothing changes
+    held = session.field_regions
+    mixed = [
+        {"objectId": "probe", "field_region": _widened(auto, 3)},
+        {"objectId": "probe", "position": [0, 0, 0]},
+    ]
+    assert not session.apply_edits(mixed)["ok"]
+    assert session.field_regions == held
 
     script = tmp_path / "scene.py"
     script.write_text(session.to_builder_script(), encoding="utf-8")
@@ -811,21 +825,48 @@ def test_pixels_outside_a_set_region_start_no_lines():
     assert len(xs) == 15 and np.abs(xs).max() <= 0.0125
 
 
-def test_a_region_at_rest_is_drawn_from_its_field_once(monkeypatch):
-    """The field over a set region is computed once at rest, and again only
-    when the region, the sensor or a source moves."""
+@pytest.mark.parametrize("drawn", ["lines", "map alone"])
+def test_a_region_keeps_its_field_as_the_rules_grid_does(monkeypatch, drawn):
+    """The field over a set region -- its lines', or with the lines off its
+    map's plane alone -- is computed once at rest, and again when the region
+    changes; its sensor dragged past still sources, once for the gesture;
+    let go a little way off, only where the grid slid onto."""
     widget = view()
     session = widget._session
     (auto,) = widget.payload["fieldlines"]
+    if drawn == "map alone":
+        session.set_field_map(True)
+        session.set_field_lines(False)
     session.set_field_region("probe", _widened(auto, 1.5))
-    session.get_scene()
+    (item,) = session.get_scene()["fieldlines"]
+    assert (item["shape"][2] == 1) or drawn == "lines"
     computed = []
     field = fieldlines.field
     monkeypatch.setattr(
-        fieldlines, "field", lambda *a, **k: computed.append(1) or field(*a, **k)
+        fieldlines,
+        "field",
+        lambda s, at, *a, **k: computed.append(len(at)) or field(s, at, *a, **k),
     )
     session.get_scene()
     assert not computed
+
+    start = np.array(session._objs["probe"].position)
+    widget._reply({"method": "begin_interaction"})
+    for k in range(1, 6):
+        edit = {
+            "objectId": "probe",
+            "position": (start + np.array([0.0003 * k, 0, 0])).tolist(),
+        }
+        widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+    assert len(computed) <= 2  # a grid for the gesture, and a look at its plane
+    computed.clear()
+    widget._reply({"method": "end_interaction"})
+    session.get_scene()
+    assert 0 < sum(computed) < fieldlines.REST_POINTS / 2
+
+    computed.clear()
     session.set_field_region("probe", _widened(auto, 2))
     session.get_scene()
     assert computed
@@ -845,25 +886,30 @@ def test_lines_alone_give_the_colour_bar_its_scale():
     assert lines["colour_scale"] == drawn["pixels"][0]["scale"]
 
 
-@pytest.mark.parametrize(("tilt", "plane"), [(0, "the grid"), (30, "a plane of its own")])
+@pytest.mark.parametrize(
+    ("tilt", "plane"), [(0, "the grid"), (30, "a plane of its own")]
+)
 def test_the_map_is_a_switch_of_its_own(tilt, plane):
     """The map is the document's switch, as the lines' is: one step to undo,
     each item saying what to draw, a legend row of its own. On a flat grid
-    it is drawn from the grid; a box's is sent a plane of its own."""
+    it is drawn from the grid; a box's is sent a plane of its own -- and
+    with the lines off, the plane is all that is computed."""
     widget = view(tilt=tilt)
     session = widget._session
     widget.field_map = True  # the map's row's eye
     assert session.doc["field_map"] is True
-    widget.field_lines = False
     (item,) = session.get_scene()["fieldlines"]
-    assert (item["lines"], item["map"]) == (False, True)
-    # what the map shows, for the colour bar to span with what the pixels read
-    low, high = item["map_levels"]
-    assert 0 < low < high
     if plane == "the grid":
         assert item["shape"][2] == 1 and "map_field" not in item
     else:
         assert item["shape"][2] > 1 and item["map_field"]["shape"][2] == 1
+    widget.field_lines = False
+    (item,) = session.get_scene()["fieldlines"]
+    assert (item["lines"], item["map"]) == (False, True)
+    assert item["shape"][2] == 1 and "map_field" not in item
+    # what the map shows, for the colour bar to span with what the pixels read
+    low, high = item["map_levels"]
+    assert 0 < low < high
     rows = [c["kind"] for n in widget.tree if n["id"] == "probe" for c in n["children"]]
     assert rows[-2:] == ["FieldLines", "FieldMap"]
     session.undo()

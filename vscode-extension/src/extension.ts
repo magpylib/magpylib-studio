@@ -2416,7 +2416,7 @@ interface Edit {
   orientation?: number[] | number[][];
   shape?: { attr: string; value: number | number[] | number[][] };
   polarization?: number[];
-  // a sensor's field region, its grips' (docs/plans/field-region.md); null
+  // a sensor's field region, its grips' (docs/decisions.md#0059-a-sensors-field-region-and-map); null
   // gives it back to the rule
   field_region?: { centre: number[]; axes: number[][]; size: number[] } | null;
 }

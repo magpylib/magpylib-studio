@@ -296,6 +296,51 @@ def grid_in(box, points, flat):
     }
 
 
+#: How much larger, side for side, than a set region the grid a gesture
+#: lays over it is: room for the region to move with its sensor, and to be
+#: resized, before another is laid -- the field of what stays computed once
+#: for it, as the rule's grid keeps it (`holds`).
+HELD_ROOM = 1.5
+
+
+def padded(box, by):
+    """`box` grown `by` times on every side, about its centre."""
+    return {**box, "size": np.asarray(box["size"], dtype=float) * by}
+
+
+def rimmed(box, points, flat):
+    """`grid_in`'s grid over `box`, with a step's room past it on every side
+    it spans: a sensor let go a little way off still has the box on it, slid
+    by whole steps (`slide`)."""
+    step = grid_in(box, points, flat)["step"]
+    size = np.asarray(box["size"], dtype=float) + 2 * step
+    if flat:
+        size[2] = box["size"][2]
+    return grid_in({**box, "size": size}, points, flat)
+
+
+def corners(box, flat):
+    """`box`'s corners in the world: its rectangle's four, if `flat`."""
+    signs = np.array([(i, j, k) for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)])
+    if flat:
+        signs = signs[signs[:, 2] < 0] * [1, 1, 0]
+    size = np.asarray(box["size"], dtype=float)
+    return np.asarray(box["centre"], dtype=float) + (signs * size / 2) @ box["axes"]
+
+
+def serves(grid, box):
+    """Whether `grid` still serves a set region standing at `box`: it
+    covers it -- in its plane, a flat one -- and is not so much larger
+    that its lines are coarser than a grid of its own would draw them."""
+    flat = is_flat(grid)
+    if not holds(grid, corners(box, flat), margin=-1e-9):
+        return False
+    sides = grid["step"] * (np.asarray(grid["shape"], dtype=float) - 1)
+    spans = 2 if flat else 3
+    largest = float(np.asarray(box["size"], dtype=float)[:spans].max())
+    return float(sides[:spans].max()) <= HELD_ROOM**2 * largest
+
+
 def within_box(box, points, flat):
     """Which of `points` lie in `box` -- in its rectangle, for a flat one."""
     local = (np.asarray(points, dtype=float) - box["centre"]) @ box["axes"].T

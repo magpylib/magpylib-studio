@@ -67,6 +67,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
 | [0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)                         | The host glue is the package's, and a changed view is said   | accepted 2026-11-08                                                  |
 | [0058](#0058-a-scene-file-opens-in-jupyterlab-as-a-tab)                                        | A scene file opens in JupyterLab as a tab                    | accepted 2026-11-08                                                  |
+| [0059](#0059-a-sensors-field-region-and-map)                                                   | A sensor's field region and map                              | accepted 2026-11-23                                                  |
 | [0060](#0060-an-old-h_ext-opens-as-a-uniform-field)                                            | An old H_ext opens as a uniform field                        | accepted 2026-11-24                                                  |
 
 ---
@@ -3139,6 +3140,71 @@ autosave.
   stays the studio.
 - Not in the tab: the script tab, the several-scenes side bar, the field and
   history views, which are the VS Code shell's.
+
+## 0059. A sensor's field region and map
+
+**Status:** accepted 2026-11-23, on Alex's word ("ok review the plan an go"),
+after a mockup of grips on the region and a map beside the lines; the colour
+bar's span settled 2026-11-24 ("Yes").
+
+### Context
+
+A sensor's field lines ran on a grid the engine laid round its pixels
+(`grid_around`), and nothing let the reach be changed: a Helmholtz pair's lines
+kept to the pixels between the coils. Where the field is spread over a plane, a
+map of |field| shows it better than lines.
+
+### Decision
+
+- **One region per sensor that reads B or H**: a rectangle in its plane where
+  its lines keep to it, else a box. Unset, it is the rule's grid, unchanged byte
+  for byte, so scenes, runs and saved pages draw as they did.
+- **Set by face grips, as a Cuboid is resized** (`GRIPS.free`): 6 in a box, 4
+  flat (`GRIPS.rect`), the opposite face staying put, ⌥ both. The region's
+  dashed outline shows with the sensor picked; a click on it shows the grips,
+  Esc or a click elsewhere lets go. R still spreads the sensor's pixels.
+- **Kept in the sensor's own frame**, in the document (`field_regions`), so it
+  turns and moves with the sensor and is saved with the scene. A drag is an
+  `apply_edits` edit `{objectId, field_region}`, alone in its call, one step to
+  undo, relayed by every host as any drag is; `field_region: null` gives the
+  sensor back to the rule.
+- **The grid covers the region, with the points it had** (`REST_POINTS`,
+  `DRAG_POINTS`): a bigger region is coarser, a frame costs what it did. The
+  item carries the region's box; lines stop at it, and a set region is seeded
+  through, middle first, to a thousandth of the field at the pixels.
+- **Its field is kept as the rule's is.** At rest, a step's room round the
+  region lets a sensor let go a little way off slide its grid by whole steps and
+  compute only where it is new. In a gesture the grid is `HELD_ROOM` times the
+  region and fixed in the world while it covers it: the field of what stays is
+  computed once. A sensor dragged past 1,000 still cuboids: 390–700 → 50 ms a
+  frame, 1–1.9 s → 0.2–0.45 s to let go.
+- **The map is a switch of its own** (`field_map`), beside the lines'
+  ([0032](#0032-field-lines-are-switched-in-the-scenes-document)): lines, map,
+  both or neither, each a legend row under the sensor. It is drawn from the
+  lines' grid where that is flat, else from a plane the engine samples for it --
+  the region's own, or the rule's flat grid; with the lines off, the plane is
+  all that is computed, and the region shows 4 grips. Coloured by the sensor's
+  own table; lines lying on it are white.
+- **The colour bar spans what is drawn**: with the pixels at size 0 the lines
+  carry the pixels' table and levels (`colour_scale`); with the map on, the
+  levels widen to its 1st–99th percentile of |field| (`map_levels`), so pixels,
+  lines and map share one scale, and the field at a magnet's edge does not
+  squeeze the rest of the map into one colour.
+
+### Rejected
+
+- **Corner grips**: a face grip moves one side, as a Cuboid's does; a corner of
+  a rotated box moves three, and of a flat one leaves its depth unsaid.
+- **A region in the world**: it would stay behind a dragged sensor.
+- **More points for a bigger region**: a frame's cost would follow a drag of a
+  grip.
+- **The map's levels alone**: the pixels and lines would read another scale than
+  the bar beside them.
+
+### Consequences
+
+- Runs and saved pages draw a set region with the rule's grid until slice 4 of
+  the plan; a saved page dragged lays the rule's grid.
 
 ## 0060. An old H_ext opens as a uniform field
 
