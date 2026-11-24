@@ -2413,6 +2413,9 @@ interface Edit {
   orientation?: number[] | number[][];
   shape?: { attr: string; value: number | number[] | number[][] };
   polarization?: number[];
+  // a sensor's field region, its grips' (docs/plans/field-region.md); null
+  // gives it back to the rule
+  field_region?: { centre: number[]; axes: number[][]; size: number[] } | null;
 }
 
 async function transformFromPanel(

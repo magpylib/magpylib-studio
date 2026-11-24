@@ -968,13 +968,16 @@ class SceneWidget(anywidget.AnyWidget):
             # objects selected
             "set_overlap_intended",
             "get_gap",
+            # a sensor's field region: its ↺ in the object panel
+            "get_field_region",
+            "set_field_region",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
     _SETTLES = frozenset({"end_interaction", "undo", "redo"})
     #: The object panel's writes: settled each, as `set` from code is.
     _OBJECT_EDITS = frozenset(
-        {"set_param", "set_transform", "apply_edit", "reset_style"}
+        {"set_param", "set_transform", "apply_edit", "reset_style", "set_field_region"}
     )
     #: The calls that edit a variable: settled too, unless the message says
     #: the value is a preview -- the pointer still on the slider -- in which

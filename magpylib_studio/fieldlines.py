@@ -188,6 +188,7 @@ def grid_around(sources, seeds, points, flat=None, every_step=False):
     low, high = local.min(axis=0), local.max(axis=0)
     pad = 0.25 * float(np.max(high - low)) or 0.01
     low, high = low - pad, high + pad
+    depth = float(high[2] - low[2])  # across the plane, as a box would have it
     if planar:
         low[2] = high[2] = 0.0  # the plane through the seeds
         span = (high - low)[:2]
@@ -197,12 +198,112 @@ def grid_around(sources, seeds, points, flat=None, every_step=False):
         span = high - low
         step = float((np.prod(span) / points) ** (1 / 3))
         shape = list(np.maximum(np.ceil(span / step).astype(int) + 1, 2))
-    return {
+    grid = {
         "origin": centre + low @ axes,
         "axes": axes,
         "step": step,
         "shape": [int(n) for n in shape],
     }
+    if planar:
+        grid["depth"] = depth
+    return grid
+
+
+def pose_of(sensor):
+    """Where `sensor` is and how it is turned, at the last step of its path."""
+    pose = np.atleast_2d(np.asarray(sensor.position, dtype=float))[-1]
+    turn = Rotation.from_quat(np.atleast_2d(sensor.orientation.as_quat()))[-1]
+    return pose, turn
+
+
+def box_of(grid):
+    """The region `grid` covers, as a box in the world: its centre, its axes
+    as rows and its sides. A flat grid's box is as deep as `grid_around`
+    padded it across its plane, so that a region taken from it has room to
+    run in 3D should the field leave the plane."""
+    sides = grid["step"] * (np.asarray(grid["shape"], dtype=float) - 1)
+    axes = np.asarray(grid["axes"], dtype=float)
+    centre = np.asarray(grid["origin"], dtype=float) + (sides / 2) @ axes
+    if is_flat(grid):
+        sides[2] = float(grid.get("depth", 0.0))
+    return {"centre": centre, "axes": axes, "size": sides}
+
+
+def region_in_world(sensor, region):
+    """`region`, set in `sensor`'s own frame -- ``{"centre", "axes",
+    "size"}``, axes as rows -- as a box in the world, where the sensor is."""
+    pose, turn = pose_of(sensor)
+    return {
+        "centre": turn.apply(np.asarray(region["centre"], dtype=float)) + pose,
+        "axes": turn.apply(np.asarray(region["axes"], dtype=float)),
+        "size": np.abs(np.asarray(region["size"], dtype=float)),
+    }
+
+
+def region_of(sensor, box):
+    """A box in the world as a region in `sensor`'s own frame, for the
+    document to keep: it turns and moves with the sensor from then on. The
+    axes made a right-handed orthonormal set, as a view's drag may round
+    them."""
+    axes = np.asarray(box["axes"], dtype=float).reshape(3, 3)
+    u, _, vt = np.linalg.svd(axes)
+    axes = u @ vt
+    if np.linalg.det(axes) < 0:
+        axes[2] = -axes[2]
+    pose, turn = pose_of(sensor)
+    centre = turn.inv().apply(np.asarray(box["centre"], dtype=float) - pose)
+    local = turn.inv().apply(axes)
+    size = np.abs(np.asarray(box["size"], dtype=float))
+    return {
+        "centre": [round(float(v), 12) for v in centre],
+        "axes": [[round(float(v), 12) for v in row] for row in local],
+        "size": [round(float(v), 12) for v in size],
+    }
+
+
+def in_plane_of(box, seeds):
+    """Whether `seeds` lie in the plane of `box`'s first two axes, through
+    its centre: a region's lines may keep to it."""
+    across = (np.asarray(seeds, dtype=float) - box["centre"]) @ box["axes"][2]
+    return float(np.max(np.abs(across))) <= 1e-6 * max(float(box["size"].max()), 1e-9)
+
+
+def grid_in(box, points, flat):
+    """A grid over `box`, about `points` evenly spaced points, centred on
+    it and covering it: one step on every axis, as a grid has, so its last
+    row may stand a little past the box. In the plane of its first two axes
+    if `flat`, else through it; a box with no depth is given a quarter of
+    its largest side."""
+    size = np.asarray(box["size"], dtype=float).copy()
+    axes = np.asarray(box["axes"], dtype=float)
+    largest = max(float(size.max()), 1e-9)
+    size = np.maximum(size, 1e-3 * largest)
+    if flat:
+        span = size[:2]
+        step = float(np.sqrt(np.prod(span) / points))
+        shape = [*np.maximum(np.ceil(span / step - 1e-9).astype(int) + 1, 2), 1]
+    else:
+        if size[2] <= 1e-3 * largest * (1 + 1e-9):
+            size[2] = 0.25 * largest
+        step = float((np.prod(size) / points) ** (1 / 3))
+        shape = list(np.maximum(np.ceil(size / step - 1e-9).astype(int) + 1, 2))
+    covered = step * (np.asarray(shape, dtype=float) - 1)
+    return {
+        "origin": np.asarray(box["centre"], dtype=float) - (covered / 2) @ axes,
+        "axes": axes,
+        "step": step,
+        "shape": [int(n) for n in shape],
+    }
+
+
+def within_box(box, points, flat):
+    """Which of `points` lie in `box` -- in its rectangle, for a flat one."""
+    local = (np.asarray(points, dtype=float) - box["centre"]) @ box["axes"].T
+    half = box["size"] / 2 * (1 + 1e-9) + 1e-12
+    keep = (np.abs(local[:, 0]) <= half[0]) & (np.abs(local[:, 1]) <= half[1])
+    if not flat:
+        keep &= np.abs(local[:, 2]) <= half[2]
+    return keep
 
 
 #: How far inside a kept grid its seeds must stay, as a share of its
@@ -1227,22 +1328,34 @@ def encoded_field(grid, values, within):
     }
 
 
-def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
+def item(sensor, key, grid, values, within, seeds, readings, encoded=None, region=None):
     """The ``fieldlines`` item for `sensor`, drawn on its node as its lines'
     part (`threejs.PARTS`): the grid and the field on it (`encoded_field`,
     or `encoded` where that is in hand), the pixels to start from, nearest
     the middle first, how far apart to keep the lines, and the colours
-    their |field| takes (`colours`)."""
+    their |field| takes (`colours`).
+
+    And the region the lines run in (`region_payload`): `region`, the box a
+    region set on the sensor makes, whose lines stop at it and whose pixels
+    outside it start none -- else the grid's own, which the rule laid."""
     from magpylib_studio.threejs import part_id
 
     lut, levels = colours(sensor, readings)
+    box = box_of(grid) if region is None else region
+    apart = spacing_of(seeds, grid)  # all the pixels', those left out too
+    if region is not None:
+        seeds = seeds[within_box(region, seeds, is_flat(grid))]
+        if not len(seeds):
+            seeds = np.empty((0, 3))
     # nearest first, equals in the pixels' order: a grid of pixels is all
     # ties, which numpy's default sort leaves in any order, and a saved page
     # dragging the sensor orders them again (#176) -- to a picometre, so
     # rounding does not part them
-    away = np.rint(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1) * 1e12)
-    order = np.argsort(away, kind="stable")
-    starts = seeds[order][:MAX_SEEDS]
+    if len(seeds):
+        away = np.rint(np.linalg.norm(seeds - seeds.mean(axis=0), axis=1) * 1e12)
+        starts = seeds[np.argsort(away, kind="stable")][:MAX_SEEDS]
+    else:
+        starts = seeds
     return {
         "kind": "fieldlines",
         "object_id": key,
@@ -1251,7 +1364,43 @@ def item(sensor, key, grid, values, within, seeds, readings, encoded=None):
         "name": f"{sensor.style.label or 'Sensor'} field lines",
         **(encoded or encoded_field(grid, values, within)),
         "seeds": np.round(starts, 9).ravel().tolist(),
-        "spacing": spacing_of(seeds, grid),
+        "spacing": apart,
         "lut": lut,
         "levels": levels,
+        "region": region_payload(box, region is not None),
+        **_bar_of(sensor, lut, levels, readings),
+    }
+
+
+def _bar_of(sensor, lut, levels, readings):
+    """What the colour bar reads of the lines of a sensor whose pixels are
+    not drawn -- at ``style.pixel.size = 0``, the lines alone -- as it reads a
+    pixels item's ``scale``: the table, its levels, the field and the scaling,
+    and the sensor's name. The lines' table is the pixels' (`colours`), so the
+    bar is the one the arrows would have. None for one colour throughout."""
+    from magpylib_studio.threejs import _resolve
+
+    scaling = _resolve(sensor, "style.pixel.field.colorscaling")
+    if scaling == "uniform" or readings is None:
+        return {}
+    return {
+        "label": sensor.style.label or "Sensor",
+        "colour_scale": {
+            "lut": lut,
+            "levels": levels,
+            "source": _resolve(sensor, "style.pixel.field.source"),
+            "scaling": scaling,
+        },
+    }
+
+
+def region_payload(box, chosen):
+    """A region as an item carries it: its centre, its axes as nine numbers,
+    rows first, and its sides, in the world -- and whether it was `chosen`,
+    set on the sensor, or is the rule's."""
+    return {
+        "centre": np.round(np.asarray(box["centre"], dtype=float), 12).tolist(),
+        "axes": np.round(np.asarray(box["axes"], dtype=float), 12).ravel().tolist(),
+        "size": np.round(np.asarray(box["size"], dtype=float), 12).tolist(),
+        "set": bool(chosen),
     }

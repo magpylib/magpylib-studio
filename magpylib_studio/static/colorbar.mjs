@@ -223,8 +223,9 @@ export function createColorBar(container, { onRange, onShare }) {
    *  chose, else the selected one if that is one, else the first -- its
    *  table drawn as the bar, it and its field named. Not one hidden, nor
    *  one whose pixels are hidden and whose lines are too, or not drawn:
-   *  nothing on screen is in its colours. None while the widget says the
-   *  bar steps `aside`. */
+   *  nothing on screen is in its colours. A sensor drawn as its lines
+   *  alone is shown by them. None while the widget says the bar steps
+   *  `aside`. */
   function update(args) {
     asked = args;
     // a drag holds the bar it began with; what came meanwhile, at its end
@@ -256,6 +257,18 @@ export function createColorBar(container, { onRange, onShare }) {
             }
           : each,
       );
+    }
+    // a sensor whose pixels are not drawn -- the lines alone, at size 0 --
+    // by its lines, coloured from the same table
+    for (const each of payload?.fieldlines ?? []) {
+      const id = each.object_id;
+      if (!each.colour_scale || sensors.has(id)) continue;
+      if (off.has(id) || off.has(`${id}/lines`)) continue;
+      sensors.set(id, {
+        object_id: id,
+        name: each.label,
+        scale: each.colour_scale,
+      });
     }
     const scaled = [...sensors.values()];
     const picked = (selected ?? []).join();

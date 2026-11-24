@@ -13,6 +13,7 @@ const MUTATING = new Set([
   'clear_path',
   'set_param',
   'edit_event',
+  'set_field_region',
 ]);
 
 /**

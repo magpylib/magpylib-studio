@@ -729,3 +729,117 @@ def test_the_views_export_makes_a_page_editable_or_not(editable, monkeypatch):
         view._on_message(view, {"kind": "export-more", "job": 1}, None)
     page = sent[-1]["html"]
     assert ('id="magpy-kernels"></script>' not in page) is editable
+
+
+def _widened(item, times):
+    """`item`'s region as a view's grips send it, `times` as wide."""
+    region = item["region"]
+    size = list(region["size"])
+    size[0] *= times
+    return {
+        "centre": region["centre"],
+        "axes": np.reshape(region["axes"], (3, 3)).tolist(),
+        "size": size,
+    }
+
+
+def test_a_set_region_is_where_the_lines_run(tmp_path):
+    """A region dragged out is one step to undo, the grid laid over it; it
+    turns and moves with its sensor, survives the script tab, and goes with
+    the sensor. Given back to the rule, the grid is the rule's again."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    assert auto["region"]["set"] is False
+    widget._reply({"method": "begin_interaction"})
+    for times in (1.2, 1.5):
+        edit = {"objectId": "probe", "field_region": _widened(auto, times)}
+        answer, _, _ = widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+        (item,) = answer["result"]["scene"]["fieldlines"]
+        assert item["region"]["set"] is True
+        assert item["region"]["size"][0] == pytest.approx(
+            auto["region"]["size"][0] * times
+        )
+    widget._reply({"method": "end_interaction"})
+    assert len(session.get_history()["undo"]) == 1
+    (item,) = session.get_scene()["fieldlines"]
+    sides = item["step"] * (np.asarray(item["shape"]) - 1)
+    assert sides[0] >= item["region"]["size"][0] > sides[0] - item["step"]
+
+    # turned and moved with the sensor
+    session.apply_edits([{"objectId": "probe", "position": [0.003, 0, 0.002]}])
+    (moved,) = session.get_scene()["fieldlines"]
+    np.testing.assert_allclose(
+        np.subtract(moved["region"]["centre"], item["region"]["centre"]),
+        [0.003, 0, 0.002],
+        atol=1e-12,
+    )
+
+    script = tmp_path / "scene.py"
+    script.write_text(session.to_builder_script(), encoding="utf-8")
+    assert session.apply_builder_script(str(script))["ok"]
+    assert "probe" in session.field_regions
+
+    assert session.set_field_region("probe", None)["ok"]
+    assert session.undo()["ok"]
+    assert rpc.handle(
+        session,
+        {"method": "set_field_region", "params": {"object_id": "probe"}},
+    )["result"]["ok"]
+    session.apply_edits([{"objectId": "probe", "position": [0, 0, 0]}])
+    (back,) = session.get_scene()["fieldlines"]
+    assert back["region"]["set"] is False
+    assert back["origin"] == auto["origin"] and back["shape"] == auto["shape"]
+
+    session.set_field_region("probe", _widened(auto, 1.5))
+    session.remove_object("probe")
+    assert session.field_regions == {}
+
+
+def test_pixels_outside_a_set_region_start_no_lines():
+    """A region narrower than the pixels: those outside it start none."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    region = _widened(auto, 1)
+    region["size"][0] = 0.025  # the middle three columns of five, 10 mm apart
+    session.set_field_region("probe", region)
+    (item,) = session.get_scene()["fieldlines"]
+    xs = np.reshape(item["seeds"], (-1, 3))[:, 0]
+    assert len(xs) == 15 and np.abs(xs).max() <= 0.0125
+
+
+def test_a_region_at_rest_is_drawn_from_its_field_once(monkeypatch):
+    """The field over a set region is computed once at rest, and again only
+    when the region, the sensor or a source moves."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    session.set_field_region("probe", _widened(auto, 1.5))
+    session.get_scene()
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines, "field", lambda *a, **k: computed.append(1) or field(*a, **k)
+    )
+    session.get_scene()
+    assert not computed
+    session.set_field_region("probe", _widened(auto, 2))
+    session.get_scene()
+    assert computed
+
+
+def test_lines_alone_give_the_colour_bar_its_scale():
+    """At ``style.pixel.size = 0`` no pixels are drawn: the lines carry what
+    the colour bar would read off them, the pixels' own table and levels."""
+    drawn = view().payload
+    widget = view()
+    widget._session.apply_edit("probe", "pixel.size", 0)
+    widget._show({"by": "edit"})
+    alone = widget.payload
+    assert not [p for p in alone.get("pixels", []) if p["object_id"] == "probe"]
+    (lines,) = alone["fieldlines"]
+    assert lines["label"] == "probe"
+    assert lines["colour_scale"] == drawn["pixels"][0]["scale"]
