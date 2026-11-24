@@ -300,9 +300,10 @@ def test_an_older_package_is_said(monkeypatch):
 CUBE = {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]}
 
 
-def _old_document(values, beside=False, version=3):
+def _old_document(values, beside=False, version=3, removed=False):
     """A document an older studio wrote: a cube for each of `values`, its
-    `H_ext` on its create step, or on its spec before there were steps."""
+    `H_ext` on its create step, or on its spec before there were steps; the
+    last cube `removed` after."""
     specs = [
         {"type": "magnet.Cuboid", "params": {**CUBE, "position": [i, 0, 0]}}
         for i in range(len(values))
@@ -318,6 +319,9 @@ def _old_document(values, beside=False, version=3):
         {"id": f"e{i + 1}", "op": "create", "target": f"cube{i}", **spec}
         for i, spec in enumerate(specs)
     ]
+    if removed:
+        last = events[-1]["target"]
+        events.append({"id": "gone", "op": "remove", "target": last})
     return {"version": version, "events": events}
 
 
@@ -329,8 +333,9 @@ def _old_document(values, beside=False, version=3):
         (_old_document([[0, 0, 0]]), [], None),
         (_old_document([[0, 0, 0.1], [0, 0.2, 0]]), [], "differ by part"),
         (_old_document([[0, 0, 0.1]], beside=True), [[0, 0, 0.1]], "count twice"),
+        (_old_document([[0, 0, 0.1], [0, 0.2, 0]], removed=True), [[0, 0, 0.1]], None),
     ],
-    ids=["the same", "before steps", "zero", "differing", "beside a field"],
+    ids=["the same", "before steps", "zero", "differing", "beside a field", "removed"],
 )
 def test_an_old_h_ext_opens_as_a_field_or_is_said(doc, fields, said):
     """magpylib-material-response 0.15 has no `H_ext`: an old document's is one

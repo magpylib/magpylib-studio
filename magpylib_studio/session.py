@@ -1683,15 +1683,34 @@ def _applied_field_as_source(doc):
     sets one sets the same and the scene holds no field already, which would
     count twice. Otherwise it is left out, and the warning returned names what
     each part set, to put back by hand. A field of zero did nothing, and goes
-    unsaid.
+    unsaid, as does the field of a part removed since, or of what held it: its
+    create step stays in the log, and its field went with it.
     """
     events = doc.get("events") or []
     creates = [e for e in events if e.get("op") == "create"]
+    held = {}
+    for e in creates:
+        if e.get("parent") is not None:
+            held.setdefault(e["parent"], []).append(e["target"])
+        held.setdefault(e["target"], []).extend(e.get("children") or [])
+    gone = [e["target"] for e in events if e.get("op") == "remove"]
+    removed = set()
+    while gone:
+        target = gone.pop()
+        if target not in removed:
+            removed.add(target)
+            gone.extend(held.get(target, ()))
     given = {e["target"]: e.pop("H_ext", None) for e in creates}
-    given = {target: value for target, value in given.items() if value and any(value)}
+    given = {
+        target: value
+        for target, value in given.items()
+        if value and any(value) and target not in removed
+    }
     if not given:
         return []
-    beside = any(e.get("type") == "UniformField" for e in creates)
+    beside = any(
+        e.get("type") == "UniformField" and e["target"] not in removed for e in creates
+    )
     values = {tuple(value) for value in given.values()}
     if len(values) == 1 and not beside:
         last = max(i for i, e in enumerate(events) if e.get("op") == "create")
