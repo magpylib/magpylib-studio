@@ -1394,6 +1394,47 @@ def _bar_of(sensor, lut, levels, readings):
     }
 
 
+#: The share of a map's |field| its colours span from each end: past them,
+#: the end colour. The field next to a magnet's edge or a wire runs off to
+#: what one point of the map shows, and spanned whole it left the rest in
+#: the lowest colour.
+MAP_SPAN = (1, 99)
+
+
+def map_levels(item):
+    """The |field| a sensor's map shows, from the least to the most bar the
+    ends (`MAP_SPAN`): where it is drawn -- outside the magnets, inside a set
+    region -- on the plane it is drawn on: the item's grid where that is
+    flat, else the one sampled for it (`map_field`). None where it shows
+    nothing."""
+    plane = item if item["shape"][2] == 1 else item.get("map_field")
+    if plane is None:
+        return None
+    values = np.frombuffer(base64.b64decode(plane["values"]), dtype="<i2")
+    size = np.linalg.norm(values.reshape(-1, 3) * plane["scale"], axis=1)
+    bits = np.frombuffer(base64.b64decode(plane["inside"]), dtype=np.uint8)
+    inside = np.unpackbits(bits, bitorder="little")[: len(size)].astype(bool)
+    keep = ~inside & np.isfinite(size) & (size > 0)
+    region = item.get("region") or {}
+    if region.get("set"):
+        grid = {
+            "origin": np.asarray(plane["origin"], dtype=float),
+            "axes": np.reshape(plane["axes"], (3, 3)),
+            "step": plane["step"],
+            "shape": plane["shape"],
+        }
+        box = {
+            "centre": np.asarray(region["centre"], dtype=float),
+            "axes": np.reshape(region["axes"], (3, 3)),
+            "size": np.asarray(region["size"], dtype=float),
+        }
+        keep &= within_box(box, points_of(grid), flat=True)
+    if not keep.any():
+        return None
+    low, high = np.percentile(size[keep], MAP_SPAN)
+    return [float(low), float(max(high, low * (1 + 1e-9) + 1e-30))]
+
+
 def region_payload(box, chosen):
     """A region as an item carries it: its centre, its axes as nine numbers,
     rows first, and its sides, in the world -- and whether it was `chosen`,

@@ -70,7 +70,9 @@ box, the opposite face staying put, ⌥ both.
   region's own plane, else the rule's flat grid). Lines over a map are white.
   Checked in a headless JupyterLab on the two cubes, the tilted probe and the
   coil pair.
-- Open: the colour bar spans what the pixels read; on the coil pair the map
-  saturates everywhere but the middle. Asked Alex whether a map or a set region
-  should widen it.
+- 2026-11-24: the colour bar spans what the pixels read; on the coil pair the
+  map saturated everywhere but the middle. Alex: the bar spans what the map
+  shows. With the map on, the sensor's levels widen to the map's 1st–99th
+  percentile of |B| (`map_levels`), and pixels, lines and map restretch with
+  it: coil pair 2.42–3.12 → 1.79–5.26 mT.
 - Open: the pointer cursor over the outline did not show in the headless run.

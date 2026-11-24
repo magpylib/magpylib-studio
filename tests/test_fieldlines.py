@@ -857,6 +857,9 @@ def test_the_map_is_a_switch_of_its_own(tilt, plane):
     widget.field_lines = False
     (item,) = session.get_scene()["fieldlines"]
     assert (item["lines"], item["map"]) == (False, True)
+    # what the map shows, for the colour bar to span with what the pixels read
+    low, high = item["map_levels"]
+    assert 0 < low < high
     if plane == "the grid":
         assert item["shape"][2] == 1 and "map_field" not in item
     else:

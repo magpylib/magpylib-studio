@@ -275,6 +275,24 @@ export function createColorBar(container, { onRange, onShare }) {
         scale: each.colour_scale,
       });
     }
+    // A sensor's map drawn: its colours span what the map shows, and the
+    // pixels and lines with them, where the pixels' own would leave the map
+    // one colour past them (`map_levels`).
+    const widened = new Set();
+    for (const each of payload?.fieldlines ?? []) {
+      const known = sensors.get(each.object_id);
+      const shows = each.map_levels;
+      if (!known || !shows || !each.map || off.has(`${each.object_id}/map`)) {
+        continue;
+      }
+      const [low, high] = known.scale.levels;
+      const levels = [Math.min(low, shows[0]), Math.max(high, shows[1])];
+      sensors.set(each.object_id, {
+        ...known,
+        scale: { ...known.scale, levels },
+      });
+      widened.add(each.object_id);
+    }
     const scaled = [...sensors.values()];
     const picked = (selected ?? []).join();
     if (picked !== selectedWas) chosen = null; // the selection moved: it decides
@@ -294,7 +312,7 @@ export function createColorBar(container, { onRange, onShare }) {
       const theirs = reach(group);
       for (const each of group) {
         if (together) common[each.object_id] = theirs;
-        else if (copied.has(each.object_id))
+        else if (copied.has(each.object_id) || widened.has(each.object_id))
           common[each.object_id] = each.scale.levels;
       }
     }

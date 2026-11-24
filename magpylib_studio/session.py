@@ -4134,9 +4134,20 @@ class MagpylibStudioSession:
         return self._edit_unbuilt(mutate, "field map " + ("on" if on else "off"))
 
     def _switched(self, items):
-        """`items`, each saying what of it to draw: its lines, its map."""
+        """`items`, each saying what of it to draw: its lines, its map -- and
+        with the map, the |field| it shows (`fieldlines.map_levels`), which
+        the colour bar spans for it."""
+        from magpylib_studio import fieldlines
+
         lines, drawn = self.field_lines, self.field_map
-        return [{**item, "lines": lines, "map": drawn} for item in items]
+        out = []
+        for item in items:
+            item = {**item, "lines": lines, "map": drawn}
+            shows = fieldlines.map_levels(item) if drawn else None
+            if shows is not None:
+                item["map_levels"] = shows
+            out.append(item)
+        return out
 
     def set_field_lines(self, on=True):
         """Draw field lines through the pixels of each sensor that reads the
