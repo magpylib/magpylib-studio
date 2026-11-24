@@ -1602,14 +1602,19 @@ function render({ model, el }) {
 
   const stateOf = () => ({
     selected: model.get("selected") || [],
-    // the lines not drawn, while they are switched off, as hidden
+    // the lines not drawn, while they are switched off, as hidden -- on a
+    // saved page, which keeps no switches, as its items say they are drawn
     hidden: [
       ...(model.get("hidden") || []),
       ...(linesComputed()
         ? FIELD_SWITCHES.flatMap(({ key, part }) =>
             model.get(key) ? [] : switchedIn(legendTree(), part),
           )
-        : []),
+        : (model.get("payload")?.fieldlines ?? []).flatMap((item) =>
+            FIELD_SWITCHES.filter(({ part }) => item[part] === false).map(
+              ({ part }) => `${item.object_id}/${part}`,
+            ),
+          )),
     ],
     faded: model.get("faded") || {},
   });
