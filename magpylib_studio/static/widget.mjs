@@ -1600,24 +1600,27 @@ function render({ model, el }) {
   });
   placing.observe(el);
 
-  const stateOf = () => ({
-    selected: model.get("selected") || [],
-    // the lines not drawn, while they are switched off, as hidden -- on a
+  const stateOf = () => {
+    // the lines and maps not drawn, while they are switched off -- on a
     // saved page, which keeps no switches, as its items say they are drawn
-    hidden: [
-      ...(model.get("hidden") || []),
-      ...(linesComputed()
-        ? FIELD_SWITCHES.flatMap(({ key, part }) =>
-            model.get(key) ? [] : switchedIn(legendTree(), part),
-          )
-        : (model.get("payload")?.fieldlines ?? []).flatMap((item) =>
-            FIELD_SWITCHES.filter(({ part }) => item[part] === false).map(
-              ({ part }) => `${item.object_id}/${part}`,
-            ),
-          )),
-    ],
-    faded: model.get("faded") || {},
-  });
+    const off = linesComputed()
+      ? FIELD_SWITCHES.flatMap(({ key, part }) =>
+          model.get(key) ? [] : switchedIn(legendTree(), part),
+        )
+      : (model.get("payload")?.fieldlines ?? []).flatMap((item) =>
+          FIELD_SWITCHES.filter(({ part }) => item[part] === false).map(
+            ({ part }) => `${item.object_id}/${part}`,
+          ),
+        );
+    return {
+      selected: model.get("selected") || [],
+      // as hidden, for their eyes; and apart, for a folded sensor's not to
+      // say something in it is hidden while only a switch is off
+      hidden: [...(model.get("hidden") || []), ...off],
+      off,
+      faded: model.get("faded") || {},
+    };
+  };
 
   // The toggles say what is in force, the way the panel's do: pressed when
   // on, never an icon that flips to name the other state.

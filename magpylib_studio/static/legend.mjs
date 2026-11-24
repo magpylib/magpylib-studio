@@ -279,6 +279,9 @@ export function createLegend(
   let swatches = new Map();
   let selected = [];
   let hidden = new Set();
+  let off = new Set(); // the parts not drawn because their switch is off
+  let sensors = 0; // how many rows have parts beneath them
+  const badges = new Map(); // part id -> its icon on its folded sensor's row
   let faded = new Map(); // id -> the share of its opacity it is drawn at
   let anchor = null; // the row a shift-click ranges from
   let proposed = null; // the selection a click here last asked for
@@ -604,6 +607,26 @@ export function createLegend(
       count.textContent = `×${drawn}`;
       row.append(count);
     }
+    // A sensor folded: the field it draws -- lines, map -- as their icons,
+    // in their colours, to say so; to switch one, unfold to its row's eye.
+    const drawsField = node.children.filter(
+      (child) => child.kind === "FieldLines" || child.kind === "FieldMap",
+    );
+    if (drawsField.length) {
+      const icons = part("magpy-legend-badges");
+      for (const child of drawsField) {
+        const badge = part(
+          "magpy-legend-swatch magpy-legend-badge icon " +
+            `icon-${ICONS[child.kind]}`,
+          `${child.label}: drawn`,
+        );
+        const colour = swatches.get(child.id) ?? swatches.get(node.id);
+        if (colour) badge.style.background = colour;
+        badges.set(child.id, badge);
+        icons.append(badge);
+      }
+      row.append(icons);
+    }
     const warning = overlapMark(node);
     if (warning) row.append(warning);
     // A solve the scene has moved away from, with nothing to do it again:
@@ -674,7 +697,12 @@ export function createLegend(
     );
     if (!seen.has(path)) {
       seen.add(path);
-      if (node.children.length > FOLD_ABOVE || depthOf(path) >= foldDepth) {
+      if (
+        node.children.length > FOLD_ABOVE ||
+        depthOf(path) >= foldDepth ||
+        // a sensor among others: its row says what it draws (`badges`)
+        (sensors > 1 && node.children.some(isPart))
+      ) {
         folded.add(path);
       }
     }
@@ -943,8 +971,10 @@ export function createLegend(
     );
     labels = new Map(order.map((node) => [node.id, node.label]));
     if (!order.some((node) => node.id === anchor)) anchor = null;
+    sensors = order.filter((node) => node.children.some(isPart)).length;
     rows.clear();
     eyes.clear();
+    badges.clear();
     folds.clear();
     container.replaceChildren(overlapHeader());
     tree.forEach((node, i) => addRow(node, String(i), container));
@@ -955,6 +985,7 @@ export function createLegend(
   function sync(state) {
     selected = state.selected;
     hidden = new Set(state.hidden);
+    off = new Set(state.off ?? []);
     faded = new Map(Object.entries(state.faded ?? {}));
     paint();
     measure();
@@ -1000,7 +1031,11 @@ export function createLegend(
     const chosen = new Set(drawnOf(selected));
     for (const node of order) {
       const mine = leaves.get(node.id);
-      const seen = shows.get(node.id);
+      // a part switched off is not drawn, not hidden: a sensor's eye says
+      // what the user hid of the rest
+      const seen = isPart(node)
+        ? shows.get(node.id)
+        : shows.get(node.id).filter((id) => !off.has(id));
       const row = rows.get(node.id);
       const picked = mine.filter((id) => chosen.has(id)).length;
       const gone = seen.filter((id) => hidden.has(id)).length;
@@ -1016,6 +1051,7 @@ export function createLegend(
       row.classList.toggle("faded", level < 1);
       eyes.get(node.id).style.setProperty("--fade", String(level));
     }
+    for (const [id, badge] of badges) badge.hidden = hidden.has(id);
   }
 
   /** Fold every collection `depth` levels down or deeper -- 0 is the top --

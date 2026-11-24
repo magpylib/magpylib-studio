@@ -1365,6 +1365,27 @@
   background: var(--vscode-focusBorder);
 }
 
+/* What a folded sensor draws of the field: its lines' and map's icons, small,
+   in their colours. Open, its rows say it. */
+.magpy-legend-badges {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding-left: 6px;
+}
+
+.magpy-legend-swatch.magpy-legend-badge {
+  width: 11px;
+  height: 11px;
+  -webkit-mask-size: 11px;
+  mask-size: 11px;
+}
+
+.magpy-legend-badge[hidden],
+.magpy-legend-row:not(.folded) > .magpy-legend-badges {
+  display: none;
+}
+
 /* How many things a collection holds -- what folding it hides -- kept to the
    right edge so the counts line up. */
 .magpy-legend-count {
