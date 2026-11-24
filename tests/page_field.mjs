@@ -11,10 +11,16 @@ import {
   fieldAt,
   frameOf,
   gridAround,
+  gridIn,
   holds,
+  inPlaneOf,
   insideAt,
+  mapLevels,
   pointsOf,
   prepared,
+  regionInWorld,
+  regionOf,
+  rimmed,
   seedsAt,
   slide,
 } from "../magpylib_studio/static/pagefield.mjs";
@@ -30,6 +36,24 @@ if (kernels.api_version() !== KERNELS_API) {
   );
 }
 const asked = JSON.parse(readFileSync(casesPath, "utf8"));
+if (asked.regions) {
+  // a set region where a pose puts its sensor, the grids laid over it, and
+  // what a map drawn on a plane shows
+  const answers = asked.regions.map(({ region, pose, seeds, points, item }) => {
+    const box = regionInWorld(region, pose);
+    return {
+      box,
+      back: regionOf(box, pose),
+      flat: gridIn(box, points, true),
+      deep: gridIn(box, points, false),
+      rimmed: rimmed(box, points, true),
+      inPlane: inPlaneOf(box, seeds),
+      levels: mapLevels(item),
+    };
+  });
+  writeFileSync(answersPath, JSON.stringify(answers));
+  process.exit(0);
+}
 if (asked.fields) {
   // the field alone: each scene's sources at `points`, as `kind`, at each
   // tolerance -- and which of the points are inside a body

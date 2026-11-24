@@ -3178,6 +3178,12 @@ map of |field| shows it better than lines.
   region and fixed in the world while it covers it: the field of what stays is
   computed once. A sensor dragged past 1,000 still cuboids: 390–700 → 50 ms a
   frame, 1–1.9 s → 0.2–0.45 s to let go.
+- **A map goes with its sensor.** The rule's grid stays in the world while a
+  sensor is dragged, its lines traced from the pixels wherever they are; a map
+  is the grid itself, so under a map the grid slides with the sensor by whole
+  steps, the field computed only on the strip it moves onto: 88 ms a frame for
+  the case above. The outline hangs on the sensor's node, carried with it
+  between the engine's frames as its lines are.
 - **The map is a switch of its own** (`field_map`), beside the lines'
   ([0032](#0032-field-lines-are-switched-in-the-scenes-document)): lines, map,
   both or neither, each a legend row under the sensor. It is drawn from the
@@ -3187,9 +3193,11 @@ map of |field| shows it better than lines.
   own table; lines lying on it are white.
 - **The colour bar spans what is drawn**: with the pixels at size 0 the lines
   carry the pixels' table and levels (`colour_scale`); with the map on, the
-  levels widen to its 1st–99th percentile of |field| (`map_levels`), so pixels,
-  lines and map share one scale, and the field at a magnet's edge does not
-  squeeze the rest of the map into one colour.
+  levels are its 1st–99th percentile of |field| (`map_levels`), and pixels and
+  lines take them, a pixel past them the end colour. The field at a magnet's
+  edge does not squeeze the rest of the map into one colour, nor do pixels
+  inside a core: on the U-core they read up to 277 mT, the map 0.25–13 mT, and a
+  bar spanning both left the map all its lowest colour.
 
 ### Rejected
 
@@ -3198,13 +3206,16 @@ map of |field| shows it better than lines.
 - **A region in the world**: it would stay behind a dragged sensor.
 - **More points for a bigger region**: a frame's cost would follow a drag of a
   grip.
-- **The map's levels alone**: the pixels and lines would read another scale than
-  the bar beside them.
+- **The pixels' levels and the map's together**: a pixel inside a core reads a
+  hundred times the air round it, and the map was one colour.
 
 ### Consequences
 
-- Runs and saved pages draw a set region with the rule's grid until slice 4 of
-  the plan; a saved page dragged lays the rule's grid.
+- A saved page lays a set region's grid and the map's plane itself
+  (`pagefield.mjs`, held to `fieldlines.py` by `tests/test_page_field.py`), and
+  its grips resize the region there, as its sensors are dragged there (#176).
+- A run's frames lay a set region's grid and the map's plane as the session does
+  (`_frame_field`).
 
 ## 0060. An old H_ext opens as a uniform field
 

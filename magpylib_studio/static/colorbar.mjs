@@ -275,21 +275,20 @@ export function createColorBar(container, { onRange, onShare }) {
         scale: each.colour_scale,
       });
     }
-    // A sensor's map drawn: its colours span what the map shows, and the
-    // pixels and lines with them, where the pixels' own would leave the map
-    // one colour past them (`map_levels`).
+    // A sensor's map drawn: its colours span what the map shows
+    // (`map_levels`), and the pixels and lines take them, a pixel past them
+    // the end colour. Not what the pixels read as well: one inside a core
+    // reads a hundred times the air round it, which left the map one colour.
     const widened = new Set();
     for (const each of payload?.fieldlines ?? []) {
       const known = sensors.get(each.object_id);
-      const shows = each.map_levels;
-      if (!known || !shows || !each.map || off.has(`${each.object_id}/map`)) {
+      const levels = each.map_levels;
+      if (!known || !levels || !each.map || off.has(`${each.object_id}/map`)) {
         continue;
       }
-      const [low, high] = known.scale.levels;
-      const levels = [Math.min(low, shows[0]), Math.max(high, shows[1])];
       sensors.set(each.object_id, {
         ...known,
-        scale: { ...known.scale, levels },
+        scale: { ...known.scale, levels: [...levels] },
       });
       widened.add(each.object_id);
     }

@@ -4935,7 +4935,13 @@ export function createScene3d() {
   function buildFieldLines(item) {
     const [nx, ny, nz] = item.shape;
     const flat = nz === 1;
-    if (item.region) fieldRegions.set(item.object_id, { ...item.region, flat });
+    if (item.region) {
+      fieldRegions.set(item.object_id, {
+        ...item.region,
+        flat,
+        objectId: item.object_id,
+      });
+    }
     if (item.lines === false) return new THREE.Group(); // the map alone
     const [ox, oy, oz] = item.origin;
     const axes = item.axes; // three rows: the grid's axes in the world
@@ -5857,14 +5863,36 @@ export function createScene3d() {
     return region && byObjectId.get(objectId)?.visible ? region : null;
   }
 
-  /** A region's frame: its centre, turned onto its axes. */
+  /** A region's frame in the world: its centre, turned onto its axes --
+   *  where its sensor's node stands now. The engine says where the region
+   *  was when it drew the item; a node the handles move goes on from there
+   *  before the next item comes, and the region with it, as the lines do. */
   function regionFrame(region) {
     const [a, b, c] = [0, 3, 6].map((k) =>
       new THREE.Vector3().fromArray(region.axes, k),
     );
-    return new THREE.Matrix4()
+    const frame = new THREE.Matrix4()
       .makeBasis(a, b, c)
       .setPosition(new THREE.Vector3().fromArray(region.centre));
+    const node = byObjectId.get(region.objectId);
+    if (!node || !region.at) return frame;
+    node.updateWorldMatrix(true, false);
+    return node.matrixWorld.clone().multiply(region.at).multiply(frame);
+  }
+
+  /** Tie each region just drawn to its sensor's node: from the node as it
+   *  stands to the region, `carried` where the handles hold the sensor
+   *  past where the engine drew it (`render`). */
+  function anchorRegions(carried) {
+    for (const [objectId, region] of fieldRegions) {
+      if (region.at) continue; // held, and not drawn again: tied already
+      const node = byObjectId.get(objectId);
+      if (!node) continue;
+      node.updateWorldMatrix(true, false);
+      region.at = node.matrixWorld.clone().invert();
+      const carry = carried.get(objectId);
+      if (carry) region.at.multiply(carry);
+    }
   }
 
   /** A region's edges in the world, as pairs of points: a rectangle's four
@@ -5920,8 +5948,10 @@ export function createScene3d() {
     line.computeLineDistances();
     line.raycast = () => {}; // picked by `nearRegion`, on the page
     line.renderOrder = 1;
-    scene.add(line);
-    return [{ on: scene, part: line }];
+    // on the sensor's node, so that a drag of the sensor takes it along
+    const node = byObjectId.get(selectedIds[0]);
+    node.attach(line);
+    return [{ on: node, part: line }];
   }
 
   /** Whether the pointer is within a few pixels of `region`'s outline. */
@@ -7662,6 +7692,7 @@ void main() {
       node.quaternion.identity(); // the geometry already holds the pose
       node.add(buildItem(item));
     }
+    anchorRegions(new Map());
     dressParts();
     placeCollections();
     // round the nodes just built, not the ones discarded
@@ -8010,6 +8041,7 @@ void main() {
         changing.push({ node, built, changes: item.changes });
       }
     }
+    anchorRegions(carried);
     dressParts();
     placeCollections();
 
@@ -9965,13 +9997,15 @@ void main() {
     canResize: (objectId) => Boolean(shapes[objectId]),
     // where the selected sensor's field region is on the page, in the
     // canvas's pixels, for a check to click: its edges' ends, and a point on
-    // each of its grips while it has them
+    // each of its grips while it has them, and its sensor's node
     regionOnPage: () => {
       const region = regionShown();
       if (!region) return null;
       grips.updateMatrixWorld(true);
       const held = gripped?.attr === REGION_ATTR ? gripObjects() : [];
+      const node = byObjectId.get(region.objectId);
       return {
+        at: onScreen(node.getWorldPosition(new THREE.Vector3())),
         picked: regionPicked,
         set: region.set,
         flat: region.flat,

@@ -221,6 +221,39 @@ def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch, seal
     assert computed  # a magnet moved
 
 
+@pytest.mark.parametrize("lines", [True, False])
+def test_a_map_goes_with_its_sensor_dragged(monkeypatch, lines):
+    """A map is its grid: a sensor dragged takes it along by whole steps --
+    the lines' flat grid, or with the lines off its plane of its own -- the
+    field of the magnets standing still computed only on the strip it moves
+    onto."""
+    widget = view()
+    widget._session.set_field_map(True)
+    widget._session.set_field_lines(lines)
+    widget._session.get_scene()
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines,
+        "field",
+        lambda s, at, *a, **k: computed.append(len(at)) or field(s, at, *a, **k),
+    )
+    widget._reply({"method": "begin_interaction"})
+    planes = []
+    for k in range(1, 5):
+        computed.clear()
+        edit = {"objectId": "probe", "position": [0.002 * k, 0, 0]}
+        answer, _, _ = widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+        (item,) = answer["result"]["scene"]["fieldlines"]
+        planes.append(item if item["shape"][2] == 1 else item["map_field"])
+        assert sum(computed) < np.prod(planes[-1]["shape"]) / 2
+    widget._reply({"method": "end_interaction"})
+    xs = [plane["origin"][0] for plane in planes]
+    assert xs == sorted(set(xs))
+
+
 def test_a_variable_only_a_sensor_follows_keeps_the_field(monkeypatch):
     """The field of the sources is kept across a change of a variable that
     only a sensor follows -- its pixels' density -- and computed again for
@@ -434,10 +467,17 @@ def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
     assert session.get_scene(frame=-1)["fieldlines"]
     run = view._saved()["run"]
     assert all(frame is None or frame["fieldlines"] for frame in run)
-    # a region set once the run's lines were drawn is the last frame's too
+    # a region set once the run's lines were drawn is every frame's, the
+    # map with it
     (item,) = last["fieldlines"]
     session.set_field_region(item["object_id"], _widened(item, 1.5))
-    assert session.get_scene(frame=7)["fieldlines"][0]["region"]["set"]
+    session.set_field_map(True)
+    sizes = []
+    for frame in (3, 7):
+        (each,) = session.get_scene(frame=frame)["fieldlines"]
+        assert each["region"]["set"] and each["map"] and each["map_levels"]
+        sizes.append(each["region"]["size"])
+    assert sizes[0] == sizes[1]
 
     from magpylib_studio import threejs
 

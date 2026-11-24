@@ -80,19 +80,32 @@ colour it is drawn, and the row itself to click: ⌘/ctrl adds, shift takes a
 range in tree order, a double click frames it. Press the eye and slide sideways
 to fade instead: left to look through it, right to bring it back. A click in the
 view goes through what is faded to what is behind it. A sensor whose pixels read
-the field is listed as its parts — its axes, its pixels and its field lines,
-each naming the field it shows — and hides each apart; the field lines' eye is
-their switch, `field_lines`. Such a sensor's colours have a colour bar down the
-right edge, beside the editing column, whose two handles cut the range they span
-— the colormap stretched over the cut, the field past it in the end colours —
-kept in `color_range` as `{id: [low, high]}`, in SI; a click on a value types
-one, a focused handle takes the arrow keys, and a picture of the view carries
-the bar; `color_shared` gives the sensors on one colormap one scale. It writes
-`selected`, `hidden` and `faded`, the traitlets a click in the view and a
-notebook cell write too; `faded` maps an id to the share of its opacity it is
-drawn at. It needs the objects, because the payload cannot say how they nest: it
-comes with `SceneWidget(...)` and `update()`, and with a bare `magpy.show()`
-only where magpylib hands its backends the objects (`Panel.objects`).
+the field is listed as its parts — its axes, its pixels, its field lines and its
+field map, each naming the field it shows — and hides each apart; the field
+lines' eye is their switch, `field_lines`, and the map's is `field_map`, a
+picture of |field| on the sensor's plane. Such a sensor's colours have a colour
+bar down the right edge, beside the editing column, whose two handles cut the
+range they span — the colormap stretched over the cut, the field past it in the
+end colours — kept in `color_range` as `{id: [low, high]}`, in SI; a click on a
+value types one, a focused handle takes the arrow keys, and a picture of the
+view carries the bar; `color_shared` gives the sensors on one colormap one
+scale. It writes `selected`, `hidden` and `faded`, the traitlets a click in the
+view and a notebook cell write too; `faded` maps an id to the share of its
+opacity it is drawn at. It needs the objects, because the payload cannot say how
+they nest: it comes with `SceneWidget(...)` and `update()`, and with a bare
+`magpy.show()` only where magpylib hands its backends the objects
+(`Panel.objects`).
+
+**A sensor's field region** is where its lines run and its map is drawn. With
+the sensor selected it shows dashed; a click on the dashes picks it and puts
+grips on its faces — four in the sensor's plane, six where the lines run in 3D —
+and a grip drags its face, the opposite one staying put, ⌥ both. Esc or a click
+elsewhere lets it go. The region turns and moves with the sensor, is saved with
+the scene, and a drag of it is one step to undo; ↺ beside "field region" in the
+object panel gives it back to the automatic one, round the pixels. With the map
+on, the colour bar spans what the map shows, its 1st to 99th percentile, and the
+pixels and lines take that range. A saved page resizes the region and drags the
+sensor too.
 
 What is selected, hidden, faded or folded survives `update()`: an object passed
 again keeps it, and a rebuilt one inherits it from whatever sat in its place in

@@ -43,14 +43,8 @@ box, the opposite face staying put, ⌥ both.
 | 1     | flat set region: outline, pick, 4 grips, edit, lines clipped, caches keyed, undo, saved | done (cc1c40e) |
 | 2     | map: `field_map` switch, host glue, texture from the flat grid                          | built          |
 | 3     | box: 6 grips, a plane sample for the map                                                | built          |
-| 4     | runs and saved pages honour a set region                                                | todo           |
-| 5     | decision record (0059 written), changelog, guide, harness check, bundles                | todo           |
-
-## Known gaps until slice 4
-
-- A saved page whose sensor has a set region draws it with the automatic rule
-  once the sensor is dragged on the page.
-- A run's frames use the automatic rule.
+| 4     | runs and saved pages honour a set region                                                | built          |
+| 5     | decision record (0059 written), changelog, guide, harness check, bundles                | built          |
 
 ## Log
 
@@ -96,4 +90,27 @@ box, the opposite face staying put, ⌥ both.
   scratchpad): 390–700 → 50 ms a frame, 1–1.9 s → 0.2–0.45 s to let go. The
   rule's grid alone: 45 ms.
 
-- Open: the pointer cursor over the outline did not show in the headless run.
+- 2026-11-24: Alex: with the map alone, the dashed outline lagged behind a
+  sensor dragged by its gizmo. Two causes: the outline was drawn in the world
+  from the engine's last item, and the rule's grid stays in the world during a
+  drag, so a map drawn from it stayed behind. Now the outline hangs on the
+  sensor's node, and under a map the rule's grid slides with the sensor by whole
+  steps (88 ms a frame past 1,000 cuboids, against 316 before the branch and 50
+  for a grid that stays). Checked in a headless JupyterLab: the outline follows
+  the gizmo to a pixel.
+- 2026-11-24: Alex, on an exported page: the map could not be seen, and the
+  grips resized nothing.
+  - The page dragged with code of its own that knew no region: a grip's edit
+    moved the sensor to where it stood, and a sensor dragged lost its region
+    and, on a grid in a box, its map. The page now lays a set region's grid, the
+    map's plane, and the map alone where the lines are off, as the session does;
+    the region travels with the page's sensor. Held to python by a parity test;
+    resized and dragged in headless Chrome.
+  - The map one colour: on the U-core, a sensor on the yoke has pixels in the
+    iron reading up to 277 mT, the map 0.25–13 mT, and the bar spanned both.
+    With the map on, the sensor's colours are now the map's span alone.
+- 2026-11-24: Alex: "finish what is open". A run's frames lay a set region's
+  grid and the map's plane (`_frame_field`), the map alone from its plane. The
+  pointer cursor over the outline works: the headless run sent its moves with
+  the left button held, which the view reads as an orbit. Changelog, guide and
+  architecture written. The plan is built; it goes once Alex says so.

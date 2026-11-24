@@ -979,7 +979,7 @@ SEGMENTS_PER_RING = 2
 SEGMENTS_PER_CYLINDER = 7
 
 
-def page_field_why(sources, sensors, computes=PAGE_KERNELS):
+def page_field_why(sources, sensors, computes=PAGE_KERNELS, regions=None):
     """What a saved page needs to draw `sensors`' lines again where they are
     dragged, with no python behind it (#176): the sources at their last
     step, each in its own frame as the compiled kernels take it -- a
@@ -989,7 +989,9 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
     own frame, and the rules `_field_lines` draws by. `sensors` are
     ``{key: sensor}``; those on a path are left out, whose pose a drag
     writes at every step. Wires, rings, balls and dipoles only where
-    `computes` names their kernels (`PAGE_KERNELS`).
+    `computes` names their kernels (`PAGE_KERNELS`). `regions`: the regions
+    set on sensors (`set_field_region`), by key, in each sensor's own frame,
+    which the page lays its grids over as the session does.
 
     ``(field, None)``, or ``(None, why)`` where a source is of a kind the
     kernels do not compute, more magnets, wire segments and triangles than
@@ -1117,8 +1119,9 @@ def page_field_why(sources, sensors, computes=PAGE_KERNELS):
         return None, (
             f"{', '.join(counted)}: more than it computes at the pace of a drag"
         )
+    regions = regions or {}
     moved = {
-        key: _page_sensor(sensor)
+        key: {**_page_sensor(sensor), "region": regions.get(key)}
         for key, sensor in sensors.items()
         if sensor._get_path_len() == 1
         and kind_of(sensor) is not None
