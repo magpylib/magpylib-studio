@@ -2286,6 +2286,9 @@ class MagpylibStudioSession:
         #: while they are the same and its pixels are on its grid. See
         #: `_field_lines`.
         self._rest_lines: dict = {}
+        #: Per sensor whose lines run in a box, the field on the plane its
+        #: map is drawn on (`_map_plane`), kept while nothing moves.
+        self._map_planes: dict = {}
         #: While `_build` folds the log: the objects created and not yet
         #: added, per parent id -- see `_add_waiting`. None otherwise.
         self._adding: dict | None = None
@@ -3800,13 +3803,15 @@ class MagpylibStudioSession:
                 stepped = self._frame_sheets(at)
                 if stepped:
                     payload = threejs.redrawn(payload, stepped, self._derived)
-                if self.field_lines:
-                    payload["fieldlines"] = self._frame_lines(at, stepped)
+                if self.draws_field:
+                    payload["fieldlines"] = self._switched(
+                        self._frame_lines(at, stepped)
+                    )
             return payload
         # The field the pixels read, once a scene: the arrows are drawn from
         # it, and the lines take their colours from it.
         readings = None
-        if self.field_lines:
+        if self.draws_field:
             from magpylib_studio import fieldlines
 
             readings = fieldlines.readings(self.scene)
@@ -3921,10 +3926,13 @@ class MagpylibStudioSession:
             except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
                 scene["overlaps"] = []
                 scene["overlaps_error"] = f"{type(e).__name__}: {e}"
-        if self.field_lines:
-            scene["fieldlines"] = self._field_lines(readings)
+        if self.draws_field:
+            scene["fieldlines"] = self._switched(self._field_lines(readings))
             # for a view that keeps no switch of its own: the studio's panel
-            scene["field_lines"] = True
+            if self.field_lines:
+                scene["field_lines"] = True
+            if self.field_map:
+                scene["field_map"] = True
         return scene
 
     def _uniform_fields(self, source_of):
@@ -4096,6 +4104,39 @@ class MagpylibStudioSession:
         the pixels of the sensors that read the field. The document's, so the
         scene's file keeps it -- see `set_field_lines`."""
         return bool(self.doc.get("field_lines"))
+
+    @property
+    def field_map(self):
+        """Whether `get_scene` carries a map of |field| on the plane of each
+        sensor that reads the field, from the grid its lines are drawn from
+        -- the document's switch, as the lines' is (`set_field_map`)."""
+        return bool(self.doc.get("field_map"))
+
+    @property
+    def draws_field(self):
+        """Whether the field is computed round the sensors: for their lines,
+        their map, or both."""
+        return self.field_lines or self.field_map
+
+    def set_field_map(self, on=True):
+        """Draw a map of |field| on each sensor's plane, or put it away: one
+        step to undo, kept in the document and carried through the script
+        tab, as `set_field_lines` keeps the lines'."""
+        if self.field_map == bool(on):
+            return {"ok": True, "unchanged": True}
+
+        def mutate(doc):
+            if on:
+                doc["field_map"] = True
+            else:
+                doc.pop("field_map", None)
+
+        return self._edit_unbuilt(mutate, "field map " + ("on" if on else "off"))
+
+    def _switched(self, items):
+        """`items`, each saying what of it to draw: its lines, its map."""
+        lines, drawn = self.field_lines, self.field_map
+        return [{**item, "lines": lines, "map": drawn} for item in items]
 
     def set_field_lines(self, on=True):
         """Draw field lines through the pixels of each sensor that reads the
@@ -4417,6 +4458,17 @@ class MagpylibStudioSession:
                     encoded,
                 )
             )
+        if self.field_map:
+            by_key = {key_of.get(id(s)): s for s in sensors}
+            moving = names is None or bool(self._sources_named(sources, names, key_of))
+            for each in items:
+                if each["shape"][2] > 1:  # a box: the map wants its plane
+                    sensor = by_key[each["object_id"]]
+                    plane = self._map_plane(
+                        sensor, each["object_id"], sources, gesture and moving, written
+                    )
+                    if plane is not None:
+                        each["map_field"] = plane
         return items
 
     def _region_lines(self, sensor, key, region, sources, names, readings, written):
@@ -4508,6 +4560,59 @@ class MagpylibStudioSession:
             region=box,
         )
 
+    def _map_plane(self, sensor, key, sources, moving, written):
+        """The field on the plane a sensor's map is drawn on, where its lines
+        run in a box (`_field_lines`): a set region's own plane, or the flat
+        grid the rule would lay round pixels that lie in a plane -- encoded as
+        an item's field is (`fieldlines.encoded_field`); None for pixels in
+        no plane. Kept while the sources and the plane stand still, computed
+        each frame of a gesture that moves a source."""
+        from magpylib_studio import fieldlines
+
+        kind = fieldlines.kind_of(sensor)
+        seeds = fieldlines.seeds_of(sensor)
+        region = self.field_regions.get(key)
+        points = (
+            fieldlines.DRAG_POINTS
+            if self._interaction is not None
+            else fieldlines.REST_POINTS
+        )
+        if region is not None:
+            box = fieldlines.region_in_world(sensor, region)
+            grid = fieldlines.grid_in(box, points, flat=True)
+        else:
+            if not fieldlines.frame_of(seeds)[1]:
+                return None
+            grid = fieldlines.grid_around(sources, seeds, points)
+        mark = json.dumps(
+            [
+                kind,
+                np.round(grid["origin"], 12).tolist(),
+                np.round(grid["axes"], 12).tolist(),
+                grid["step"],
+                grid["shape"],
+            ]
+        )
+        kept = self._map_planes.get(key)
+        if (
+            kept is not None
+            and not moving
+            and kept["mark"] == mark
+            and kept["sources"] == written()
+        ):
+            return kept["encoded"]
+        at = fieldlines.points_of(grid)
+        encoded = fieldlines.encoded_field(
+            grid, fieldlines.field(sources, at, kind), fieldlines.inside(sources, at)
+        )
+        if not moving:
+            self._map_planes[key] = {
+                "mark": mark,
+                "sources": written(),
+                "encoded": encoded,
+            }
+        return encoded
+
     @staticmethod
     def _region_grid(box, seeds, sources, kind, points):
         """The grid over a set region `box`: in its plane where the pixels
@@ -4594,7 +4699,7 @@ class MagpylibStudioSession:
         view draws no lines, which leaves nothing to say."""
         from magpylib_studio import fieldlines
 
-        if not self.field_lines:
+        if not self.draws_field:
             return None, None
         key_of = self._names_of_objects()
         sensors = {

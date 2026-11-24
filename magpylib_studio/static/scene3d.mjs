@@ -4680,7 +4680,9 @@ export function createScene3d() {
           ? buildPixels(item)
           : item.kind === "fieldlines"
             ? buildFieldLines(item)
-            : buildScatter(item);
+            : item.kind === "fieldmap"
+              ? buildFieldMap(item)
+              : buildScatter(item);
     if (item.copy) built.userData.copy = item.copy;
     built.userData.built = true; // what a node carries for its object, see `dress`
     if (built.userData.batch) batchesStale = true;
@@ -4699,7 +4701,9 @@ export function createScene3d() {
       flowArrows.add(built);
     }
     // a field line is the field's, not a thing a drag could land on
-    if (item.kind === "fieldlines") built.userData.unsnapped = true;
+    if (item.kind === "fieldlines" || item.kind === "fieldmap") {
+      built.userData.unsnapped = true;
+    }
     // the opacity a fade is a share of -- a field line's material, kept from
     // build to build, knows its own already (`fieldLineMaterial`)
     built.traverse((part) => {
@@ -4932,6 +4936,7 @@ export function createScene3d() {
     const [nx, ny, nz] = item.shape;
     const flat = nz === 1;
     if (item.region) fieldRegions.set(item.object_id, { ...item.region, flat });
+    if (item.lines === false) return new THREE.Group(); // the map alone
     const [ox, oy, oz] = item.origin;
     const axes = item.axes; // three rows: the grid's axes in the world
     const h = item.step;
@@ -4952,10 +4957,16 @@ export function createScene3d() {
     const paper = new THREE.Color(
       cssColor("--vscode-editor-background", "#1e1e1e"),
     ).getHexString();
-    const lut = item.lut.map(
-      (colour) =>
-        new THREE.Color(legible(new THREE.Color(colour).getHexString(), paper)),
-    );
+    // Over the sensor's map the lines are one ink, which the map's colours
+    // would otherwise swallow: white, on the map rather than on the page.
+    const lut = item.map
+      ? [new THREE.Color("#ffffff")]
+      : item.lut.map(
+          (colour) =>
+            new THREE.Color(
+              legible(new THREE.Color(colour).getHexString(), paper),
+            ),
+        );
 
     // Everything below in grid units, along the grid's axes: a step of half a
     // cell, and positions turned back into the world only when written.
@@ -5324,6 +5335,108 @@ export function createScene3d() {
     group.userData.recolour = lineColouring(coloured, lut, item.levels);
     group.userData.recolour(colorRanges.get(item.object_id));
     return group;
+  }
+
+  /** A sensor's field map (docs/plans/field-region.md): |field| on the plane
+   *  of its lines' grid, coloured from its table -- the pixels', so the colour
+   *  bar says what a colour is, and cuts it as it cuts theirs -- seen through
+   *  inside a magnet and past a region set on the sensor. A box's grid is
+   *  drawn on the plane the engine sampled for it (`map_field`); none where
+   *  it sent none. Behind the lines, and behind what a click picks. */
+  function buildFieldMap(item) {
+    const plane = item.shape[2] === 1 ? item : item.map_field;
+    if (!plane) return new THREE.Group();
+    const [nx, ny] = plane.shape;
+    const h = plane.step;
+    const axes = [0, 3, 6].map((k) =>
+      new THREE.Vector3().fromArray(plane.axes, k),
+    );
+    const raw = window.atob(plane.values);
+    const magnitude = new Float32Array(nx * ny);
+    const component = (n) => {
+      const quantum = raw.charCodeAt(2 * n) | (raw.charCodeAt(2 * n + 1) << 8);
+      return ((quantum << 16) >> 16) * plane.scale;
+    };
+    for (let n = 0; n < nx * ny; n++) {
+      magnitude[n] = Math.hypot(
+        component(3 * n),
+        component(3 * n + 1),
+        component(3 * n + 2),
+      );
+    }
+    const bits = window.atob(plane.inside);
+    const inside = (n) => (bits.charCodeAt(n >> 3) >> (n & 7)) & 1;
+    // a set region's rectangle, in the plane's own units
+    const origin = new THREE.Vector3().fromArray(plane.origin);
+    let clip = null;
+    if (item.region?.set) {
+      const centre = new THREE.Vector3()
+        .fromArray(item.region.centre)
+        .sub(origin);
+      clip = [0, 1].flatMap((k) => {
+        const middle = centre.dot(axes[k]) / h;
+        const half = item.region.size[k] / 2 / h + 1e-9;
+        return [middle - half, middle + half];
+      });
+    }
+    const table = item.lut.map((colour) => {
+      const hex = new THREE.Color(colour).getHex();
+      return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+    });
+    const data = new Uint8Array(nx * ny * 4);
+    const texture = new THREE.DataTexture(data, nx, ny, THREE.RGBAFormat);
+    texture.minFilter = texture.magFilter = THREE.LinearFilter;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const paint = (range) => {
+      for (let i = 0; i < nx; i++) {
+        const outside = clip && (i < clip[0] || i > clip[1]);
+        for (let j = 0; j < ny; j++) {
+          const n = i * ny + j; // the grid's order, the first axis slowest
+          const at = 4 * (j * nx + i); // the texture's, rows along the first
+          if (outside || inside(n) || (clip && (j < clip[2] || j > clip[3]))) {
+            data[at + 3] = 0;
+            continue;
+          }
+          const [r, g, b] = tableColour(
+            table,
+            item.levels,
+            range,
+            magnitude[n],
+          );
+          data[at] = r;
+          data[at + 1] = g;
+          data[at + 2] = b;
+          data[at + 3] = 255;
+        }
+      }
+      texture.needsUpdate = true;
+    };
+    const geometry = new THREE.PlaneGeometry(nx * h, ny * h);
+    geometry.computeBoundingSphere(); // for a click; not for the framing:
+    geometry.boundingBox = new THREE.Box3(); // the grid is wider than the scene
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    material.userData.blended = true; // see-through at any fade
+    const mesh = new THREE.Mesh(geometry, material);
+    const middle = origin
+      .clone()
+      .addScaledVector(axes[0], ((nx - 1) / 2) * h)
+      .addScaledVector(axes[1], ((ny - 1) / 2) * h);
+    mesh.applyMatrix4(
+      new THREE.Matrix4().makeBasis(...axes).setPosition(middle),
+    );
+    mesh.renderOrder = -1; // under the lines
+    mesh.frustumCulled = false;
+    mesh.userData.field = true; // behind what a click picks, as a line is
+    mesh.userData.recolour = paint;
+    paint(colorRanges.get(item.object_id));
+    return mesh;
   }
 
   /** How wide a field line is to a click, in pixels: wider than it is drawn. */
@@ -7481,8 +7594,25 @@ void main() {
     return payload.meshes.concat(
       payload.scatters,
       payload.pixels ?? [],
-      payload.fieldlines ?? [],
+      (payload.fieldlines ?? []).flatMap(withMap),
     );
+  }
+
+  /** A sensor's field lines, and its field map where that is on: an item of
+   *  its own, drawn from the same grid, a part of the sensor beside the lines
+   *  -- each hidden and faded by its own row. */
+  function withMap(item) {
+    if (!item.map) return [item];
+    const part = `${item.object_id}/map`;
+    return [
+      item,
+      {
+        ...item,
+        kind: "fieldmap",
+        part,
+        name: `${item.label ?? "Sensor"} field map`,
+      },
+    ];
   }
 
   /** Drop every node but the ones held, freeing what they hold on the GPU.

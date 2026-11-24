@@ -256,7 +256,18 @@ const NO_EDIT_ANSWER =
 /** The style group of a sensor's part (legend.mjs), which the object panel
  *  opens at when the part's row is picked: the field lines are coloured as
  *  the pixels are, by `pixel.field`. */
-const PART_STYLE = { Axes: "arrows", Pixels: "pixel", FieldLines: "pixel" };
+/** The document's switches a legend row's eye is, by the part it shows:
+ *  each sensor's field lines, and its field map. */
+const FIELD_SWITCHES = [
+  { key: "field_lines", part: "lines" },
+  { key: "field_map", part: "map" },
+];
+const PART_STYLE = {
+  Axes: "arrows",
+  Pixels: "pixel",
+  FieldLines: "pixel",
+  FieldMap: "pixel",
+};
 
 /** The keys that pick the handles, as the studio's panel has them. */
 /** The pencil's title where python edits the scene. */
@@ -1594,8 +1605,10 @@ function render({ model, el }) {
     // the lines not drawn, while they are switched off, as hidden
     hidden: [
       ...(model.get("hidden") || []),
-      ...(linesComputed() && !model.get("field_lines")
-        ? linesIn(legendTree())
+      ...(linesComputed()
+        ? FIELD_SWITCHES.flatMap(({ key, part }) =>
+            model.get(key) ? [] : switchedIn(legendTree(), part),
+          )
         : []),
     ],
     faded: model.get("faded") || {},
@@ -1691,9 +1704,11 @@ function render({ model, el }) {
       const parts = partsIn(legendTree());
       const asParts = (ids) => ids.flatMap((id) => parts.get(id) ?? [id]);
       const hidden = new Set(stateOf().hidden);
-      const off = linesComputed() && !model.get("field_lines");
+      const off = FIELD_SWITCHES.filter(
+        ({ key }) => linesComputed() && !model.get(key),
+      ).map(({ part }) => `/${part}`);
       const drawn = (ids) =>
-        ids.filter((id) => !(off && id.endsWith("/lines")));
+        ids.filter((id) => !off.some((end) => id.endsWith(end)));
       const chosen = drawn(
         asParts(drawnFor(model.get("selected") || [], model.get("payload"))),
       );
@@ -2761,34 +2776,46 @@ function render({ model, el }) {
     }
     const pruned = (nodes) =>
       nodes
-        .filter((node) => node.kind !== "FieldLines")
+        .filter(
+          (node) => node.kind !== "FieldLines" && node.kind !== "FieldMap",
+        )
         .map((node) => ({ ...node, children: pruned(node.children) }));
     return pruned(tree);
   }
 
-  /** The ids of the field lines' rows in the legend. */
-  const linesIn = (tree) =>
-    [...partsIn(tree).values()].flat().filter((id) => id.endsWith("/lines"));
+  /** The ids of `part`'s rows in the legend: each sensor's field lines,
+   *  or its field map. */
+  const switchedIn = (tree, part) =>
+    [...partsIn(tree).values()].flat().filter((id) => id.endsWith(`/${part}`));
 
   /** What an eye or H asks hidden. Where they are computed, a sensor's field
-   *  lines are the `field_lines` switch's: shown while it is off, one turns
-   *  it on, the others staying hidden; every one of them hidden turns it
-   *  off, and nothing computes a field nobody sees. The legend is shown them
-   *  hidden while it is off (`stateOf`). */
+   *  lines are the `field_lines` switch's, and its map the `field_map`
+   *  switch's: shown while it is off, one turns it on, the others staying
+   *  hidden; every one of them hidden turns it off, and nothing computes a
+   *  field nobody sees. The legend is shown them hidden while it is off
+   *  (`stateOf`). */
   function hideAsked(ids) {
-    const lines = linesComputed() ? linesIn(legendTree()) : [];
-    const on = Boolean(model.get("field_lines"));
-    const others = ids.filter((id) => !lines.includes(id));
-    if (!lines.length) return commit("hidden", ids);
-    if (!on && lines.some((id) => !ids.includes(id))) {
-      model.set("hidden", ids);
-      model.set("field_lines", true);
-      model.save_changes();
-    } else if (on && lines.every((id) => ids.includes(id))) {
-      model.set("hidden", others);
-      model.set("field_lines", false);
-      model.save_changes();
-    } else commit("hidden", on ? ids : others);
+    let hidden = ids;
+    let switched = false;
+    for (const { key, part } of linesComputed() ? FIELD_SWITCHES : []) {
+      const rows = switchedIn(legendTree(), part);
+      if (!rows.length) continue;
+      const on = Boolean(model.get(key));
+      const others = hidden.filter((id) => !rows.includes(id));
+      if (!on && rows.some((id) => !ids.includes(id))) {
+        model.set(key, true);
+        switched = true;
+      } else if (on && rows.every((id) => ids.includes(id))) {
+        hidden = others;
+        model.set(key, false);
+        switched = true;
+      } else if (!on) {
+        hidden = others;
+      }
+    }
+    if (!switched) return commit("hidden", hidden);
+    model.set("hidden", hidden);
+    model.save_changes();
   }
 
   /** The flow's switch, where something flows: a wire, a strip, a sheet,
@@ -3322,6 +3349,7 @@ function render({ model, el }) {
     "theme",
     "editable",
     "field_lines",
+    "field_map",
     "open_panel",
     "revision",
     "variants",

@@ -843,3 +843,27 @@ def test_lines_alone_give_the_colour_bar_its_scale():
     (lines,) = alone["fieldlines"]
     assert lines["label"] == "probe"
     assert lines["colour_scale"] == drawn["pixels"][0]["scale"]
+
+
+@pytest.mark.parametrize(("tilt", "plane"), [(0, "the grid"), (30, "a plane of its own")])
+def test_the_map_is_a_switch_of_its_own(tilt, plane):
+    """The map is the document's switch, as the lines' is: one step to undo,
+    each item saying what to draw, a legend row of its own. On a flat grid
+    it is drawn from the grid; a box's is sent a plane of its own."""
+    widget = view(tilt=tilt)
+    session = widget._session
+    widget.field_map = True  # the map's row's eye
+    assert session.doc["field_map"] is True
+    widget.field_lines = False
+    (item,) = session.get_scene()["fieldlines"]
+    assert (item["lines"], item["map"]) == (False, True)
+    if plane == "the grid":
+        assert item["shape"][2] == 1 and "map_field" not in item
+    else:
+        assert item["shape"][2] > 1 and item["map_field"]["shape"][2] == 1
+    rows = [c["kind"] for n in widget.tree if n["id"] == "probe" for c in n["children"]]
+    assert rows[-2:] == ["FieldLines", "FieldMap"]
+    session.undo()
+    session.undo()
+    widget._show({"by": "undo"})
+    assert (widget.field_lines, widget.field_map) == (True, False)

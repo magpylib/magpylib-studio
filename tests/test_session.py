@@ -133,6 +133,7 @@ def test_a_sensor_drawn_apart_is_its_parts_in_the_tree_and_the_scene():
         "field/axes",
         "field/pixels",
         "field/lines",
+        "field/map",
     ]
     # the axes say their tips' colours, for an icon drawn as the view draws them
     assert field["children"][0]["colors"] == ["red", "green", "blue"]

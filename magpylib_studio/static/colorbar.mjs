@@ -235,12 +235,17 @@ export function createColorBar(container, { onRange, onShare }) {
     }
     const { payload, selected, units, hidden } = args;
     const off = new Set(hidden ?? []);
+    // the sensors whose lines or map are drawn, in their colours
+    const drawsField = (item) =>
+      (item.lines !== false && !off.has(`${item.object_id}/lines`)) ||
+      (item.map === true && !off.has(`${item.object_id}/map`));
     const lined = new Set(
-      (payload?.fieldlines ?? []).map((item) => item.object_id),
+      (payload?.fieldlines ?? [])
+        .filter(drawsField)
+        .map((item) => item.object_id),
     );
     const seen = ({ object_id: id }) =>
-      !off.has(id) &&
-      !(off.has(`${id}/pixels`) && (!lined.has(id) || off.has(`${id}/lines`)));
+      !off.has(id) && !(off.has(`${id}/pixels`) && !lined.has(id));
     // one each: a pattern's copies come under their source's id, and are it
     const sensors = new Map();
     const copied = new Set();
@@ -263,7 +268,7 @@ export function createColorBar(container, { onRange, onShare }) {
     for (const each of payload?.fieldlines ?? []) {
       const id = each.object_id;
       if (!each.colour_scale || sensors.has(id)) continue;
-      if (off.has(id) || off.has(`${id}/lines`)) continue;
+      if (off.has(id) || !lined.has(id)) continue;
       sensors.set(id, {
         object_id: id,
         name: each.label,

@@ -36,7 +36,7 @@
  */
 
 /** A part of a sensor's drawing, listed beneath it: see `threejs.PARTS`. */
-const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
+const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines", "FieldMap"]);
 const isPart = (node) => PART_KINDS.has(node.kind);
 
 /** Each sensor in `tree` drawn as its parts, and what its eye hides in its
@@ -192,6 +192,7 @@ const ICONS = {
   Axes: "sensor",
   Pixels: "pixels",
   FieldLines: "field-lines",
+  FieldMap: "field-map",
 };
 
 /** How many objects a row stands for in the view: itself and the copies its

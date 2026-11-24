@@ -2204,6 +2204,7 @@ const ACTS = new Set([
   'previewTransform',
   'setVisible',
   'setFieldLines',
+  'setFieldMap',
   'undo',
   'redo',
   'dragStart',
@@ -2243,6 +2244,8 @@ function adoptScenePanel(
       void setVisibleFromPanel(context, message.hide, message.show);
     } else if (message.type === 'setFieldLines') {
       void setFieldLinesFromPanel(context, message.on === true);
+    } else if (message.type === 'setFieldMap') {
+      void setFieldSwitchFromPanel(context, 'set_field_map', message.on === true);
     } else if (message.type === 'useVariant') {
       void useVariantFromPanel(context, String(message.name));
     } else if (message.type === 'undo' || message.type === 'redo') {
@@ -2558,9 +2561,19 @@ async function setFieldLinesFromPanel(
   context: vscode.ExtensionContext,
   on: boolean,
 ): Promise<void> {
+  await setFieldSwitchFromPanel(context, 'set_field_lines', on);
+}
+
+/** A switch of the field drawn round the sensors -- the lines', the
+ *  map's -- set from the view's legend: the document's, so an edit. */
+async function setFieldSwitchFromPanel(
+  context: vscode.ExtensionContext,
+  method: 'set_field_lines' | 'set_field_map',
+  on: boolean,
+): Promise<void> {
   try {
     const engine = await getEngine(context);
-    await engine.request('set_field_lines', { on });
+    await engine.request(method, { on });
   } catch (err) {
     vscode.window.showErrorMessage(
       `Magpylib Studio: ${err instanceof Error ? err.message : err}`,

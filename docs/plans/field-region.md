@@ -38,13 +38,13 @@ box, the opposite face staying put, ⌥ both.
 
 ## Slices
 
-| slice | what                                                                                    | state                         |
-| ----- | --------------------------------------------------------------------------------------- | ----------------------------- |
-| 1     | flat set region: outline, pick, 4 grips, edit, lines clipped, caches keyed, undo, saved | built, waiting for Alex's try |
-| 2     | map: `field_map` switch, host glue, texture from the flat grid                          | todo                          |
-| 3     | box: 6 grips, a plane sample for the map                                                | todo                          |
-| 4     | runs and saved pages honour a set region                                                | todo                          |
-| 5     | decision record, changelog, guide, harness check, bundles                               | todo                          |
+| slice | what                                                                                    | state          |
+| ----- | --------------------------------------------------------------------------------------- | -------------- |
+| 1     | flat set region: outline, pick, 4 grips, edit, lines clipped, caches keyed, undo, saved | done (cc1c40e) |
+| 2     | map: `field_map` switch, host glue, texture from the flat grid                          | built          |
+| 3     | box: 6 grips, a plane sample for the map                                                | built          |
+| 4     | runs and saved pages honour a set region                                                | todo           |
+| 5     | decision record, changelog, guide, harness check, bundles                               | todo           |
 
 ## Known gaps until slice 4
 
@@ -63,4 +63,14 @@ box, the opposite face staying put, ⌥ both.
 - 2026-11-23: Alex: no colour bar with the lines alone. At `pixel.size = 0`
   magpylib draws no pixels, and the bar read only pixels items; the lines item
   now carries the same table (`colour_scale`) and the bar falls back to it.
+- 2026-11-24: slices 2 and 3 built. The map is a row of its own beneath each
+  sensor ("field map (|B|)"), its eye the document's `field_map` switch as the
+  lines' eye is `field_lines`'; drawn from the lines' grid where it is flat, and
+  where the lines run in a box from a plane the engine samples for it (a set
+  region's own plane, else the rule's flat grid). Lines over a map are white.
+  Checked in a headless JupyterLab on the two cubes, the tilted probe and the
+  coil pair.
+- Open: the colour bar spans what the pixels read; on the coil pair the map
+  saturates everywhere but the middle. Asked Alex whether a map or a set region
+  should widen it.
 - Open: the pointer cursor over the outline did not show in the headless run.

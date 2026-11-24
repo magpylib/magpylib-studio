@@ -2023,6 +2023,7 @@ _NULL_VECTOR = 1e-12
 #: name in a scene has no slash.
 PARTS = (("axes", "axes", "Axes"), ("pixels", "pixels", "Pixels"))
 LINES = ("lines", "field lines", "FieldLines")
+MAP = ("map", "field map", "FieldMap")
 
 
 def tip_colors(sensor):
@@ -2049,10 +2050,11 @@ def part_nodes(sensor, key, apart=False):
     source = _resolve(sensor, "style.pixel.field.source")
     parts = [*PARTS] if apart and _reading_sensors([sensor]) else []
     if fieldlines.sensors_of([sensor]):
-        parts.append(LINES)
+        parts += [LINES, MAP]
     named = {
         "pixels": f"pixels ({source})",
         "lines": f"field lines ({source and source[:1]})",
+        "map": f"field map (|{source and source[:1]}|)",
     }
     tips = tip_colors(sensor)
     return [

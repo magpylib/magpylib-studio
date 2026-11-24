@@ -482,7 +482,15 @@ def test_a_sensors_field_lines_are_a_row_beneath_it():
 
     view = widget.SceneWidget(*build())
     assert _outline(view.tree[1:]) == [
-        ("probe", [("axes", []), ("pixels (Bxy)", []), ("field lines (B)", [])]),
+        (
+            "probe",
+            [
+                ("axes", []),
+                ("pixels (Bxy)", []),
+                ("field lines (B)", []),
+                ("field map (|B|)", []),
+            ],
+        ),
         ("plain", []),
     ]
     view.hidden = [view.tree[1]["children"][2]["id"]]

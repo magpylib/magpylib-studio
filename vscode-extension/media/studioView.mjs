@@ -52,6 +52,7 @@ const host = {
   setVisible: (hide, show) =>
     vscodeApi.postMessage({ type: "setVisible", hide, show }),
   setFieldLines: (on) => vscodeApi.postMessage({ type: "setFieldLines", on }),
+  setFieldMap: (on) => vscodeApi.postMessage({ type: "setFieldMap", on }),
   useVariant: (name) => vscodeApi.postMessage({ type: "useVariant", name }),
   editor: {
     // the host opens the undo group; the view's own readout says what a drag
