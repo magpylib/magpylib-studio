@@ -1835,20 +1835,6 @@ def has_style(obj, path):
     return True
 
 
-def own_applied_field(obj):
-    """`obj`'s own `H_ext`, the uniform applied field of magpylib-material-
-    response (mu0 * H in tesla), as three floats: None unset, and None for what
-    is not three finite numbers, which that package refuses and says why."""
-    value = getattr(obj, "H_ext", None)
-    if value is None:
-        return None
-    try:
-        value = np.asarray(value, dtype=float)
-    except (TypeError, ValueError):
-        return None
-    return value.tolist() if value.shape == (3,) and np.isfinite(value).all() else None
-
-
 #: How magpylib-material-response names a solve by cells in `solved_by`:
 #: ``"demag"`` in a result pickled by its 0.8.0.
 _BY_CELLS = ("cells", "demag")
@@ -1894,35 +1880,6 @@ def _responds(source):
     return False
 
 
-def applied_field(objects):
-    """The one field `H_ext` of `objects` as the corner shows it: three floats,
-    ``"differs"`` where they set several, None where they set none, or only
-    zero. Each object's is its own or its nearest parent's, as material-response
-    reads it; what sets none is not counted. A sealed collection is one object:
-    its thousands of cells are not asked."""
-    found = set()
-
-    def visit(obj, above):
-        own = own_applied_field(obj)
-        here = above if own is None else own
-        if isinstance(obj, magpy.Collection) and not is_sealed(obj):
-            for child in obj.children:
-                visit(child, here)
-        elif here is not None:
-            found.add(tuple(here))
-
-    for obj in objects:
-        above = None
-        parent = obj.parent
-        while above is None and parent is not None:
-            above = own_applied_field(parent)
-            parent = parent.parent
-        visit(obj, above)
-    if len(found) > 1:
-        return "differs"
-    return next((list(field) for field in found if any(field)), None)
-
-
 def is_uniform_field(obj):
     """Whether `obj` is magpylib-material-response's `UniformField`: a source
     with a value and a turn, and no place or body. By name, as the type table
@@ -1963,8 +1920,8 @@ def fields_of(named):
 
 def _uniform_fields_under(objects):
     """The uniform fields among `objects`, collections opened up, each once: a
-    field can be given beside a collection that holds it. As `applied_field`
-    does, it asks no sealed collection."""
+    field can be given beside a collection that holds it. It asks no sealed
+    collection."""
     found = {}
 
     def visit(obj):
@@ -2624,7 +2581,6 @@ def view_payload(scene, index=None, traces=None):
         **_by_kind(drawn),
         "ranges": reach,
         "labels": panel.labels,
-        "applied": applied_field(panel.objects),
         "fields": fields_of((str(id(field)), field) for field in fields),
         # The studio's view carries these; this one has no gizmo to place, no
         # shape to resize, no polarization to aim, no path to scrub and no

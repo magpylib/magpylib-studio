@@ -132,11 +132,10 @@ A scene is one JSON object, saved verbatim as `.magpy.json`
 - **A uniform field** (`UniformField`, of magpylib-material-response) is an
   object whose one parameter is `B`, sent as `fields` with every scene, global,
   for the corner to add up
-  ([0046](decisions.md#0046-a-uniform-field-is-a-source)). The older attribute
-  `H_ext` is kept on the object's create step and sent as `applied` with a whole
-  scene, and the corner draws it apart; scripts write it as a `UniformField`
-  where one can say it
-  ([0044](decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner)).
+  ([0046](decisions.md#0046-a-uniform-field-is-a-source)). An old document's
+  `H_ext` opens as one `UniformField`, or is left out with a warning where one
+  cannot say it
+  ([0060](decisions.md#0060-an-old-h_ext-opens-as-a-uniform-field)).
 - **A solved face-charge sheet** (`face_charge.ChargeSheet`, from
   magpylib-material-response, imported when a document first names it) is its
   constructor's arguments: `vertices`, `faces`, `charge_densities`, `panels` and

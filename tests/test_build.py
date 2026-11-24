@@ -1610,9 +1610,9 @@ def test_a_sealed_body_in_a_scene_is_its_parts_moved_once(sealed_first):
 
 
 @pytest.mark.parametrize("by", ["scene function", "importing the object"])
-def test_an_applied_field_is_kept_with_the_scene(by):
-    """`H_ext` is an attribute no call reports: read off the objects, kept in
-    the document, written by both scripts and drawn from what they build."""
+def test_an_h_ext_set_in_python_is_said_and_left_out(by):
+    """magpylib-material-response 0.15 has no `H_ext`: what a script sets is
+    named, and left out of the document."""
 
     def make():
         body = magpy.Collection(magpy.magnet.Cuboid(dimension=(1, 1, 1)))
@@ -1620,13 +1620,10 @@ def test_an_applied_field_is_kept_with_the_scene(by):
         return body
 
     if by == "scene function":
-        session = scene(make).build().session
+        with pytest.warns(UserWarning, match="H_ext of .* is left out"):
+            session = scene(make).build().session
     else:
-        doc, _ = importer.document_from_objects([make()], {}, script=False)
+        doc, said = importer.document_from_objects([make()], {}, script=False)
+        assert any("H_ext" in each and "UniformField" in each for each in said)
         session = MagpylibStudioSession(doc)
-    assert session.get_scene()["applied"] == [0, 0, 0.1]
-    for script in (session.to_script(), session.to_builder_script()):
-        assert "= UniformField(B=(0.0, 0.0, 0.1))" in script
-        assert ".H_ext" not in script
-    again = MagpylibStudioSession(json.loads(json.dumps(session.to_dict())))
-    assert again.get_scene()["applied"] == [0, 0, 0.1]
+    assert "H_ext" not in json.dumps(session.to_dict())

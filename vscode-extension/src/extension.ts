@@ -1731,12 +1731,21 @@ async function loadSession(client: EngineClient, doc: SceneDocument, again: bool
   // A lost scene opens empty: putting it back stopped the engine before.
   const scene = doc.lost ? undefined : doc.lastDocument;
   const example = doc.lost || scene !== undefined ? undefined : doc.example;
-  const result = await client.request<{ ok: boolean; error?: string }>('open_session', {
-    session: doc.session,
-    ...(scene !== undefined ? { scene } : {}),
-    ...(example !== undefined ? { example } : {}),
-    base_dir: doc.baseDir ?? null,
-  });
+  const result = await client.request<{ ok: boolean; error?: string; warnings?: string[] }>(
+    'open_session',
+    {
+      session: doc.session,
+      ...(scene !== undefined ? { scene } : {}),
+      ...(example !== undefined ? { example } : {}),
+      base_dir: doc.baseDir ?? null,
+    },
+  );
+  if (result.ok && !again && result.warnings?.length) {
+    // what an old file held that this one cannot: an `H_ext` one field cannot say
+    void vscode.window.showWarningMessage(
+      `Magpylib Studio: ${doc.name} -- ${result.warnings.join('; ')}`,
+    );
+  }
   if (!result.ok) {
     // Opened empty, so the tab and the side bar work, and marked: a scene
     // that could not be read is never saved, or the empty one would go over

@@ -33,7 +33,6 @@ import numpy as np
 
 from magpylib_studio import expressions, hook, units
 from magpylib_studio.session import (
-    _H_EXT_KEPT,
     _HIDE_STYLE,
     _SOLVED_KEPT,
     MagpylibStudioSession,
@@ -46,8 +45,6 @@ from magpylib_studio.session import (
     _variant_problem,
     class_call,
     class_imports,
-    free_name,
-    script_field,
 )
 
 
@@ -1059,15 +1056,6 @@ class _ScriptWriter:
             for target, parent in self.parents_at_end().items()
             if parent is None and target in creates
         ]
-        field = self.field()
-        if field:
-            name = free_name("applied_field", set(self.names.values()))
-            body += [
-                "",
-                field[1],
-                f"{name} = {class_call('UniformField')}(B={field[0]!r})",
-            ]
-            roots.append(name)
         if roots:
             body += ["", f"return {', '.join(roots)}"]
         if not body:
@@ -1137,10 +1125,6 @@ class _ScriptWriter:
             lines.append(f"        {variant!r}: {{{entries}}},")
         return lines
 
-    def field(self):
-        """What the document's `H_ext` is written as (`script_field`)."""
-        return script_field(e for e in self.events if e.get("op") == "create")
-
     def header(self):
         lines = []
         if self.typing:
@@ -1153,10 +1137,7 @@ class _ScriptWriter:
                 f"from scipy.spatial.transform import Rotation as {self.alias['R']}"
             )
         lines += class_imports(
-            [
-                *_types_in(e for e in self.events if e.get("op") == "create"),
-                *(["UniformField"] if self.field() else []),
-            ]
+            list(_types_in(e for e in self.events if e.get("op") == "create"))
         )
         words = ", ".join(
             word if self.alias[word] == word else f"{word} as {self.alias[word]}"
@@ -1361,7 +1342,6 @@ class _ScriptWriter:
                 "sealed",
                 "parts",
                 "parts_style",
-                "H_ext",
                 "solved_by",
                 "switch",
                 "branch",
@@ -1413,8 +1393,6 @@ class _ScriptWriter:
             ]
         else:
             lines = [f"{name} = {call}({self.keywords(parts)})"]
-        if event.get("H_ext") is not None and self.field() is None:
-            lines.append(f"{name}.H_ext = {tuple(event['H_ext'])!r}{_H_EXT_KEPT}")
         if event.get("solved_by") is not None:
             lines.append(f"{name}.solved_by = {event['solved_by']!r}{_SOLVED_KEPT}")
         if event.get("parts"):

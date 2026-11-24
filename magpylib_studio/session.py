@@ -114,6 +114,7 @@ import sys
 import traceback
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
+from warnings import warn
 
 import magpylib as magpy
 import numpy as np
@@ -717,7 +718,7 @@ _DOC_KEYS = (
 # newer format, a hand-written file, another tool — and is carried rather than
 # dropped, so opening a document here does not quietly strip it. A sealed
 # collection's `sealed` and `parts` travel the same way: on its create event,
-# and on its spec, where `to_script` reads them. So does any object's `H_ext`.
+# and on its spec, where `to_script` reads them.
 _CREATE_KEYS = (
     "id",
     "op",
@@ -1668,27 +1669,53 @@ def class_call(type_str, magpy="magpy"):
     return f"{magpy}.{type_str}"
 
 
-#: What a script writes beside an `H_ext` it cannot make one `UniformField` of.
-_H_EXT_KEPT = "  # one UniformField cannot say this: it acts on every part"
-
 #: What a script writes beside a body's `solved_by` (`threejs.solved_by_cells`).
 _SOLVED_KEPT = "  # its polarization is what a solve made of it"
 
 
-def script_field(specs):
-    """The `UniformField` a script writes for the document's `H_ext`, as ``(its
-    B, the comment over it)``, of the objects' create steps `specs`: None where
-    no one field says the same, for values that differ, or beside a field
-    already there, where it would count twice and the solvers refuse the
-    attribute instead. magpylib-material-response drops the attribute after 0.9,
-    and setting it then would say nothing and do nothing.
+def _applied_field_as_source(doc):
+    """Turn the attribute `H_ext` on `doc`'s create steps into a `UniformField`
+    (docs/decisions.md#0060-an-old-h_ext-opens-as-a-uniform-field), and say
+    what could not be: magpylib-material-response 0.15 has no `H_ext`, and
+    refuses to solve an object that sets it.
+
+    One create step for the field, after the objects', where every part that
+    sets one sets the same and the scene holds no field already, which would
+    count twice. Otherwise it is left out, and the warning returned names what
+    each part set, to put back by hand. A field of zero did nothing, and goes
+    unsaid.
     """
-    specs = list(specs)
-    values = {tuple(s["H_ext"]) for s in specs if s.get("H_ext") is not None}
-    if len(values) != 1 or any(s.get("type") == "UniformField" for s in specs):
-        return None
-    (value,) = values
-    return value, "# the scene's H_ext: read by getB as well, and on every part"
+    events = doc.get("events") or []
+    creates = [e for e in events if e.get("op") == "create"]
+    given = {e["target"]: e.pop("H_ext", None) for e in creates}
+    given = {target: value for target, value in given.items() if value and any(value)}
+    if not given:
+        return []
+    beside = any(e.get("type") == "UniformField" for e in creates)
+    values = {tuple(value) for value in given.values()}
+    if len(values) == 1 and not beside:
+        last = max(i for i, e in enumerate(events) if e.get("op") == "create")
+        events.insert(
+            last + 1,
+            {
+                "id": _next_event_id(events),
+                "op": "create",
+                "target": free_name("applied_field", {e["target"] for e in creates}),
+                "type": "UniformField",
+                "params": {"B": list(next(iter(values)))},
+            },
+        )
+        return []
+    why = (
+        "a UniformField beside it would count twice"
+        if beside
+        else "one UniformField cannot say values that differ by part"
+    )
+    each = ", ".join(f"{target} {tuple(value)} T" for target, value in given.items())
+    return [
+        f"the applied field H_ext is left out, since magpylib-material-response "
+        f"0.15 has none and {why} ({each}): add a UniformField for it"
+    ]
 
 
 def free_name(word, taken):
@@ -2181,9 +2208,10 @@ class MagpylibStudioSession:
 
     def __init__(self, scene: dict | None = None, mesh_cache: dict | None = None):
         # start empty; older documents carry their ops per object, not as a log
-        self.doc = _canonical(
-            _migrate_events(scene if scene is not None else {"objects": []})
-        )
+        self.doc = _migrate_events(scene if scene is not None else {"objects": []})
+        for text in _applied_field_as_source(self.doc):
+            warn(f"magpylib-studio: {text}", stacklevel=2)
+        self.doc = _canonical(self.doc)
         #: The objects of the branches no switch chooses (`_set_aside`): built,
         #: and out of the scene and of what walking `_objs` finds.
         self._absent: dict[str, object] = {}
@@ -2478,8 +2506,6 @@ class MagpylibStudioSession:
                 self._parents[child] = object_id
         else:
             obj = _resolve_type(event["type"])(**params)
-        if event.get("H_ext") is not None:
-            obj.H_ext = event["H_ext"]
         if event.get("solved_by") is not None:
             obj.solved_by = event["solved_by"]
         self._stamp_mesh(obj, object_id)
@@ -3811,8 +3837,6 @@ class MagpylibStudioSession:
         if base is not None:
             scene = threejs.drawn_over(base["scene"], scene)
             colors = base["colors"]
-        if not stepping:  # no step of a gesture changes it, and the view keeps it
-            scene["applied"] = threejs.applied_field(self._drawn())
         # Every step: a slider's or a parent's turn changes them, and in most
         # scenes there are none to read.
         scene["fields"] = threejs.fields_of(self._uniform_fields(source_of))
@@ -6630,19 +6654,16 @@ class MagpylibStudioSession:
 
         return self._mutate_doc(mutate, f"seal {object_id}")
 
-    def _write_attributes(self, fields, solved):
-        """Objects' `H_ext`, ``{id: three floats}``, and the bodies `solved` a
-        solve by cells set the polarization of (`threejs.solved_by_cells`),
-        written on their create steps in one (`recording`, from what a scene
-        function sets on them or was given)."""
+    def _write_solved(self, solved):
+        """The bodies `solved` a solve by cells set the polarization of
+        (`threejs.solved_by_cells`), written on their create steps in one
+        (`recording`, from what a scene function was given)."""
 
         def mutate(doc):
-            for object_id, field in fields.items():
-                self._create_event(object_id)["H_ext"] = field
             for object_id in solved:
                 self._create_event(object_id)["solved_by"] = "cells"
 
-        return self._mutate_doc(mutate, "set H_ext")
+        return self._mutate_doc(mutate, "set solved_by")
 
     def _rename_ids(self, renames):
         """Give objects other ids, every step that names them following: the
@@ -7361,8 +7382,12 @@ class MagpylibStudioSession:
                     "error": f"not a scene this one can read: {problem}",
                 }
 
+        said = []
+
         def mutate(doc):
-            self.doc = _canonical(_migrate_events(json.loads(json.dumps(scene))))
+            self.doc = _migrate_events(json.loads(json.dumps(scene)))
+            said[:] = _applied_field_as_source(self.doc)
+            self.doc = _canonical(self.doc)
             _retire_reused_ids(self.doc)
             # A mesh source that arrived without a hash gets one now, while
             # the file it names is in front of us: a hand-written document,
@@ -7389,6 +7414,8 @@ class MagpylibStudioSession:
         result = self._mutate_doc(mutate, label, tolerant=True)
         if not result["ok"]:
             self._base_dir = previous_base
+        elif said:
+            result["warnings"] = [*result.get("warnings", []), *said]
         return result
 
     def load_script(self, path, scene=0, timeout=None):
@@ -9475,9 +9502,8 @@ class MagpylibStudioSession:
             lines.append("import pyvista as pv")
         if needs_scipy:
             lines.append("from scipy.spatial.transform import Rotation as R")
-        field = script_field(spec_of.values())
         lines += class_imports(
-            [*_types_in(spec_of.values()), *(["UniformField"] if field else [])],
+            list(_types_in(spec_of.values())),
             any("part" in (spec.get("params") or {}) for spec in spec_of.values()),
         )
         # An expression goes into the script verbatim, which is what keeps the
@@ -9540,8 +9566,6 @@ class MagpylibStudioSession:
                 parts.append(f"style={_nest(given)!r}")
             ctor = class_call(spec["type"])
             lines.append(f"{target} = {ctor}{factory}({', '.join(parts)})")
-            if spec.get("H_ext") is not None and field is None:
-                lines.append(f"{target}.H_ext = {tuple(spec['H_ext'])!r}{_H_EXT_KEPT}")
             if spec.get("solved_by") is not None:
                 lines.append(
                     f"{target}.solved_by = {spec['solved_by']!r}{_SOLVED_KEPT}"
@@ -9599,13 +9623,6 @@ class MagpylibStudioSession:
                     lines.append(sample)
                 lines.append(f"{event['target']}.{_op_source(event, sampled)}")
         names = [spec["id"] for spec in self.doc.get("objects") or []]
-        if field:
-            name = free_name("applied_field", spec_of)
-            lines += [
-                field[1],
-                f"{name} = {class_call('UniformField')}(B={field[0]!r})",
-            ]
-            names.append(name)
         # Shown as loose objects, not wrapped in a Collection: the script must
         # bind exactly the objects this document holds, so importing it back
         # reproduces the same scene. A wrapper would come back as one nested

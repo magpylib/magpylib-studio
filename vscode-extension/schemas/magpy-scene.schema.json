@@ -160,7 +160,8 @@
       "items": { "type": "number" },
       "minItems": 3,
       "maxItems": 3,
-      "description": "The uniform applied field of magpylib-material-response, mu0 * H in tesla, on this object and what it holds. Said in a script as `obj.H_ext = (x, y, z)`. Shown in the view's corner."
+      "deprecated": true,
+      "description": "Written by older versions: the uniform applied field of magpylib-material-response, mu0 * H in tesla, on this object and what it holds. Opened as one UniformField when every object that sets it sets the same, and left out with a warning otherwise: magpylib-material-response 0.15 has no H_ext."
     },
     "solvedBy": {
       "const": "cells",
