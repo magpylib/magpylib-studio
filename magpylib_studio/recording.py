@@ -1268,23 +1268,30 @@ class _Recorder:
                 self.sealing.setdefault(each.id, set())
         self.flush()
 
-    def note_attributes(self):
-        """Each object's `H_ext`, and each body a solve by cells set the
-        polarization of (`threejs.solved_by_cells`), as the script left them,
-        in one step: attributes set on an object, as `sealed` is, which no
-        call reports."""
-        fields, solved = {}, []
+    def note_solved(self):
+        """Each body a solve by cells set the polarization of
+        (`threejs.solved_by_cells`), as the script left them, in one step: an
+        attribute set on an object, as `sealed` is, which no call reports. An
+        `H_ext` is said and left out: magpylib-material-response 0.15 has none
+        (docs/decisions.md#0060-an-old-h_ext-opens-as-a-uniform-field)."""
+        solved, fields = [], []
         for each in self.objects.values():
             obj = self.live.get(each.id)
-            field = threejs.own_applied_field(obj)
-            if field is not None:
-                fields[each.id] = field
+            if getattr(obj, "H_ext", None) is not None:
+                fields.append(each.id)
             if threejs.solved_by_cells(obj):
                 solved.append(each.id)
-        if not fields and not solved:
+        if fields:
+            warnings.warn(
+                f"the applied field H_ext of {', '.join(fields)} is left out: "
+                "magpylib-material-response 0.15 has none, give the scene a "
+                "UniformField instead",
+                stacklevel=2,
+            )
+        if not solved:
             return
         with hook.nested():
-            result = self.session._write_attributes(fields, solved)
+            result = self.session._write_solved(solved)
         if not result["ok"]:
             raise BuildError(result["error"])
 
@@ -1293,7 +1300,7 @@ class _Recorder:
         self.flush()
         self.flush_styles()
         self.seal()
-        self.note_attributes()
+        self.note_solved()
         self.name_by_variables()
 
 

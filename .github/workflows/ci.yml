@@ -107,7 +107,8 @@ jobs:
       - name: Install the extension's packages
         working-directory: vscode-extension
         run: npm ci
-      - run: uv pip install -e ".[widget]"
+      # a UniformField, for the corner's arrow
+      - run: uv pip install -e ".[widget]" "magpylib-material-response>=0.12.0"
       - name: Drive the widget in headless Chrome
         working-directory: vscode-extension
         run: node harness/check-widget-browser.mjs

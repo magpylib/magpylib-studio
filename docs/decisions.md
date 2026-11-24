@@ -67,6 +67,7 @@ anchor, `docs/decisions.md#0008-units-are-metadata`, which never changes.
 | [0056](#0056-every-host-draws-with-the-packages-view)                                          | Every host draws with the package's view                     | accepted 2026-11-08                                                  |
 | [0057](#0057-the-host-glue-is-the-packages-and-a-changed-view-is-said)                         | The host glue is the package's, and a changed view is said   | accepted 2026-11-08                                                  |
 | [0058](#0058-a-scene-file-opens-in-jupyterlab-as-a-tab)                                        | A scene file opens in JupyterLab as a tab                    | accepted 2026-11-08                                                  |
+| [0060](#0060-an-old-h_ext-opens-as-a-uniform-field)                                            | An old H_ext opens as a uniform field                        | accepted 2026-11-24                                                  |
 
 ---
 
@@ -2486,7 +2487,8 @@ solvers. A `UniformField` was left out of a document, with a warning.
 
 **Status:** accepted 2026-11-02, as built (#112). Supersedes the part of
 [0044](#0044-the-applied-field-is-an-arrow-in-the-corner) that has both scripts
-write `obj.H_ext`.
+write `obj.H_ext`. Superseded by
+[0060](#0060-an-old-h_ext-opens-as-a-uniform-field).
 
 ### Context
 
@@ -3137,3 +3139,45 @@ autosave.
   stays the studio.
 - Not in the tab: the script tab, the several-scenes side bar, the field and
   history views, which are the VS Code shell's.
+
+## 0060. An old H_ext opens as a uniform field
+
+**Status:** accepted 2026-11-24, on Alex's answers. Supersedes
+[0047](#0047-a-script-writes-h_ext-as-a-uniform-field), and the parts of
+[0044](#0044-the-applied-field-is-an-arrow-in-the-corner) and
+[0046](#0046-a-uniform-field-is-a-source) that keep `H_ext`.
+
+### Context
+
+magpylib-material-response 0.15 removes the attribute `H_ext` (its #71): its
+solvers refuse an object that sets one, naming `UniformField`, so an old file
+never solves without its field and says nothing. A document the studio wrote
+still carries `H_ext` on its create steps, and both scripts wrote it back where
+one field could not say it, which that release refuses.
+
+### Decision
+
+- **Opening a document turns its `H_ext` into one `UniformField`**, a create
+  step after the objects', where every part that sets one sets the same and the
+  scene holds no field already. Nothing is said: the field acts on every part as
+  before, and `getB` now includes it, as #71 accepted.
+- **Otherwise it opens without it, and says so**: values that differ by part, or
+  a field beside it, which would count twice. The warning names each part and
+  its value, to put back as fields by hand. Refusing to open would leave a hand
+  edit of the JSON as the only way back in. A field of zero did nothing, and
+  goes unsaid.
+- **Nothing writes `H_ext` any more**: not a document, not either script. One
+  that a scene function or a script sets on an object is said, and left out.
+- **The corner draws `UniformField`s alone**: the old arrow and its "H ext" pill
+  are gone, with the `applied` the view was sent.
+- **No new document version**: a converted document holds what version 3 already
+  reads, so an older studio still opens it.
+- **The schema keeps `H_ext`, deprecated**, so an old file is not marked wrong
+  before it is opened.
+
+### Rejected
+
+- **Refusing to open a file whose values differ**: nothing lost silently, but
+  the only way back in is editing the JSON.
+- **Keeping the corner's arrow until studio requires material-response 0.15**:
+  it drew what that package had warned about since 0.9.

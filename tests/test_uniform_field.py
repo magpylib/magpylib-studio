@@ -214,7 +214,7 @@ def test_h_takes_no_variable():
             design.build()
 
 
-def test_a_solved_model_keeps_its_fields_and_an_old_h_ext_stays_apart():
+def test_a_solved_model_keeps_its_fields():
     soft = magpy.magnet.Cuboid(polarization=(0, 0, 0), dimension=(0.01, 0.01, 0.01))
     soft.susceptibility = 1000
     solved = material_response.solve_face_charge(
@@ -223,13 +223,6 @@ def test_a_solved_model_keeps_its_fields_and_an_old_h_ext_stays_apart():
     view = SceneWidget(solved, editable=True)
     np.testing.assert_array_equal(read(view._session), magpy.getB(solved, POINTS))
     assert [f["B"] for f in view.payload["fields"]] == [[0, 0, 0.1]]
-    assert view.payload["applied"] is None
-
-    old = magpy.magnet.Cuboid(polarization=(0, 0, 1), dimension=(0.01, 0.01, 0.01))
-    old.H_ext = (0.05, 0, 0)
-    both = SceneWidget(old, UniformField(B=(0, 0, 0.1))).payload
-    assert both["applied"] == [0.05, 0, 0]
-    assert [f["B"] for f in both["fields"]] == [[0, 0, 0.1]]
 
 
 def test_a_part_solved_again_while_a_drag_goes_keeps_the_fields():
@@ -304,50 +297,67 @@ def test_an_older_package_is_said(monkeypatch):
         session._resolve_type("UniformField")
 
 
-def _with_h_ext(*values):
-    objects = [
-        magpy.magnet.Cuboid(
-            polarization=(0, 0, 1), dimension=(0.01,) * 3, position=(x, 0, 0)
-        )
-        for x, _ in enumerate(values)
+CUBE = {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]}
+
+
+def _old_document(values, beside=False, version=3, removed=False):
+    """A document an older studio wrote: a cube for each of `values`, its
+    `H_ext` on its create step, or on its spec before there were steps; the
+    last cube `removed` after."""
+    specs = [
+        {"type": "magnet.Cuboid", "params": {**CUBE, "position": [i, 0, 0]}}
+        for i in range(len(values))
     ]
-    for each, value in zip(objects, values, strict=True):
-        each.H_ext = value
-    return objects
+    for spec, value in zip(specs, values, strict=True):
+        spec["H_ext"] = value
+    if beside:
+        specs.append({"type": "UniformField", "params": {"B": [0, 0, 0.1]}})
+    if version == 1:
+        objects = [{"id": f"cube{i}", **spec} for i, spec in enumerate(specs)]
+        return {"version": 1, "objects": objects}
+    events = [
+        {"id": f"e{i + 1}", "op": "create", "target": f"cube{i}", **spec}
+        for i, spec in enumerate(specs)
+    ]
+    if removed:
+        last = events[-1]["target"]
+        events.append({"id": "gone", "op": "remove", "target": last})
+    return {"version": version, "events": events}
 
 
-@pytest.mark.parametrize("writer", ["to_script", "to_builder_script"])
-def test_a_script_writes_h_ext_as_a_field_it_can_be_one_of(writer, tmp_path):
-    def written(*objects):
-        doc, _ = importer.document_from_objects(objects, {}, script=False)
-        here = MagpylibStudioSession(doc)
-        return here, getattr(here, writer)()
-
-    here, script = written(*_with_h_ext((0, 0, 0.1), (0, 0, 0.1)))
-    assert ".H_ext" not in script
-    assert "applied_field = UniformField(B=(0.0, 0.0, 0.1))" in script
-    path = tmp_path / "scene.py"
-    path.write_text(script, encoding="utf-8")
-    if writer == "to_script":
-        namespace, captured, _ = importer.run_script(path)
-        doc, _ = importer.document_from_objects(captured[0], namespace)
-        back = MagpylibStudioSession(doc)
+@pytest.mark.parametrize(
+    ("doc", "fields", "said"),
+    [
+        (_old_document([[0, 0, 0.1], [0, 0, 0.1]]), [[0, 0, 0.1]], None),
+        (_old_document([[0, 0, 0.1]], version=1), [[0, 0, 0.1]], None),
+        (_old_document([[0, 0, 0]]), [], None),
+        (_old_document([[0, 0, 0.1], [0, 0.2, 0]]), [], "differ by part"),
+        (_old_document([[0, 0, 0.1]], beside=True), [[0, 0, 0.1]], "count twice"),
+        (_old_document([[0, 0, 0.1], [0, 0.2, 0]], removed=True), [[0, 0, 0.1]], None),
+    ],
+    ids=["the same", "before steps", "zero", "differing", "beside a field", "removed"],
+)
+def test_an_old_h_ext_opens_as_a_field_or_is_said(doc, fields, said):
+    """magpylib-material-response 0.15 has no `H_ext`: an old document's is one
+    `UniformField` where one can say it, and said and left out where not."""
+    opened = MagpylibStudioSession()
+    result = opened.load_scene(json.loads(json.dumps(doc)))
+    assert result["ok"]
+    if said:
+        (warning,) = result["warnings"]
+        assert said in warning and "cube0 (0, 0, 0.1) T" in warning
     else:
-        found = {}
-        exec(compile(script, str(path), "exec"), found)  # noqa: S102 - the point
-        back = found["design"].build().session
-    assert back._broken == []
-    assert [f["B"] for f in back.get_scene()["fields"]] == [[0, 0, 0.1]]
-    assert back.get_scene()["applied"] is None
-    np.testing.assert_allclose(
-        read(back) - read(here), np.tile((0, 0, 0.1), (len(POINTS), 1))
-    )
-
-    # what one field cannot say stays, and says so
-    for objects in (
-        _with_h_ext((0, 0, 0.1), (0, 0.2, 0)),
-        [*_with_h_ext((0, 0, 0.1)), UniformField(B=(0, 0, 0.1))],
+        assert "warnings" not in result
+    assert [f["B"] for f in opened.get_scene()["fields"]] == fields
+    for written in (
+        json.dumps(opened.to_dict()),
+        opened.to_script(),
+        opened.to_builder_script(),
     ):
-        _, script = written(*objects)
-        assert ".H_ext = (0.0, 0.0, 0.1)  # one UniformField cannot say this" in script
-        assert "applied_field" not in script
+        assert "H_ext" not in written
+    with (
+        pytest.warns(UserWarning, match=said)
+        if said
+        else warnings.catch_warnings(action="error")
+    ):
+        MagpylibStudioSession(json.loads(json.dumps(doc)))

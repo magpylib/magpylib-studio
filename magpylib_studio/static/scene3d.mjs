@@ -6214,15 +6214,13 @@ export function createScene3d() {
   // so that it stays beside an axis it runs along, and a little longer than the
   // square (docs/decisions.md#0044-the-applied-field-is-an-arrow-in-the-corner):
   // the sum of the scene's `UniformField`s, or of those selected, thicker and in
-  // the selection's colour, or an old model's `H_ext`, never the two as one
-  // (docs/decisions.md#0046-a-uniform-field-is-a-source).
+  // the selection's colour (docs/decisions.md#0046-a-uniform-field-is-a-source).
   const FIELD_LENGTH = { rest: 3, grown: 2.5 };
   const FIELD_INKS = { light: "#c2189b", dark: "#f472d0" }; // no pole, axis or mark
   const FIELD_ROOM = 2.5; // how far past the square it is drawn, as a share of it
   const FIELD_END_ON = 0.96; // turned this far to the eye, it says so with a ring
   const FIELD_PICKED = 1.6; // how much thicker the arrow of what is selected is
   const TAG_ROOM = { width: 300, height: 22 }; // CSS pixels: the longest it says
-  const TAG_GAP = 4; // between its pills, an old `H_ext` beside a `UniformField`
   const TAG_ABOVE = 12; // up from the square: the arrow's head reaches past it
 
   let unit = ""; // the scene's length unit, for the scale bar
@@ -6232,7 +6230,6 @@ export function createScene3d() {
   let cornerPointer = null; // and where it is on the canvas, while it is
   let grown = 0; // how far the corner has grown, from 0 at rest to 1
   let bar = null; // the scale bar's canvas, and what was last painted on it
-  let applied = null; // the scene's `H_ext`: three numbers, "differs" or null
   let uniformFields = []; // the scene's `UniformField`s: {id, B}, B global in tesla
   let tag = null; // what says it, as `bar` is: drawn above the corner
   let insets = { right: 0, bottom: 0, bar: 0 }; // how far in the host pushes the square, and the scale bar up
@@ -6388,7 +6385,6 @@ void main() {
     cornerScene.add(body, axes);
     const fieldInk = FIELD_INKS[dark ? "dark" : "light"];
     const fields = {
-      hext: cornerField(fieldInk, paper),
       sum: cornerField(fieldInk, paper),
       picked: cornerField(SELECTION_COLOUR, paper),
     };
@@ -6621,17 +6617,10 @@ void main() {
   /** Turn the corner's arrows to the fields the scene has now. */
   function poseFields() {
     if (!corner) return;
-    const { hext, sum, picked } = corner.fields;
+    const { sum, picked } = corner.fields;
     const shown = fieldShown();
-    poseField(hext, Array.isArray(applied) ? applied : null);
     poseField(sum, shown && !shown.picked ? shown.B : null);
     poseField(picked, shown?.picked ? shown.B : null, FIELD_PICKED);
-  }
-
-  /** The scene's `H_ext`, as `scene_payload` says it. */
-  function setApplied(field) {
-    applied = field ?? null;
-    poseFields();
   }
 
   /** The scene's `UniformField`s, as `fields_of` says them. */
@@ -6932,7 +6921,7 @@ void main() {
    *  the picture shows, and nothing floats over one. */
   function drawApplied(size, withCube) {
     const shown = fieldShown();
-    if (!applied && !shown) return;
+    if (!shown) return;
     const side = withCube ? cornerSide() : CORNER_SIDE.rest;
     const [left, top] = withCube
       ? cornerAt(size, side)
@@ -6963,23 +6952,12 @@ void main() {
       renderer.render(corner.fieldScene, fieldCamera);
       renderer.setViewport(0, 0, size.x, size.y);
     }
-    const pills = [];
-    if (shown) {
-      const many = shown.count > 1 ? ` (${shown.count} fields)` : "";
-      pills.push({
-        name: "B",
-        text: sayField(shown.B) + many,
-        picked: shown.picked,
-      });
-    }
-    if (applied) {
-      pills.push({
-        name: "H",
-        below: "ext",
-        text: Array.isArray(applied) ? sayField(applied) : "differs",
-      });
-    }
-    drawTag(size, left + side, size.y - top + TAG_ABOVE, pills);
+    const many = shown.count > 1 ? ` (${shown.count} fields)` : "";
+    drawTag(size, left + side, size.y - top + TAG_ABOVE, {
+      name: "B",
+      text: sayField(shown.B) + many,
+      picked: shown.picked,
+    });
   }
 
   /** The field's strength, in the unit that reads best. */
@@ -6992,13 +6970,13 @@ void main() {
 
   /** The tag, its right end at `right` and its foot at `up`, in CSS pixels from
    *  the view's bottom left. */
-  function drawTag(size, right, up, pills) {
+  function drawTag(size, right, up, pill) {
     const ratio = renderer.getPixelRatio();
     if (tag?.ratio !== ratio) {
       dropBar(tag);
       tag = makeBar(ratio, TAG_ROOM);
     }
-    paintTag(pills);
+    paintTag(pill);
     const { width, height } = TAG_ROOM;
     const [x, y] = [right - width, up].map(
       (v) => Math.round(v * ratio) / ratio,
@@ -7010,12 +6988,11 @@ void main() {
     renderer.render(tag.scene, tag.camera);
   }
 
-  /** Paint `pills` on the tag, each a quantity's name, a smaller word under it
-   *  and what it says, from its right end -- only when those, or the theme, have
-   *  changed since it was last painted. */
-  function paintTag(pills) {
+  /** Paint `pill` on the tag, a quantity's name and what it says, at its right
+   *  end -- only when it, or the theme, has changed since it was last painted. */
+  function paintTag(pill) {
     const dark = new THREE.Color(corner.paper).getHSL({}).l < 0.25;
-    const key = JSON.stringify([pills, dark]);
+    const key = JSON.stringify([pill, dark]);
     if (key === tag.painted) return;
     tag.painted = key;
     const { width, height } = TAG_ROOM;
@@ -7030,30 +7007,22 @@ void main() {
     };
     const pad = 8;
     const y = height / 2 + 4;
-    let end = width;
-    for (const { name, below = "", text, picked } of [...pills].reverse()) {
-      const named = widthOf(12, name);
-      const under = below ? 0.5 + widthOf(9, below) : 0;
-      const said = widthOf(11, text);
-      const pill = pad + named + under + 5 + said + pad;
-      const from = end - pill;
-      context.beginPath();
-      context.roundRect(from, 1, pill, height - 2, (height - 2) / 2);
-      context.fillStyle = picked
-        ? SELECTION_COLOUR
-        : FIELD_INKS[dark ? "dark" : "light"];
-      context.fill();
-      context.fillStyle = dark || picked ? "#1e1e1e" : "#ffffff";
-      context.font = `600 12px ${CORNER_FONT}`;
-      context.fillText(name, from + pad, y);
-      if (below) {
-        context.font = `600 9px ${CORNER_FONT}`;
-        context.fillText(below, from + pad + named + 0.5, y + 2.5);
-      }
-      context.font = `600 11px ${CORNER_FONT}`;
-      context.fillText(text, from + pad + named + under + 5, y);
-      end = from - TAG_GAP;
-    }
+    const { name, text, picked } = pill;
+    const named = widthOf(12, name);
+    const said = widthOf(11, text);
+    const long = pad + named + 5 + said + pad;
+    const from = width - long;
+    context.beginPath();
+    context.roundRect(from, 1, long, height - 2, (height - 2) / 2);
+    context.fillStyle = picked
+      ? SELECTION_COLOUR
+      : FIELD_INKS[dark ? "dark" : "light"];
+    context.fill();
+    context.fillStyle = dark || picked ? "#1e1e1e" : "#ffffff";
+    context.font = `600 12px ${CORNER_FONT}`;
+    context.fillText(name, from + pad, y);
+    context.font = `600 11px ${CORNER_FONT}`;
+    context.fillText(text, from + pad + named + 5, y);
     tag.texture.needsUpdate = true;
   }
 
@@ -7634,7 +7603,6 @@ void main() {
     // something happened to fit it again.
     const was = METRES[unit];
     drawAxes(payload.ranges, payload.labels);
-    if ("applied" in payload) setApplied(payload.applied); // kept through a drag
     if ("fields" in payload) setUniformFields(payload.fields);
     if (keepCamera && framed && was && METRES[unit] && METRES[unit] !== was) {
       // The scene again, in another unit: a cell's objects, in the millimetres

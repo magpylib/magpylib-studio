@@ -5,6 +5,19 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Changed
+
+<details>
+<summary>An old H_ext opens as a UniformField</summary>
+
+magpylib-material-response 0.15 removes the applied field `H_ext`. A scene file
+that sets it opens with one `UniformField` in its place when every part sets the
+same value; otherwise it opens without it, and a warning names each part's
+value. Nothing writes `H_ext` any more, and the view's corner draws
+`UniformField`s alone (decision 0060).
+
+</details>
+
 ## [0.17.0]
 
 ### Added

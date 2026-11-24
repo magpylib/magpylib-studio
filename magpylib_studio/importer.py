@@ -34,7 +34,6 @@ from magpylib_studio.session import (
 from magpylib_studio.threejs import (
     has_style,
     is_sealed,
-    own_applied_field,
     sealed_own,
     solved_by_cells,
 )
@@ -291,9 +290,8 @@ def _spec_from(obj, object_id, used_ids, unnamed, names, left_out):
         style.update(_HIDE_STYLE)  # the parts' hiding is the body's
     if style:
         spec["style"] = style
-    applied = own_applied_field(obj)
-    if applied is not None:
-        spec["H_ext"] = applied
+    if getattr(obj, "H_ext", None) is not None:
+        left_out.append(f"{object_id} (H_ext)")
     if solved_by_cells(obj):
         spec["solved_by"] = "cells"
     return spec
@@ -432,13 +430,18 @@ def _style_warnings(left_out):
         for what in left_out
         if what.endswith(" (left out)")
     ]
+    fields = [
+        what.removesuffix(" (H_ext)") for what in left_out if what.endswith(" (H_ext)")
+    ]
     objects = [
         what.removesuffix(" (not held)")
         for what in left_out
         if what.endswith(" (not held)")
     ]
     styles = [
-        what for what in left_out if not what.endswith((" (left out)", " (not held)"))
+        what
+        for what in left_out
+        if not what.endswith((" (left out)", " (not held)", " (H_ext)"))
     ]
     out = []
     if objects:
@@ -458,6 +461,13 @@ def _style_warnings(left_out):
         out.append(
             f"{', '.join(parts)}: a kind of object a scene cannot hold, so it "
             "did not come across. The rest of the body did."
+        )
+    if fields:
+        # docs/decisions.md#0060-an-old-h_ext-opens-as-a-uniform-field
+        out.append(
+            f"{', '.join(fields)}: an applied field H_ext, which "
+            "magpylib-material-response 0.15 does not have, so it did not come "
+            "across. Give the scene a UniformField instead."
         )
     return out
 
