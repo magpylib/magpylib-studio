@@ -11,10 +11,17 @@ import {
   fieldAt,
   frameOf,
   gridAround,
+  gridIn,
   holds,
+  inPlaneOf,
   insideAt,
+  mapLevels,
+  pageEditor,
   pointsOf,
   prepared,
+  regionInWorld,
+  regionOf,
+  rimmed,
   seedsAt,
   slide,
 } from "../magpylib_studio/static/pagefield.mjs";
@@ -30,6 +37,49 @@ if (kernels.api_version() !== KERNELS_API) {
   );
 }
 const asked = JSON.parse(readFileSync(casesPath, "utf8"));
+if (asked.switched) {
+  // a page saved with a sensor's map off, its eye clicked: the map the
+  // page's editor draws for it with its own kernels
+  const { payload, key } = asked.switched;
+  // the editor loads its glue from a blob; node, from the glue's own file
+  URL.createObjectURL = () => pathToFileURL(`${folder}/mmr_kernels.js`).href;
+  const values = { payload };
+  const model = {
+    get: (k) => values[k],
+    set: (k, v) => (values[k] = v),
+    on() {},
+  };
+  const editor = await pageEditor(model, {
+    glue: "",
+    wasm: readFileSync(`${folder}/mmr_kernels_bg.wasm`).toString("base64"),
+  });
+  const switched = editor.switchPart(key, "map", true);
+  const again = editor.switchPart(key, "map", true); // on already: nothing
+  const item = values.payload.fieldlines.find((i) => i.object_id === key);
+  writeFileSync(
+    answersPath,
+    JSON.stringify({ switched, again, map: item.map, levels: item.map_levels }),
+  );
+  process.exit(0);
+}
+if (asked.regions) {
+  // a set region where a pose puts its sensor, the grids laid over it, and
+  // what a map drawn on a plane shows
+  const answers = asked.regions.map(({ region, pose, seeds, points, item }) => {
+    const box = regionInWorld(region, pose);
+    return {
+      box,
+      back: regionOf(box, pose),
+      flat: gridIn(box, points, true),
+      deep: gridIn(box, points, false),
+      rimmed: rimmed(box, points, true),
+      inPlane: inPlaneOf(box, seeds),
+      levels: mapLevels(item),
+    };
+  });
+  writeFileSync(answersPath, JSON.stringify(answers));
+  process.exit(0);
+}
 if (asked.fields) {
   // the field alone: each scene's sources at `points`, as `kind`, at each
   // tolerance -- and which of the points are inside a body

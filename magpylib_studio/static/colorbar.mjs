@@ -223,8 +223,9 @@ export function createColorBar(container, { onRange, onShare }) {
    *  chose, else the selected one if that is one, else the first -- its
    *  table drawn as the bar, it and its field named. Not one hidden, nor
    *  one whose pixels are hidden and whose lines are too, or not drawn:
-   *  nothing on screen is in its colours. None while the widget says the
-   *  bar steps `aside`. */
+   *  nothing on screen is in its colours. A sensor drawn as its lines
+   *  alone is shown by them. None while the widget says the bar steps
+   *  `aside`. */
   function update(args) {
     asked = args;
     // a drag holds the bar it began with; what came meanwhile, at its end
@@ -234,12 +235,17 @@ export function createColorBar(container, { onRange, onShare }) {
     }
     const { payload, selected, units, hidden } = args;
     const off = new Set(hidden ?? []);
+    // the sensors whose lines or map are drawn, in their colours
+    const drawsField = (item) =>
+      (item.lines !== false && !off.has(`${item.object_id}/lines`)) ||
+      (item.map === true && !off.has(`${item.object_id}/map`));
     const lined = new Set(
-      (payload?.fieldlines ?? []).map((item) => item.object_id),
+      (payload?.fieldlines ?? [])
+        .filter(drawsField)
+        .map((item) => item.object_id),
     );
     const seen = ({ object_id: id }) =>
-      !off.has(id) &&
-      !(off.has(`${id}/pixels`) && (!lined.has(id) || off.has(`${id}/lines`)));
+      !off.has(id) && !(off.has(`${id}/pixels`) && !lined.has(id));
     // one each: a pattern's copies come under their source's id, and are it
     const sensors = new Map();
     const copied = new Set();
@@ -256,6 +262,35 @@ export function createColorBar(container, { onRange, onShare }) {
             }
           : each,
       );
+    }
+    // a sensor whose pixels are not drawn -- the lines alone, at size 0 --
+    // by its lines, coloured from the same table
+    for (const each of payload?.fieldlines ?? []) {
+      const id = each.object_id;
+      if (!each.colour_scale || sensors.has(id)) continue;
+      if (off.has(id) || !lined.has(id)) continue;
+      sensors.set(id, {
+        object_id: id,
+        name: each.label,
+        scale: each.colour_scale,
+      });
+    }
+    // A sensor's map drawn: its colours span what the map shows
+    // (`map_levels`), and the pixels and lines take them, a pixel past them
+    // the end colour. Not what the pixels read as well: one inside a core
+    // reads a hundred times the air round it, which left the map one colour.
+    const widened = new Set();
+    for (const each of payload?.fieldlines ?? []) {
+      const known = sensors.get(each.object_id);
+      const levels = each.map_levels;
+      if (!known || !levels || !each.map || off.has(`${each.object_id}/map`)) {
+        continue;
+      }
+      sensors.set(each.object_id, {
+        ...known,
+        scale: { ...known.scale, levels: [...levels] },
+      });
+      widened.add(each.object_id);
     }
     const scaled = [...sensors.values()];
     const picked = (selected ?? []).join();
@@ -276,7 +311,7 @@ export function createColorBar(container, { onRange, onShare }) {
       const theirs = reach(group);
       for (const each of group) {
         if (together) common[each.object_id] = theirs;
-        else if (copied.has(each.object_id))
+        else if (copied.has(each.object_id) || widened.has(each.object_id))
           common[each.object_id] = each.scale.levels;
       }
     }

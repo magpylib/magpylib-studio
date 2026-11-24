@@ -152,6 +152,7 @@ export function gridAround(centres, seeds, points, [axes, planar]) {
     high[k] += pad;
   }
   let step, shape;
+  const depth = high[2] - low[2]; // across the plane, as a box would have it
   if (planar) {
     low[2] = high[2] = 0;
     const span = [high[0] - low[0], high[1] - low[1]];
@@ -166,7 +167,9 @@ export function gridAround(centres, seeds, points, [axes, planar]) {
     (c, k) =>
       c + low[0] * axes[0][k] + low[1] * axes[1][k] + low[2] * axes[2][k],
   );
-  return { origin, axes, step, shape };
+  return planar
+    ? { origin, axes, step, shape, depth }
+    : { origin, axes, step, shape };
 }
 
 const isFlat = (grid) => grid.shape[2] === 1;
@@ -648,9 +651,23 @@ function encoded(grid, along, within) {
 }
 
 /** The ``fieldlines`` item, as `fieldlines.item` makes it: `saved`'s name
- *  and colours, the grid's field, and the seeds nearest the middle first. */
-function itemOf(saved, sensor, rules, grid, along, within, seeds) {
-  const centre = middle(seeds);
+ *  and colours, the grid's field, and the seeds nearest the middle first --
+ *  and the region the lines run in: `box`, a region set on the sensor,
+ *  whose pixels outside it start none, else the grid's own. */
+function itemOf(
+  saved,
+  sensor,
+  rules,
+  grid,
+  along,
+  within,
+  allSeeds,
+  box = null,
+) {
+  const seeds = box
+    ? allSeeds.filter((_, i) => withinBox(box, [allSeeds[i]], isFlat(grid))[0])
+    : allSeeds;
+  const centre = seeds.length ? middle(seeds) : [0, 0, 0];
   // as `fieldlines.item` orders them: to a picometre, equals in order
   const away = (s) =>
     Math.round(Math.hypot(...s.map((v, k) => v - centre[k])) * 1e12);
@@ -661,9 +678,15 @@ function itemOf(saved, sensor, rules, grid, along, within, seeds) {
   const finest = isFlat(grid)
     ? (Math.max(grid.shape[0], grid.shape[1]) * grid.step) / 30
     : Infinity;
+  // what the engine laid for where the sensor stood -- a set region, a box
+  // grid's map plane, the map's span -- is not the page's to move with it:
+  // the page lays the rule's grid
+  const kept = { ...saved };
+  for (const key of ["region", "map_field", "map_levels"]) delete kept[key];
   return {
-    ...saved,
+    ...kept,
     ...encoded(grid, along, within),
+    region: regionPayload(box ?? boxOf(grid), Boolean(box)),
     seeds: order.flatMap(([, i]) =>
       seeds[i].map((v) => Math.round(v * 1e9) / 1e9),
     ),
@@ -706,6 +729,181 @@ function decodedItem(item) {
     within[n] = (bits.charCodeAt(n >> 3) >> (n & 7)) & 1;
   }
   return { grid, along, within };
+}
+
+// --- a sensor's field region (docs/decisions.md#0059-a-sensors-field-region-and-map)
+// As `fieldlines.py` lays it: a box {centre, axes (rows), size}, kept in the
+// sensor's own frame and drawn where the sensor is. Held to python by
+// `tests/test_page_field.py`.
+
+const minus = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const round12 = (v) => Math.round(v * 1e12) / 1e12;
+
+/** `region_in_world`: `region`, in a sensor's own frame, as a box in the
+ *  world where `pose` puts the sensor. */
+export function regionInWorld(region, pose) {
+  const at = turn(pose.orientation, region.centre);
+  return {
+    centre: at.map((v, k) => v + pose.position[k]),
+    axes: region.axes.map((row) => turn(pose.orientation, row)),
+    size: region.size.map(Math.abs),
+  };
+}
+
+/** `region_of`: a box in the world as a region in the own frame of a
+ *  sensor at `pose`, its axes made a right-handed orthonormal set. */
+export function regionOf(box, pose) {
+  const [a, b] = box.axes;
+  const norm = (v) => {
+    const n = Math.hypot(...v);
+    return v.map((c) => c / n);
+  };
+  const u = norm(a);
+  const v = norm(
+    minus(
+      b,
+      u.map((c) => c * dot(u, b)),
+    ),
+  );
+  const w = [
+    u[1] * v[2] - u[2] * v[1],
+    u[2] * v[0] - u[0] * v[2],
+    u[0] * v[1] - u[1] * v[0],
+  ];
+  const back = (x) => turn(pose.orientation, x, true).map(round12);
+  return {
+    centre: back(minus(box.centre, pose.position)),
+    axes: [u, v, w].map(back),
+    size: box.size.map((s) => round12(Math.abs(s))),
+  };
+}
+
+/** `in_plane_of`: whether `seeds` lie in the plane of `box`'s first two
+ *  axes, through its centre. */
+export function inPlaneOf(box, seeds) {
+  let across = 0;
+  for (const s of seeds)
+    across = Math.max(across, Math.abs(dot(minus(s, box.centre), box.axes[2])));
+  return across <= 1e-6 * Math.max(Math.max(...box.size), 1e-9);
+}
+
+/** `grid_in`: a grid over `box` of about `points` points, one step on
+ *  every axis, centred on it -- in the plane of its first two axes if
+ *  `flat`; a box with no depth is given a quarter of its largest side. */
+export function gridIn(box, points, flat) {
+  const largest = Math.max(Math.max(...box.size), 1e-9);
+  const size = box.size.map((s) => Math.max(s, 1e-3 * largest));
+  let step, shape;
+  if (flat) {
+    step = Math.sqrt((size[0] * size[1]) / points);
+    shape = [
+      ...[0, 1].map((k) => Math.max(Math.ceil(size[k] / step - 1e-9) + 1, 2)),
+      1,
+    ];
+  } else {
+    if (size[2] <= 1e-3 * largest * (1 + 1e-9)) size[2] = 0.25 * largest;
+    step = ((size[0] * size[1] * size[2]) / points) ** (1 / 3);
+    shape = size.map((s) => Math.max(Math.ceil(s / step - 1e-9) + 1, 2));
+  }
+  const covered = shape.map((n) => step * (n - 1));
+  const origin = box.centre.map(
+    (c, k) =>
+      c -
+      (covered[0] * box.axes[0][k] +
+        covered[1] * box.axes[1][k] +
+        covered[2] * box.axes[2][k]) /
+        2,
+  );
+  return { origin, axes: box.axes.map((row) => [...row]), step, shape };
+}
+
+/** `rimmed`: `gridIn`'s grid with a step's room past `box` on every side
+ *  it spans. */
+export function rimmed(box, points, flat) {
+  const { step } = gridIn(box, points, flat);
+  const size = box.size.map((s, k) => (flat && k === 2 ? s : s + 2 * step));
+  return gridIn({ ...box, size }, points, flat);
+}
+
+/** `within_box`: which of `points` lie in `box` -- in its rectangle, for a
+ *  flat one. */
+export function withinBox(box, points, flat) {
+  const half = box.size.map((s) => (s / 2) * (1 + 1e-9) + 1e-12);
+  return points.map((p) => {
+    const d = minus(p, box.centre);
+    return box.axes.every(
+      (axis, k) => (flat && k === 2) || Math.abs(dot(d, axis)) <= half[k],
+    );
+  });
+}
+
+/** `box_of`: the region a grid covers, as a box in the world; a flat
+ *  grid's as deep as `gridAround` padded it across its plane. */
+export function boxOf(grid) {
+  const sides = grid.shape.map((n) => grid.step * (n - 1));
+  if (isFlat(grid)) sides[2] = grid.depth ?? 0;
+  const centre = grid.origin.map(
+    (c, k) =>
+      c +
+      (grid.step * (grid.shape[0] - 1) * grid.axes[0][k] +
+        grid.step * (grid.shape[1] - 1) * grid.axes[1][k] +
+        grid.step * (grid.shape[2] - 1) * grid.axes[2][k]) /
+        2,
+  );
+  return { centre, axes: grid.axes, size: sides };
+}
+
+/** `region_payload`: a region as an item carries it. */
+function regionPayload(box, set) {
+  return {
+    centre: box.centre.map(round12),
+    axes: box.axes.flat().map(round12),
+    size: box.size.map(round12),
+    set,
+  };
+}
+
+/** `MAP_SPAN`, `map_levels`: the |field| a map shows, its 1st to 99th
+ *  percentile where it is drawn -- outside the magnets, inside a set
+ *  region -- on the plane it is drawn on; null where it shows nothing. */
+export function mapLevels(item) {
+  const plane = isFlat(item) ? item : item.map_field;
+  if (!plane) return null;
+  const { grid, along, within } = decodedItem(plane);
+  const region = item.region?.set
+    ? {
+        centre: item.region.centre,
+        axes: [0, 3, 6].map((k) => item.region.axes.slice(k, k + 3)),
+        size: item.region.size,
+      }
+    : null;
+  const points = region ? pointsOf(grid) : null;
+  const kept = [];
+  for (let n = 0; n < within.length; n++) {
+    const size = Math.hypot(along[3 * n], along[3 * n + 1], along[3 * n + 2]);
+    if (within[n] || !(size > 0) || !Number.isFinite(size)) continue;
+    if (
+      region &&
+      !withinBox(
+        region,
+        [Array.from(points.subarray(3 * n, 3 * n + 3))],
+        true,
+      )[0]
+    )
+      continue;
+    kept.push(size);
+  }
+  if (!kept.length) return null;
+  kept.sort((a, b) => a - b);
+  // numpy's percentile: linear between the two nearest ranks
+  const at = (p) => {
+    const rank = (p / 100) * (kept.length - 1);
+    const below = Math.floor(rank);
+    const above = Math.min(below + 1, kept.length - 1);
+    return kept[below] + (kept[above] - kept[below]) * (rank - below);
+  };
+  const low = at(1);
+  return [low, Math.max(at(99), low * (1 + 1e-9) + 1e-30)];
 }
 
 // --- a dragged sensor's pixels ----------------------------------------------
@@ -824,19 +1022,38 @@ export async function pageEditor(model, { glue, wasm }) {
     model.set("payload", payload);
   };
 
-  /** The sensor the edits move, and the pose they put it at. */
+  /** The sensor the edits move, the pose they put it at, and its region
+   *  -- set in its own frame, or null for the rule's -- which a grip's edit
+   *  (`field_region`, a box in the world, or null) sets, `regioned`. */
   function posed(payload, edits) {
     const field = payload?.page_field;
     const edit = edits.length === 1 ? edits[0] : null;
     const sensor = edit && field?.sensors?.[edit.objectId];
     if (!sensor || edit.shape || edit.polarization) return null;
+    if ("field_region" in edit) {
+      const pose = {
+        position: sensor.position,
+        orientation: sensor.orientation,
+      };
+      const box = edit.field_region;
+      const region = box ? regionOf(box, pose) : null;
+      return {
+        key: edit.objectId,
+        sensor,
+        pose,
+        field,
+        region,
+        regioned: true,
+      };
+    }
+    const region = sensor.region ?? null;
     const pose = {
       position: edit.position ?? sensor.position,
       orientation: edit.orientation
         ? quaternionOf(edit.orientation)
         : sensor.orientation,
     };
-    return { key: edit.objectId, sensor, pose, field };
+    return { key: edit.objectId, sensor, pose, field, region };
   }
 
   /** The grid, field and inside at rest of sensor `key` in `payload`: the
@@ -895,11 +1112,137 @@ export async function pageEditor(model, { glue, wasm }) {
     return got;
   }
 
+  /** The grid over a set region `box` and the field on it: in its plane
+   *  where the pixels lie in it and the field keeps to it, from a coarse
+   *  look first; else through the box -- `_region_grid`'s order. At rest,
+   *  with a step's room round it (`rimmed`). */
+  function regionLaid(sources, sensor, box, seeds, points, tolerance, rest) {
+    const { rules } = sources.field;
+    const lay = rest ? rimmed : gridIn;
+    let flat = false;
+    if (inPlaneOf(box, seeds)) {
+      const looked = computed(
+        sources,
+        gridIn(box, rules.probe_points, true),
+        sensor.kind,
+        tolerance,
+      );
+      flat = keepsTo(looked.along, looked.within, rules.across);
+    }
+    let got = computed(sources, lay(box, points, flat), sensor.kind, tolerance);
+    if (flat && !keepsTo(got.along, got.within, rules.across)) {
+      got = computed(sources, lay(box, points, false), sensor.kind, tolerance);
+    }
+    return got;
+  }
+
+  /** The field on the plane a map is drawn on where the lines do not lie
+   *  in one, or are not drawn: a set region's own, else the flat grid the
+   *  rule lays round pixels in a plane; null for pixels in none
+   *  (`_map_plane`). */
+  function planeOf(sources, sensor, pose, seeds, box, points, tolerance, rest) {
+    if (box) {
+      const grid = (rest ? rimmed : gridIn)(box, points, true);
+      return computed(sources, grid, sensor.kind, tolerance);
+    }
+    const frame = frameOf(sensor, pose);
+    if (!frame[1]) return null;
+    return computed(
+      sources,
+      gridAround(sources.centres, seeds, points, frame),
+      sensor.kind,
+      tolerance,
+    );
+  }
+
+  /** Sensor `key`'s item where its region is set or its lines are off --
+   *  laid afresh, as the session lays it, at `points` -- or null where the
+   *  rule's grid and its lines are drawn, which the drag keeps. */
+  function freshly(
+    saved,
+    sources,
+    sensor,
+    pose,
+    seeds,
+    region,
+    points,
+    tolerance,
+    rest,
+  ) {
+    if (!region && saved.lines !== false) return null;
+    const box = region ? regionInWorld(region, pose) : null;
+    let got = null;
+    if (saved.lines === false) {
+      // the map alone: its plane is all there is to compute
+      got = planeOf(sources, sensor, pose, seeds, box, points, tolerance, rest);
+    }
+    if (!got) {
+      got = box
+        ? regionLaid(sources, sensor, box, seeds, points, tolerance, rest)
+        : laid(sources, sensor, pose, seeds, points, tolerance, true);
+    }
+    return { got, box };
+  }
+
+  /** The item drawn from `got`, its map's plane computed where the map is
+   *  on and the grid is a box, and what the map shows for the bar. */
+  function drawnItem(
+    saved,
+    sources,
+    sensor,
+    pose,
+    seeds,
+    got,
+    box,
+    points,
+    tolerance,
+    rest,
+  ) {
+    const { rules } = sources.field;
+    const item = itemOf(
+      saved,
+      sensor,
+      rules,
+      got.grid,
+      got.along,
+      got.within,
+      seeds,
+      box,
+    );
+    if (!saved.map) return item;
+    if (!isFlat(got.grid)) {
+      const plane = planeOf(
+        sources,
+        sensor,
+        pose,
+        seeds,
+        box,
+        points,
+        tolerance,
+        rest,
+      );
+      if (plane)
+        item.map_field = encoded(plane.grid, plane.along, plane.within);
+    }
+    const shows = mapLevels(item);
+    if (shows) item.map_levels = shows;
+    return item;
+  }
+
   /** `payload` with sensor `key` moved from its pose there to `pose`, and
    *  its lines `item`: each of its drawings carried rigidly, its pixels
    *  reading the field where they now are (`pixelsAt`, from `sources` at
    *  `tolerance`), its pose said. */
-  function movedPayload(payload, key, sensor, pose, item, sources, tolerance) {
+  function movedPayload(
+    payload,
+    key,
+    sensor,
+    pose,
+    item,
+    sources,
+    tolerance,
+    region = sensor.region ?? null,
+  ) {
     const from = sensor;
     const turned = product(pose.orientation, [
       -from.orientation[0],
@@ -966,7 +1309,7 @@ export async function pageEditor(model, { glue, wasm }) {
     }
     const sensors = {
       ...payload.page_field.sensors,
-      [key]: { ...sensor, ...pose },
+      [key]: { ...sensor, ...pose, region },
     };
     out.page_field = { ...payload.page_field, sensors };
     return out;
@@ -1007,10 +1350,63 @@ export async function pageEditor(model, { glue, wasm }) {
       const payload = gesture?.before ?? model.get("payload");
       const moved = posed(payload, edits);
       if (!moved) return { ok: false };
-      const { key, sensor, pose, field } = moved;
+      const { key, sensor, pose, field, region } = moved;
       const sources = ready(field);
       const seeds = seedsAt(sensor, pose);
       const { rules } = field;
+      const saved = savedItem(payload, key);
+      const tolerance = rules.tolerance.drag;
+      const fresh = freshly(
+        saved,
+        sources,
+        sensor,
+        pose,
+        seeds,
+        region,
+        rules.drag_points,
+        tolerance,
+        false,
+      );
+      if (fresh || moved.regioned) {
+        const { got, box } = fresh ?? {
+          got: laid(
+            sources,
+            sensor,
+            pose,
+            seeds,
+            rules.drag_points,
+            tolerance,
+            true,
+          ),
+          box: null,
+        };
+        const item = drawnItem(
+          saved,
+          sources,
+          sensor,
+          pose,
+          seeds,
+          got,
+          box,
+          rules.drag_points,
+          tolerance,
+          false,
+        );
+        const scene = {
+          ...movedPayload(
+            payload,
+            key,
+            sensor,
+            pose,
+            item,
+            sources,
+            tolerance,
+            region,
+          ),
+          partial: [key],
+        };
+        return { ok: true, scene };
+      }
       // the grid the drag holds: at first the one at rest, while it serves
       let held = gesture?.held;
       if (!held) {
@@ -1029,14 +1425,17 @@ export async function pageEditor(model, { glue, wasm }) {
         );
       }
       if (gesture) gesture.held = held;
-      const item = itemOf(
-        savedItem(payload, key),
+      const item = drawnItem(
+        saved,
+        sources,
         sensor,
-        rules,
-        held.grid,
-        held.along,
-        held.within,
+        pose,
         seeds,
+        held,
+        null,
+        rules.drag_points,
+        tolerance,
+        false,
       );
       const scene = {
         ...movedPayload(
@@ -1052,6 +1451,72 @@ export async function pageEditor(model, { glue, wasm }) {
       };
       return { ok: true, scene };
     },
+    /** Switch sensor `key`'s `part` -- its "lines" or its "map" -- on or
+     *  off where it stands: a part the page was saved without is drawn
+     *  afresh, as the session draws it with its switch turned on. False
+     *  where the page has no such sensor or lines. */
+    switchPart(key, part, on) {
+      const payload = model.get("payload");
+      const field = payload?.page_field;
+      const sensor = field?.sensors?.[key];
+      const was = savedItem(payload, key);
+      if (!sensor || !was || (was[part] !== false) === on) return false;
+      const saved = { ...was, [part]: on };
+      const sources = ready(field);
+      const pose = {
+        position: sensor.position,
+        orientation: sensor.orientation,
+      };
+      const seeds = seedsAt(sensor, pose);
+      const { rules } = field;
+      const tolerance = rules.tolerance.rest;
+      const fresh = freshly(
+        saved,
+        sources,
+        sensor,
+        pose,
+        seeds,
+        sensor.region ?? null,
+        rules.rest_points,
+        tolerance,
+        true,
+      );
+      const { got, box } = fresh ?? {
+        // the rule's grid: the lines' own where they were drawn, else laid
+        got:
+          was.lines !== false
+            ? restOf(payload, key, sensor)
+            : laid(
+                sources,
+                sensor,
+                pose,
+                seeds,
+                rules.rest_points,
+                tolerance,
+                true,
+              ),
+        box: null,
+      };
+      const item = drawnItem(
+        saved,
+        sources,
+        sensor,
+        pose,
+        seeds,
+        got,
+        box,
+        rules.rest_points,
+        tolerance,
+        true,
+      );
+      const fieldlines = payload.fieldlines.map((i) =>
+        i.object_id === key ? item : i,
+      );
+      undone.push(payload);
+      redone.length = 0;
+      show({ ...payload, fieldlines });
+      return true;
+    },
     commit(edits) {
       const payload = gesture?.before ?? model.get("payload");
       gesture = null;
@@ -1061,10 +1526,67 @@ export async function pageEditor(model, { glue, wasm }) {
           ok: false,
           error: "a saved page moves its sensors only",
         });
-      const { key, sensor, pose, field } = moved;
+      const { key, sensor, pose, field, region } = moved;
       const sources = ready(field);
       const seeds = seedsAt(sensor, pose);
       const { rules } = field;
+      const saved = savedItem(payload, key);
+      const tolerance = rules.tolerance.rest;
+      const fresh =
+        saved &&
+        freshly(
+          saved,
+          sources,
+          sensor,
+          pose,
+          seeds,
+          region,
+          rules.rest_points,
+          tolerance,
+          true,
+        );
+      if (fresh || (saved && moved.regioned)) {
+        const { got, box } = fresh ?? {
+          got: laid(
+            sources,
+            sensor,
+            pose,
+            seeds,
+            rules.rest_points,
+            tolerance,
+            true,
+          ),
+          box: null,
+        };
+        const item = drawnItem(
+          saved,
+          sources,
+          sensor,
+          pose,
+          seeds,
+          got,
+          box,
+          rules.rest_points,
+          tolerance,
+          true,
+        );
+        const next = movedPayload(
+          payload,
+          key,
+          sensor,
+          pose,
+          item,
+          sources,
+          tolerance,
+          region,
+        );
+        if (!box && saved.lines !== false)
+          rests.set(next, { [key]: { ...got, seeds } });
+        undone.push(payload);
+        redone.length = 0;
+        show(next);
+        return Promise.resolve({ ok: true });
+      }
       const rest = restOf(payload, key, sensor);
       if (!rest) {
         // no lines of its own to draw again: the page's `movable` says so
@@ -1134,14 +1656,17 @@ export async function pageEditor(model, { glue, wasm }) {
           );
         }
       }
-      const item = itemOf(
-        savedItem(payload, key),
+      const item = drawnItem(
+        saved,
+        sources,
         sensor,
-        rules,
-        got.grid,
-        got.along,
-        got.within,
+        pose,
         seeds,
+        got,
+        null,
+        rules.rest_points,
+        tolerance,
+        true,
       );
       const next = movedPayload(
         payload,

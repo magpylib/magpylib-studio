@@ -15,6 +15,7 @@
  *   select(objectId)       a pick, for the side bar to show
  *   setVisible(hide, show) hiding, an edit in the studio, saved and undoable
  *   setFieldLines(on)      the field lines' switch, the document's too
+ *   setFieldMap(on)        the field map's, the same way
  *   useVariant(name)       a variant used from the view's row of them
  *   say(text)              a word in the host's bar
  *
@@ -41,7 +42,7 @@ const READS = new Set([
  *  beneath it (`threejs.PARTS`) -- hides them one by one as the view's own
  *  setting, as a fade is: no object of the document is a part. Hidden whole,
  *  it is the sensor that is hidden, an edit as any object's is. */
-const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
+const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines", "FieldMap"]);
 
 /** Each sensor in `tree` drawn whole as its parts -- its axes among them --
  *  and their ids; and, in `apart`, every part's id. */
@@ -120,7 +121,12 @@ export function mountWidget(el, host) {
     emit(`change:${key}`, value);
   }
   // what the host last heard from here
-  const told = { selected: [], hidden: [], field_lines: false };
+  const told = {
+    selected: [],
+    hidden: [],
+    field_lines: false,
+    field_map: false,
+  };
   let partsHidden = new Set();
   let inSidebar = null; // the object the side bar shows
 
@@ -157,6 +163,11 @@ export function mountWidget(el, host) {
     if (lines !== told.field_lines) {
       told.field_lines = lines;
       host.setFieldLines(lines);
+    }
+    const map = Boolean(values.field_map);
+    if (map !== told.field_map) {
+      told.field_map = map;
+      host.setFieldMap(map);
     }
   }
 
@@ -230,6 +241,7 @@ export function mountWidget(el, host) {
       ];
       // the document's switch, which the engine's scene says (#45)
       told.field_lines = Boolean(payload.field_lines);
+      told.field_map = Boolean(payload.field_map);
       take("tree", tree);
       // the variants' names, for the grid of them; the Variables view uses them
       const names = Object.keys(panel?.variants ?? {});
@@ -239,6 +251,7 @@ export function mountWidget(el, host) {
       take("hidden", off);
       take("frames", framesOf(payload));
       take("field_lines", told.field_lines);
+      take("field_map", told.field_map);
       take("payload", payload);
     },
     select(objectId) {

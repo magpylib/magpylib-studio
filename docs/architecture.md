@@ -331,16 +331,37 @@ visible, and leaves the pulses standing for `prefers-reduced-motion`. Beside it,
 only short motions ask for frames until they end: a turn to an axis view, the
 corner growing, an overlap's shading blinking twice as it appears. The widget's
 `flow` trait, kept by an export, puts the pulses away and the arrows back, and
-stands the field lines still. It says the scene's scale one of three ways
-(`setAxes`, the widget's `axes`): by default a view cube and a scale bar, drawn
-into the canvas's corner after the scene in the same frame -- at rest only the
-cube's x, y, z arrows, small, seen in perspective and fading where they point
-away, which grow with the cube round them while the pointer is on the corner --
-the cube a click away from twenty-six views, turned to over a few frames
-(`axisView`, as the 1, 3 and 7 keys), and the bar a round length at the orbit
-centre, low in the middle of the foot beside the axes at rest, said in the unit
-that reads best, kept by the PNG where the corner is not; the graduated box
-round the scene; or neither
+stands the field lines still.
+
+A sensor's field lines run in a region
+([0059](decisions.md#0059-a-sensors-field-region-and-map)): the automatic grid
+(`fieldlines.grid_around`), or one set by grips and kept in the document's
+`field_regions`, in the sensor's own frame (`fieldlines.region_of`,
+`region_in_world`). Each `fieldlines` item carries its region, which the
+renderer outlines dashed on the selected sensor -- hung on its node, so a drag
+carries it between the engine's frames -- picks by its outline (`nearRegion`)
+and puts face grips on (`GRIPS.free`, `GRIPS.rect`); a grip's drag is an
+`apply_edits` edit `{objectId, field_region}`. The session keeps a set region's
+field as the rule's grid is kept (`_region_lines`): in a gesture on a grid
+`HELD_ROOM` times the region, fixed while it covers it (`fieldlines.serves`); at
+rest with a step's room round it (`rimmed`), slid on release. The map,
+`field_map`, is drawn by the renderer from the item's grid where that is flat,
+else from `map_field`, a plane the session samples (`_map_plane`), which under
+the rule's grid slides with a dragged sensor (`_slid_on`); with the lines off,
+the plane is the item's grid. `map_levels`, the map's 1st to 99th percentile, is
+the sensor's colour range while the map shows (`colorbar.mjs`). A run's frames
+lay the same grids (`_frame_field`), and a saved page lays them itself
+(`pagefield.mjs`), held to python by `tests/test_page_field.py`.
+
+It says the scene's scale one of three ways (`setAxes`, the widget's `axes`): by
+default a view cube and a scale bar, drawn into the canvas's corner after the
+scene in the same frame -- at rest only the cube's x, y, z arrows, small, seen
+in perspective and fading where they point away, which grow with the cube round
+them while the pointer is on the corner -- the cube a click away from twenty-six
+views, turned to over a few frames (`axisView`, as the 1, 3 and 7 keys), and the
+bar a round length at the orbit centre, low in the middle of the foot beside the
+axes at rest, said in the unit that reads best, kept by the PNG where the corner
+is not; the graduated box round the scene; or neither
 ([0027](decisions.md#0027-the-scale-is-said-round-the-scene-or-in-its-corner),
 [0030](decisions.md#0030-the-view-cube-is-the-default-scale),
 [0035](decisions.md#0035-the-corner-shows-the-axes-and-grows-the-cube-on-hover),

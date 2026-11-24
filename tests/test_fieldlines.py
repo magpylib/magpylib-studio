@@ -221,6 +221,39 @@ def test_a_sensor_dragged_past_still_magnets_keeps_their_field(monkeypatch, seal
     assert computed  # a magnet moved
 
 
+@pytest.mark.parametrize("lines", [True, False])
+def test_a_map_goes_with_its_sensor_dragged(monkeypatch, lines):
+    """A map is its grid: a sensor dragged takes it along by whole steps --
+    the lines' flat grid, or with the lines off its plane of its own -- the
+    field of the magnets standing still computed only on the strip it moves
+    onto."""
+    widget = view()
+    widget._session.set_field_map(True)
+    widget._session.set_field_lines(lines)
+    widget._session.get_scene()
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines,
+        "field",
+        lambda s, at, *a, **k: computed.append(len(at)) or field(s, at, *a, **k),
+    )
+    widget._reply({"method": "begin_interaction"})
+    planes = []
+    for k in range(1, 5):
+        computed.clear()
+        edit = {"objectId": "probe", "position": [0.002 * k, 0, 0]}
+        answer, _, _ = widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+        (item,) = answer["result"]["scene"]["fieldlines"]
+        planes.append(item if item["shape"][2] == 1 else item["map_field"])
+        assert sum(computed) < np.prod(planes[-1]["shape"]) / 2
+    widget._reply({"method": "end_interaction"})
+    xs = [plane["origin"][0] for plane in planes]
+    assert xs == sorted(set(xs))
+
+
 def test_a_variable_only_a_sensor_follows_keeps_the_field(monkeypatch):
     """The field of the sources is kept across a change of a variable that
     only a sensor follows -- its pixels' density -- and computed again for
@@ -434,6 +467,17 @@ def test_a_frame_of_a_run_has_its_own_field_lines(monkeypatch):
     assert session.get_scene(frame=-1)["fieldlines"]
     run = view._saved()["run"]
     assert all(frame is None or frame["fieldlines"] for frame in run)
+    # a region set once the run's lines were drawn is every frame's, the
+    # map with it
+    (item,) = last["fieldlines"]
+    session.set_field_region(item["object_id"], _widened(item, 1.5))
+    session.set_field_map(True)
+    sizes = []
+    for frame in (3, 7):
+        (each,) = session.get_scene(frame=frame)["fieldlines"]
+        assert each["region"]["set"] and each["map"] and each["map_levels"]
+        sizes.append(each["region"]["size"])
+    assert sizes[0] == sizes[1]
 
     from magpylib_studio import threejs
 
@@ -729,3 +773,186 @@ def test_the_views_export_makes_a_page_editable_or_not(editable, monkeypatch):
         view._on_message(view, {"kind": "export-more", "job": 1}, None)
     page = sent[-1]["html"]
     assert ('id="magpy-kernels"></script>' not in page) is editable
+
+
+def _widened(item, times):
+    """`item`'s region as a view's grips send it, `times` as wide."""
+    region = item["region"]
+    size = list(region["size"])
+    size[0] *= times
+    return {
+        "centre": region["centre"],
+        "axes": np.reshape(region["axes"], (3, 3)).tolist(),
+        "size": size,
+    }
+
+
+def test_a_set_region_is_where_the_lines_run(tmp_path):
+    """A region dragged out is one step to undo, the grid laid over it; it
+    turns and moves with its sensor, survives the script tab, and goes with
+    the sensor. Given back to the rule, the grid is the rule's again."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    assert auto["region"]["set"] is False
+    widget._reply({"method": "begin_interaction"})
+    for times in (1.2, 1.5):
+        edit = {"objectId": "probe", "field_region": _widened(auto, times)}
+        answer, _, _ = widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+        (item,) = answer["result"]["scene"]["fieldlines"]
+        assert item["region"]["set"] is True
+        assert item["region"]["size"][0] == pytest.approx(
+            auto["region"]["size"][0] * times
+        )
+    widget._reply({"method": "end_interaction"})
+    assert len(session.get_history()["undo"]) == 1
+    (item,) = session.get_scene()["fieldlines"]
+    sides = item["step"] * (np.asarray(item["shape"]) - 1)
+    # with a step's room on each side for a sensor let go a little way off
+    assert sides[0] >= item["region"]["size"][0] > sides[0] - 3 * item["step"]
+
+    # turned and moved with the sensor
+    session.apply_edits([{"objectId": "probe", "position": [0.003, 0, 0.002]}])
+    (moved,) = session.get_scene()["fieldlines"]
+    np.testing.assert_allclose(
+        np.subtract(moved["region"]["centre"], item["region"]["centre"]),
+        [0.003, 0, 0.002],
+        atol=1e-12,
+    )
+
+    # dragged alone: a region beside a pose is refused, and nothing changes
+    held = session.field_regions
+    mixed = [
+        {"objectId": "probe", "field_region": _widened(auto, 3)},
+        {"objectId": "probe", "position": [0, 0, 0]},
+    ]
+    assert not session.apply_edits(mixed)["ok"]
+    assert session.field_regions == held
+
+    script = tmp_path / "scene.py"
+    script.write_text(session.to_builder_script(), encoding="utf-8")
+    assert session.apply_builder_script(str(script))["ok"]
+    assert "probe" in session.field_regions
+
+    assert session.set_field_region("probe", None)["ok"]
+    assert session.undo()["ok"]
+    assert rpc.handle(
+        session,
+        {"method": "set_field_region", "params": {"object_id": "probe"}},
+    )["result"]["ok"]
+    session.apply_edits([{"objectId": "probe", "position": [0, 0, 0]}])
+    (back,) = session.get_scene()["fieldlines"]
+    assert back["region"]["set"] is False
+    assert back["origin"] == auto["origin"] and back["shape"] == auto["shape"]
+
+    session.set_field_region("probe", _widened(auto, 1.5))
+    session.remove_object("probe")
+    assert session.field_regions == {}
+
+
+def test_pixels_outside_a_set_region_start_no_lines():
+    """A region narrower than the pixels: those outside it start none."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    region = _widened(auto, 1)
+    region["size"][0] = 0.025  # the middle three columns of five, 10 mm apart
+    session.set_field_region("probe", region)
+    (item,) = session.get_scene()["fieldlines"]
+    xs = np.reshape(item["seeds"], (-1, 3))[:, 0]
+    assert len(xs) == 15 and np.abs(xs).max() <= 0.0125
+
+
+@pytest.mark.parametrize("drawn", ["lines", "map alone"])
+def test_a_region_keeps_its_field_as_the_rules_grid_does(monkeypatch, drawn):
+    """The field over a set region -- its lines', or with the lines off its
+    map's plane alone -- is computed once at rest, and again when the region
+    changes; its sensor dragged past still sources, once for the gesture;
+    let go a little way off, only where the grid slid onto."""
+    widget = view()
+    session = widget._session
+    (auto,) = widget.payload["fieldlines"]
+    if drawn == "map alone":
+        session.set_field_map(True)
+        session.set_field_lines(False)
+    session.set_field_region("probe", _widened(auto, 1.5))
+    (item,) = session.get_scene()["fieldlines"]
+    assert (item["shape"][2] == 1) or drawn == "lines"
+    computed = []
+    field = fieldlines.field
+    monkeypatch.setattr(
+        fieldlines,
+        "field",
+        lambda s, at, *a, **k: computed.append(len(at)) or field(s, at, *a, **k),
+    )
+    session.get_scene()
+    assert not computed
+
+    start = np.array(session._objs["probe"].position)
+    widget._reply({"method": "begin_interaction"})
+    for k in range(1, 6):
+        edit = {
+            "objectId": "probe",
+            "position": (start + np.array([0.0003 * k, 0, 0])).tolist(),
+        }
+        widget._reply(
+            {"method": "apply_edits", "params": {"edits": [edit]}, "scene": True}
+        )
+    assert len(computed) <= 2  # a grid for the gesture, and a look at its plane
+    computed.clear()
+    widget._reply({"method": "end_interaction"})
+    session.get_scene()
+    assert 0 < sum(computed) < fieldlines.REST_POINTS / 2
+
+    computed.clear()
+    session.set_field_region("probe", _widened(auto, 2))
+    session.get_scene()
+    assert computed
+
+
+def test_lines_alone_give_the_colour_bar_its_scale():
+    """At ``style.pixel.size = 0`` no pixels are drawn: the lines carry what
+    the colour bar would read off them, the pixels' own table and levels."""
+    drawn = view().payload
+    widget = view()
+    widget._session.apply_edit("probe", "pixel.size", 0)
+    widget._show({"by": "edit"})
+    alone = widget.payload
+    assert not [p for p in alone.get("pixels", []) if p["object_id"] == "probe"]
+    (lines,) = alone["fieldlines"]
+    assert lines["label"] == "probe"
+    assert lines["colour_scale"] == drawn["pixels"][0]["scale"]
+
+
+@pytest.mark.parametrize(
+    ("tilt", "plane"), [(0, "the grid"), (30, "a plane of its own")]
+)
+def test_the_map_is_a_switch_of_its_own(tilt, plane):
+    """The map is the document's switch, as the lines' is: one step to undo,
+    each item saying what to draw, a legend row of its own. On a flat grid
+    it is drawn from the grid; a box's is sent a plane of its own -- and
+    with the lines off, the plane is all that is computed."""
+    widget = view(tilt=tilt)
+    session = widget._session
+    widget.field_map = True  # the map's row's eye
+    assert session.doc["field_map"] is True
+    (item,) = session.get_scene()["fieldlines"]
+    if plane == "the grid":
+        assert item["shape"][2] == 1 and "map_field" not in item
+    else:
+        assert item["shape"][2] > 1 and item["map_field"]["shape"][2] == 1
+    widget.field_lines = False
+    (item,) = session.get_scene()["fieldlines"]
+    assert (item["lines"], item["map"]) == (False, True)
+    assert item["shape"][2] == 1 and "map_field" not in item
+    # what the map shows, for the colour bar to span with what the pixels read
+    low, high = item["map_levels"]
+    assert 0 < low < high
+    rows = [c["kind"] for n in widget.tree if n["id"] == "probe" for c in n["children"]]
+    assert rows[-2:] == ["FieldLines", "FieldMap"]
+    session.undo()
+    session.undo()
+    widget._show({"by": "undo"})
+    assert (widget.field_lines, widget.field_map) == (True, False)

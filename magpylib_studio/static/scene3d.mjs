@@ -894,7 +894,11 @@ export function createScene3d() {
     const alone = gizmoMode === "scale" && !together;
     flatAxes = alone ? flatOf(primaryId()) : new Set();
     showAxes();
-    placeGrips(alone ? primaryId() : null);
+    // a region picked keeps its grips while its sensor alone is selected
+    if (regionPicked && (together || regionPicked !== primaryId())) {
+      regionPicked = null;
+    }
+    placeGrips(regionPicked ?? (alone ? primaryId() : null));
     if (gripped) {
       gizmo.detach();
       return gizmoMode;
@@ -1058,6 +1062,17 @@ export function createScene3d() {
   let gripHovered = null; // the grip under the pointer, by index
   let gripPressed = false; // a press on a grip or a dot, which no pick may take
   const MOST_GRIPS = 6;
+
+  // A sensor's field region (docs/decisions.md#0059-a-sensors-field-region-and-map): the box its field
+  // lines run in, as its item says -- set on the sensor, or the rule's -- by
+  // sensor id; and the sensor whose region has the grips, picked by a click
+  // on the region's outline, which shows while the sensor is selected. Its
+  // grips are a Cuboid's faces, in the region's own frame: four in a plane,
+  // six in a box. A drag sends the region as an edit (`field_region`).
+  const fieldRegions = new Map();
+  let regionPicked = null;
+  let regionHovered = false; // the pointer on the outline, which a click picks
+  const REGION_ATTR = "field_region";
 
   /** The points' dots, in the same frame; and the stand-in the move handles
    *  go on when one is picked up. */
@@ -1230,6 +1245,8 @@ export function createScene3d() {
         ),
       ];
     },
+    // a flat region's: a Cuboid's but for the two faces across its plane
+    rect: (value) => GRIPS.free(value).slice(0, 4),
     diameter([diameter]) {
       const out = new THREE.Vector3(1, 0, 0);
       const kept = (value) => [Math.max(value[0], 1e-3 * diameter)];
@@ -1321,6 +1338,26 @@ export function createScene3d() {
   /** Show the grips on `objectId`, if it has them, or put them away. */
   function placeGrips(objectId) {
     if (gripping) return; // a drag carries its own value: see `watchGrips`
+    if (objectId && objectId === regionPicked) {
+      const region = fieldRegions.get(objectId);
+      if (region && byObjectId.get(objectId)?.visible) {
+        const frame = regionFrame(region);
+        gripped = {
+          objectId,
+          attr: REGION_ATTR,
+          kind: region.flat ? "rect" : "free",
+          scalar: false,
+          value: [...region.size],
+          frame,
+        };
+        grips.matrix.copy(frame);
+        grips.matrixWorldNeedsUpdate = true;
+        grips.visible = true;
+        setGrips(gripped.value);
+        return;
+      }
+      regionPicked = null;
+    }
     const node = objectId ? byObjectId.get(objectId) : null;
     const shape = objectId ? shapes[objectId] : null;
     if (!node?.visible || !GRIPS[shape?.constraint]) {
@@ -2109,6 +2146,19 @@ export function createScene3d() {
       return true;
     };
     const send = (drag, preview) => {
+      if (drag.attr === REGION_ATTR) {
+        host.dispatchEvent(
+          new CustomEvent("objecttransform", {
+            detail: {
+              preview,
+              edits: [
+                { objectId: drag.objectId, field_region: regionDragged(drag) },
+              ],
+            },
+          }),
+        );
+        return;
+      }
       const edit = {
         objectId: drag.objectId,
         shape: {
@@ -2403,6 +2453,17 @@ export function createScene3d() {
     };
     element.addEventListener("pointerup", letGo);
     element.addEventListener("pointercancel", letGo);
+    // the region's outline, which a click picks: a pointer over it says so
+    element.addEventListener("pointermove", (event) => {
+      if (event.buttons || gripping || gripHovered !== null) return;
+      if (dotHovered !== null || ghostHovered !== null) return;
+      const region = regionShown();
+      const near =
+        Boolean(region) && regionPicked === null && nearRegion(event, region);
+      if (near === regionHovered) return;
+      regionHovered = near;
+      element.style.cursor = near ? "pointer" : "";
+    });
     element.addEventListener("pointerleave", () => {
       if (gripping || (gripHovered === null && dotHovered === null)) return;
       gripHovered = null;
@@ -2582,6 +2643,7 @@ export function createScene3d() {
         redraw();
         return;
       }
+      if (regionClick(event)) return;
       const objectId = pick(event);
       if (objectId) {
         host.dispatchEvent(
@@ -4618,7 +4680,9 @@ export function createScene3d() {
           ? buildPixels(item)
           : item.kind === "fieldlines"
             ? buildFieldLines(item)
-            : buildScatter(item);
+            : item.kind === "fieldmap"
+              ? buildFieldMap(item)
+              : buildScatter(item);
     if (item.copy) built.userData.copy = item.copy;
     built.userData.built = true; // what a node carries for its object, see `dress`
     if (built.userData.batch) batchesStale = true;
@@ -4637,7 +4701,9 @@ export function createScene3d() {
       flowArrows.add(built);
     }
     // a field line is the field's, not a thing a drag could land on
-    if (item.kind === "fieldlines") built.userData.unsnapped = true;
+    if (item.kind === "fieldlines" || item.kind === "fieldmap") {
+      built.userData.unsnapped = true;
+    }
     // the opacity a fade is a share of -- a field line's material, kept from
     // build to build, knows its own already (`fieldLineMaterial`)
     built.traverse((part) => {
@@ -4834,6 +4900,8 @@ export function createScene3d() {
    *  faint -- so what the eye lands on is what the sensor is about. */
   /** Lines in one plane at most: past it the plane is as full as it gets. */
   const FIELD_LINES_MOST = 400;
+  /** And through a box a region set on a sensor fills (`buildFieldLines`). */
+  const FIELD_LINES_MOST_3D = 300;
 
   const FIELD_LINE_BANDS = [
     { below: 0.2, opacity: 0.18 },
@@ -4867,6 +4935,14 @@ export function createScene3d() {
   function buildFieldLines(item) {
     const [nx, ny, nz] = item.shape;
     const flat = nz === 1;
+    if (item.region) {
+      fieldRegions.set(item.object_id, {
+        ...item.region,
+        flat,
+        objectId: item.object_id,
+      });
+    }
+    if (item.lines === false) return new THREE.Group(); // the map alone
     const [ox, oy, oz] = item.origin;
     const axes = item.axes; // three rows: the grid's axes in the world
     const h = item.step;
@@ -4887,10 +4963,18 @@ export function createScene3d() {
     const paper = new THREE.Color(
       cssColor("--vscode-editor-background", "#1e1e1e"),
     ).getHexString();
-    const lut = item.lut.map(
-      (colour) =>
-        new THREE.Color(legible(new THREE.Color(colour).getHexString(), paper)),
-    );
+    // Over the sensor's map the lines are one ink, which the map's colours
+    // would otherwise swallow: white, on the map rather than on the page --
+    // where the lines lie in the map's plane; lines through a box leave it.
+    const lut =
+      item.map && flat
+        ? [new THREE.Color("#ffffff")]
+        : item.lut.map(
+            (colour) =>
+              new THREE.Color(
+                legible(new THREE.Color(colour).getHexString(), paper),
+              ),
+          );
 
     // Everything below in grid units, along the grid's axes: a step of half a
     // cell, and positions turned back into the world only when written.
@@ -4902,6 +4986,15 @@ export function createScene3d() {
       // written so that NaN, which compares false with everything, is outside
       if (!(fx >= 0 && fy >= 0 && fx <= nx - 1 && fy <= ny - 1)) return -1;
       if (!flat && !(fz >= 0 && fz <= nz - 1)) return -1;
+      // a region set on the sensor: its grid covers it to the next step, and
+      // the lines stop at the region itself, where its outline is drawn
+      if (
+        clip &&
+        !(fx >= clip[0] && fx <= clip[1] && fy >= clip[2] && fy <= clip[3])
+      ) {
+        return -1;
+      }
+      if (clip && !flat && !(fz >= clip[4] && fz <= clip[5])) return -1;
       const i = Math.min(Math.floor(fx), nx - 2);
       const j = Math.min(Math.floor(fy), ny - 2);
       const k = flat ? 0 : Math.min(Math.floor(fz), nz - 2);
@@ -4940,6 +5033,15 @@ export function createScene3d() {
         (y - oy) * axes[row + 1] +
         (z - oz) * axes[row + 2]) /
       h;
+    // a set region's box in grid units, lo and hi along each axis: its axes
+    // are the grid's (`fieldlines.grid_in`)
+    const clip = item.region?.set
+      ? [0, 3, 6].flatMap((row, k) => {
+          const middle = toGrid(...item.region.centre, row);
+          const half = item.region.size[k] / 2 / h + 1e-9;
+          return [middle - half, middle + half];
+        })
+      : null;
     const seeds = [];
     for (let s = 0; s < item.seeds.length; s += 3) {
       const [x, y, z] = item.seeds.slice(s, s + 3);
@@ -4954,8 +5056,10 @@ export function createScene3d() {
     if (!middle) return new THREE.Group();
     // where a line ends for want of field: a twenty-fifth of what the sensor
     // reads, past the faintest band -- a fringe drawn to the edge of the grid
-    // was hair round the scene, and said nothing the faint band does not
-    const fade = middle / 25;
+    // was hair round the scene, and said nothing the faint band does not.
+    // In a region set on the sensor the lines are asked for to its edges,
+    // faint where the field is: a thousandth.
+    const fade = middle / (clip ? 1000 : 25);
 
     // What is drawn so far, for the distance test: points in cells half a
     // spacing across, each cell a linked list in flat arrays. A point carries
@@ -5146,19 +5250,57 @@ export function createScene3d() {
     // Lefer's seeding, as matplotlib's streamplot fills its plane; capped by
     // count rather than by time, so a frame's lines do not depend on how fast
     // the machine was
-    for (
-      let p = 0;
-      flat && p < frontier.length && lines < FIELD_LINES_MOST;
-      p += 4
-    ) {
-      const x = frontier[p];
-      const y = frontier[p + 1];
-      const dx = frontier[p + 2];
-      const dy = frontier[p + 3];
-      const across = spacing / Math.hypot(dx, dy);
-      if (!Number.isFinite(across)) continue;
-      trace(x - dy * across, y + dx * across, 0, 0.99 * spacing);
-      trace(x + dy * across, y - dx * across, 0, 0.99 * spacing);
+    let p = 0;
+    const spread = () => {
+      for (; flat && p < frontier.length && lines < FIELD_LINES_MOST; p += 4) {
+        const x = frontier[p];
+        const y = frontier[p + 1];
+        const dx = frontier[p + 2];
+        const dy = frontier[p + 3];
+        const across = spacing / Math.hypot(dx, dy);
+        if (!Number.isFinite(across)) continue;
+        trace(x - dy * across, y + dx * across, 0, 0.99 * spacing);
+        trace(x + dy * across, y - dx * across, 0, 0.99 * spacing);
+      }
+    };
+    spread();
+    // A region set on the sensor is where its lines are wanted, not only
+    // where the pixels' reach: starts laid evenly through all of it, the
+    // middle first, each where no line runs yet -- in a plane spread beside
+    // as the pixels' are, in a box a few hundred at most.
+    if (clip) {
+      const most = flat ? FIELD_LINES_MOST : FIELD_LINES_MOST_3D;
+      const sides = [clip[1] - clip[0], clip[3] - clip[2], clip[5] - clip[4]];
+      const gap = flat
+        ? Math.max(2 * spacing, Math.sqrt((sides[0] * sides[1]) / most))
+        : Math.max(
+            1.5 * spacing,
+            Math.cbrt((sides[0] * sides[1] * sides[2]) / most),
+          );
+      const counts = sides.map((side) => Math.max(1, Math.round(side / gap)));
+      if (flat) counts[2] = 1;
+      const middles = [0, 1, 2].map((k) => (clip[2 * k] + clip[2 * k + 1]) / 2);
+      const starts = [];
+      for (let i = 0; i < counts[0]; i++) {
+        for (let j = 0; j < counts[1]; j++) {
+          for (let k = 0; k < counts[2]; k++) {
+            const at = [i, j, k].map(
+              (n, axis) =>
+                clip[2 * axis] + ((n + 0.5) * sides[axis]) / counts[axis],
+            );
+            if (flat) at[2] = 0;
+            starts.push(at);
+          }
+        }
+      }
+      const away = ([x, y, z]) =>
+        Math.hypot(x - middles[0], y - middles[1], flat ? 0 : z - middles[2]);
+      starts.sort((a, b) => away(a) - away(b));
+      for (const [x, y, z] of starts) {
+        if (lines >= most) break;
+        trace(x, y, z, flat ? 0.99 * spacing : 0.75 * gap);
+        spread();
+      }
     }
     const group = new THREE.Group();
     group.name = item.name;
@@ -5201,6 +5343,108 @@ export function createScene3d() {
     group.userData.recolour = lineColouring(coloured, lut, item.levels);
     group.userData.recolour(colorRanges.get(item.object_id));
     return group;
+  }
+
+  /** A sensor's field map (docs/decisions.md#0059-a-sensors-field-region-and-map): |field| on the plane
+   *  of its lines' grid, coloured from its table -- the pixels', so the colour
+   *  bar says what a colour is, and cuts it as it cuts theirs -- seen through
+   *  inside a magnet and past a region set on the sensor. A box's grid is
+   *  drawn on the plane the engine sampled for it (`map_field`); none where
+   *  it sent none. Behind the lines, and behind what a click picks. */
+  function buildFieldMap(item) {
+    const plane = item.shape[2] === 1 ? item : item.map_field;
+    if (!plane) return new THREE.Group();
+    const [nx, ny] = plane.shape;
+    const h = plane.step;
+    const axes = [0, 3, 6].map((k) =>
+      new THREE.Vector3().fromArray(plane.axes, k),
+    );
+    const raw = window.atob(plane.values);
+    const magnitude = new Float32Array(nx * ny);
+    const component = (n) => {
+      const quantum = raw.charCodeAt(2 * n) | (raw.charCodeAt(2 * n + 1) << 8);
+      return ((quantum << 16) >> 16) * plane.scale;
+    };
+    for (let n = 0; n < nx * ny; n++) {
+      magnitude[n] = Math.hypot(
+        component(3 * n),
+        component(3 * n + 1),
+        component(3 * n + 2),
+      );
+    }
+    const bits = window.atob(plane.inside);
+    const inside = (n) => (bits.charCodeAt(n >> 3) >> (n & 7)) & 1;
+    // a set region's rectangle, in the plane's own units
+    const origin = new THREE.Vector3().fromArray(plane.origin);
+    let clip = null;
+    if (item.region?.set) {
+      const centre = new THREE.Vector3()
+        .fromArray(item.region.centre)
+        .sub(origin);
+      clip = [0, 1].flatMap((k) => {
+        const middle = centre.dot(axes[k]) / h;
+        const half = item.region.size[k] / 2 / h + 1e-9;
+        return [middle - half, middle + half];
+      });
+    }
+    const table = item.lut.map((colour) => {
+      const hex = new THREE.Color(colour).getHex();
+      return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+    });
+    const data = new Uint8Array(nx * ny * 4);
+    const texture = new THREE.DataTexture(data, nx, ny, THREE.RGBAFormat);
+    texture.minFilter = texture.magFilter = THREE.LinearFilter;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const paint = (range) => {
+      for (let i = 0; i < nx; i++) {
+        const outside = clip && (i < clip[0] || i > clip[1]);
+        for (let j = 0; j < ny; j++) {
+          const n = i * ny + j; // the grid's order, the first axis slowest
+          const at = 4 * (j * nx + i); // the texture's, rows along the first
+          if (outside || inside(n) || (clip && (j < clip[2] || j > clip[3]))) {
+            data[at + 3] = 0;
+            continue;
+          }
+          const [r, g, b] = tableColour(
+            table,
+            item.levels,
+            range,
+            magnitude[n],
+          );
+          data[at] = r;
+          data[at + 1] = g;
+          data[at + 2] = b;
+          data[at + 3] = 255;
+        }
+      }
+      texture.needsUpdate = true;
+    };
+    const geometry = new THREE.PlaneGeometry(nx * h, ny * h);
+    geometry.computeBoundingSphere(); // for a click; not for the framing:
+    geometry.boundingBox = new THREE.Box3(); // the grid is wider than the scene
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    material.userData.blended = true; // see-through at any fade
+    const mesh = new THREE.Mesh(geometry, material);
+    const middle = origin
+      .clone()
+      .addScaledVector(axes[0], ((nx - 1) / 2) * h)
+      .addScaledVector(axes[1], ((ny - 1) / 2) * h);
+    mesh.applyMatrix4(
+      new THREE.Matrix4().makeBasis(...axes).setPosition(middle),
+    );
+    mesh.renderOrder = -1; // under the lines
+    mesh.frustumCulled = false;
+    mesh.userData.field = true; // behind what a click picks, as a line is
+    mesh.userData.recolour = paint;
+    paint(colorRanges.get(item.object_id));
+    return mesh;
   }
 
   /** How wide a field line is to a click, in pixels: wider than it is drawn. */
@@ -5605,8 +5849,187 @@ export function createScene3d() {
       ),
       ...shadeOverlaps(overlaps),
       ...patternTraces(selectedIds),
+      ...regionOutline(),
     ];
     countMarks();
+  }
+
+  // --- a sensor's field region --------------------------------------------
+
+  /** The region of the one sensor selected, while it is drawn, or null. */
+  function regionShown() {
+    const objectId = selectedIds.length === 1 ? selectedIds[0] : null;
+    const region = objectId ? fieldRegions.get(objectId) : null;
+    return region && byObjectId.get(objectId)?.visible ? region : null;
+  }
+
+  /** A region's frame in the world: its centre, turned onto its axes --
+   *  where its sensor's node stands now. The engine says where the region
+   *  was when it drew the item; a node the handles move goes on from there
+   *  before the next item comes, and the region with it, as the lines do. */
+  function regionFrame(region) {
+    const [a, b, c] = [0, 3, 6].map((k) =>
+      new THREE.Vector3().fromArray(region.axes, k),
+    );
+    const frame = new THREE.Matrix4()
+      .makeBasis(a, b, c)
+      .setPosition(new THREE.Vector3().fromArray(region.centre));
+    const node = byObjectId.get(region.objectId);
+    if (!node || !region.at) return frame;
+    node.updateWorldMatrix(true, false);
+    return node.matrixWorld.clone().multiply(region.at).multiply(frame);
+  }
+
+  /** Tie each region just drawn to its sensor's node: from the node as it
+   *  stands to the region, `carried` where the handles hold the sensor
+   *  past where the engine drew it (`render`). */
+  function anchorRegions(carried) {
+    for (const [objectId, region] of fieldRegions) {
+      if (region.at) continue; // held, and not drawn again: tied already
+      const node = byObjectId.get(objectId);
+      if (!node) continue;
+      node.updateWorldMatrix(true, false);
+      region.at = node.matrixWorld.clone().invert();
+      const carry = carried.get(objectId);
+      if (carry) region.at.multiply(carry);
+    }
+  }
+
+  /** A region's edges in the world, as pairs of points: a rectangle's four
+   *  in its plane, a box's twelve. */
+  function fieldRegionEdges(region) {
+    const frame = regionFrame(region);
+    const [x, y, z] = region.size.map((side) => side / 2);
+    const at = (i, j, k) =>
+      new THREE.Vector3(i * x, j * y, k * z).applyMatrix4(frame);
+    const square = (k) => [
+      [at(-1, -1, k), at(1, -1, k)],
+      [at(1, -1, k), at(1, 1, k)],
+      [at(1, 1, k), at(-1, 1, k)],
+      [at(-1, 1, k), at(-1, -1, k)],
+    ];
+    if (region.flat) return square(0);
+    const posts = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ].map(([i, j]) => [at(i, j, -1), at(i, j, 1)]);
+    return [...square(-1), ...square(1), ...posts];
+  }
+
+  /** The selected sensor's region, outlined in the selection's colour:
+   *  dashed, a thing a click picks; whole, while its grips are on it. Drawn
+   *  through what hides it, as a pattern's path is. */
+  function regionOutline() {
+    const region = regionShown();
+    if (!region) return [];
+    const picked = regionPicked === selectedIds[0];
+    const edges = fieldRegionEdges(region);
+    const dash = Math.max(...region.size) / 80;
+    const material = new LineMaterial({
+      linewidth: picked ? 1.5 : 1,
+      dashed: !picked,
+      dashSize: dash,
+      gapSize: dash,
+      transparent: true,
+      opacity: picked ? 0.9 : TRACE_OPACITY,
+      depthTest: false,
+    });
+    material.color = new THREE.Color(SELECTION_COLOUR);
+    if (renderer) renderer.getSize(material.resolution);
+    wideMaterials.add(material);
+    const line = new LineSegments2(
+      new LineSegmentsGeometry().setPositions(
+        edges.flatMap(([a, b]) => [...a.toArray(), ...b.toArray()]),
+      ),
+      material,
+    );
+    line.computeLineDistances();
+    line.raycast = () => {}; // picked by `nearRegion`, on the page
+    line.renderOrder = 1;
+    // on the sensor's node, so that a drag of the sensor takes it along
+    const node = byObjectId.get(selectedIds[0]);
+    node.attach(line);
+    return [{ on: node, part: line }];
+  }
+
+  /** Whether the pointer is within a few pixels of `region`'s outline. */
+  function nearRegion(event, region) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const reach = 6;
+    for (const [a, b] of fieldRegionEdges(region)) {
+      const p = onScreen(a);
+      const q = onScreen(b);
+      if (!p || !q) continue;
+      const dx = q[0] - p[0];
+      const dy = q[1] - p[1];
+      const length = dx * dx + dy * dy;
+      const t = length
+        ? Math.min(Math.max(((x - p[0]) * dx + (y - p[1]) * dy) / length, 0), 1)
+        : 0;
+      if (Math.hypot(p[0] + t * dx - x, p[1] + t * dy - y) <= reach)
+        return true;
+    }
+    return false;
+  }
+
+  /** A click: on the selected sensor's outline, its region is picked and
+   *  takes the grips -- answered true, the click is the region's; anywhere
+   *  else, a region picked is let go, and the click goes on to pick what it
+   *  is on. */
+  function regionClick(event) {
+    const region = regionShown();
+    const was = regionPicked;
+    if (region && regionPicked === null && nearRegion(event, region)) {
+      regionPicked = selectedIds[0];
+    } else {
+      regionPicked = null;
+    }
+    if (regionPicked === was) return false;
+    regionChanged();
+    return regionPicked !== null;
+  }
+
+  /** Esc with a region picked: the grips go, the sensor stays selected. */
+  function regionEscape() {
+    if (regionPicked === null) return false;
+    regionPicked = null;
+    regionChanged();
+    return true;
+  }
+
+  function regionChanged() {
+    regionHovered = false;
+    renderer.domElement.style.cursor = "";
+    setGizmoMode(gizmoMode);
+    drawOutlines();
+    host.dispatchEvent(
+      new CustomEvent("regionpick", { detail: { objectId: regionPicked } }),
+    );
+    redraw();
+  }
+
+  /** The region a grip's drag has come to, as the edit says it: in the
+   *  world, its centre moved by the shift a face moving alone makes. */
+  function regionDragged(drag) {
+    const frame = drag.inverse.clone().invert();
+    const [a, b, c] = [
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+      new THREE.Vector3(),
+    ];
+    frame.extractBasis(a, b, c);
+    const centre = (drag.shift ?? new THREE.Vector3())
+      .clone()
+      .applyMatrix4(frame);
+    return {
+      centre: centre.toArray(),
+      axes: [a.toArray(), b.toArray(), c.toArray()],
+      size: [...drag.value],
+    };
   }
 
   /** The path a pattern laid its copies on, through their centres, while the
@@ -7203,8 +7626,25 @@ void main() {
     return payload.meshes.concat(
       payload.scatters,
       payload.pixels ?? [],
-      payload.fieldlines ?? [],
+      (payload.fieldlines ?? []).flatMap(withMap),
     );
+  }
+
+  /** A sensor's field lines, and its field map where that is on: an item of
+   *  its own, drawn from the same grid, a part of the sensor beside the lines
+   *  -- each hidden and faded by its own row. */
+  function withMap(item) {
+    if (!item.map) return [item];
+    const part = `${item.object_id}/map`;
+    return [
+      item,
+      {
+        ...item,
+        kind: "fieldmap",
+        part,
+        name: item.name.replace(/field lines$/, "field map"),
+      },
+    ];
   }
 
   /** Drop every node but the ones held, freeing what they hold on the GPU.
@@ -7245,12 +7685,14 @@ void main() {
     changes = [];
     changing = [];
     luts = payload.luts ?? [];
+    fieldRegions.clear();
     overlaps = overlapsAt(payload.frame, payload.frames);
     for (const item of drawnItems(payload)) {
       const node = nodeFor(item.object_id, null);
       node.quaternion.identity(); // the geometry already holds the pose
       node.add(buildItem(item));
     }
+    anchorRegions(new Map());
     dressParts();
     placeCollections();
     // round the nodes just built, not the ones discarded
@@ -7465,7 +7907,11 @@ void main() {
       case "deselect":
         // a drag first, the ruler's own, the selection, then what it measured
         return (
-          cancelDrag() || rulerEscape() || ask(host.deselect) || clearRuler()
+          cancelDrag() ||
+          regionEscape() ||
+          rulerEscape() ||
+          ask(host.deselect) ||
+          clearRuler()
         );
       case "ruler":
         setRuler(!ruler.on);
@@ -7575,6 +8021,10 @@ void main() {
     changes = payload.changes ?? [];
     changing = [];
     luts = payload.luts ?? [];
+    // the regions of the sensors drawn again are their items' again
+    for (const objectId of [...fieldRegions.keys()]) {
+      if (!held.has(objectId)) fieldRegions.delete(objectId);
+    }
     // `attach` keeps each trace where magpylib put it while re-parenting it, so
     // the baked world coordinates survive the move onto the object's own node.
     for (const item of drawnItems(payload)) {
@@ -7591,6 +8041,7 @@ void main() {
         changing.push({ node, built, changes: item.changes });
       }
     }
+    anchorRegions(carried);
     dressParts();
     placeCollections();
 
@@ -9544,6 +9995,30 @@ void main() {
     viewKey,
     poseEdit,
     canResize: (objectId) => Boolean(shapes[objectId]),
+    // where the selected sensor's field region is on the page, in the
+    // canvas's pixels, for a check to click: its edges' ends, and a point on
+    // each of its grips while it has them, and its sensor's node
+    regionOnPage: () => {
+      const region = regionShown();
+      if (!region) return null;
+      grips.updateMatrixWorld(true);
+      const held = gripped?.attr === REGION_ATTR ? gripObjects() : [];
+      const node = byObjectId.get(region.objectId);
+      return {
+        at: onScreen(node.getWorldPosition(new THREE.Vector3())),
+        picked: regionPicked,
+        set: region.set,
+        flat: region.flat,
+        size: [...region.size],
+        edges: fieldRegionEdges(region).map(([a, b]) => [
+          onScreen(a),
+          onScreen(b),
+        ]),
+        grips: held.map((grip) =>
+          onScreen(grip.localToWorld(new THREE.Vector3(0, 0.45, 0))),
+        ),
+      };
+    },
     canAim: (objectId) => Boolean(polarizations[objectId]),
     heldPoint,
     pointEdit,

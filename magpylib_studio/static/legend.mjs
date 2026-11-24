@@ -36,7 +36,7 @@
  */
 
 /** A part of a sensor's drawing, listed beneath it: see `threejs.PARTS`. */
-const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines"]);
+const PART_KINDS = new Set(["Axes", "Pixels", "FieldLines", "FieldMap"]);
 const isPart = (node) => PART_KINDS.has(node.kind);
 
 /** Each sensor in `tree` drawn as its parts, and what its eye hides in its
@@ -88,6 +88,11 @@ function swatchesOf(payload) {
     const key = item.part ?? item.object_id;
     if (!swatches.has(key)) {
       swatches.set(key, swatchOf(item, payload.luts || []));
+    }
+    // its map in the lines' table, from the least field to the most across,
+    // as the map's own icon fills
+    if (item.kind === "fieldlines") {
+      swatches.set(`${item.object_id}/map`, gradientOfColours(item.lut));
     }
   }
   return swatches;
@@ -192,6 +197,7 @@ const ICONS = {
   Axes: "sensor",
   Pixels: "pixels",
   FieldLines: "field-lines",
+  FieldMap: "field-map",
 };
 
 /** How many objects a row stands for in the view: itself and the copies its
@@ -273,6 +279,9 @@ export function createLegend(
   let swatches = new Map();
   let selected = [];
   let hidden = new Set();
+  let off = new Set(); // the parts not drawn because their switch is off
+  let sensors = 0; // how many rows have parts beneath them
+  const badges = new Map(); // part id -> its icon on its folded sensor's row
   let faded = new Map(); // id -> the share of its opacity it is drawn at
   let anchor = null; // the row a shift-click ranges from
   let proposed = null; // the selection a click here last asked for
@@ -445,6 +454,9 @@ export function createLegend(
     return next;
   }
 
+  /** What a slide asks of the page while it lasts: no text selected. */
+  const unselectable = (event) => event.preventDefault();
+
   /** Press on a row's eye and slide sideways to fade what the row holds:
    *  left for less of it, right for more, `SLIDE_RANGE` pixels the whole
    *  way -- with option held, everything else, the row whole. A press that
@@ -455,6 +467,11 @@ export function createLegend(
     let slid = false;
     eye.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      // not the start of a text selection: a slide carried past the legend
+      // painted the scene behind it selected -- in Safari, which selects
+      // under a captured pointer too
+      event.preventDefault();
+      addEventListener("selectstart", unselectable, true);
       eye.setPointerCapture(event.pointerId);
       const others = event.altKey;
       const level = others ? levelOfIds(othersOf(node)) : levelOf(node);
@@ -492,6 +509,7 @@ export function createLegend(
       onFade(Object.fromEntries(faded), { settled: false });
     });
     const release = () => {
+      removeEventListener("selectstart", unselectable, true);
       if (!from) return;
       from = null;
       if (!slid) return;
@@ -501,6 +519,7 @@ export function createLegend(
     };
     eye.addEventListener("pointerup", release);
     eye.addEventListener("pointercancel", release);
+    eye.addEventListener("lostpointercapture", release);
     // The release of a slide is a click as well, and not one that hides.
     eye.addEventListener("click", (event) => {
       if (slid) slid = false;
@@ -588,6 +607,26 @@ export function createLegend(
       count.textContent = `×${drawn}`;
       row.append(count);
     }
+    // A sensor folded: the field it draws -- lines, map -- as their icons,
+    // in their colours, to say so; to switch one, unfold to its row's eye.
+    const drawsField = node.children.filter(
+      (child) => child.kind === "FieldLines" || child.kind === "FieldMap",
+    );
+    if (drawsField.length) {
+      const icons = part("magpy-legend-badges");
+      for (const child of drawsField) {
+        const badge = part(
+          "magpy-legend-swatch magpy-legend-badge icon " +
+            `icon-${ICONS[child.kind]}`,
+          `${child.label}: drawn`,
+        );
+        const colour = swatches.get(child.id) ?? swatches.get(node.id);
+        if (colour) badge.style.background = colour;
+        badges.set(child.id, badge);
+        icons.append(badge);
+      }
+      row.append(icons);
+    }
     const warning = overlapMark(node);
     if (warning) row.append(warning);
     // A solve the scene has moved away from, with nothing to do it again:
@@ -658,7 +697,12 @@ export function createLegend(
     );
     if (!seen.has(path)) {
       seen.add(path);
-      if (node.children.length > FOLD_ABOVE || depthOf(path) >= foldDepth) {
+      if (
+        node.children.length > FOLD_ABOVE ||
+        depthOf(path) >= foldDepth ||
+        // a sensor among others: its row says what it draws (`badges`)
+        (sensors > 1 && node.children.some(isPart))
+      ) {
         folded.add(path);
       }
     }
@@ -927,8 +971,10 @@ export function createLegend(
     );
     labels = new Map(order.map((node) => [node.id, node.label]));
     if (!order.some((node) => node.id === anchor)) anchor = null;
+    sensors = order.filter((node) => node.children.some(isPart)).length;
     rows.clear();
     eyes.clear();
+    badges.clear();
     folds.clear();
     container.replaceChildren(overlapHeader());
     tree.forEach((node, i) => addRow(node, String(i), container));
@@ -939,6 +985,7 @@ export function createLegend(
   function sync(state) {
     selected = state.selected;
     hidden = new Set(state.hidden);
+    off = new Set(state.off ?? []);
     faded = new Map(Object.entries(state.faded ?? {}));
     paint();
     measure();
@@ -984,7 +1031,11 @@ export function createLegend(
     const chosen = new Set(drawnOf(selected));
     for (const node of order) {
       const mine = leaves.get(node.id);
-      const seen = shows.get(node.id);
+      // a part switched off is not drawn, not hidden: a sensor's eye says
+      // what the user hid of the rest
+      const seen = isPart(node)
+        ? shows.get(node.id)
+        : shows.get(node.id).filter((id) => !off.has(id));
       const row = rows.get(node.id);
       const picked = mine.filter((id) => chosen.has(id)).length;
       const gone = seen.filter((id) => hidden.has(id)).length;
@@ -1000,6 +1051,7 @@ export function createLegend(
       row.classList.toggle("faded", level < 1);
       eyes.get(node.id).style.setProperty("--fade", String(level));
     }
+    for (const [id, badge] of badges) badge.hidden = hidden.has(id);
   }
 
   /** Fold every collection `depth` levels down or deeper -- 0 is the top --

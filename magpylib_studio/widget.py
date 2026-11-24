@@ -524,7 +524,7 @@ def _page_field_why(session):
     page could not use."""
     from magpylib_studio import fieldlines
 
-    if not session.field_lines:
+    if not session.draws_field:
         return None, None  # no lines, nothing to draw again
     kernels = fieldlines.page_kernels()
     if kernels is None:
@@ -916,6 +916,10 @@ class SceneWidget(anywidget.AnyWidget):
     #: Its switch in the view is the eye on each sensor's field lines, a row
     #: beneath it in the legend: one shown turns them on, all hidden off.
     field_lines = traitlets.Bool(False).tag(sync=True)
+    #: A map of |field| on each such sensor's plane, from the grid its lines
+    #: are drawn from: its eye is the map's row beneath the sensor, as the
+    #: lines' is theirs.
+    field_map = traitlets.Bool(False).tag(sync=True)
     #: Whether a page saved from the view can carry material-response's
     #: field kernels (`fieldlines.kernel_files`), for its sensors to be
     #: dragged in it (#176): where not, the export does not offer it.
@@ -968,13 +972,16 @@ class SceneWidget(anywidget.AnyWidget):
             # objects selected
             "set_overlap_intended",
             "get_gap",
+            # a sensor's field region: its ↺ in the object panel
+            "get_field_region",
+            "set_field_region",
         }
     )
     #: The calls after which the scene is settled, and the notebook is told.
     _SETTLES = frozenset({"end_interaction", "undo", "redo"})
     #: The object panel's writes: settled each, as `set` from code is.
     _OBJECT_EDITS = frozenset(
-        {"set_param", "set_transform", "apply_edit", "reset_style"}
+        {"set_param", "set_transform", "apply_edit", "reset_style", "set_field_region"}
     )
     #: The calls that edit a variable: settled too, unless the message says
     #: the value is a preview -- the pointer still on the slider -- in which
@@ -1120,9 +1127,10 @@ class SceneWidget(anywidget.AnyWidget):
             raise TypeError(f"no objects to draw with {', '.join(kwargs)}")
         if editable is None and self._session is None:
             self.editable = None  # never: a session's view said so in `_edit`
-        if self.field_lines and self._session is None:
+        if (self.field_lines or self.field_map) and self._session is None:
             # asked for when the view was made, before there were objects
-            self._field_lines_asked_for({"new": True})
+            asked = "field_lines" if self.field_lines else "field_map"
+            self._field_lines_asked_for({"new": True, "name": asked})
         for key, value in later.items():
             setattr(self, key, value)
 
@@ -1764,6 +1772,8 @@ class SceneWidget(anywidget.AnyWidget):
         # starts, not an edit; a document that has them on shows them.
         if self.field_lines and not session.field_lines:
             session.set_field_lines(True)
+        if self.field_map and not session.field_map:
+            session.set_field_map(True)
         # Where editing starts: undo stops here, and `reset` comes back here.
         # What the session did before the view -- a scene function's build,
         # steps made from code -- is its starting point, not edits. Its sheets
@@ -1780,23 +1790,26 @@ class SceneWidget(anywidget.AnyWidget):
         self.editable = handles
         self._show(None)
 
-    @traitlets.observe("field_lines")
+    @traitlets.observe("field_lines", "field_map")
     def _field_lines_asked_for(self, change):
-        """The lines asked for, or put away: the legend's eye, or
-        ``view.field_lines``. The document keeps the choice, as one step to
-        undo (`set_field_lines`), and the trait follows the document back --
-        see `_show`. They are computed by a session, so a view of the cell's
-        own objects copies them into one now, as the pencil does, with the
-        handles left away -- the view stays one to look at."""
+        """The lines asked for, or put away -- or the map: the legend's eye,
+        or ``view.field_lines``, ``view.field_map``. The document keeps the
+        choice, as one step to undo (`set_field_lines`, `set_field_map`), and
+        the trait follows the document back -- see `_show`. They are computed
+        by a session, so a view of the cell's own objects copies them into
+        one now, as the pencil does, with the handles left away -- the view
+        stays one to look at."""
+        name = change.get("name", "field_lines")
         session = getattr(self, "_session", None)
         if session is not None:
-            if bool(change["new"]) != session.field_lines:
-                session.set_field_lines(change["new"])
-                self._show({"by": "field_lines", "on": bool(change["new"])})
+            if bool(change["new"]) != getattr(session, name):
+                getattr(session, f"set_{name}")(change["new"])
+                self._show({"by": name, "on": bool(change["new"])})
         elif change["new"] and getattr(self, "_given", None):
             if self.editable is None:
                 return  # made for looking only: no session, so no lines
-            session = self._copied("field_lines", "No field lines")
+            refusal = "No field lines" if name == "field_lines" else "No field map"
+            session = self._copied(name, refusal)
             if session is None:
                 return
             with self.hold_sync():
@@ -1848,6 +1861,7 @@ class SceneWidget(anywidget.AnyWidget):
             ]
             # an undo or a redo can turn the lines on or off
             self.field_lines = self._session.field_lines
+            self.field_map = self._session.field_map
             if not first:
                 self.last_edit = edit or {}
                 self.revision += 1
@@ -2035,7 +2049,7 @@ class SceneWidget(anywidget.AnyWidget):
             field, why = _page_field_why(session)
             if field is not None:
                 state["payload"] = {**state["payload"], "page_field": field}
-        elif page and session is not None and session.field_lines:
+        elif page and session is not None and session.draws_field:
             why = "it was saved to only show"
         if page and why:
             # for the page's pencil to say, greyed (`showComputes`), and the
@@ -2077,12 +2091,22 @@ class SceneWidget(anywidget.AnyWidget):
                     scene = None  # drawn from the payload, or cut
                 else:
                     if source is None and seen is not None:
-                        now = (live._animated, live.field_lines)
-                        if now[0] is not seen[0] or now[1] != seen[1]:
+                        now = (
+                            live._animated,
+                            live.field_lines,
+                            live.field_map,
+                            live.field_regions,
+                        )
+                        if now[0] is not seen[0] or now[1:] != seen[1:]:
                             source = copy()
                     scene = (source or live).get_scene(frame=i)
                     if seen is None:
-                        seen = (live._animated, live.field_lines)
+                        seen = (
+                            live._animated,
+                            live.field_lines,
+                            live.field_map,
+                            live.field_regions,
+                        )
                     yield None
                 run.append(scene)
                 if limit is not None:

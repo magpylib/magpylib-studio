@@ -1786,22 +1786,36 @@ def _built_parts(spec):
     return made
 
 
-def _frame_field(held, around, every, fixed, varying, seeds, kind):
+def _frame_field(
+    held, around, every, fixed, varying, seeds, kind, box=None, lines=True, mapped=False
+):
     """A run's frame's grid, field and inside for a sensor at `seeds`
     (`_frame_lines`): its grid round `around` -- at `every` step, for a grid
-    the run shares -- kept in `held` with the field of what is `fixed` on it,
-    read once, and the field of what is `varying` added. In the sensor's
-    plane where the field keeps to it, as at rest, else a box."""
+    the run shares -- or over `box`, a region set on it, kept in `held` with
+    the field of what is `fixed` on it, read once, and the field of what is
+    `varying` added. In the sensor's plane where the field keeps to it, as at
+    rest, else a box.
+
+    ``(grid, values, within, plane)``: `plane` the field on the plane a map
+    is drawn on, where it is `mapped` and the grid is a box (`_map_plane`),
+    else None. With the `lines` off, the plane is the grid."""
     from magpylib_studio import fieldlines
 
     budget = fieldlines.DRAG_POINTS  # a frame is drawn once and passed
 
+    def lay(wanted, flat):
+        if box is None:
+            return fieldlines.grid_around(
+                around, seeds, wanted, flat=flat, every_step=every
+            )
+        if flat is None:
+            flat = fieldlines.in_plane_of(box, seeds)
+        return fieldlines.grid_in(box, wanted, flat=bool(flat))
+
     def grid_of(name, wanted, flat=None):
         got = held.get(name)
         if got is None:
-            grid = fieldlines.grid_around(
-                around, seeds, wanted, flat=flat, every_step=every
-            )
+            grid = lay(wanted, flat)
             got = held[name] = {"grid": grid, "points": fieldlines.points_of(grid)}
         return got
 
@@ -1816,6 +1830,16 @@ def _frame_field(held, around, every, fixed, varying, seeds, kind):
             got["inside"] | fieldlines.inside(varying, points),
         )
 
+    def plane():
+        if box is None and not fieldlines.frame_of(seeds)[1]:
+            return None  # pixels in no plane: no map
+        return field_on(grid_of("map", budget, flat=True))
+
+    if mapped and not lines:
+        # the map alone: its plane is all there is to compute
+        drawn = plane()
+        if drawn is not None:
+            return (*drawn, None)
     got = grid_of("flat", budget)
     if fieldlines.is_flat(got["grid"]) and not fieldlines.keeps_to(
         *field_on(grid_of("probe", fieldlines.PROBE_POINTS))
@@ -1824,7 +1848,9 @@ def _frame_field(held, around, every, fixed, varying, seeds, kind):
     grid, values, within = field_on(got)
     if fieldlines.is_flat(grid) and not fieldlines.keeps_to(grid, values, within):
         grid, values, within = field_on(grid_of("box", budget, flat=False))
-    return grid, values, within
+    if mapped and not fieldlines.is_flat(grid):
+        return grid, values, within, plane()
+    return grid, values, within, None
 
 
 def _moving_alone(collection):
@@ -2286,6 +2312,9 @@ class MagpylibStudioSession:
         #: while they are the same and its pixels are on its grid. See
         #: `_field_lines`.
         self._rest_lines: dict = {}
+        #: Per sensor whose lines run in a box, the field on the plane its
+        #: map is drawn on (`_map_plane`), kept while nothing moves.
+        self._map_planes: dict = {}
         #: While `_build` folds the log: the objects created and not yet
         #: added, per parent id -- see `_add_waiting`. None otherwise.
         self._adding: dict | None = None
@@ -3800,13 +3829,15 @@ class MagpylibStudioSession:
                 stepped = self._frame_sheets(at)
                 if stepped:
                     payload = threejs.redrawn(payload, stepped, self._derived)
-                if self.field_lines:
-                    payload["fieldlines"] = self._frame_lines(at, stepped)
+                if self.draws_field:
+                    payload["fieldlines"] = self._switched(
+                        self._frame_lines(at, stepped)
+                    )
             return payload
         # The field the pixels read, once a scene: the arrows are drawn from
         # it, and the lines take their colours from it.
         readings = None
-        if self.field_lines:
+        if self.draws_field:
             from magpylib_studio import fieldlines
 
             readings = fieldlines.readings(self.scene)
@@ -3921,10 +3952,13 @@ class MagpylibStudioSession:
             except Exception as e:  # noqa: BLE001 - an optional check must not cost the scene
                 scene["overlaps"] = []
                 scene["overlaps_error"] = f"{type(e).__name__}: {e}"
-        if self.field_lines:
-            scene["fieldlines"] = self._field_lines(readings)
+        if self.draws_field:
+            scene["fieldlines"] = self._switched(self._field_lines(readings))
             # for a view that keeps no switch of its own: the studio's panel
-            scene["field_lines"] = True
+            if self.field_lines:
+                scene["field_lines"] = True
+            if self.field_map:
+                scene["field_map"] = True
         return scene
 
     def _uniform_fields(self, source_of):
@@ -4096,6 +4130,50 @@ class MagpylibStudioSession:
         the pixels of the sensors that read the field. The document's, so the
         scene's file keeps it -- see `set_field_lines`."""
         return bool(self.doc.get("field_lines"))
+
+    @property
+    def field_map(self):
+        """Whether `get_scene` carries a map of |field| on the plane of each
+        sensor that reads the field, from the grid its lines are drawn from
+        -- the document's switch, as the lines' is (`set_field_map`)."""
+        return bool(self.doc.get("field_map"))
+
+    @property
+    def draws_field(self):
+        """Whether the field is computed round the sensors: for their lines,
+        their map, or both."""
+        return self.field_lines or self.field_map
+
+    def set_field_map(self, on=True):
+        """Draw a map of |field| on each sensor's plane, or put it away: one
+        step to undo, kept in the document and carried through the script
+        tab, as `set_field_lines` keeps the lines'."""
+        if self.field_map == bool(on):
+            return {"ok": True, "unchanged": True}
+
+        def mutate(doc):
+            if on:
+                doc["field_map"] = True
+            else:
+                doc.pop("field_map", None)
+
+        return self._edit_unbuilt(mutate, "field map " + ("on" if on else "off"))
+
+    def _switched(self, items):
+        """`items`, each saying what of it to draw: its lines, its map -- and
+        with the map, the |field| it shows (`fieldlines.map_levels`), which
+        the colour bar spans for it."""
+        from magpylib_studio import fieldlines
+
+        lines, drawn = self.field_lines, self.field_map
+        out = []
+        for item in items:
+            item = {**item, "lines": lines, "map": drawn}
+            shows = fieldlines.map_levels(item) if drawn else None
+            if shows is not None:
+                item["map_levels"] = shows
+            out.append(item)
+        return out
 
     def set_field_lines(self, on=True):
         """Draw field lines through the pixels of each sensor that reads the
@@ -4280,14 +4358,46 @@ class MagpylibStudioSession:
                 digest.append(self._sources_written())
             return digest[0]
 
+        regions = self.doc.get("field_regions") or {}
         items = []
         for sensor in sensors:
             key = key_of.get(id(sensor))
             if key is None:
                 continue
+            if not self.field_lines:
+                # the map alone: its plane is all there is to compute
+                plane = self._map_plane(sensor, key, sources, names, written)
+                if plane is not None:
+                    box = regions.get(key) and fieldlines.region_in_world(
+                        sensor, regions[key]
+                    )
+                    items.append(
+                        fieldlines.item(
+                            sensor,
+                            key,
+                            plane["grid"],
+                            plane["values"],
+                            plane["within"],
+                            fieldlines.seeds_of(sensor),
+                            readings.get(sensor),
+                            plane["encoded"],
+                            region=box,
+                        )
+                    )
+                    continue
             kind = fieldlines.kind_of(sensor)
             seeds = fieldlines.seeds_of(sensor)
+            if regions.get(key) is not None:
+                items.append(
+                    self._region_lines(
+                        sensor, key, regions[key], sources, names, readings, written
+                    )
+                )
+                continue
             cache = self._field_cache.get(key)
+            if cache is not None and "mark" in cache:
+                cache = self._field_cache[key] = None  # a set region's, gone
+                del self._field_cache[key]
             # kept from rest: drawn from at rest, and the start of a gesture
             # that moves no source -- for no other frame is it asked after,
             # nor is the log read for it
@@ -4298,7 +4408,9 @@ class MagpylibStudioSession:
             )
             rest = self._rest_lines.get(key) if kept else None
             if rest is not None and not (
-                rest["kind"] == kind and rest["sources"] == written()
+                rest["kind"] == kind
+                and rest["sources"] == written()
+                and "mark" not in rest  # a set region's grid, not the rule's
             ):
                 rest = None
             margin = fieldlines.HELD_MARGIN if gesture else fieldlines.REST_MARGIN
@@ -4332,6 +4444,7 @@ class MagpylibStudioSession:
                     "field": rest["values"],
                     "inside": rest["within"],
                     "encoded": rest["encoded"],
+                    "anchor": rest["seeds"],
                 }
             follows = names is None or key in names
             if not gesture:
@@ -4348,27 +4461,47 @@ class MagpylibStudioSession:
                     self._rest_lines[key], grid, was, sources, kind
                 )
             else:
-                if (
+                # Lines are traced from the pixels wherever the grid is: it
+                # stays, and costs nothing. A map drawn from it is the grid,
+                # so a sensor dragged takes it along by whole steps, the field
+                # computed only where it is new (`_slid_on`).
+                along = (
+                    self._slid_on(key, seeds)
+                    if stays
+                    and cache is not None
+                    and follows
+                    and self.field_map
+                    and fieldlines.is_flat(cache["grid"])
+                    else None
+                )
+                was = None
+                if along is not None and fieldlines.holds(along[0], seeds):
+                    grid, was, anchor = along
+                elif (
                     stays
                     and cache is not None
                     and (not follows or fieldlines.holds(cache["grid"], seeds))
                 ):
-                    grid = cache["grid"]
+                    grid, anchor = cache["grid"], cache.get("anchor")
                 else:
-                    grid = fieldlines.grid_around(sources, seeds, budget)
+                    grid, anchor = fieldlines.grid_around(sources, seeds, budget), seeds
                     if fieldlines.is_flat(grid) and not self._keeps_to_plane(
                         sources, seeds, kind
                     ):
                         grid = fieldlines.grid_around(
                             sources, seeds, budget, flat=False
                         )
-                values, within = self._field_on(key, grid, sources, names, stays, kind)
+                values, within = self._field_on(
+                    key, grid, sources, names, stays, kind, was, anchor
+                )
             if fieldlines.is_flat(grid) and not fieldlines.keeps_to(
                 grid, values, within
             ):
                 # a drag took the field off the sensor's plane: its lines, in 3D
                 grid = fieldlines.grid_around(sources, seeds, budget, flat=False)
-                values, within = self._field_on(key, grid, sources, names, stays, kind)
+                values, within = self._field_on(
+                    key, grid, sources, names, stays, kind, anchor=seeds
+                )
             # the field as sent, once while it stands still
             held = self._field_cache.get(key) if stays else None
             if held is not None and values is held["field"]:
@@ -4404,7 +4537,357 @@ class MagpylibStudioSession:
                     encoded,
                 )
             )
+        if self.field_map:
+            by_key = {key_of.get(id(s)): s for s in sensors}
+            for each in items:
+                if each["shape"][2] > 1:  # a box: the map wants its plane
+                    key = each["object_id"]
+                    plane = self._map_plane(by_key[key], key, sources, names, written)
+                    if plane is not None:
+                        each["map_field"] = plane["encoded"]
         return items
+
+    def _region_lines(self, sensor, key, region, sources, names, readings, written):
+        """`_field_lines`' item for a sensor with a region set on it
+        (`set_field_region`): the grid laid over the region, where the sensor
+        is now, rather than round its pixels by the rule.
+
+        The region turns and moves with the sensor; its field is kept as the
+        rule's is. At rest, while the sources are as they were: drawn again
+        from where the region stood (`mark`), or let go a little way off, the
+        grid slid with it by whole steps and the field computed only where
+        it is new (`fieldlines.slide`) -- the grid at rest has a step's room
+        round the region for it (`fieldlines.rimmed`). In a gesture, on a
+        grid `fieldlines.HELD_ROOM` times the region, fixed in the world while
+        it covers the region (`fieldlines.serves`): the field of what stays
+        computed once, what moves added every frame. The lines stop at the
+        region's box wherever the grid runs."""
+        from magpylib_studio import fieldlines
+
+        gesture = self._interaction is not None
+        kind = fieldlines.kind_of(sensor)
+        seeds = fieldlines.seeds_of(sensor)
+        box = fieldlines.region_in_world(sensor, region)
+        # the region's form, wherever it stands -- whether the pixels lie in
+        # its plane picks its grid's kind -- and where it stands
+        form = json.dumps(
+            [
+                kind,
+                bool(fieldlines.in_plane_of(box, seeds)),
+                *(np.round(box[k], 12).tolist() for k in ("axes", "size")),
+            ]
+        )
+        mark = json.dumps([form, np.round(box["centre"], 12).tolist()])
+        rest = self._rest_lines.get(key)
+        if rest is not None and not (
+            rest.get("form") == form and rest["sources"] == written()
+        ):
+            rest = None
+        key_of = self._names_of_objects()
+        moving = gesture and (
+            names is None or bool(self._sources_named(sources, names, key_of))
+        )
+
+        def item(grid, values, within, encoded):
+            return fieldlines.item(
+                sensor,
+                key,
+                grid,
+                values,
+                within,
+                seeds,
+                readings.get(sensor),
+                encoded,
+                region=box,
+            )
+
+        if rest is not None and not moving and rest["mark"] == mark:
+            # the field at rest is this frame's: the sources stand as they did
+            return item(rest["grid"], rest["values"], rest["within"], rest["encoded"])
+        if not gesture:
+            budget = fieldlines.REST_POINTS
+        else:
+            budget = fieldlines.DRAG_POINTS if names else fieldlines.DRAG_POINTS_ALL
+        stays = gesture and names is not None
+        room = fieldlines.padded(box, fieldlines.HELD_ROOM) if stays else box
+        slid = None
+        if rest is not None and not gesture:
+            centre = np.asarray([box["centre"]])
+            slid = fieldlines.slide(rest["grid"], rest["centre"], centre)
+            if slid is not None and not fieldlines.serves(slid[0], box):
+                slid = None
+        if slid is not None:
+            grid, was = slid
+            values, within = self._slid_field(rest, grid, was, sources, kind)
+        else:
+            cache = self._field_cache.get(key) if stays else None
+            if cache is not None and "mark" not in cache:
+                cache = None  # the rule's, from before the region was set
+            if (
+                cache is None
+                and stays
+                and not moving
+                and rest is not None
+                and fieldlines.serves(rest["grid"], box)
+            ):
+                # a gesture moving no source starts from the field at rest
+                cache = self._field_cache[key] = {
+                    "grid": rest["grid"],
+                    "names": names,
+                    "field": rest["values"],
+                    "inside": rest["within"],
+                    "encoded": rest["encoded"],
+                    "mark": mark,
+                }
+            if cache is not None and fieldlines.serves(cache["grid"], box):
+                grid = cache["grid"]
+            else:
+                grid = self._region_grid(
+                    room, seeds, sources, kind, budget, rim=not gesture
+                )
+            values, within = self._field_on(key, grid, sources, names, stays, kind)
+        if fieldlines.is_flat(grid) and not fieldlines.keeps_to(grid, values, within):
+            lay = fieldlines.grid_in if gesture else fieldlines.rimmed
+            grid = lay(room, budget, flat=False)
+            values, within = self._field_on(key, grid, sources, names, stays, kind)
+        held = self._field_cache.get(key) if stays else None
+        if held is not None:
+            held["mark"] = mark
+        if held is not None and values is held["field"]:
+            encoded = held.setdefault(
+                "encoded", fieldlines.encoded_field(grid, values, within)
+            )
+        elif not gesture:
+            encoded = fieldlines.encoded_field(grid, values, within)
+            self._rest_lines = {
+                k: v for k, v in self._rest_lines.items() if k in self._objs
+            }
+            self._rest_lines[key] = {
+                "sources": written(),
+                "kind": kind,
+                "seeds": seeds,
+                "grid": grid,
+                "values": values,
+                "within": within,
+                "encoded": encoded,
+                "form": form,
+                "mark": mark,
+                "centre": np.asarray([box["centre"]]),
+            }
+        else:
+            encoded = None
+        return item(grid, values, within, encoded)
+
+    def _map_plane(self, sensor, key, sources, names, written):
+        """The field on the plane a sensor's map is drawn on where its lines
+        do not lie in one, or are not drawn (`_field_lines`): a set region's
+        own plane, or the flat grid the rule would lay round pixels that lie
+        in a plane. ``{"grid", "values", "within", "encoded"}``, the field
+        encoded as an item's is (`fieldlines.encoded_field`); None for pixels
+        in no plane.
+
+        Kept as the lines' field is: at rest while the sources are as they
+        were, drawn again from where it stood, or slid with a sensor let go
+        a little way off (`fieldlines.slide`); in a gesture, on a grid fixed
+        in the world while it serves -- the field of what stays computed
+        once, what moves added every frame (`_field_on`)."""
+        from magpylib_studio import fieldlines
+
+        gesture = self._interaction is not None
+        kind = fieldlines.kind_of(sensor)
+        seeds = fieldlines.seeds_of(sensor)
+        region = self.field_regions.get(key)
+        box = None if region is None else fieldlines.region_in_world(sensor, region)
+        if box is None and not fieldlines.frame_of(seeds)[1]:
+            return None
+        # what the plane moves with: the region's centre, on it, else the pixels
+        anchor = seeds if box is None else np.asarray([box["centre"]])
+        # at rest, a region's grid is its own: laid for its size and turn
+        form = None if box is None else np.round([*box["axes"], box["size"]], 12)
+
+        def serves(grid):
+            if not fieldlines.is_flat(grid):
+                return False
+            if box is not None:
+                return fieldlines.serves(grid, box)
+            margin = fieldlines.HELD_MARGIN if gesture else fieldlines.REST_MARGIN
+            return fieldlines.holds(grid, seeds, margin)
+
+        def lay(points, room=1.0):
+            if box is None:
+                return fieldlines.grid_around(sources, seeds, points)
+            if gesture:
+                return fieldlines.grid_in(
+                    fieldlines.padded(box, room), points, flat=True
+                )
+            return fieldlines.rimmed(box, points, flat=True)
+
+        def plane(grid, values, within, encoded=None):
+            if encoded is None:
+                encoded = fieldlines.encoded_field(grid, values, within)
+            return {
+                "grid": grid,
+                "values": values,
+                "within": within,
+                "encoded": encoded,
+            }
+
+        held_key = f"{key}/map"
+        rest = self._map_planes.get(key)
+        if rest is not None and not (
+            rest["kind"] == kind
+            and rest["sources"] == written()
+            and (gesture or np.array_equal(rest["form"], form))
+        ):
+            rest = None
+        key_of = self._names_of_objects()
+        moving = gesture and (
+            names is None or bool(self._sources_named(sources, names, key_of))
+        )
+        if not gesture:
+            if rest is not None and serves(rest["grid"]):
+                return rest
+            slid = None
+            if rest is not None and len(rest["anchor"]) == len(anchor):
+                slid = fieldlines.slide(rest["grid"], rest["anchor"], anchor)
+                if slid is not None and not serves(slid[0]):
+                    slid = None
+            if slid is not None:
+                grid, was = slid
+                values, within = self._slid_field(rest, grid, was, sources, kind)
+            else:
+                grid = lay(fieldlines.REST_POINTS)
+                at = fieldlines.points_of(grid)
+                values = fieldlines.field(sources, at, kind)
+                within = fieldlines.inside(sources, at)
+            out = plane(grid, values, within)
+            self._map_planes = {
+                k: v for k, v in self._map_planes.items() if k in self._objs
+            }
+            self._map_planes[key] = {
+                **out,
+                "kind": kind,
+                "form": form,
+                "anchor": anchor,
+                "sources": written(),
+            }
+            return out
+        if names is None:
+            # anything moves: the whole field, every frame
+            grid = lay(fieldlines.DRAG_POINTS_ALL)
+            at = fieldlines.points_of(grid)
+            return plane(
+                grid,
+                fieldlines.field(sources, at, kind),
+                fieldlines.inside(sources, at),
+            )
+        cache = self._field_cache.get(held_key)
+        if cache is None and not moving and rest is not None and serves(rest["grid"]):
+            # a gesture moving no source starts from the field at rest
+            cache = self._field_cache[held_key] = {
+                "grid": rest["grid"],
+                "names": names,
+                "field": rest["values"],
+                "inside": rest["within"],
+                "encoded": rest["encoded"],
+                "anchor": rest["anchor"],
+            }
+        # The rule's plane is the map: it goes with the pixels by whole steps
+        # (`_slid_on`). A region's is clipped to the region, which goes with
+        # its sensor in the view: its grid stays while it covers it.
+        along = self._slid_on(held_key, anchor) if box is None else None
+        was = None
+        if along is not None and serves(along[0]):
+            grid, was, anchor = along
+        elif cache is not None and serves(cache["grid"]):
+            grid = cache["grid"]
+        else:
+            grid = lay(fieldlines.DRAG_POINTS, fieldlines.HELD_ROOM)
+        values, within = self._field_on(
+            held_key, grid, sources, names, True, kind, was, anchor
+        )
+        held = self._field_cache[held_key]
+        if values is held["field"]:
+            encoded = held.setdefault(
+                "encoded", fieldlines.encoded_field(grid, values, within)
+            )
+            return plane(grid, values, within, encoded)
+        return plane(grid, values, within)
+
+    @staticmethod
+    def _region_grid(box, seeds, sources, kind, points, rim=False):
+        """The grid over a set region `box`: in its plane where the pixels
+        lie in it and the field keeps to it, from a coarse look first, as
+        `_keeps_to_plane` decides for the rule's; else through the box. With
+        a step's room round it, if `rim` (`fieldlines.rimmed`)."""
+        from magpylib_studio import fieldlines
+
+        lay = fieldlines.rimmed if rim else fieldlines.grid_in
+        if fieldlines.in_plane_of(box, seeds):
+            probe = fieldlines.grid_in(box, fieldlines.PROBE_POINTS, flat=True)
+            at = fieldlines.points_of(probe)
+            if fieldlines.keeps_to(
+                probe,
+                fieldlines.field(sources, at, kind),
+                fieldlines.inside(sources, at),
+            ):
+                return lay(box, points, flat=True)
+        return lay(box, points, flat=False)
+
+    @property
+    def field_regions(self):
+        """The regions set on sensors (`set_field_region`), by id: each
+        ``{"centre", "axes", "size"}`` in the sensor's own frame."""
+        return dict(self.doc.get("field_regions") or {})
+
+    def get_field_region(self, object_id):
+        """Whether `object_id` has a region set on it (`set_field_region`),
+        for the object panel's ↺."""
+        return {"set": object_id in self.field_regions}
+
+    def set_field_region(self, object_id, region=None):
+        """Set the region `object_id`'s field lines run in -- a box in the
+        world, ``{"centre", "axes", "size"}``, axes as rows, kept in the
+        sensor's own frame so it turns and moves with the sensor -- or, with
+        None, give it back to the rule that lays one round its pixels. One
+        step to undo; the scene is not rebuilt. A view's grips send it as
+        an edit (`apply_edits`)."""
+        return self._set_field_regions(
+            [{"objectId": object_id, "field_region": region}]
+        )
+
+    def _set_field_regions(self, edits):
+        """`set_field_region` for each of `edits`, a view's
+        ``{"objectId", "field_region"}``, as one step."""
+        from magpylib_studio import fieldlines
+
+        regions = self.field_regions
+        for edit in edits:
+            object_id = edit["objectId"]
+            obj = self._objs.get(object_id)
+            if not isinstance(obj, magpy.Sensor):
+                return {"ok": False, "error": f"{object_id!r} is not a sensor"}
+            box = edit.get("field_region")
+            if box is None:
+                regions.pop(object_id, None)
+                continue
+            try:
+                regions[object_id] = fieldlines.region_of(obj, box)
+            except (KeyError, TypeError, ValueError) as e:
+                return {"ok": False, "error": f"not a region: {e}"}
+        if regions == self.field_regions:
+            return {"ok": True, "unchanged": True}
+        ids = sorted({edit["objectId"] for edit in edits})
+        self._moved(ids)
+        snapshot = json.loads(json.dumps(self.doc))
+        if regions:
+            self.doc["field_regions"] = regions
+        else:
+            self.doc.pop("field_regions", None)
+        _canonical(self.doc)
+        self._record_state(f"field region of {', '.join(ids)}", snapshot)
+        self._changed()
+        return {"ok": True}
 
     def page_field(self):
         """`page_field_why`'s field alone."""
@@ -4419,7 +4902,7 @@ class MagpylibStudioSession:
         view draws no lines, which leaves nothing to say."""
         from magpylib_studio import fieldlines
 
-        if not self.field_lines:
+        if not self.draws_field:
             return None, None
         key_of = self._names_of_objects()
         sensors = {
@@ -4433,6 +4916,7 @@ class MagpylibStudioSession:
             fieldlines.sources_of(self.scene),
             sensors,
             fieldlines.PAGE_KERNELS if computes is None else computes,
+            regions=self.field_regions,
         )
 
     def _run_readings(self):
@@ -4486,8 +4970,11 @@ class MagpylibStudioSession:
         from magpylib_studio import fieldlines
 
         kept = getattr(self, "_lines_of_frames", None)
-        if kept is None or kept[0] is not self._animated:
-            kept = self._lines_of_frames = (self._animated, {}, {})
+        # the switches and the regions are the document's, set without a
+        # rebuild: the map alone is drawn from a plane of its own
+        drawn = (self.field_lines, self.field_map, self.field_regions)
+        if kept is None or kept[0] is not self._animated or kept[3] != drawn:
+            kept = self._lines_of_frames = (self._animated, {}, {}, drawn)
         if frame in kept[1]:
             return kept[1][frame]
         run = kept[2]
@@ -4510,12 +4997,18 @@ class MagpylibStudioSession:
         ]
         moved += list((stepped or {}).values())
         key_of = self._names_of_objects()
+        regions = self.field_regions
         items = []
         for sensor in fieldlines.sensors_of(self.scene):
             key = key_of.get(id(sensor))
             if key is None:
                 continue
             kind = fieldlines.kind_of(sensor)
+            at = fieldlines.at_step(sensor, step)
+            # a region set on it, where the sensor stands at this step
+            box = (
+                fieldlines.region_in_world(at, regions[key]) if key in regions else None
+            )
             if sensor._get_path_len() > 1:  # its grid moves with it
                 held, fixed, varying = {}, [], [*still, *moved]
                 around, every = varying, False
@@ -4524,15 +5017,32 @@ class MagpylibStudioSession:
                 held = run.setdefault((key, kind, bool(stepped)), {})
                 fixed, varying = still, moved
                 around, every = sources, True
-            seeds = fieldlines.seeds_of(fieldlines.at_step(sensor, step))
-            grid, values, within = _frame_field(
-                held, around, every, fixed, varying, seeds, kind
+            seeds = fieldlines.seeds_of(at)
+            grid, values, within, plane = _frame_field(
+                held,
+                around,
+                every,
+                fixed,
+                varying,
+                seeds,
+                kind,
+                box=box,
+                lines=self.field_lines,
+                mapped=self.field_map,
             )
-            items.append(
-                fieldlines.item(
-                    sensor, key, grid, values, within, seeds, readings.get(sensor)
-                )
+            each = fieldlines.item(
+                sensor,
+                key,
+                grid,
+                values,
+                within,
+                seeds,
+                readings.get(sensor),
+                region=box,
             )
+            if plane is not None:
+                each["map_field"] = fieldlines.encoded_field(*plane)
+            items.append(each)
         kept[1][frame] = items
         return items
 
@@ -4605,10 +5115,13 @@ class MagpylibStudioSession:
             fieldlines.inside(sources, points),
         )
 
-    def _field_on(self, key, grid, sources, names, stays, kind):
+    def _field_on(self, key, grid, sources, names, stays, kind, was=None, anchor=None):
         """The field -- B or H, as `kind` -- on `grid`, and which of its points are inside a magnet. Where
         the grid `stays` for the gesture, the field of what does not move is
-        kept, under `key`, and only the moving sources' added."""
+        kept, under `key`, and only the moving sources' added. `was`: where
+        `grid` is the kept one slid (`_slid_on`), the kept point each of its
+        points was, -1 for a new one -- the field of what stays computed only
+        there; `anchor`, what the grid moves with, kept for the next slide."""
         from magpylib_studio import fieldlines
 
         points = fieldlines.points_of(grid)
@@ -4627,11 +5140,25 @@ class MagpylibStudioSession:
         if cache is None or cache["names"] != names or cache["grid"] is not grid:
             ids = {id(s) for s in moving}
             still = [s for s in sources if id(s) not in ids]
+            shaped = [*still, *recharged]
+            if was is None or cache is None or cache["names"] != names:
+                field = fieldlines.field(still, points, kind)
+                inside = fieldlines.inside(shaped, points)
+            else:
+                had = was >= 0
+                field = np.empty((len(points), 3))
+                inside = np.empty(len(points), dtype=bool)
+                field[had] = cache["field"][was[had]]
+                inside[had] = cache["inside"][was[had]]
+                if not had.all():
+                    field[~had] = fieldlines.field(still, points[~had], kind)
+                    inside[~had] = fieldlines.inside(shaped, points[~had])
             cache = {
                 "grid": grid,
                 "names": names,
-                "field": fieldlines.field(still, points, kind),
-                "inside": fieldlines.inside([*still, *recharged], points),
+                "field": field,
+                "inside": inside,
+                "anchor": anchor,
             }
             self._field_cache[key] = cache
         if not moving:
@@ -4640,6 +5167,28 @@ class MagpylibStudioSession:
         ids = {id(s) for s in recharged}
         shaped = [s for s in moving if id(s) not in ids]
         return values, cache["inside"] | fieldlines.inside(shaped, points)
+
+    def _slid_on(self, key, now):
+        """The grid kept under `key` slid by whole steps with what it moves
+        with, now at `now` (`fieldlines.slide`): ``(grid, was, anchor)`` for
+        `_field_on` -- the kept grid itself, `was` None, where it has not
+        moved a step -- or None where nothing is kept to slide, or `now` has
+        left a flat grid's plane."""
+        from magpylib_studio import fieldlines
+
+        cache = self._field_cache.get(key)
+        if cache is None or cache.get("anchor") is None:
+            return None
+        if len(cache["anchor"]) != len(now):
+            return None
+        slid = fieldlines.slide(cache["grid"], cache["anchor"], now)
+        if slid is None:
+            return None
+        grid, was = slid
+        moved = np.asarray(grid["origin"]) - np.asarray(cache["grid"]["origin"])
+        if not moved.any():
+            return cache["grid"], None, cache["anchor"]
+        return grid, was, cache["anchor"] + moved
 
     def _moving_names(self):
         """The ids the gesture in progress moves -- the objects it named, the
@@ -5295,9 +5844,22 @@ class MagpylibStudioSession:
         different story from the one the scene actually went through.
         """
         self._spec(object_id)  # raise early on unknown id
+        name_of = self._names_of_objects()
+        gone = {object_id} | {
+            name_of.get(id(c))
+            for c in getattr(self._objs.get(object_id), "children_all", ())
+        }
 
         def mutate(doc):
             self._append({"op": "remove", "target": object_id})
+            # a sensor's region goes with it: an id taken again is another's
+            regions = doc.get("field_regions") or {}
+            kept = {k: v for k, v in regions.items() if k not in gone}
+            if kept != regions:
+                if kept:
+                    doc["field_regions"] = kept
+                else:
+                    doc.pop("field_regions", None)
 
         return self._mutate_doc(mutate, f"remove {object_id}")
 
@@ -6311,6 +6873,13 @@ class MagpylibStudioSession:
         dragged together were one gesture -- and, if one of them is refused,
         none of them moves.
         """
+        regions = [edit for edit in edits if "field_region" in edit]
+        if regions:
+            # a sensor's field region, its grips': the document's, not a
+            # call, so not in the calls' step -- and dragged alone
+            if len(regions) < len(edits):
+                return {"ok": False, "error": "a field region is edited alone"}
+            return self._set_field_regions(regions)
         edits = [self._kept_formula(edit) for edit in edits]
         calls = [call for edit in edits for call in _calls_for(edit)]
         made = []
@@ -6700,6 +7269,10 @@ class MagpylibStudioSession:
                     event["parent"] = follow(event["parent"])
                 if event.get("children"):
                     event["children"] = [follow(c) for c in event["children"]]
+            if doc.get("field_regions"):
+                doc["field_regions"] = {
+                    follow(k): v for k, v in doc["field_regions"].items()
+                }
 
         return self._mutate_doc(mutate, "name")
 

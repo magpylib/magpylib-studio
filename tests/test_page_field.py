@@ -355,3 +355,95 @@ def test_the_page_computes_the_field_of_turned_and_moved_sources(
                 tolerance,
                 float((error / size.max()).max()),
             )
+
+
+def test_the_page_lays_a_set_region_and_reads_a_map_as_python(tmp_path):
+    """A region set on a turned, moved sensor: the box the page puts it at,
+    back in the sensor's frame, the grids it lays over it -- flat, through
+    it, with a step's room -- whether the pixels lie in it, and what a map on
+    it shows, as `fieldlines.py` has them."""
+    from magpylib_studio.examples import EXAMPLES
+    from magpylib_studio.widget import SceneWidget
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        view = SceneWidget(
+            EXAMPLES["helmholtz"].scene.build(), field_lines=True, field_map=True
+        )
+    session = view._session
+    (rule,) = session.get_scene()["fieldlines"]
+    sensor = session._objs[rule["object_id"]]
+    sensor.position = (0.002, -0.001, 0.003)
+    sensor.orientation = Rotation.from_rotvec([0.1, -0.2, 0.3])
+    turned = Rotation.from_rotvec([0.0, 0.0, 0.4]).as_matrix()
+    region = {
+        "centre": [0.001, 0.002, 0.0],
+        "axes": turned.tolist(),
+        "size": [0.02, 0.03, 0.01],
+    }
+    pose = {
+        "position": sensor.position.tolist(),
+        "orientation": sensor.orientation.as_quat().tolist(),
+    }
+    seeds = fieldlines.seeds_of(sensor)
+    session.set_field_region(rule["object_id"], None)
+    session.set_field_region(
+        rule["object_id"], fieldlines.region_in_world(sensor, region)
+    )
+    (regioned,) = session.get_scene()["fieldlines"]
+    asked = [
+        {
+            "region": region,
+            "pose": pose,
+            "seeds": seeds.tolist(),
+            "points": 2500,
+            "item": item,
+        }
+        for item in (rule, regioned)
+    ]
+    answers = _in_node(tmp_path, {"regions": asked})
+
+    box = fieldlines.region_in_world(sensor, region)
+    for item, got in zip((rule, regioned), answers, strict=True):
+        for key in ("centre", "axes", "size"):
+            np.testing.assert_allclose(got["box"][key], box[key], atol=1e-15)
+        back = fieldlines.region_of(sensor, box)
+        for key in ("centre", "axes", "size"):
+            np.testing.assert_allclose(got["back"][key], back[key], atol=2e-12)
+        for name, grid in (
+            ("flat", fieldlines.grid_in(box, 2500, flat=True)),
+            ("deep", fieldlines.grid_in(box, 2500, flat=False)),
+            ("rimmed", fieldlines.rimmed(box, 2500, flat=True)),
+        ):
+            assert got[name]["shape"] == grid["shape"], name
+            np.testing.assert_allclose(got[name]["step"], grid["step"], rtol=1e-14)
+            np.testing.assert_allclose(got[name]["origin"], grid["origin"], atol=1e-15)
+        assert got["inPlane"] == fieldlines.in_plane_of(box, seeds)
+        np.testing.assert_allclose(
+            got["levels"], fieldlines.map_levels(item), rtol=1e-12
+        )
+
+
+def test_a_page_saved_without_its_map_draws_it_as_python(tmp_path):
+    """A page saved with the map off, its eye clicked: the page draws the
+    map with its own kernels, reading what python's map reads."""
+    from magpylib_studio.examples import EXAMPLES
+    from magpylib_studio.widget import SceneWidget, _page_field
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        view = SceneWidget(EXAMPLES["helmholtz"].scene.build(), field_lines=True)
+    session = view._session
+    payload = {**session.get_scene(), "page_field": _page_field(session)}
+    (saved,) = payload["fieldlines"]
+    assert saved["map"] is False
+    got = _in_node(
+        tmp_path, {"switched": {"payload": payload, "key": saved["object_id"]}}
+    )
+
+    view.field_map = True
+    (python,) = view._session.get_scene()["fieldlines"]
+    assert got["switched"] is True
+    assert got["again"] is False
+    assert got["map"] is True
+    np.testing.assert_allclose(got["levels"], python["map_levels"], rtol=1e-3)

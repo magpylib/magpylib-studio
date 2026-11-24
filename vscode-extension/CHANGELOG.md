@@ -5,6 +5,26 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Added
+
+<details>
+<summary>A sensor's field lines run where its grips put them, beside a map of the field</summary>
+
+A sensor's field lines ran on a grid laid round its pixels, which nothing
+changed: a coil pair's lines kept to the pixels between the coils. Now the
+region they run in shows dashed with the sensor selected; a click on it puts
+grips on its faces, four in the sensor's plane, six in 3D, and a drag resizes
+it, as a cuboid's grips do. The region turns and moves with the sensor, is saved
+with the scene, and ↺ in the object panel gives it back to the automatic one.
+Beside the lines, a **field map** row under each sensor draws |field| on its
+plane, its eye a switch of the scene's as the lines' is (`field_map`); lines
+over it are white, and the colour bar spans what it shows. The lines and map are
+redrawn as the sensor or a grip is dragged, at the pace of the automatic grid,
+and a run's frames and a saved page draw them too. The colour bar now also shows
+for field lines drawn without pixels.
+
+</details>
+
 ### Changed
 
 <details>

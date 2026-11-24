@@ -235,6 +235,8 @@ export function createInspector(
   const stepEl = element("div", "magpy-ins-step");
   const paramsEl = element("div", "magpy-ins-params");
   const transformEl = element("div", "magpy-ins-transform");
+  // a sensor's field region, where one is set: a row with its ↺
+  const regionEl = element("div", "magpy-ins-region");
   // the filter sits with what it filters: the style list, which is the only
   // long one and the only one it touches
   const filterEl = element("input", "magpy-ins-filter");
@@ -258,6 +260,7 @@ export function createInspector(
     headerEl,
     ...(compact ? [] : [stepEl]),
     transformEl,
+    regionEl,
     paramsEl,
     ...(compact ? [styleBox] : [filterEl, propsEl]),
     emptyEl,
@@ -1153,6 +1156,35 @@ export function createInspector(
     transformEl.appendChild(box);
   }
 
+  /** A sensor's field region, set by its grips in the view: said, with a
+   *  ↺ that gives it back to the region laid round the pixels. Nothing for
+   *  a sensor whose region is the rule's, nor for anything else. */
+  async function loadRegion() {
+    const id = objectId;
+    const answer = await rpc("get_field_region", { object_id: id });
+    if (id !== objectId) return;
+    regionEl.innerHTML = "";
+    if (!answer?.set) return;
+    const row = element("div", "magpy-ins-row magpy-ins-set");
+    const label = element("label", "", "field region");
+    label.title =
+      "Set by its grips in the view: the field lines run in it, and it " +
+      "turns and moves with the sensor";
+    const reset = element("button", "magpy-ins-reset", "↺");
+    reset.type = "button";
+    reset.title = "Back to the region laid round the pixels";
+    reset.addEventListener("click", () =>
+      rpc("set_field_region", { object_id: id })
+        .then((res) => {
+          answered(res);
+          return loadRegion();
+        })
+        .catch(refused),
+    );
+    row.append(label, element("span", "magpy-ins-what", "set"), reset);
+    regionEl.appendChild(row);
+  }
+
   /** The style tree: the schema its widgets are built from and the values
    *  they show. In full, with the object; compact, when its heading is
    *  opened. */
@@ -1177,7 +1209,7 @@ export function createInspector(
       if (schema) render();
       sayHead();
     }
-    await Promise.all([loadParams(), loadTransform()]);
+    await Promise.all([loadParams(), loadTransform(), loadRegion()]);
   }
 
   async function loadObject(id) {
@@ -1193,6 +1225,7 @@ export function createInspector(
       headerEl.textContent = "";
       propsEl.innerHTML = "";
       transformEl.innerHTML = "";
+      regionEl.innerHTML = "";
       paramsEl.innerHTML = "";
       stepEl.innerHTML = "";
       return;
@@ -1241,7 +1274,7 @@ export function createInspector(
               sayHead();
             })
           : Promise.resolve();
-    await Promise.all([style, loadParams(), loadTransform()]);
+    await Promise.all([style, loadParams(), loadTransform(), loadRegion()]);
   }
 
   /** The step form and the object's own sections, both back from source. */
