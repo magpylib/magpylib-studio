@@ -1451,6 +1451,72 @@ export async function pageEditor(model, { glue, wasm }) {
       };
       return { ok: true, scene };
     },
+    /** Switch sensor `key`'s `part` -- its "lines" or its "map" -- on or
+     *  off where it stands: a part the page was saved without is drawn
+     *  afresh, as the session draws it with its switch turned on. False
+     *  where the page has no such sensor or lines. */
+    switchPart(key, part, on) {
+      const payload = model.get("payload");
+      const field = payload?.page_field;
+      const sensor = field?.sensors?.[key];
+      const was = savedItem(payload, key);
+      if (!sensor || !was || (was[part] !== false) === on) return false;
+      const saved = { ...was, [part]: on };
+      const sources = ready(field);
+      const pose = {
+        position: sensor.position,
+        orientation: sensor.orientation,
+      };
+      const seeds = seedsAt(sensor, pose);
+      const { rules } = field;
+      const tolerance = rules.tolerance.rest;
+      const fresh = freshly(
+        saved,
+        sources,
+        sensor,
+        pose,
+        seeds,
+        sensor.region ?? null,
+        rules.rest_points,
+        tolerance,
+        true,
+      );
+      const { got, box } = fresh ?? {
+        // the rule's grid: the lines' own where they were drawn, else laid
+        got:
+          was.lines !== false
+            ? restOf(payload, key, sensor)
+            : laid(
+                sources,
+                sensor,
+                pose,
+                seeds,
+                rules.rest_points,
+                tolerance,
+                true,
+              ),
+        box: null,
+      };
+      const item = drawnItem(
+        saved,
+        sources,
+        sensor,
+        pose,
+        seeds,
+        got,
+        box,
+        rules.rest_points,
+        tolerance,
+        true,
+      );
+      const fieldlines = payload.fieldlines.map((i) =>
+        i.object_id === key ? item : i,
+      );
+      undone.push(payload);
+      redone.length = 0;
+      show({ ...payload, fieldlines });
+      return true;
+    },
     commit(edits) {
       const payload = gesture?.before ?? model.get("payload");
       gesture = null;

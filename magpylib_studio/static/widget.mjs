@@ -2776,13 +2776,22 @@ function render({ model, el }) {
    *  where they can be computed, or are drawn -- a saved page keeps them. */
   function legendTree() {
     const tree = gridTree(model.get("tree") || []);
-    if (linesComputed() || model.get("payload")?.fieldlines?.length) {
-      return tree;
-    }
+    if (linesComputed()) return tree;
+    // a saved page lists what it drew, and what its kernels can draw
+    const saved = model.get("payload")?.fieldlines ?? [];
+    const kept = new Set(
+      saved.flatMap((item) =>
+        FIELD_SWITCHES.filter(
+          ({ part }) => item[part] !== false || model.pageEditor,
+        ).map(({ part }) => `${item.object_id}/${part}`),
+      ),
+    );
     const pruned = (nodes) =>
       nodes
         .filter(
-          (node) => node.kind !== "FieldLines" && node.kind !== "FieldMap",
+          (node) =>
+            (node.kind !== "FieldLines" && node.kind !== "FieldMap") ||
+            kept.has(node.id),
         )
         .map((node) => ({ ...node, children: pruned(node.children) }));
     return pruned(tree);
@@ -2802,6 +2811,17 @@ function render({ model, el }) {
   function hideAsked(ids) {
     let hidden = ids;
     let switched = false;
+    // A saved page keeps no switches: a part it was saved without, shown,
+    // is drawn by the page's own kernels where it carries them.
+    if (!linesComputed() && model.pageEditor) {
+      for (const item of model.get("payload")?.fieldlines ?? []) {
+        for (const { part } of FIELD_SWITCHES) {
+          const row = `${item.object_id}/${part}`;
+          if (item[part] !== false || ids.includes(row)) continue;
+          model.pageEditor.switchPart(item.object_id, part, true);
+        }
+      }
+    }
     for (const { key, part } of linesComputed() ? FIELD_SWITCHES : []) {
       const rows = switchedIn(legendTree(), part);
       if (!rows.length) continue;

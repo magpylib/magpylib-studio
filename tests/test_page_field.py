@@ -422,3 +422,28 @@ def test_the_page_lays_a_set_region_and_reads_a_map_as_python(tmp_path):
         np.testing.assert_allclose(
             got["levels"], fieldlines.map_levels(item), rtol=1e-12
         )
+
+
+def test_a_page_saved_without_its_map_draws_it_as_python(tmp_path):
+    """A page saved with the map off, its eye clicked: the page draws the
+    map with its own kernels, reading what python's map reads."""
+    from magpylib_studio.examples import EXAMPLES
+    from magpylib_studio.widget import SceneWidget, _page_field
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        view = SceneWidget(EXAMPLES["helmholtz"].scene.build(), field_lines=True)
+    session = view._session
+    payload = {**session.get_scene(), "page_field": _page_field(session)}
+    (saved,) = payload["fieldlines"]
+    assert saved["map"] is False
+    got = _in_node(
+        tmp_path, {"switched": {"payload": payload, "key": saved["object_id"]}}
+    )
+
+    view.field_map = True
+    (python,) = view._session.get_scene()["fieldlines"]
+    assert got["switched"] is True
+    assert got["again"] is False
+    assert got["map"] is True
+    np.testing.assert_allclose(got["levels"], python["map_levels"], rtol=1e-3)

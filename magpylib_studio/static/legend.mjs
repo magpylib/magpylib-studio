@@ -446,6 +446,9 @@ export function createLegend(
     return next;
   }
 
+  /** What a slide asks of the page while it lasts: no text selected. */
+  const unselectable = (event) => event.preventDefault();
+
   /** Press on a row's eye and slide sideways to fade what the row holds:
    *  left for less of it, right for more, `SLIDE_RANGE` pixels the whole
    *  way -- with option held, everything else, the row whole. A press that
@@ -456,6 +459,11 @@ export function createLegend(
     let slid = false;
     eye.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      // not the start of a text selection: a slide carried past the legend
+      // painted the scene behind it selected -- in Safari, which selects
+      // under a captured pointer too
+      event.preventDefault();
+      addEventListener("selectstart", unselectable, true);
       eye.setPointerCapture(event.pointerId);
       const others = event.altKey;
       const level = others ? levelOfIds(othersOf(node)) : levelOf(node);
@@ -493,6 +501,7 @@ export function createLegend(
       onFade(Object.fromEntries(faded), { settled: false });
     });
     const release = () => {
+      removeEventListener("selectstart", unselectable, true);
       if (!from) return;
       from = null;
       if (!slid) return;
@@ -502,6 +511,7 @@ export function createLegend(
     };
     eye.addEventListener("pointerup", release);
     eye.addEventListener("pointercancel", release);
+    eye.addEventListener("lostpointercapture", release);
     // The release of a slide is a click as well, and not one that hides.
     eye.addEventListener("click", (event) => {
       if (slid) slid = false;
