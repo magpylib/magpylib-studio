@@ -2040,8 +2040,9 @@ def part_id(key, part):
 def part_nodes(sensor, key, apart=False):
     """The legend's rows for the parts of `sensor`'s drawing (`PARTS`): its
     axes and pixels where the view draws the pixels apart -- a session's
-    scene, `apart` -- and its field lines where it can draw them
-    (`fieldlines.sensors_of`); none for a sensor without pixels. The pixels
+    scene, `apart` -- and its field lines and map where it can draw them
+    (`fieldlines.sensors_of`), its axes then too, to be hidden on their own;
+    none for a sensor without pixels. The pixels
     say what they read, as their source does -- ``Bxy`` -- and the lines
     what they are of: the whole of B or H, whatever the pixels show. The
     axes carry their tips' colours (`tip_colors`), as the sensor does."""
@@ -2050,7 +2051,7 @@ def part_nodes(sensor, key, apart=False):
     source = _resolve(sensor, "style.pixel.field.source")
     parts = [*PARTS] if apart and _reading_sensors([sensor]) else []
     if fieldlines.sensors_of([sensor]):
-        parts += [LINES, MAP]
+        parts = [*(parts or PARTS[:1]), LINES, MAP]
     named = {
         "pixels": f"pixels ({source})",
         "lines": f"field lines ({source and source[:1]})",

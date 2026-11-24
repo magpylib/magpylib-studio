@@ -137,6 +137,17 @@ def test_a_sensor_drawn_apart_is_its_parts_in_the_tree_and_the_scene():
     ]
     # the axes say their tips' colours, for an icon drawn as the view draws them
     assert field["children"][0]["colors"] == ["red", "green", "blue"]
+    # pixels not drawn, only seeding its lines: its axes still a row of their
+    # own, to hide apart from the lines and the map
+    size = s._objs["field"].style.pixel.size
+    s._objs["field"].style.pixel.size = 0
+    field = next(node for node in s.object_tree() if node["id"] == "field")
+    assert [part["id"] for part in field["children"]] == [
+        "field/axes",
+        "field/lines",
+        "field/map",
+    ]
+    s._objs["field"].style.pixel.size = size
     s.set_field_lines(True)
     scene = s.get_scene()
     assert {item["part"] for item in scene["pixels"]} == {"field/pixels"}
