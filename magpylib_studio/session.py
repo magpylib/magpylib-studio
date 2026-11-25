@@ -1687,6 +1687,12 @@ def _applied_field_as_source(doc):
     create step stays in the log, and its field went with it.
     """
     events = doc.get("events") or []
+    if not any("H_ext" in e for e in events if e.get("op") == "create"):
+        return []
+    # an id given again after a removal names two parts: kept apart first,
+    # or the live one's field went with the removed one's, or a field
+    # removed and made again hid that one was there
+    _retire_reused_ids(doc)
     creates = [e for e in events if e.get("op") == "create"]
     held = {}
     for e in creates:
@@ -1700,10 +1706,10 @@ def _applied_field_as_source(doc):
         if target not in removed:
             removed.add(target)
             gone.extend(held.get(target, ()))
-    given = {e["target"]: e.pop("H_ext", None) for e in creates}
+    raw = {e["target"]: e.pop("H_ext", None) for e in creates}
     given = {
         target: value
-        for target, value in given.items()
+        for target, value in raw.items()
         if value and any(value) and target not in removed
     }
     if not given:
@@ -1724,7 +1730,15 @@ def _applied_field_as_source(doc):
                 "params": {"B": list(next(iter(values)))},
             },
         )
-        return []
+        untouched = _unapplied_responders(creates, raw, removed)
+        if not untouched:
+            return []
+        return [
+            "the applied field H_ext is now a UniformField, which acts on every "
+            "part: before, it did not act on "
+            + ", ".join(untouched)
+            + ", which set none and respond to it, so their solve changes"
+        ]
     why = (
         "a UniformField beside it would count twice"
         if beside
@@ -1734,6 +1748,52 @@ def _applied_field_as_source(doc):
     return [
         f"the applied field H_ext is left out, since magpylib-material-response "
         f"0.15 has none and {why} ({each}): add a UniformField for it"
+    ]
+
+
+def _unapplied_responders(creates, raw, removed):
+    """The live parts among `creates` that respond to an applied field -- a
+    susceptibility not zero on them or a parent, or a solved sheet -- and
+    that `H_ext` did not reach: none set, or zero, on them and on what holds
+    them, as magpylib-material-response 0.14 read it (`get_H_ext`)."""
+    parent = {}
+    for e in creates:
+        for child in e.get("children") or []:
+            parent.setdefault(child, e["target"])
+        if e.get("parent") is not None:
+            parent[e["target"]] = e["parent"]
+    params = {e["target"]: e.get("params") or {} for e in creates}
+
+    def up(target):
+        while target is not None:
+            yield target
+            target = parent.get(target)
+
+    def responds(e):
+        if e.get("type") == "face_charge.ChargeSheet":
+            return True
+        for owner in up(e["target"]):
+            value = params.get(owner, {}).get("susceptibility")
+            if value is not None:
+                try:
+                    return bool(np.any(np.asarray(value, dtype=float)))
+                except (TypeError, ValueError):
+                    return True
+        return False
+
+    def reached(target):
+        for owner in up(target):
+            if raw.get(owner) is not None:
+                return any(raw[owner])
+        return False
+
+    return [
+        e["target"]
+        for e in creates
+        if e["target"] not in removed
+        and e.get("type") != "Collection"
+        and responds(e)
+        and not reached(e["target"])
     ]
 
 

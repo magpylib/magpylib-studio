@@ -300,16 +300,20 @@ def test_an_older_package_is_said(monkeypatch):
 CUBE = {"polarization": [0, 0, 1], "dimension": [0.01, 0.01, 0.01]}
 
 
-def _old_document(values, beside=False, version=3, removed=False):
+def _old_document(values, beside=False, version=3, removed=False, unset=None):
     """A document an older studio wrote: a cube for each of `values`, its
     `H_ext` on its create step, or on its spec before there were steps; the
-    last cube `removed` after."""
+    last cube `removed` after; and with `unset`, a cube with those params
+    that sets none."""
     specs = [
         {"type": "magnet.Cuboid", "params": {**CUBE, "position": [i, 0, 0]}}
         for i in range(len(values))
     ]
     for spec, value in zip(specs, values, strict=True):
         spec["H_ext"] = value
+    if unset is not None:
+        params = {**CUBE, "position": [0, 1, 0], **unset}
+        specs.append({"type": "magnet.Cuboid", "params": params})
     if beside:
         specs.append({"type": "UniformField", "params": {"B": [0, 0, 0.1]}})
     if version == 1:
@@ -325,6 +329,24 @@ def _old_document(values, beside=False, version=3, removed=False):
     return {"version": version, "events": events}
 
 
+def _given_again():
+    """An older document that removed `cube0` and made another `cube0`,
+    each with its `H_ext`: the live one's field is the scene's."""
+    first, again = (
+        {
+            "op": "create",
+            "target": "cube0",
+            "type": "magnet.Cuboid",
+            "H_ext": [0, 0, 0.1],
+        }
+        | {"params": {**CUBE, "position": [x, 0, 0]}}
+        for x in (0, 1)
+    )
+    removed = {"op": "remove", "target": "cube0"}
+    events = [{"id": f"e{i}", **e} for i, e in enumerate((first, removed, again))]
+    return {"version": 3, "events": events}
+
+
 @pytest.mark.parametrize(
     ("doc", "fields", "said"),
     [
@@ -334,8 +356,25 @@ def _old_document(values, beside=False, version=3, removed=False):
         (_old_document([[0, 0, 0.1], [0, 0.2, 0]]), [], "differ by part"),
         (_old_document([[0, 0, 0.1]], beside=True), [[0, 0, 0.1]], "count twice"),
         (_old_document([[0, 0, 0.1], [0, 0.2, 0]], removed=True), [[0, 0, 0.1]], None),
+        (_given_again(), [[0, 0, 0.1]], None),
+        (_old_document([[0, 0, 0.1]], unset={}), [[0, 0, 0.1]], None),
+        (
+            _old_document([[0, 0, 0.1]], unset={"susceptibility": 1000}),
+            [[0, 0, 0.1]],
+            "did not act on cube1",
+        ),
     ],
-    ids=["the same", "before steps", "zero", "differing", "beside a field", "removed"],
+    ids=[
+        "the same",
+        "before steps",
+        "zero",
+        "differing",
+        "beside a field",
+        "removed",
+        "an id given again",
+        "a magnet it did not reach",
+        "a soft part it did not reach",
+    ],
 )
 def test_an_old_h_ext_opens_as_a_field_or_is_said(doc, fields, said):
     """magpylib-material-response 0.15 has no `H_ext`: an old document's is one
@@ -345,7 +384,9 @@ def test_an_old_h_ext_opens_as_a_field_or_is_said(doc, fields, said):
     assert result["ok"]
     if said:
         (warning,) = result["warnings"]
-        assert said in warning and "cube0 (0, 0, 0.1) T" in warning
+        assert said in warning
+        # left out, each part's value named, to put back by hand
+        assert "left out" not in warning or "cube0 (0, 0, 0.1) T" in warning
     else:
         assert "warnings" not in result
     assert [f["B"] for f in opened.get_scene()["fields"]] == fields

@@ -56,9 +56,22 @@ if (asked.switched) {
   const switched = editor.switchPart(key, "map", true);
   const again = editor.switchPart(key, "map", true); // on already: nothing
   const item = values.payload.fieldlines.find((i) => i.object_id === key);
+  // then nudged where its grid still holds it: the region keeps its depth
+  const { position } = payload.page_field.sensors[key];
+  await editor.begin();
+  await editor.commit([
+    { objectId: key, position: [position[0] + 2e-4, position[1], position[2]] },
+  ]);
+  const moved = values.payload.fieldlines.find((i) => i.object_id === key);
   writeFileSync(
     answersPath,
-    JSON.stringify({ switched, again, map: item.map, levels: item.map_levels }),
+    JSON.stringify({
+      switched,
+      again,
+      map: item.map,
+      levels: item.map_levels,
+      depth: moved.region.size[2],
+    }),
   );
   process.exit(0);
 }

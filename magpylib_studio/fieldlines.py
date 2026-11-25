@@ -161,6 +161,19 @@ def _apart(seeds):
     return float(np.median(apart)) if len(apart) else None
 
 
+#: How far under a whole number of steps a span may fall and still be that
+#: many: a square span is exactly ``sqrt(points)`` steps, and the last bit of
+#: its sum -- BLAS's order, the page's -- otherwise decides a step more or
+#: less, a page's grid unlike python's (`_steps`, `stepsOf` in pagefield.mjs).
+WHOLE_STEPS = 1e-9
+
+
+def _steps(ratio):
+    """The whole steps a span of `ratio` steps needs: its ceiling, a ratio
+    within `WHOLE_STEPS` of a whole number taken as it."""
+    return np.ceil(np.asarray(ratio) - WHOLE_STEPS).astype(int)
+
+
 def grid_around(sources, seeds, points, flat=None, every_step=False):
     """The grid for `seeds`: in their plane, if they lie in one and `flat` is
     not False, else a box;
@@ -193,11 +206,11 @@ def grid_around(sources, seeds, points, flat=None, every_step=False):
         low[2] = high[2] = 0.0  # the plane through the seeds
         span = (high - low)[:2]
         step = float(np.sqrt(np.prod(span) / points))
-        shape = [*np.maximum(np.ceil(span / step).astype(int) + 1, 2), 1]
+        shape = [*np.maximum(_steps(span / step) + 1, 2), 1]
     else:
         span = high - low
         step = float((np.prod(span) / points) ** (1 / 3))
-        shape = list(np.maximum(np.ceil(span / step).astype(int) + 1, 2))
+        shape = list(np.maximum(_steps(span / step) + 1, 2))
     grid = {
         "origin": centre + low @ axes,
         "axes": axes,
@@ -281,12 +294,12 @@ def grid_in(box, points, flat):
     if flat:
         span = size[:2]
         step = float(np.sqrt(np.prod(span) / points))
-        shape = [*np.maximum(np.ceil(span / step - 1e-9).astype(int) + 1, 2), 1]
+        shape = [*np.maximum(_steps(span / step) + 1, 2), 1]
     else:
         if size[2] <= 1e-3 * largest * (1 + 1e-9):
             size[2] = 0.25 * largest
         step = float((np.prod(size) / points) ** (1 / 3))
-        shape = list(np.maximum(np.ceil(size / step - 1e-9).astype(int) + 1, 2))
+        shape = list(np.maximum(_steps(size / step) + 1, 2))
     covered = step * (np.asarray(shape, dtype=float) - 1)
     return {
         "origin": np.asarray(box["centre"], dtype=float) - (covered / 2) @ axes,
@@ -1302,7 +1315,7 @@ def page_kernels():
     """material-response's compiled field kernels for a page (#176): its glue
     module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
     they are not to be had (`kernel_files`). Read once while the files stay
-    as they are. A prototype: how they reach studio for good is open
+    as they are. magpylib-material-response's wheel carries them from 0.15.0
     (magpylib-material-response#215)."""
     files = kernel_files()
     if files is None:

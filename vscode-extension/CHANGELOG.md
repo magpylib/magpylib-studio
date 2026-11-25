@@ -5,7 +5,25 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+## [0.18.0]
+
 ### Added
+
+<details>
+<summary>A sensor dragged on a saved page has its field lines drawn again</summary>
+
+A page saved with `write_html` or the export button was read only. Now its
+sensors move and turn there, with the pencil, and the page draws their field
+lines and pixels again in the browser, by the live view's rules, with
+material-response's compiled field kernels carried in the page. That works for
+scenes of magnets (cuboids, cylinders, spheres, meshes), wire currents, dipoles
+and solved sheets, up to about a hundred magnets; the export says why a page
+cannot, and the magnets and currents stay where they were saved. It needs
+magpylib-material-response 0.15.0, the first release whose wheel has the kernels
+([#177](https://github.com/magpylib/magpylib-studio/pull/177),
+[#179](https://github.com/magpylib/magpylib-studio/pull/179)).
+
+</details>
 
 <details>
 <summary>A sensor's field lines run where its grips put them, beside a map of the field</summary>
@@ -20,8 +38,12 @@ Beside the lines, a **field map** row under each sensor draws |field| on its
 plane, its eye a switch of the scene's as the lines' is (`field_map`); lines
 over it are white, and the colour bar spans what it shows. The lines and map are
 redrawn as the sensor or a grip is dragged, at the pace of the automatic grid,
-and a run's frames and a saved page draw them too. The colour bar now also shows
-for field lines drawn without pixels.
+and a run's frames and a saved page draw them too; a saved page draws a map that
+was off when it was saved, at a click on its eye. The colour bar now also shows
+for field lines drawn without pixels. In the legend, a sensor among others
+starts folded, its row showing the lines and map it draws, and a sensor whose
+lines are drawn lists its axes to hide them alone
+([#180](https://github.com/magpylib/magpylib-studio/pull/180)).
 
 </details>
 
@@ -32,9 +54,11 @@ for field lines drawn without pixels.
 
 magpylib-material-response 0.15 removes the applied field `H_ext`. A scene file
 that sets it opens with one `UniformField` in its place when every part sets the
-same value; otherwise it opens without it, and a warning names each part's
-value. Nothing writes `H_ext` any more, and the view's corner draws
-`UniformField`s alone (decision 0060).
+same value, and a warning names any soft part or solved sheet that set none,
+which the field now reaches too; otherwise it opens without it, and a warning
+names each part's value. Nothing writes `H_ext` any more, and the view's corner
+draws `UniformField`s alone (decision 0060,
+[#181](https://github.com/magpylib/magpylib-studio/pull/181)).
 
 </details>
 

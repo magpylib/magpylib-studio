@@ -520,7 +520,7 @@ def _page_field_why(session):
     """What a page's scene carries for a sensor dragged in it (#176,
     `page_field_why`), and why it carries nothing where it draws lines: only
     where the page can carry the compiled kernels too, which
-    material-response releases do not ship yet -- without them, bytes the
+    magpylib-material-response ships from 0.15.0 -- without them, bytes the
     page could not use."""
     from magpylib_studio import fieldlines
 

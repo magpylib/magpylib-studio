@@ -83,14 +83,15 @@ view goes through what is faded to what is behind it. A sensor whose pixels read
 the field is listed as its parts — its axes, its pixels, its field lines and its
 field map, each naming the field it shows — and hides each apart; the field
 lines' eye is their switch, `field_lines`, and the map's is `field_map`, a
-picture of |field| on the sensor's plane. Such a sensor's colours have a colour
-bar down the right edge, beside the editing column, whose two handles cut the
-range they span — the colormap stretched over the cut, the field past it in the
-end colours — kept in `color_range` as `{id: [low, high]}`, in SI; a click on a
-value types one, a focused handle takes the arrow keys, and a picture of the
-view carries the bar; `color_shared` gives the sensors on one colormap one
-scale. It writes `selected`, `hidden` and `faded`, the traitlets a click in the
-view and a notebook cell write too; `faded` maps an id to the share of its
+picture of |field| on the sensor's plane. Among other sensors, each starts
+folded, its row showing the lines and map it draws. Such a sensor's colours have
+a colour bar down the right edge, beside the editing column, whose two handles
+cut the range they span — the colormap stretched over the cut, the field past it
+in the end colours — kept in `color_range` as `{id: [low, high]}`, in SI; a
+click on a value types one, a focused handle takes the arrow keys, and a picture
+of the view carries the bar; `color_shared` gives the sensors on one colormap
+one scale. It writes `selected`, `hidden` and `faded`, the traitlets a click in
+the view and a notebook cell write too; `faded` maps an id to the share of its
 opacity it is drawn at. It needs the objects, because the payload cannot say how
 they nest: it comes with `SceneWidget(...)` and `update()`, and with a bare
 `magpy.show()` only where magpylib hands its backends the objects
@@ -297,27 +298,28 @@ that made them stays as it was, and running it again does not take the edits
 away. A drag is recorded as it goes and is one step to undo; the notebook hears
 of it once, when it ends — in marimo, the cells that read
 `mo.ui.anywidget(studio)` re-run then, not on every frame. It needs a live
-kernel: without one the view says so and puts the object back, and a page saved
-with `write_html` is read only. The handles and their keys are the panel's —
-**W** moves, **E** turns, **R** resizes, **P** aims a polarization, **Q** puts
-them away; **X**/**Y**/**Z** hold a drag to one axis and **A** frees it, **L**
-swaps the world's axes for the object's own, **S** snaps — and a column down the
-view's right-hand side has the same. The corner reads out the numbers a drag is
-changing, in the scene's units, and takes a typed value in their place —
-`15 mm`, `5°`, or a variable's name, which binds the number to it; a name the
-scene lacks is made at the value it replaces; the keys button lists every key. A
-collection has handles of its own: select it — its row in the legend, or **C**
-from something in it, and **C** again for the one round that — and a drag moves
-and turns it whole, as one edit to the collection. A scene with variables — a
-scene function's parameters, or a saved scene's sliders — has a **sliders**
-toggle at the foot of the edit column, on the right with the handles: a panel
-beside it with a slider per variable, a dropdown for a choice, and a box that
-takes `15 mm` or an expression; drag one and the scene follows, as one edit to
-undo. `view.variables` is `{name: value}` as the scene has them now: a trait a
-marimo cell reads, and one a cell assigns — `view.variables = {"n": 12}` is one
-edit — so another control is tied to it both ways with
-`traitlets.link((call, "values"), (view3d, "variables"))`, the view owning the
-numbers. `call` and `view3d` are the widgets themselves, not the
+kernel: without one the view says so and puts the object back. A page saved with
+`write_html` moves only its sensors, drawing their field lines again itself
+where it carries material-response's field kernels (0.15.0 on). The handles and
+their keys are the panel's — **W** moves, **E** turns, **R** resizes, **P** aims
+a polarization, **Q** puts them away; **X**/**Y**/**Z** hold a drag to one axis
+and **A** frees it, **L** swaps the world's axes for the object's own, **S**
+snaps — and a column down the view's right-hand side has the same. The corner
+reads out the numbers a drag is changing, in the scene's units, and takes a
+typed value in their place — `15 mm`, `5°`, or a variable's name, which binds
+the number to it; a name the scene lacks is made at the value it replaces; the
+keys button lists every key. A collection has handles of its own: select it —
+its row in the legend, or **C** from something in it, and **C** again for the
+one round that — and a drag moves and turns it whole, as one edit to the
+collection. A scene with variables — a scene function's parameters, or a saved
+scene's sliders — has a **sliders** toggle at the foot of the edit column, on
+the right with the handles: a panel beside it with a slider per variable, a
+dropdown for a choice, and a box that takes `15 mm` or an expression; drag one
+and the scene follows, as one edit to undo. `view.variables` is `{name: value}`
+as the scene has them now: a trait a marimo cell reads, and one a cell assigns —
+`view.variables = {"n": 12}` is one edit — so another control is tied to it both
+ways with `traitlets.link((call, "values"), (view3d, "variables"))`, the view
+owning the numbers. `call` and `view3d` are the widgets themselves, not the
 `mo.ui.anywidget` elements around them: a marimo cell that names an element
 re-runs on its every change, and would make the link again each time. In marimo
 a cell that names the view re-runs on its every change, a click included; one

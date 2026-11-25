@@ -3236,8 +3236,12 @@ one field could not say it, which that release refuses.
 
 - **Opening a document turns its `H_ext` into one `UniformField`**, a create
   step after the objects', where every part that sets one sets the same and the
-  scene holds no field already. Nothing is said: the field acts on every part as
-  before, and `getB` now includes it, as #71 accepted.
+  scene holds no field already. `getB` now includes it, as #71 accepted. The
+  field acts on every part, where `H_ext` acted only on the parts that set it or
+  whose parent did: a part that responds to it -- a susceptibility not zero, or
+  a solved sheet -- and set none is named in a warning, its solve changing; a
+  magnet or a current that set none is not, nothing of theirs changing (Alex,
+  2026-11-25, from the 0.18.0 release review).
 - **Otherwise it opens without it, and says so**: values that differ by part, or
   a field beside it, which would count twice. The warning names each part and
   its value, to put back as fields by hand. Refusing to open would leave a hand

@@ -127,6 +127,12 @@ function middle(points) {
 
 /** `grid_around`: the grid for `seeds` round them and the sources near
  *  them, about `points` points, in their plane where `planar`. */
+/** `_steps`: the whole steps a span of `ratio` steps needs, a ratio within
+ *  `WHOLE_STEPS` of a whole number taken as it -- a square span is exactly
+ *  `sqrt(points)` steps, its last bit python's BLAS's or the page's. */
+const WHOLE_STEPS = 1e-9;
+const stepsOf = (ratio) => Math.ceil(ratio - WHOLE_STEPS);
+
 export function gridAround(centres, seeds, points, [axes, planar]) {
   const centre = middle(seeds);
   let far = 0;
@@ -157,11 +163,11 @@ export function gridAround(centres, seeds, points, [axes, planar]) {
     low[2] = high[2] = 0;
     const span = [high[0] - low[0], high[1] - low[1]];
     step = Math.sqrt((span[0] * span[1]) / points);
-    shape = [...span.map((s) => Math.max(Math.ceil(s / step) + 1, 2)), 1];
+    shape = [...span.map((s) => Math.max(stepsOf(s / step) + 1, 2)), 1];
   } else {
     const span = high.map((h, k) => h - low[k]);
     step = Math.cbrt((span[0] * span[1] * span[2]) / points);
-    shape = span.map((s) => Math.max(Math.ceil(s / step) + 1, 2));
+    shape = span.map((s) => Math.max(stepsOf(s / step) + 1, 2));
   }
   const origin = centre.map(
     (c, k) =>
@@ -717,6 +723,11 @@ function decodedItem(item) {
     step: item.step,
     shape: item.shape,
   };
+  // a flat grid's depth across its plane, which the item keeps as its
+  // region's: lost, a drag kept the grid and drew the region flat
+  if (isFlat(grid) && item.region && !item.region.set) {
+    grid.depth = item.region.size[2];
+  }
   const raw = atob(item.values);
   const along = new Float64Array(raw.length / 2);
   for (let i = 0; i < along.length; i++) {
@@ -796,14 +807,11 @@ export function gridIn(box, points, flat) {
   let step, shape;
   if (flat) {
     step = Math.sqrt((size[0] * size[1]) / points);
-    shape = [
-      ...[0, 1].map((k) => Math.max(Math.ceil(size[k] / step - 1e-9) + 1, 2)),
-      1,
-    ];
+    shape = [...[0, 1].map((k) => Math.max(stepsOf(size[k] / step) + 1, 2)), 1];
   } else {
     if (size[2] <= 1e-3 * largest * (1 + 1e-9)) size[2] = 0.25 * largest;
     step = ((size[0] * size[1] * size[2]) / points) ** (1 / 3);
-    shape = size.map((s) => Math.max(Math.ceil(s / step - 1e-9) + 1, 2));
+    shape = size.map((s) => Math.max(stepsOf(s / step) + 1, 2));
   }
   const covered = shape.map((n) => step * (n - 1));
   const origin = box.centre.map(

@@ -35,11 +35,16 @@ jobs:
       # 0.10.0 the first with field_matrix, which the field lines read from,
       # 0.10.1 the first whose matrix does not keep its solve alive, and
       # 0.12.0 the first to take a winding pack in the polyline's own frame,
-      # as the U-core example draws it.
-      - run: uv pip install "magpylib-material-response>=0.12.0"
+      # as the U-core example draws it, and 0.15.0 the first whose wheel
+      # carries the compiled kernels a saved page draws its field with.
+      - run: uv pip install "magpylib-material-response>=0.15.0"
       - run:
           python -c "import magpylib; print('magpylib', magpylib.__version__)"
+      # The saved page's tests fail here, rather than skip, without the
+      # kernels or node: a release that dropped them would go unnoticed.
       - run: python -m pytest -q
+        env:
+          MAGPYLIB_STUDIO_REQUIRE_KERNELS: "1"
 
   # Warnings are errors: a docstring Sphinx cannot read, an example page that
   # no longer builds or an include that moved fails here, not on the site.
@@ -108,7 +113,7 @@ jobs:
         working-directory: vscode-extension
         run: npm ci
       # a UniformField, for the corner's arrow
-      - run: uv pip install -e ".[widget]" "magpylib-material-response>=0.12.0"
+      - run: uv pip install -e ".[widget]" "magpylib-material-response>=0.15.0"
       - name: Drive the widget in headless Chrome
         working-directory: vscode-extension
         run: node harness/check-widget-browser.mjs
