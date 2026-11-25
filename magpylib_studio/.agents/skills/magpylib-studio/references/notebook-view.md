@@ -129,7 +129,14 @@ print(view.variables)
 `field_lines=True` draws lines through the pixels of each sensor that has a
 `pixel` array and reads B or H there (`style.pixel.field.source`). A sensor
 without either draws none, and nothing says so. At `pixel.size` 0 the pixels are
-hidden and still give the lines their colours.
+hidden and still give the lines their colours. `field_map=True` draws |field| on
+the sensor's plane beside or instead of the lines; with it on, the colour bar
+spans the map's 1st to 99th percentile. Each is a switch of the scene, saved
+with it, and the legend's eye on a sensor's "field lines" or "field map" row
+flips the same traitlet. Where the lines run is the sensor's field region: by
+default a grid round its pixels; grips on the dashed outline of a selected
+sensor resize it, and the scene saves it in the sensor's own frame. There is no
+Python call to set one.
 
 ## One HTML file, from a script
 
@@ -146,13 +153,18 @@ view.write_html("pair_part.html", steps=(2, 6))  # steps 2 to 6 alone
 No notebook or browser is needed: this runs in a plain Python script.
 `write_html(path)` is `to_html()` written to a file; each call computes the page
 again. The page is the view itself, not a picture: orbit, legend, keys, the run
-and the variants, with no Python behind it. It has no handles and no sliders: a
-value outside its variants needs the notebook. A view never drawn on screen has
-no camera to keep, so the page opens framed on the whole scene. A run carries
-every step, and each variant its own run, so a page with a long run and many
-variants takes a while to write. In a notebook, the view's own export button
-asks first, in the view's foot, which steps of the run and which variants to
-carry, and writes it a piece at a time, with a count and a Cancel.
+and the variants, with no Python behind it. It has no sliders, and its only
+handles move and turn sensors: where material-response's compiled field kernels
+are installed (magpylib-material-response 0.15.0 on), the page carries them and
+draws a dragged sensor's field lines, map and region again itself, for scenes of
+magnets, wire currents, dipoles and solved sheets up to about a hundred magnets.
+Magnets stay put, and a value outside the variants needs the notebook. A view
+never drawn on screen has no camera to keep, so the page opens framed on the
+whole scene. A run carries every step, and each variant its own run, so a page
+with a long run and many variants takes a while to write. In a notebook, the
+view's own export button asks first, in the view's foot, which steps of the run
+and which variants to carry, and writes it a piece at a time, with a count and a
+Cancel.
 
 ## What takes the time
 
