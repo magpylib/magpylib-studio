@@ -1,8 +1,8 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "magpylib-studio[widget]>=0.15.0",
-#     "magpylib-material-response>=0.10.0",
+#     "magpylib-studio[widget]>=0.18.0",
+#     "magpylib-material-response>=0.15.0",
 #     "marimo",
 # ]
 # ///
@@ -12,7 +12,7 @@ exportable: `marimo edit docs/notebooks/run_with_variants.py`.
 Needs the widget extra, marimo and magpylib-material-response 0.9.2, and says
 so without it:
 
-    pip install "magpylib-studio[widget]" marimo "magpylib-material-response>=0.10.0"
+    pip install "magpylib-studio[widget]" marimo "magpylib-material-response>=0.15.0"
 """
 
 import marimo
@@ -68,8 +68,8 @@ def _(inspect, mo):
     mo.stop(
         solved_example is None,
         mo.md(
-            "_Needs magpylib-material-response 0.10: "
-            '`uv pip install "magpylib-material-response>=0.10.0"`._'
+            "_Needs magpylib-material-response 0.15: "
+            '`uv pip install "magpylib-material-response>=0.15.0"`._'
         ),
     )
     slide = solved_example.solved_plate_run

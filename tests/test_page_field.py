@@ -3,12 +3,14 @@ what is inside and computes the field as python does, by
 `magpylib_studio/static/pagefield.mjs` and material-response's compiled
 kernels -- held here to `fieldlines.py`, through node (`page_field.mjs`).
 
-Skipped where node or the kernels are not to be had: see
-`fieldlines.page_kernels`."""
+Skipped where node or the kernels are not to be had (see
+`fieldlines.page_kernels`), except where `MAGPYLIB_STUDIO_REQUIRE_KERNELS`
+is 1, as CI sets it: there they fail."""
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import warnings
@@ -21,8 +23,16 @@ from scipy.spatial.transform import Rotation
 
 from magpylib_studio import fieldlines
 
-pytest.importorskip("magpylib_material_response")
+REQUIRED = os.environ.get("MAGPYLIB_STUDIO_REQUIRE_KERNELS") == "1"
+if not REQUIRED:
+    pytest.importorskip("magpylib_material_response")
 KERNELS = fieldlines.page_kernels()
+if REQUIRED and (KERNELS is None or shutil.which("node") is None):
+    pytest.fail(
+        "MAGPYLIB_STUDIO_REQUIRE_KERNELS is 1, and node or "
+        "magpylib-material-response's compiled kernels (0.15.0 on) are missing",
+        pytrace=False,
+    )
 pytestmark = pytest.mark.skipif(
     KERNELS is None or shutil.which("node") is None,
     reason="needs node and material-response's compiled kernels",
