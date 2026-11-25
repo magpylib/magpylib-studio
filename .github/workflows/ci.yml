@@ -22,8 +22,8 @@ jobs:
     name: engine
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           activate-environment: true
@@ -52,8 +52,8 @@ jobs:
     name: docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           # Read the Docs' (.readthedocs.yaml)
           python-version: "3.14"
@@ -66,13 +66,13 @@ jobs:
     name: extension
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           activate-environment: true
           enable-cache: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -95,15 +95,15 @@ jobs:
     name: widget in a browser
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           activate-environment: true
           enable-cache: true
       # 22 for its WebSocket: the check talks to Chrome itself. Chrome is
       # already on GitHub's Ubuntu runners.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -126,15 +126,15 @@ jobs:
     name: JupyterLab tab
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           activate-environment: true
           enable-cache: true
       # 22 for its WebSocket: the check talks to Chrome itself. Chrome is
       # already on GitHub's Ubuntu runners.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
       - run: uv pip install -e ".[widget]" "jupyterlab>=4.4,<5"
@@ -147,10 +147,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # the whole history, for the version hatch-vcs reads off the tags
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
           enable-cache: true

@@ -23,11 +23,11 @@ jobs:
     # The managed identity trusts jobs in this environment only.
     environment: marketplace
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: npm
@@ -134,7 +134,7 @@ jobs:
       # Contributor member of the magpylib publisher. Neither ID is a secret;
       # marketplace-login.yml checks the same sign-in without publishing.
       - name: Sign in to Azure
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: 022ba66b-5030-496e-af0f-864e452bc4e8
           tenant-id: cf42a1c9-05bb-415e-a752-84a630d5f779
@@ -156,7 +156,7 @@ jobs:
             echo "::notice::${GITHUB_REF_NAME} is a pre-release tag; not publishing it to the Marketplace"
           fi
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: magpylib-studio-*.vsix
           generate_release_notes: true
