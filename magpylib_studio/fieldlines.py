@@ -1302,7 +1302,7 @@ def page_kernels():
     """material-response's compiled field kernels for a page (#176): its glue
     module's text and the WebAssembly, ``(js, wasm bytes)``, or None where
     they are not to be had (`kernel_files`). Read once while the files stay
-    as they are. A prototype: how they reach studio for good is open
+    as they are. magpylib-material-response's wheel carries them from 0.15.0
     (magpylib-material-response#215)."""
     files = kernel_files()
     if files is None:

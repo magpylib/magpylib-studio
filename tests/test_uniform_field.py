@@ -325,6 +325,24 @@ def _old_document(values, beside=False, version=3, removed=False):
     return {"version": version, "events": events}
 
 
+def _given_again():
+    """An older document that removed `cube0` and made another `cube0`,
+    each with its `H_ext`: the live one's field is the scene's."""
+    first, again = (
+        {
+            "op": "create",
+            "target": "cube0",
+            "type": "magnet.Cuboid",
+            "H_ext": [0, 0, 0.1],
+        }
+        | {"params": {**CUBE, "position": [x, 0, 0]}}
+        for x in (0, 1)
+    )
+    removed = {"op": "remove", "target": "cube0"}
+    events = [{"id": f"e{i}", **e} for i, e in enumerate((first, removed, again))]
+    return {"version": 3, "events": events}
+
+
 @pytest.mark.parametrize(
     ("doc", "fields", "said"),
     [
@@ -334,8 +352,17 @@ def _old_document(values, beside=False, version=3, removed=False):
         (_old_document([[0, 0, 0.1], [0, 0.2, 0]]), [], "differ by part"),
         (_old_document([[0, 0, 0.1]], beside=True), [[0, 0, 0.1]], "count twice"),
         (_old_document([[0, 0, 0.1], [0, 0.2, 0]], removed=True), [[0, 0, 0.1]], None),
+        (_given_again(), [[0, 0, 0.1]], None),
     ],
-    ids=["the same", "before steps", "zero", "differing", "beside a field", "removed"],
+    ids=[
+        "the same",
+        "before steps",
+        "zero",
+        "differing",
+        "beside a field",
+        "removed",
+        "an id given again",
+    ],
 )
 def test_an_old_h_ext_opens_as_a_field_or_is_said(doc, fields, said):
     """magpylib-material-response 0.15 has no `H_ext`: an old document's is one

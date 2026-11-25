@@ -717,6 +717,11 @@ function decodedItem(item) {
     step: item.step,
     shape: item.shape,
   };
+  // a flat grid's depth across its plane, which the item keeps as its
+  // region's: lost, a drag kept the grid and drew the region flat
+  if (isFlat(grid) && item.region && !item.region.set) {
+    grid.depth = item.region.size[2];
+  }
   const raw = atob(item.values);
   const along = new Float64Array(raw.length / 2);
   for (let i = 0; i < along.length; i++) {

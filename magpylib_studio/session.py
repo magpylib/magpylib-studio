@@ -1687,6 +1687,12 @@ def _applied_field_as_source(doc):
     create step stays in the log, and its field went with it.
     """
     events = doc.get("events") or []
+    if not any("H_ext" in e for e in events if e.get("op") == "create"):
+        return []
+    # an id given again after a removal names two parts: kept apart first,
+    # or the live one's field went with the removed one's, or a field
+    # removed and made again hid that one was there
+    _retire_reused_ids(doc)
     creates = [e for e in events if e.get("op") == "create"]
     held = {}
     for e in creates:

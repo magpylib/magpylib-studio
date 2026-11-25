@@ -426,7 +426,8 @@ def test_the_page_lays_a_set_region_and_reads_a_map_as_python(tmp_path):
 
 def test_a_page_saved_without_its_map_draws_it_as_python(tmp_path):
     """A page saved with the map off, its eye clicked: the page draws the
-    map with its own kernels, reading what python's map reads."""
+    map with its own kernels, reading what python's map reads; and a drag
+    after it keeps the region's depth."""
     from magpylib_studio.examples import EXAMPLES
     from magpylib_studio.widget import SceneWidget, _page_field
 
@@ -447,3 +448,6 @@ def test_a_page_saved_without_its_map_draws_it_as_python(tmp_path):
     assert got["again"] is False
     assert got["map"] is True
     np.testing.assert_allclose(got["levels"], python["map_levels"], rtol=1e-3)
+    # and a nudge after it keeps the region as deep as python laid it
+    assert saved["region"]["size"][2] > 0
+    np.testing.assert_allclose(got["depth"], saved["region"]["size"][2], rtol=1e-9)
