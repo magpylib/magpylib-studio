@@ -54,9 +54,10 @@ lines are drawn lists its axes to hide them alone
 
 magpylib-material-response 0.15 removes the applied field `H_ext`. A scene file
 that sets it opens with one `UniformField` in its place when every part sets the
-same value; otherwise it opens without it, and a warning names each part's
-value. Nothing writes `H_ext` any more, and the view's corner draws
-`UniformField`s alone (decision 0060,
+same value, and a warning names any soft part or solved sheet that set none,
+which the field now reaches too; otherwise it opens without it, and a warning
+names each part's value. Nothing writes `H_ext` any more, and the view's corner
+draws `UniformField`s alone (decision 0060,
 [#181](https://github.com/magpylib/magpylib-studio/pull/181)).
 
 </details>
