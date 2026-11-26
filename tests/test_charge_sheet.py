@@ -4,6 +4,7 @@ is drawn with its charge beside field lines, saved, written and read back."""
 
 from __future__ import annotations
 
+import collections
 import json
 import sys
 import types
@@ -13,7 +14,15 @@ import magpylib as magpy
 import numpy as np
 import pytest
 
-from magpylib_studio import build, fieldlines, importer, scene, session, widget
+from magpylib_studio import (
+    build,
+    collisions,
+    fieldlines,
+    importer,
+    scene,
+    session,
+    widget,
+)
 from magpylib_studio.session import MagpylibStudioSession
 from magpylib_studio.widget import SceneWidget
 from tests.test_widget import _as_page, _scene_of
@@ -170,6 +179,29 @@ def test_field_lines_stop_at_a_solved_body():
     sheets = [s for s in out.children if isinstance(s, face_charge.ChargeSheet)]
     assert len(sheets) == 2
     np.testing.assert_array_equal(fieldlines.inside(sheets, points), body)
+
+
+@pytest.mark.parametrize(("down", "overlaps"), [(0, False), (0.001, True)])
+def test_a_magnet_pushed_into_a_solved_body_overlaps_it(down, overlaps, monkeypatch):
+    # the issue's magnet stands on the plate; pushed 1 mm down, it is inside
+    # the part the sheet was solved from
+    monkeypatch.setattr(collisions, "_cache", collections.OrderedDict())
+    given = solved()
+    sheet = sheet_of(given)
+    magnet = next(s for s in given.children if s is not sheet)
+    magnet.move((0, 0, -down))
+    # the same mesh with no part has nothing to fill, and asked first, its
+    # answer is not kept for the sheet that has one
+    bare = face_charge.ChargeSheet(
+        vertices=sheet.vertices,
+        faces=sheet.faces,
+        charge_densities=sheet.charge_densities,
+        panels=sheet.panels,
+        position=sheet.position,
+    )
+    assert SceneWidget(magnet, bare).payload["overlaps"] == []
+    pairs = SceneWidget(magnet, sheet).payload["overlaps"]
+    assert pairs == ([[str(id(magnet)), str(id(sheet))]] if overlaps else [])
 
 
 def test_without_material_response_the_sheet_says_what_it_needs(monkeypatch):

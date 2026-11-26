@@ -5,6 +5,18 @@ Python package it runs on. Open an entry for its details.
 
 ## [Unreleased]
 
+### Fixed
+
+<details>
+<summary>A magnet pushed into a solved body is said to overlap it</summary>
+
+A solved body is drawn as its sheets of face charge, which the overlap check did
+not take for a shape: a magnet sunk into a solved plate was not marked, counted
+or listed by `get_overlaps`. A sheet now overlaps as the part it was solved
+from, where the sheet stands, at every step of a run.
+
+</details>
+
 ## [0.18.0]
 
 ### Added

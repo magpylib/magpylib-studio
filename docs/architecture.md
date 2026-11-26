@@ -390,22 +390,22 @@ Every scene also says which objects overlap
 marked as meant; and `overlaps_by_step` where something moves along a path. Two
 objects overlap when they interpenetrate by more than a nanometre, touching
 never, each where its path ends; a magnet inside a pattern's copied group is
-named by the copy that holds it. `collisions.py` decides it from the magpylib
-objects alone, keeping each shape built while it is unchanged, so a drag
-rebuilds only what moved. `get_overlaps` lists the pairs, `get_gap` measures two
-objects, `set_overlap_intended` marks a pair, kept in the document's
-`intended_overlaps` and carried through the script tab, and `list_objects` names
-each object's partners, which the Objects tree marks as it marks a broken mesh.
-The view marks each overlapping object in amber, its own traces only, and
-hatches the region two solids share where each is convex or a ring segment's
-convex wedges, worked out from the shapes it draws; in a run, the pairs of the
-step shown. A selected one keeps its green. The legend marks each overlapping
-row, passed up to a folded collection, faint for a pair marked as meant; above
-the list it counts the pairs, a click stepping through them with a way to mark
-the one shown, and with two objects selected says how far apart they are. A
-read-only view works the overlaps out from the objects it was given, keyed as
-its payload. A check that fails leaves `overlaps` empty and says why in
-`overlaps_error`.
+named by the copy that holds it, and a solved sheet overlaps as the part it was
+solved from. `collisions.py` decides it from the magpylib objects alone, keeping
+each shape built while it is unchanged, so a drag rebuilds only what moved.
+`get_overlaps` lists the pairs, `get_gap` measures two objects,
+`set_overlap_intended` marks a pair, kept in the document's `intended_overlaps`
+and carried through the script tab, and `list_objects` names each object's
+partners, which the Objects tree marks as it marks a broken mesh. The view marks
+each overlapping object in amber, its own traces only, and hatches the region
+two solids share where each is convex or a ring segment's convex wedges, worked
+out from the shapes it draws; in a run, the pairs of the step shown. A selected
+one keeps its green. The legend marks each overlapping row, passed up to a
+folded collection, faint for a pair marked as meant; above the list it counts
+the pairs, a click stepping through them with a way to mark the one shown, and
+with two objects selected says how far apart they are. A read-only view works
+the overlaps out from the objects it was given, keyed as its payload. A check
+that fails leaves `overlaps` empty and says why in `overlaps_error`.
 
 **The ruler**
 ([0053](decisions.md#0053-the-ruler-measures-features-in-every-pane)) is the
