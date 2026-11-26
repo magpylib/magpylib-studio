@@ -617,6 +617,12 @@ def _solid(part, probe):
 
 def _build(obj, m, tol, step=None):
     kind = type(obj).__name__
+    if kind == "ChargeSheet":
+        # a solved part's surface charge: it fills the part it was solved
+        # from, given at the sheet's pose, path included; a sheet with none
+        # has nothing to fill
+        part = obj.part
+        return None if part is None else _build(part, m, tol, step)
     R, c = _pose(obj, step)
     if kind == "Cuboid":
         h = np.maximum(_row(obj.dimension, 3, step) / 2 - m, 0.0)
@@ -771,6 +777,10 @@ def _body(obj, tol, step=None):
         body = None  # a shape whose geometry is missing or degenerate
     if body is not None:
         body.key = key
+    elif type(obj).__name__ == "ChargeSheet":
+        # a sheet with no part has nothing to fill, and asking is cheap; one
+        # of the same mesh given a part later must not find None kept
+        return None
     _cache[key] = body
     if len(_cache) > _CACHE_SIZE:
         _cache.popitem(last=False)
@@ -1319,8 +1329,10 @@ def find_overlaps(objects, tol=TOL, step=None, depths=False, groups=None):
     touching does not count. Collections are not looked into: pass their
     leaves. What has no shape to overlap with -- a sensor, a dipole, a custom
     source, a shape not yet given its geometry -- is never in a pair, and
-    neither are two wires or two sheets, which have no thickness. Each object
-    is taken where it is at `step` of its path, the last by default. Objects
+    neither are two wires or two sheets, which have no thickness. A solved
+    part's charge sheet (material-response's `ChargeSheet`) is the solid it
+    was solved from. Each object is taken where it is at `step` of its path,
+    the last by default. Objects
     of one of `groups`, given one per object -- a sealed collection's parts --
     are not asked of each other: what overlaps inside a group is its own.
     """
