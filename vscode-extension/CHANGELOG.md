@@ -13,7 +13,8 @@ Python package it runs on. Open an entry for its details.
 A solved body is drawn as its sheets of face charge, which the overlap check did
 not take for a shape: a magnet sunk into a solved plate was not marked, counted
 or listed by `get_overlaps`. A sheet now overlaps as the part it was solved
-from, where the sheet stands, at every step of a run.
+from, where the sheet stands, at every step of a run
+([#184](https://github.com/magpylib/magpylib-studio/pull/184)).
 
 </details>
 
